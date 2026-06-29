@@ -15,16 +15,17 @@ signal died(unit: Unit)
 
 var team_id: int = -1
 var is_selected: bool = false
+var has_move_target: bool = false
 
 var _current_health: float = 0.0
 var _max_health: float = 0.0
 
 var _selection_indicator: MeshInstance3D
-var _move_target: Vector3 = Vector3.ZERO
-var _is_moving: bool = false
+var _movement_target: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
+	motion_mode = MOTION_MODE_FLOATING
 	_selection_indicator = get_node_or_null("SelectionIndicator") as MeshInstance3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
@@ -42,26 +43,28 @@ func set_selected(selected: bool) -> void:
 	selected_changed.emit(is_selected)
 
 
-## Commands the unit to move toward a world position on the XZ plane.
-func move_to(world_position: Vector3) -> void:
-	_move_target = Vector3(world_position.x, global_position.y, world_position.z)
-	_is_moving = true
+## Sets a single move target. Called only when a move command is issued.
+func set_movement_target(target: Vector3) -> void:
+	_movement_target = Vector3(target.x, global_position.y, target.z)
+	has_move_target = true
 
 
 func _physics_process(_delta: float) -> void:
-	if not _is_moving:
+	if not has_move_target:
 		velocity = Vector3.ZERO
 		return
 
-	var offset := _move_target - global_position
+	var offset: Vector3 = _movement_target - global_position
 	offset.y = 0.0
-	var distance := offset.length()
+	var distance: float = offset.length()
 	if distance <= stopping_distance:
-		_is_moving = false
+		has_move_target = false
 		velocity = Vector3.ZERO
 		return
 
-	velocity = offset.normalized() * move_speed
+	var direction: Vector3 = offset.normalized()
+	velocity = direction * move_speed
+	velocity.y = 0.0
 	move_and_slide()
 
 

@@ -44,7 +44,7 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if not ground_position.is_finite():
 		return
 
-	selected_unit.move_to(ground_position)
+	selected_unit.set_movement_target(ground_position)
 
 
 func _raycast_unit(camera: Camera3D, screen_position: Vector2) -> Unit:
