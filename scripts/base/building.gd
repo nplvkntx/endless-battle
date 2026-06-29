@@ -10,6 +10,12 @@ signal construction_progress_changed(progress: float)
 signal building_state_changed(state: StringName)
 signal destroyed(building: Building)
 
+const STATE_UNDER_CONSTRUCTION: StringName = &"under_construction"
+const STATE_CONSTRUCTING: StringName = &"constructing"
+const STATE_COMPLETED: StringName = &"completed"
+
+const CONSTRUCTION_PLACEHOLDER_ALPHA: float = 0.4
+
 @export var building_data: Resource
 
 var team_id: int = -1
@@ -18,11 +24,13 @@ var building_state: StringName = &""
 var _current_health: float = 0.0
 var _max_health: float = 0.0
 var _construction_progress: float = 0.0
+var _mesh_instance: MeshInstance3D
 
 
 func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
+	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
 	_apply_building_data()
 
 
@@ -41,3 +49,55 @@ func take_damage(_amount: float) -> void:
 ## Handles building destruction and notifies listeners through signals.
 func destroy_building() -> void:
 	destroyed.emit(self)
+
+
+## Shows an unfinished placeholder until a worker finishes construction.
+func start_under_construction() -> void:
+	building_state = STATE_UNDER_CONSTRUCTION
+	_construction_progress = 0.0
+	_apply_under_construction_visual()
+	building_state_changed.emit(building_state)
+	construction_progress_changed.emit(_construction_progress)
+
+
+## Called when a worker arrives and begins the build timer.
+func begin_construction() -> void:
+	if building_state == STATE_COMPLETED:
+		return
+
+	building_state = STATE_CONSTRUCTING
+	building_state_changed.emit(building_state)
+
+
+## Marks the building as finished and restores its normal appearance.
+func complete_construction() -> void:
+	building_state = STATE_COMPLETED
+	_construction_progress = 1.0
+	_apply_completed_visual()
+	building_state_changed.emit(building_state)
+	construction_progress_changed.emit(_construction_progress)
+
+
+func set_completed() -> void:
+	building_state = STATE_COMPLETED
+	_construction_progress = 1.0
+	_apply_completed_visual()
+	building_state_changed.emit(building_state)
+	construction_progress_changed.emit(_construction_progress)
+
+
+func _apply_under_construction_visual() -> void:
+	if _mesh_instance == null:
+		return
+
+	var placeholder_material := StandardMaterial3D.new()
+	placeholder_material.albedo_color = Color(0.6, 0.6, 0.6, CONSTRUCTION_PLACEHOLDER_ALPHA)
+	placeholder_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_mesh_instance.material_override = placeholder_material
+
+
+func _apply_completed_visual() -> void:
+	if _mesh_instance == null:
+		return
+
+	_mesh_instance.material_override = null

@@ -1,6 +1,6 @@
 extends Node
 
-## Handles building placement preview and instant placement.
+## Handles building placement preview and worker-driven construction.
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const FARM_GOLD_COST: int = 80
@@ -10,6 +10,7 @@ const GHOST_ALPHA: float = 0.4
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var buildings_parent_path: NodePath = ".."
+@export var selection_manager_path: NodePath = "../SelectionManager"
 
 var _is_placing_farm: bool = false
 var _farm_ghost: Node3D = null
@@ -88,9 +89,26 @@ func _place_farm() -> void:
 	if buildings_parent == null:
 		return
 
-	var farm: Node3D = FARM_SCENE.instantiate()
+	var farm: Farm = FARM_SCENE.instantiate() as Farm
 	farm.global_position = _farm_ghost.global_position
 	buildings_parent.add_child(farm)
+	farm.start_under_construction()
+
+	var worker: Worker = _get_selected_worker()
+	if worker != null:
+		worker.command_build_farm(farm)
+
+
+func _get_selected_worker() -> Worker:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return null
+
+	for unit: Unit in selection_manager.selected_units:
+		if unit is Worker:
+			return unit as Worker
+
+	return null
 
 
 func _disable_ghost_collision(ghost: Node3D) -> void:

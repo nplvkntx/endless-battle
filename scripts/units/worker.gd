@@ -11,17 +11,28 @@ enum GoldMineTripState {
 	DONE,
 }
 
+enum BuildTripState {
+	IDLE,
+	TO_FARM,
+	CONSTRUCTION_WAIT,
+	DONE,
+}
+
 const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
 const MINING_WAIT_SECONDS: float = 1.0
+const CONSTRUCTION_WAIT_SECONDS: float = 3.0
 const GOLD_DEPOSIT_AMOUNT: int = 5
 
 var _gold_mine_trip_state: GoldMineTripState = GoldMineTripState.IDLE
 var _gathering_gold_mine: GoldMine = null
+var _build_trip_state: BuildTripState = BuildTripState.IDLE
+var _building_target: Building = null
 
 
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 	_update_gold_mine_trip()
+	_update_build_trip()
 
 
 func command_gather_gold_mine(gold_mine: GoldMine) -> void:
@@ -36,6 +47,13 @@ func cancel_gathering() -> void:
 	_gathering_gold_mine = null
 
 
+func command_build_farm(farm: Farm) -> void:
+	cancel_gathering()
+	_build_trip_state = BuildTripState.TO_FARM
+	_building_target = farm
+	set_movement_target(_compute_approach_position(farm))
+
+
 func _update_gold_mine_trip() -> void:
 	match _gold_mine_trip_state:
 		GoldMineTripState.TO_GOLD_MINE:
@@ -45,6 +63,55 @@ func _update_gold_mine_trip() -> void:
 			if not has_move_target:
 				_deposit_gold()
 				_continue_gathering_cycle()
+
+
+func _update_build_trip() -> void:
+	match _build_trip_state:
+		BuildTripState.TO_FARM:
+			if not has_move_target:
+				if _is_near_building_target():
+					_begin_construction_wait()
+				else:
+					_build_trip_state = BuildTripState.IDLE
+					_building_target = null
+
+
+func _begin_construction_wait() -> void:
+	if _building_target == null or not is_instance_valid(_building_target):
+		_build_trip_state = BuildTripState.DONE
+		_building_target = null
+		return
+
+	_build_trip_state = BuildTripState.CONSTRUCTION_WAIT
+	_building_target.begin_construction()
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(CONSTRUCTION_WAIT_SECONDS)
+	wait_timer.timeout.connect(_on_construction_wait_finished, CONNECT_ONE_SHOT)
+
+
+func _is_near_building_target() -> bool:
+	if _building_target == null:
+		return false
+
+	var offset: Vector3 = global_position - _building_target.global_position
+	offset.y = 0.0
+	var reach_distance: float = (
+		stopping_distance
+		+ _get_collision_xz_radius(_building_target)
+		+ _get_collision_xz_radius(self)
+		+ 0.5
+	)
+	return offset.length_squared() <= reach_distance * reach_distance
+
+
+func _on_construction_wait_finished() -> void:
+	if _build_trip_state != BuildTripState.CONSTRUCTION_WAIT:
+		return
+
+	if _building_target != null and is_instance_valid(_building_target):
+		_building_target.complete_construction()
+
+	_build_trip_state = BuildTripState.DONE
+	_building_target = null
 
 
 func _begin_mining_wait() -> void:
