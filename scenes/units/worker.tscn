@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://c34sseipvxy7a"]
+
+[ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_brown"]
+albedo_color = Color(0.55, 0.35, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_visual"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(1, 1, 1)
+
+[node name="Worker" type="CharacterBody3D" groups=["workers", "units"]]
+script = ExtResource("1_worker")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_visual")
+surface_material_override/0 = SubResource("StandardMaterial3D_brown")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_body")
