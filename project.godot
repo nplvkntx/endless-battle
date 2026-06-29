@@ -11,8 +11,20 @@ config_version=5
 [application]
 
 config/name="endless battle"
+run/main_scene="uid://cpee3usuf6htk"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+GameSettings="*res://autoloads/game_settings.gd"
+ResourceManager="*res://autoloads/resource_manager.gd"
+TechTree="*res://autoloads/tech_tree.gd"
+UpgradeManager="*res://autoloads/upgrade_manager.gd"
+FormationManager="*res://autoloads/formation_manager.gd"
+InputManager="*res://autoloads/input_manager.gd"
+FogOfWarManager="*res://autoloads/fog_of_war_manager.gd"
+ProjectileManager="*res://autoloads/projectile_manager.gd"
 
 [display]
 
