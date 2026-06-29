@@ -3,6 +3,7 @@ extends Node
 ## Handles unit selection through left-click and drag-box selection.
 
 signal selection_changed(units: Array[Unit])
+signal building_selection_changed(building: Building)
 
 const DRAG_THRESHOLD_PIXELS: float = 4.0
 const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
@@ -13,6 +14,7 @@ const WORKER_GROUP: StringName = &"workers"
 @export var selection_box_path: NodePath = "../SelectionUI/SelectionBox"
 
 var selected_units: Array[Unit] = []
+var selected_building: Building = null
 
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
@@ -97,9 +99,17 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		else:
 			_set_selected_units([unit])
 		_record_click(unit)
-	else:
-		_clear_selection()
+		return
+
+	var building: Building = _raycast_building(camera, screen_position)
+	if building != null:
+		_set_selected_building(building)
 		_reset_click_tracking()
+		return
+
+	_clear_selection()
+	_clear_building_selection()
+	_reset_click_tracking()
 
 
 func _handle_right_click(screen_position: Vector2) -> void:
@@ -167,6 +177,7 @@ func _set_selected_units(units: Array[Unit]) -> void:
 	if _arrays_match(selected_units, units):
 		return
 
+	_clear_building_selection_without_signal()
 	_clear_selection_without_signal()
 	selected_units = units.duplicate()
 	for unit: Unit in selected_units:
@@ -180,6 +191,35 @@ func _clear_selection() -> void:
 
 	_clear_selection_without_signal()
 	selection_changed.emit(selected_units)
+
+
+func _set_selected_building(building: Building) -> void:
+	if selected_building == building:
+		return
+
+	_clear_selection_without_signal()
+	_clear_building_selection_without_signal()
+	selected_building = building
+	if selected_building != null:
+		selected_building.set_selected(true)
+	building_selection_changed.emit(selected_building)
+	selection_changed.emit(selected_units)
+
+
+func _clear_building_selection() -> void:
+	if selected_building == null:
+		return
+
+	_clear_building_selection_without_signal()
+	building_selection_changed.emit(null)
+
+
+func _clear_building_selection_without_signal() -> void:
+	if selected_building == null:
+		return
+
+	selected_building.set_selected(false)
+	selected_building = null
 
 
 func _clear_selection_without_signal() -> void:
@@ -318,5 +358,29 @@ func _find_unit_from_collider(node: Node) -> Unit:
 	while current:
 		if current is Unit:
 			return current as Unit
+		current = current.get_parent()
+	return null
+
+
+func _raycast_building(camera: Camera3D, screen_position: Vector2) -> Building:
+	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
+		return null
+
+	return _find_building_from_collider(result.collider as Node)
+
+
+func _find_building_from_collider(node: Node) -> Building:
+	var current: Node = node
+	while current:
+		if current is Building:
+			return current as Building
 		current = current.get_parent()
 	return null

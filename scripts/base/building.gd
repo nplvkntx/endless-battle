@@ -20,6 +20,7 @@ const CONSTRUCTION_PLACEHOLDER_ALPHA: float = 0.4
 
 var team_id: int = -1
 var building_state: StringName = &""
+var is_selected: bool = false
 
 var _current_health: float = 0.0
 var _max_health: float = 0.0
@@ -35,6 +36,10 @@ func _ready() -> void:
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
 	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
 	_apply_building_data()
+
+
+func set_selected(selected: bool) -> void:
+	is_selected = selected
 
 
 ## Loads runtime state from building_data when the data pipeline is available.

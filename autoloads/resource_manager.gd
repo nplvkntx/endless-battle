@@ -47,6 +47,31 @@ func can_afford(gold_cost: int, wood_cost: int) -> bool:
 	return gold >= gold_cost and wood >= wood_cost
 
 
+func has_food_supply(additional: int) -> bool:
+	return food_current + additional <= food_max
+
+
+func can_afford_worker_training(gold_cost: int, food_cost: int) -> bool:
+	return gold >= gold_cost and has_food_supply(food_cost)
+
+
+func try_spend_gold(amount: int) -> bool:
+	if amount > gold:
+		return false
+
+	gold -= amount
+	resources_changed.emit()
+	return true
+
+
+func add_food_used(amount: int) -> void:
+	if amount <= 0:
+		return
+
+	food_current += amount
+	food_changed.emit(food_current, food_max)
+
+
 func try_spend(gold_cost: int, wood_cost: int) -> bool:
 	if not can_afford(gold_cost, wood_cost):
 		return false
