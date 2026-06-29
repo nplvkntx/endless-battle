@@ -35,6 +35,14 @@ func add_gold(amount: int) -> void:
 	resources_changed.emit()
 
 
+func add_wood(amount: int) -> void:
+	if amount <= 0:
+		return
+
+	wood += amount
+	resources_changed.emit()
+
+
 func add_food_max(amount: int) -> void:
 	if amount <= 0:
 		return

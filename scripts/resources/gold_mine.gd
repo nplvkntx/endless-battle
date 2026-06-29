@@ -1,4 +1,8 @@
 class_name GoldMine
-extends StaticBody3D
+extends GatherableResource
 
 ## Placeholder gold mine resource node for early gathering command tests.
+
+
+func get_resource_id() -> StringName:
+	return &"gold"

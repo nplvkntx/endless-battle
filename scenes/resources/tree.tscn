@@ -1,4 +1,6 @@
-[gd_scene format=3 uid="uid://bg40oion7ayqm"]
+[gd_scene load_steps=5 format=3 uid="uid://bg40oion7ayqm"]
+
+[ext_resource type="Script" path="res://scripts/resources/tree.gd" id="1_tree"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tree"]
 albedo_color = Color(0.18, 0.62, 0.22, 1)
@@ -13,6 +15,7 @@ height = 2.5
 radius = 0.45
 
 [node name="Tree" type="StaticBody3D" groups=["resource_nodes"]]
+script = ExtResource("1_tree")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 mesh = SubResource("CylinderMesh_tree")
