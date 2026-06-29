@@ -31,6 +31,11 @@ func command_gather_gold_mine(gold_mine: GoldMine) -> void:
 	set_movement_target(_compute_approach_position(gold_mine))
 
 
+func cancel_gathering() -> void:
+	_gold_mine_trip_state = GoldMineTripState.IDLE
+	_gathering_gold_mine = null
+
+
 func _update_gold_mine_trip() -> void:
 	match _gold_mine_trip_state:
 		GoldMineTripState.TO_GOLD_MINE:

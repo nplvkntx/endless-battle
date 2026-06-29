@@ -124,7 +124,10 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		selected_units.size()
 	)
 	for index: int in selected_units.size():
-		selected_units[index].set_movement_target(move_targets[index])
+		var unit: Unit = selected_units[index]
+		if unit is Worker:
+			(unit as Worker).cancel_gathering()
+		unit.set_movement_target(move_targets[index])
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
