@@ -6,7 +6,7 @@ const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
 
 
 func _input(event: InputEvent) -> void:
-	if not is_selected:
+	if not _is_only_selected_worker():
 		return
 	if not _is_right_mouse_press(event):
 		return
@@ -17,6 +17,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	print(GOLD_MINE_COMMAND_MESSAGE)
+	set_movement_target(_compute_gold_mine_approach_position(gold_mine))
 	get_viewport().set_input_as_handled()
 
 
@@ -53,3 +54,49 @@ func _find_gold_mine_from_collider(node: Node) -> GoldMine:
 			return current as GoldMine
 		current = current.get_parent()
 	return null
+
+
+func _is_only_selected_worker() -> bool:
+	if not is_selected:
+		return false
+
+	var selected_worker_count: int = 0
+	for node: Node in get_tree().get_nodes_in_group(&"workers"):
+		var unit := node as Unit
+		if unit == null or not unit.is_selected:
+			continue
+		selected_worker_count += 1
+		if selected_worker_count > 1:
+			return false
+
+	return selected_worker_count == 1
+
+
+func _compute_gold_mine_approach_position(gold_mine: GoldMine) -> Vector3:
+	var mine_center: Vector3 = gold_mine.global_position
+	var direction: Vector3 = global_position - mine_center
+	direction.y = 0.0
+
+	if direction.length_squared() < 0.001:
+		direction = Vector3.FORWARD
+
+	var stand_off_distance: float = (
+		_get_collision_xz_radius(gold_mine)
+		+ _get_collision_xz_radius(self)
+		+ stopping_distance
+	)
+	var approach_position: Vector3 = mine_center + direction.normalized() * stand_off_distance
+	approach_position.y = global_position.y
+	return approach_position
+
+
+func _get_collision_xz_radius(body: CollisionObject3D) -> float:
+	var collision_shape: CollisionShape3D = body.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision_shape == null or collision_shape.shape == null:
+		return 0.5
+
+	if collision_shape.shape is BoxShape3D:
+		var box_shape := collision_shape.shape as BoxShape3D
+		return maxf(box_shape.size.x, box_shape.size.z) * 0.5
+
+	return 0.5
