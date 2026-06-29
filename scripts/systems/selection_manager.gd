@@ -5,7 +5,9 @@ extends Node
 signal selection_changed(units: Array[Unit])
 
 const DRAG_THRESHOLD_PIXELS: float = 4.0
+const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
 const UNIT_GROUP: StringName = &"units"
+const WORKER_GROUP: StringName = &"workers"
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var selection_box_path: NodePath = "../SelectionUI/SelectionBox"
@@ -15,6 +17,8 @@ var selected_units: Array[Unit] = []
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _is_dragging: bool = false
+var _last_clicked_unit: Unit = null
+var _last_click_time_msec: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -78,6 +82,7 @@ func _finish_drag_selection(screen_position: Vector2) -> void:
 	var selection_rect := _make_screen_rect(_drag_start, screen_position)
 	var units := _get_units_in_rect(camera, selection_rect)
 	_set_selected_units(units)
+	_reset_click_tracking()
 
 
 func _handle_left_click(screen_position: Vector2) -> void:
@@ -87,9 +92,14 @@ func _handle_left_click(screen_position: Vector2) -> void:
 
 	var unit: Unit = _raycast_unit(camera, screen_position)
 	if unit:
-		_set_selected_units([unit])
+		if _is_double_click(unit):
+			_select_all_visible_same_type(unit, camera)
+		else:
+			_set_selected_units([unit])
+		_record_click(unit)
 	else:
 		_clear_selection()
+		_reset_click_tracking()
 
 
 func _handle_right_click(screen_position: Vector2) -> void:
@@ -195,6 +205,61 @@ func _raycast_unit(camera: Camera3D, screen_position: Vector2) -> Unit:
 		return null
 
 	return _find_unit_from_collider(result.collider as Node)
+
+
+func _is_double_click(unit: Unit) -> bool:
+	if _last_clicked_unit == null or _last_click_time_msec < 0:
+		return false
+
+	if not _is_same_unit_type(_last_clicked_unit, unit):
+		return false
+
+	var elapsed_seconds: float = float(Time.get_ticks_msec() - _last_click_time_msec) / 1000.0
+	return elapsed_seconds <= DOUBLE_CLICK_TIME_SECONDS
+
+
+func _record_click(unit: Unit) -> void:
+	_last_clicked_unit = unit
+	_last_click_time_msec = Time.get_ticks_msec()
+
+
+func _reset_click_tracking() -> void:
+	_last_clicked_unit = null
+	_last_click_time_msec = -1
+
+
+func _is_same_unit_type(first_unit: Unit, second_unit: Unit) -> bool:
+	var first_type: StringName = _get_unit_selection_group(first_unit)
+	var second_type: StringName = _get_unit_selection_group(second_unit)
+	if first_type.is_empty() or second_type.is_empty():
+		return false
+	return first_type == second_type
+
+
+func _get_unit_selection_group(unit: Unit) -> StringName:
+	if unit.is_in_group(WORKER_GROUP):
+		return WORKER_GROUP
+
+	# TODO: Return soldier/archer groups when those unit types exist.
+	return &""
+
+
+func _select_all_visible_same_type(clicked_unit: Unit, camera: Camera3D) -> void:
+	var type_group: StringName = _get_unit_selection_group(clicked_unit)
+	if type_group.is_empty():
+		_set_selected_units([clicked_unit])
+		return
+
+	var units: Array[Unit] = []
+	for node: Node in get_tree().get_nodes_in_group(type_group):
+		var unit := node as Unit
+		if unit == null:
+			continue
+		if not camera.is_position_in_frustum(unit.global_position):
+			continue
+		units.append(unit)
+
+	_set_selected_units(units)
 
 
 func _raycast_ground_plane(camera: Camera3D, screen_position: Vector2) -> Vector3:
