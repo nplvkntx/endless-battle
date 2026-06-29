@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
+[ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -109,3 +110,27 @@ shape = SubResource("BoxShape3D_command_center")
 
 [node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1, -5)
+
+[node name="Tree" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, -7)
+
+[node name="Tree2" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1.25, -8)
+
+[node name="Tree3" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 1.25, -6)
+
+[node name="Tree4" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1.25, -6)
+
+[node name="Tree5" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1.25, -9)
+
+[node name="Tree6" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1.25, -8)
+
+[node name="Tree7" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1.25, -8)
+
+[node name="Tree8" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1.25, -10)
