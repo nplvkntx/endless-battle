@@ -25,3 +25,11 @@ func _ready() -> void:
 func _emit_resource_state() -> void:
 	resources_changed.emit()
 	food_changed.emit(food_current, food_max)
+
+
+func add_gold(amount: int) -> void:
+	if amount <= 0:
+		return
+
+	gold += amount
+	resources_changed.emit()

@@ -12,8 +12,10 @@ enum GoldMineTripState {
 
 const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
 const MINING_WAIT_SECONDS: float = 1.0
+const GOLD_DEPOSIT_AMOUNT: int = 5
 
 var _gold_mine_trip_state: GoldMineTripState = GoldMineTripState.IDLE
+var _gathering_gold_mine: GoldMine = null
 
 
 func _physics_process(delta: float) -> void:
@@ -33,6 +35,7 @@ func _input(event: InputEvent) -> void:
 		return
 
 	print(GOLD_MINE_COMMAND_MESSAGE)
+	_gathering_gold_mine = gold_mine
 	_gold_mine_trip_state = GoldMineTripState.TO_GOLD_MINE
 	set_movement_target(_compute_approach_position(gold_mine))
 	get_viewport().set_input_as_handled()
@@ -45,7 +48,8 @@ func _update_gold_mine_trip() -> void:
 				_begin_mining_wait()
 		GoldMineTripState.TO_COMMAND_CENTER:
 			if not has_move_target:
-				_gold_mine_trip_state = GoldMineTripState.DONE
+				_deposit_gold()
+				_continue_gathering_cycle()
 
 
 func _begin_mining_wait() -> void:
@@ -65,6 +69,19 @@ func _on_mining_wait_finished() -> void:
 
 	_gold_mine_trip_state = GoldMineTripState.TO_COMMAND_CENTER
 	set_movement_target(_compute_approach_position(command_center))
+
+
+func _deposit_gold() -> void:
+	ResourceManager.add_gold(GOLD_DEPOSIT_AMOUNT)
+
+
+func _continue_gathering_cycle() -> void:
+	if _gathering_gold_mine == null or not is_instance_valid(_gathering_gold_mine):
+		_gold_mine_trip_state = GoldMineTripState.DONE
+		return
+
+	_gold_mine_trip_state = GoldMineTripState.TO_GOLD_MINE
+	set_movement_target(_compute_approach_position(_gathering_gold_mine))
 
 
 func _is_right_mouse_press(event: InputEvent) -> bool:
