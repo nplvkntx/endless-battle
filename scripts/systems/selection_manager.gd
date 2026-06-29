@@ -136,6 +136,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(selected_building as CommandCenter).set_rally_point(rally_ground_position)
 		return
 
+	if selected_building is Barracks:
+		var barracks_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if barracks_rally_position.is_finite():
+			(selected_building as Barracks).set_rally_point(barracks_rally_position)
+		return
+
 	if selected_units.is_empty():
 		return
 
