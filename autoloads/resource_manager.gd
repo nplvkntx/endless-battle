@@ -64,6 +64,17 @@ func try_spend_gold(amount: int) -> bool:
 	return true
 
 
+func try_pay_worker_training(gold_cost: int, food_cost: int) -> bool:
+	if not can_afford_worker_training(gold_cost, food_cost):
+		return false
+
+	gold -= gold_cost
+	food_current += food_cost
+	resources_changed.emit()
+	food_changed.emit(food_current, food_max)
+	return true
+
+
 func add_food_used(amount: int) -> void:
 	if amount <= 0:
 		return

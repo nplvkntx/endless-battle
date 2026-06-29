@@ -5,8 +5,9 @@ extends Control
 @export var selection_manager_path: NodePath = "../../SelectionManager"
 @export var build_manager_path: NodePath = "../../BuildManager"
 
-@onready var _build_farm_button: Button = $BuildFarmButton
-@onready var _train_worker_button: Button = $TrainWorkerButton
+@onready var _build_farm_button: Button = $ButtonsRow/BuildFarmButton
+@onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
+@onready var _worker_queue_label: Label = $WorkerQueueLabel
 
 var _selected_command_center: CommandCenter = null
 
@@ -14,6 +15,7 @@ var _selected_command_center: CommandCenter = null
 func _ready() -> void:
 	_build_farm_button.visible = false
 	_train_worker_button.visible = false
+	_worker_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 
@@ -38,8 +40,28 @@ func _on_selection_changed(units: Array[Unit]) -> void:
 
 
 func _on_building_selection_changed(building: Building) -> void:
+	_disconnect_queue_signal()
 	_selected_command_center = building as CommandCenter if building is CommandCenter else null
 	_train_worker_button.visible = _selected_command_center != null
+	_worker_queue_label.visible = _selected_command_center != null
+
+	if _selected_command_center != null:
+		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
+		_on_worker_queue_changed(_selected_command_center.get_worker_queue_count())
+	else:
+		_worker_queue_label.text = "Worker Queue: 0"
+
+
+func _on_worker_queue_changed(queue_count: int) -> void:
+	_worker_queue_label.text = "Worker Queue: %d" % queue_count
+
+
+func _disconnect_queue_signal() -> void:
+	if _selected_command_center == null:
+		return
+
+	if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
+		_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
 
 
 func _on_build_farm_pressed() -> void:
