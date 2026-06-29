@@ -110,6 +110,11 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if camera == null:
 		return
 
+	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
+	if gold_mine != null:
+		_dispatch_gold_mine_gather_command(gold_mine)
+		return
+
 	var ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
 	if not ground_position.is_finite():
 		return
@@ -120,6 +125,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	)
 	for index: int in selected_units.size():
 		selected_units[index].set_movement_target(move_targets[index])
+
+
+func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
+	for unit: Unit in selected_units:
+		if unit is Worker:
+			(unit as Worker).command_gather_gold_mine(gold_mine)
 
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:
@@ -205,6 +216,30 @@ func _raycast_unit(camera: Camera3D, screen_position: Vector2) -> Unit:
 		return null
 
 	return _find_unit_from_collider(result.collider as Node)
+
+
+func _raycast_gold_mine(camera: Camera3D, screen_position: Vector2) -> GoldMine:
+	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
+		return null
+
+	return _find_gold_mine_from_collider(result.collider as Node)
+
+
+func _find_gold_mine_from_collider(node: Node) -> GoldMine:
+	var current: Node = node
+	while current:
+		if current is GoldMine:
+			return current as GoldMine
+		current = current.get_parent()
+	return null
 
 
 func _is_double_click(unit: Unit) -> bool:

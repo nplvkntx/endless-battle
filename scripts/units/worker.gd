@@ -1,3 +1,4 @@
+class_name Worker
 extends Unit
 
 ## Placeholder worker unit used for early 3D scene testing.
@@ -23,22 +24,11 @@ func _physics_process(delta: float) -> void:
 	_update_gold_mine_trip()
 
 
-func _input(event: InputEvent) -> void:
-	if not _is_only_selected_worker():
-		return
-	if not _is_right_mouse_press(event):
-		return
-
-	var mouse_button := event as InputEventMouseButton
-	var gold_mine: GoldMine = _raycast_gold_mine(mouse_button.position)
-	if gold_mine == null:
-		return
-
+func command_gather_gold_mine(gold_mine: GoldMine) -> void:
 	print(GOLD_MINE_COMMAND_MESSAGE)
 	_gathering_gold_mine = gold_mine
 	_gold_mine_trip_state = GoldMineTripState.TO_GOLD_MINE
 	set_movement_target(_compute_approach_position(gold_mine))
-	get_viewport().set_input_as_handled()
 
 
 func _update_gold_mine_trip() -> void:
@@ -84,63 +74,12 @@ func _continue_gathering_cycle() -> void:
 	set_movement_target(_compute_approach_position(_gathering_gold_mine))
 
 
-func _is_right_mouse_press(event: InputEvent) -> bool:
-	if event is InputEventMouseButton:
-		var mouse_button := event as InputEventMouseButton
-		return mouse_button.pressed and mouse_button.button_index == MOUSE_BUTTON_RIGHT
-	return false
-
-
-func _raycast_gold_mine(screen_position: Vector2) -> GoldMine:
-	var camera: Camera3D = get_viewport().get_camera_3d()
-	if camera == null:
-		return null
-
-	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
-	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
-	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-
-	var result: Dictionary = space_state.intersect_ray(query)
-	if result.is_empty():
-		return null
-
-	return _find_gold_mine_from_collider(result.collider as Node)
-
-
-func _find_gold_mine_from_collider(node: Node) -> GoldMine:
-	var current: Node = node
-	while current:
-		if current is GoldMine:
-			return current as GoldMine
-		current = current.get_parent()
-	return null
-
-
 func _find_command_center() -> CommandCenter:
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
 		return null
 
 	return scene_root.find_child("CommandCenter", true, false) as CommandCenter
-
-
-func _is_only_selected_worker() -> bool:
-	if not is_selected:
-		return false
-
-	var selected_worker_count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(&"workers"):
-		var unit := node as Unit
-		if unit == null or not unit.is_selected:
-			continue
-		selected_worker_count += 1
-		if selected_worker_count > 1:
-			return false
-
-	return selected_worker_count == 1
 
 
 func _compute_approach_position(target: CollisionObject3D) -> Vector3:
