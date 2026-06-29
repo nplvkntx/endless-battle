@@ -8,6 +8,10 @@ extends Camera3D
 @export var zoom_speed: float = 3.0
 @export var min_height: float = 8.0
 @export var max_height: float = 45.0
+@export var min_x: float = -50.0
+@export var max_x: float = 50.0
+@export var min_z: float = -50.0
+@export var max_z: float = 50.0
 
 
 func _process(delta: float) -> void:
@@ -18,7 +22,7 @@ func _process(delta: float) -> void:
 	direction = direction.normalized()
 	var movement := direction * move_speed * delta
 	movement.y = 0.0
-	global_position += movement
+	global_position = _clamp_position(global_position + movement)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -81,4 +85,10 @@ func _apply_zoom(direction: float) -> void:
 	var new_position := global_position + (-global_transform.basis.z * direction * zoom_speed)
 	if new_position.y < min_height or new_position.y > max_height:
 		return
-	global_position = new_position
+	global_position = _clamp_position(new_position)
+
+
+func _clamp_position(position: Vector3) -> Vector3:
+	position.x = clampf(position.x, min_x, max_x)
+	position.z = clampf(position.z, min_z, max_z)
+	return position
