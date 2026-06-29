@@ -4,7 +4,15 @@
 [ext_resource type="Script" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
 [ext_resource type="Script" path="res://scripts/systems/selection_manager.gd" id="5_selection_manager"]
 [ext_resource type="Script" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
+[ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
 albedo_color = Color(0.35, 0.55, 0.25, 1)
@@ -37,6 +45,29 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("6_selection_box")
+
+[node name="GameUI" type="CanvasLayer" parent="."]
+
+[node name="ResourceBar" type="PanelContainer" parent="GameUI"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 36.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_resource_bar")
+script = ExtResource("7_resource_bar")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/ResourceBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 0
+
+[node name="ResourceLabel" type="Label" parent="GameUI/ResourceBar/MarginContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Gold: 500 | Wood: 300 | Food: 5/15"
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
