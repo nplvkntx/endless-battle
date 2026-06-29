@@ -35,6 +35,14 @@ func add_gold(amount: int) -> void:
 	resources_changed.emit()
 
 
+func add_food_max(amount: int) -> void:
+	if amount <= 0:
+		return
+
+	food_max += amount
+	food_changed.emit(food_current, food_max)
+
+
 func can_afford(gold_cost: int, wood_cost: int) -> bool:
 	return gold >= gold_cost and wood >= wood_cost
 
