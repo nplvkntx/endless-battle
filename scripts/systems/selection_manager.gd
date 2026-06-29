@@ -113,11 +113,17 @@ func _handle_left_click(screen_position: Vector2) -> void:
 
 
 func _handle_right_click(screen_position: Vector2) -> void:
-	if selected_units.is_empty():
-		return
-
 	var camera: Camera3D = _get_camera()
 	if camera == null:
+		return
+
+	if selected_building is CommandCenter:
+		var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if rally_ground_position.is_finite():
+			(selected_building as CommandCenter).set_rally_point(rally_ground_position)
+		return
+
+	if selected_units.is_empty():
 		return
 
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
