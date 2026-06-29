@@ -3,6 +3,8 @@ extends Node
 ## Handles building placement preview and instant placement.
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
+const FARM_GOLD_COST: int = 80
+const FARM_WOOD_COST: int = 20
 const FARM_GROUND_Y: float = 0.75
 const GHOST_ALPHA: float = 0.4
 
@@ -76,6 +78,10 @@ func _cancel_farm_placement() -> void:
 
 func _place_farm() -> void:
 	if _farm_ghost == null:
+		return
+
+	if not ResourceManager.try_spend(FARM_GOLD_COST, FARM_WOOD_COST):
+		print("Not enough resources")
 		return
 
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)

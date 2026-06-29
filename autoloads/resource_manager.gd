@@ -33,3 +33,17 @@ func add_gold(amount: int) -> void:
 
 	gold += amount
 	resources_changed.emit()
+
+
+func can_afford(gold_cost: int, wood_cost: int) -> bool:
+	return gold >= gold_cost and wood >= wood_cost
+
+
+func try_spend(gold_cost: int, wood_cost: int) -> bool:
+	if not can_afford(gold_cost, wood_cost):
+		return false
+
+	gold -= gold_cost
+	wood -= wood_cost
+	resources_changed.emit()
+	return true
