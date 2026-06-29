@@ -1,4 +1,6 @@
-[gd_scene load_steps=4 format=3 uid="uid://bqm8goldmine01"]
+[gd_scene load_steps=5 format=3 uid="uid://bqm8goldmine01"]
+
+[ext_resource type="Script" path="res://scripts/resources/gold_mine.gd" id="1_gold_mine"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gold"]
 albedo_color = Color(0.95, 0.82, 0.12, 1)
@@ -12,6 +14,7 @@ size = Vector3(3, 2, 3)
 size = Vector3(3, 2, 3)
 
 [node name="GoldMine" type="StaticBody3D" groups=["resource_nodes"]]
+script = ExtResource("1_gold_mine")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_gold_mine")
