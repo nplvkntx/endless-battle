@@ -1,0 +1,22 @@
+[gd_scene load_steps=5 format=3 uid="uid://c8farmplaceholder"]
+
+[ext_resource type="Script" path="res://scripts/buildings/farm.gd" id="1_farm"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_farm"]
+albedo_color = Color(0.6, 0.6, 0.6, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_farm"]
+size = Vector3(3, 1.5, 2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_farm"]
+size = Vector3(3, 1.5, 2)
+
+[node name="Farm" type="StaticBody3D" groups=["buildings"]]
+script = ExtResource("1_farm")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_farm")
+surface_material_override/0 = SubResource("StandardMaterial3D_farm")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_farm")

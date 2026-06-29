@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
+[ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -107,6 +108,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter"]
 shape = SubResource("BoxShape3D_command_center")
+
+[node name="Farm" parent="." instance=ExtResource("10_farm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.75, 0)
 
 [node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1, -5)
