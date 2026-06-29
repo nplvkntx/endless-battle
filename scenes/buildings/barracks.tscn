@@ -12,6 +12,8 @@ size = Vector3(4, 2, 3)
 size = Vector3(4, 2, 3)
 
 [node name="Barracks" type="StaticBody3D" groups=["buildings"]]
+collision_layer = 4
+collision_mask = 3
 script = ExtResource("1_barracks")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]

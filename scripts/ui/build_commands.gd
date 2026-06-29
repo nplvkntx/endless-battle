@@ -8,19 +8,24 @@ extends Control
 @onready var _build_farm_button: Button = $ButtonsRow/BuildFarmButton
 @onready var _build_barracks_button: Button = $ButtonsRow/BuildBarracksButton
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
+@onready var _train_swordsman_button: Button = $ButtonsRow/TrainSwordsmanButton
 @onready var _worker_queue_label: Label = $WorkerQueueLabel
 
 var _selected_command_center: CommandCenter = null
+var _selected_barracks: Barracks = null
+var _tracked_barracks: Barracks = null
 
 
 func _ready() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
 	_train_worker_button.visible = false
+	_train_swordsman_button.visible = false
 	_worker_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
+	_train_swordsman_button.pressed.connect(_on_train_swordsman_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -28,32 +33,61 @@ func _ready() -> void:
 
 	selection_manager.selection_changed.connect(_on_selection_changed)
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
-	_on_selection_changed(selection_manager.selected_units)
 	_on_building_selection_changed(selection_manager.selected_building)
+	_on_selection_changed(selection_manager.selected_units)
 
 
-func _on_selection_changed(units: Array[Unit]) -> void:
-	var has_worker: bool = false
-	for unit: Unit in units:
-		if unit is Worker:
-			has_worker = true
-			break
-
-	_build_farm_button.visible = has_worker
-	_build_barracks_button.visible = has_worker
+func _on_selection_changed(_units: Array[Unit]) -> void:
+	_refresh_command_visibility()
 
 
 func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_queue_signal()
-	_selected_command_center = building as CommandCenter if building is CommandCenter else null
-	_train_worker_button.visible = _selected_command_center != null
-	_worker_queue_label.visible = _selected_command_center != null
+	_disconnect_barracks_signal()
+	_selected_command_center = null
 
-	if _selected_command_center != null:
+	if building is CommandCenter:
+		_selected_command_center = building as CommandCenter
 		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
 		_on_worker_queue_changed(_selected_command_center.get_worker_queue_count())
 	else:
 		_worker_queue_label.text = "Worker Queue: 0"
+
+	if building is Barracks:
+		_tracked_barracks = building as Barracks
+		_tracked_barracks.building_state_changed.connect(_on_barracks_state_changed)
+
+	_refresh_command_visibility()
+
+
+func _on_barracks_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _refresh_command_visibility() -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return
+
+	var has_worker: bool = false
+	for unit: Unit in selection_manager.selected_units:
+		if unit is Worker:
+			has_worker = true
+			break
+
+	var selected_building: Building = selection_manager.selected_building
+	var show_train_swordsman: bool = (
+		selected_building is Barracks
+		and (selected_building as Barracks).building_state == Building.STATE_COMPLETED
+	)
+
+	_selected_barracks = selected_building as Barracks if show_train_swordsman else null
+
+	_build_farm_button.visible = has_worker
+	_build_barracks_button.visible = has_worker
+	_train_swordsman_button.visible = show_train_swordsman
+	_train_worker_button.visible = _selected_command_center != null
+	_worker_queue_label.visible = _selected_command_center != null
 
 
 func _on_worker_queue_changed(queue_count: int) -> void:
@@ -66,6 +100,18 @@ func _disconnect_queue_signal() -> void:
 
 	if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
 		_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
+
+	_selected_command_center = null
+
+
+func _disconnect_barracks_signal() -> void:
+	if _tracked_barracks == null:
+		return
+
+	if _tracked_barracks.building_state_changed.is_connected(_on_barracks_state_changed):
+		_tracked_barracks.building_state_changed.disconnect(_on_barracks_state_changed)
+
+	_tracked_barracks = null
 
 
 func _on_build_farm_pressed() -> void:
@@ -89,3 +135,10 @@ func _on_train_worker_pressed() -> void:
 		return
 
 	_selected_command_center.try_train_worker()
+
+
+func _on_train_swordsman_pressed() -> void:
+	if _selected_barracks == null:
+		return
+
+	_selected_barracks.try_train_swordsman()

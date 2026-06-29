@@ -93,6 +93,20 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		return
 
 	var unit: Unit = _raycast_unit(camera, screen_position)
+	var building: Building = _raycast_building(camera, screen_position)
+
+	if unit != null and building != null:
+		var unit_distance: float = _raycast_hit_distance(
+			camera, screen_position, PhysicsLayers.UNITS
+		)
+		var building_distance: float = _raycast_hit_distance(
+			camera, screen_position, PhysicsLayers.BUILDINGS
+		)
+		if building_distance < unit_distance:
+			_set_selected_building(building)
+			_reset_click_tracking()
+			return
+
 	if unit:
 		if _is_double_click(unit):
 			_select_all_visible_same_type(unit, camera)
@@ -101,7 +115,6 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		_record_click(unit)
 		return
 
-	var building: Building = _raycast_building(camera, screen_position)
 	if building != null:
 		_set_selected_building(building)
 		_reset_click_tracking()
@@ -253,14 +266,7 @@ func _get_selection_box() -> SelectionBox:
 
 
 func _raycast_unit(camera: Camera3D, screen_position: Vector2) -> Unit:
-	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
-	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
-	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-
-	var result: Dictionary = space_state.intersect_ray(query)
+	var result: Dictionary = _raycast_with_mask(camera, screen_position, PhysicsLayers.UNITS)
 	if result.is_empty():
 		return null
 
@@ -369,18 +375,38 @@ func _find_unit_from_collider(node: Node) -> Unit:
 
 
 func _raycast_building(camera: Camera3D, screen_position: Vector2) -> Building:
+	var result: Dictionary = _raycast_with_mask(
+		camera, screen_position, PhysicsLayers.BUILDINGS
+	)
+	if result.is_empty():
+		return null
+
+	return _find_building_from_collider(result.collider as Node)
+
+
+func _raycast_hit_distance(
+	camera: Camera3D, screen_position: Vector2, collision_mask: int
+) -> float:
+	var result: Dictionary = _raycast_with_mask(camera, screen_position, collision_mask)
+	if result.is_empty():
+		return INF
+
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	return ray_origin.distance_to(result.position)
+
+
+func _raycast_with_mask(
+	camera: Camera3D, screen_position: Vector2, collision_mask: int
+) -> Dictionary:
 	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
 	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
 	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
 	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
+	query.collision_mask = collision_mask
 
-	var result: Dictionary = space_state.intersect_ray(query)
-	if result.is_empty():
-		return null
-
-	return _find_building_from_collider(result.collider as Node)
+	return space_state.intersect_ray(query)
 
 
 func _find_building_from_collider(node: Node) -> Building:
