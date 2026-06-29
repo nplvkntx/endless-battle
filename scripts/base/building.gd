@@ -21,6 +21,8 @@ var _construction_progress: float = 0.0
 
 
 func _ready() -> void:
+	collision_layer = PhysicsLayers.BUILDINGS
+	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
 	_apply_building_data()
 
 

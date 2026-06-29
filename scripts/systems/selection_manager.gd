@@ -104,8 +104,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if not ground_position.is_finite():
 		return
 
-	for unit: Unit in selected_units:
-		unit.set_movement_target(ground_position)
+	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+		ground_position,
+		selected_units.size()
+	)
+	for index: int in selected_units.size():
+		selected_units[index].set_movement_target(move_targets[index])
 
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:

@@ -26,6 +26,8 @@ var _movement_target: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	motion_mode = MOTION_MODE_FLOATING
+	collision_layer = PhysicsLayers.UNITS
+	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 	_selection_indicator = get_node_or_null("SelectionIndicator") as MeshInstance3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
