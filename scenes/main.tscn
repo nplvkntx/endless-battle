@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
+[ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -105,3 +106,6 @@ surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter"]
 shape = SubResource("BoxShape3D_command_center")
+
+[node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1, -5)
