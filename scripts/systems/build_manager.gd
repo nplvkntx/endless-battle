@@ -37,7 +37,7 @@ func _process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_B and not _is_placing_farm:
-			_start_farm_placement()
+			start_farm_placement()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_ESCAPE and _is_placing_farm:
@@ -56,6 +56,17 @@ func _input(event: InputEvent) -> void:
 			MOUSE_BUTTON_RIGHT:
 				_cancel_farm_placement()
 				get_viewport().set_input_as_handled()
+
+
+func start_farm_placement() -> void:
+	if _is_placing_farm:
+		return
+
+	if not _has_worker_selected():
+		print("Select a Worker first")
+		return
+
+	_start_farm_placement()
 
 
 func _start_farm_placement() -> void:
@@ -109,6 +120,10 @@ func _get_selected_worker() -> Worker:
 			return unit as Worker
 
 	return null
+
+
+func _has_worker_selected() -> bool:
+	return _get_selected_worker() != null
 
 
 func _disable_ghost_collision(ghost: Node3D) -> void:

@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://scripts/systems/build_manager.gd" id="11_build_manager"]
 [ext_resource type="Script" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
+[ext_resource type="Script" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
@@ -75,6 +76,24 @@ theme_override_constants/margin_bottom = 0
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Gold: 500 | Wood: 300 | Food: 5/15"
+
+[node name="BuildCommands" type="HBoxContainer" parent="GameUI"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -60.0
+offset_top = -48.0
+offset_right = 60.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+script = ExtResource("12_build_commands")
+
+[node name="BuildFarmButton" type="Button" parent="GameUI/BuildCommands"]
+layout_mode = 2
+text = "Build Farm"
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
