@@ -10,6 +10,7 @@ extends Control
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
 @onready var _train_swordsman_button: Button = $ButtonsRow/TrainSwordsmanButton
 @onready var _worker_queue_label: Label = $WorkerQueueLabel
+@onready var _swordsman_queue_label: Label = $SwordsmanQueueLabel
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
@@ -22,6 +23,7 @@ func _ready() -> void:
 	_train_worker_button.visible = false
 	_train_swordsman_button.visible = false
 	_worker_queue_label.visible = false
+	_swordsman_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
@@ -42,8 +44,8 @@ func _on_selection_changed(_units: Array[Unit]) -> void:
 
 
 func _on_building_selection_changed(building: Building) -> void:
-	_disconnect_queue_signal()
-	_disconnect_barracks_signal()
+	_disconnect_worker_queue_signal()
+	_disconnect_barracks_signals()
 	_selected_command_center = null
 
 	if building is CommandCenter:
@@ -56,6 +58,10 @@ func _on_building_selection_changed(building: Building) -> void:
 	if building is Barracks:
 		_tracked_barracks = building as Barracks
 		_tracked_barracks.building_state_changed.connect(_on_barracks_state_changed)
+		_tracked_barracks.swordsman_queue_changed.connect(_on_swordsman_queue_changed)
+		_on_swordsman_queue_changed(_tracked_barracks.get_swordsman_queue_count())
+	else:
+		_swordsman_queue_label.text = "Swordsman Queue: 0"
 
 	_refresh_command_visibility()
 
@@ -88,13 +94,18 @@ func _refresh_command_visibility() -> void:
 	_train_swordsman_button.visible = show_train_swordsman
 	_train_worker_button.visible = _selected_command_center != null
 	_worker_queue_label.visible = _selected_command_center != null
+	_swordsman_queue_label.visible = show_train_swordsman
 
 
 func _on_worker_queue_changed(queue_count: int) -> void:
 	_worker_queue_label.text = "Worker Queue: %d" % queue_count
 
 
-func _disconnect_queue_signal() -> void:
+func _on_swordsman_queue_changed(queue_count: int) -> void:
+	_swordsman_queue_label.text = "Swordsman Queue: %d" % queue_count
+
+
+func _disconnect_worker_queue_signal() -> void:
 	if _selected_command_center == null:
 		return
 
@@ -104,12 +115,15 @@ func _disconnect_queue_signal() -> void:
 	_selected_command_center = null
 
 
-func _disconnect_barracks_signal() -> void:
+func _disconnect_barracks_signals() -> void:
 	if _tracked_barracks == null:
 		return
 
 	if _tracked_barracks.building_state_changed.is_connected(_on_barracks_state_changed):
 		_tracked_barracks.building_state_changed.disconnect(_on_barracks_state_changed)
+
+	if _tracked_barracks.swordsman_queue_changed.is_connected(_on_swordsman_queue_changed):
+		_tracked_barracks.swordsman_queue_changed.disconnect(_on_swordsman_queue_changed)
 
 	_tracked_barracks = null
 
