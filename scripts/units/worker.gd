@@ -2,7 +2,23 @@ extends Unit
 
 ## Placeholder worker unit used for early 3D scene testing.
 
+enum GoldMineTripState {
+	IDLE,
+	TO_GOLD_MINE,
+	MINING_WAIT,
+	TO_COMMAND_CENTER,
+	DONE,
+}
+
 const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
+const MINING_WAIT_SECONDS: float = 1.0
+
+var _gold_mine_trip_state: GoldMineTripState = GoldMineTripState.IDLE
+
+
+func _physics_process(delta: float) -> void:
+	super._physics_process(delta)
+	_update_gold_mine_trip()
 
 
 func _input(event: InputEvent) -> void:
@@ -17,8 +33,38 @@ func _input(event: InputEvent) -> void:
 		return
 
 	print(GOLD_MINE_COMMAND_MESSAGE)
-	set_movement_target(_compute_gold_mine_approach_position(gold_mine))
+	_gold_mine_trip_state = GoldMineTripState.TO_GOLD_MINE
+	set_movement_target(_compute_approach_position(gold_mine))
 	get_viewport().set_input_as_handled()
+
+
+func _update_gold_mine_trip() -> void:
+	match _gold_mine_trip_state:
+		GoldMineTripState.TO_GOLD_MINE:
+			if not has_move_target:
+				_begin_mining_wait()
+		GoldMineTripState.TO_COMMAND_CENTER:
+			if not has_move_target:
+				_gold_mine_trip_state = GoldMineTripState.DONE
+
+
+func _begin_mining_wait() -> void:
+	_gold_mine_trip_state = GoldMineTripState.MINING_WAIT
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(MINING_WAIT_SECONDS)
+	wait_timer.timeout.connect(_on_mining_wait_finished, CONNECT_ONE_SHOT)
+
+
+func _on_mining_wait_finished() -> void:
+	if _gold_mine_trip_state != GoldMineTripState.MINING_WAIT:
+		return
+
+	var command_center: CommandCenter = _find_command_center()
+	if command_center == null:
+		_gold_mine_trip_state = GoldMineTripState.DONE
+		return
+
+	_gold_mine_trip_state = GoldMineTripState.TO_COMMAND_CENTER
+	set_movement_target(_compute_approach_position(command_center))
 
 
 func _is_right_mouse_press(event: InputEvent) -> bool:
@@ -56,6 +102,14 @@ func _find_gold_mine_from_collider(node: Node) -> GoldMine:
 	return null
 
 
+func _find_command_center() -> CommandCenter:
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return null
+
+	return scene_root.find_child("CommandCenter", true, false) as CommandCenter
+
+
 func _is_only_selected_worker() -> bool:
 	if not is_selected:
 		return false
@@ -72,20 +126,20 @@ func _is_only_selected_worker() -> bool:
 	return selected_worker_count == 1
 
 
-func _compute_gold_mine_approach_position(gold_mine: GoldMine) -> Vector3:
-	var mine_center: Vector3 = gold_mine.global_position
-	var direction: Vector3 = global_position - mine_center
+func _compute_approach_position(target: CollisionObject3D) -> Vector3:
+	var target_center: Vector3 = target.global_position
+	var direction: Vector3 = global_position - target_center
 	direction.y = 0.0
 
 	if direction.length_squared() < 0.001:
 		direction = Vector3.FORWARD
 
 	var stand_off_distance: float = (
-		_get_collision_xz_radius(gold_mine)
+		_get_collision_xz_radius(target)
 		+ _get_collision_xz_radius(self)
 		+ stopping_distance
 	)
-	var approach_position: Vector3 = mine_center + direction.normalized() * stand_off_distance
+	var approach_position: Vector3 = target_center + direction.normalized() * stand_off_distance
 	approach_position.y = global_position.y
 	return approach_position
 
