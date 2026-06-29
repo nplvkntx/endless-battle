@@ -6,6 +6,7 @@ extends Control
 @export var build_manager_path: NodePath = "../../BuildManager"
 
 @onready var _build_farm_button: Button = $ButtonsRow/BuildFarmButton
+@onready var _build_barracks_button: Button = $ButtonsRow/BuildBarracksButton
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
 @onready var _worker_queue_label: Label = $WorkerQueueLabel
 
@@ -14,9 +15,11 @@ var _selected_command_center: CommandCenter = null
 
 func _ready() -> void:
 	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
 	_train_worker_button.visible = false
 	_worker_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
+	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
@@ -37,6 +40,7 @@ func _on_selection_changed(units: Array[Unit]) -> void:
 			break
 
 	_build_farm_button.visible = has_worker
+	_build_barracks_button.visible = has_worker
 
 
 func _on_building_selection_changed(building: Building) -> void:
@@ -70,6 +74,14 @@ func _on_build_farm_pressed() -> void:
 		return
 
 	build_manager.start_farm_placement()
+
+
+func _on_build_barracks_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_barracks_placement()
 
 
 func _on_train_worker_pressed() -> void:

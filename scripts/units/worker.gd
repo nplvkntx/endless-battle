@@ -13,7 +13,7 @@ enum GoldMineTripState {
 
 enum BuildTripState {
 	IDLE,
-	TO_FARM,
+	TO_BUILDING,
 	CONSTRUCTION_WAIT,
 	DONE,
 }
@@ -46,11 +46,15 @@ func cancel_gathering() -> void:
 	_gathering_gold_mine = null
 
 
-func command_build_farm(farm: Farm) -> void:
+func command_build(building: Building) -> void:
 	cancel_gathering()
-	_build_trip_state = BuildTripState.TO_FARM
-	_building_target = farm
-	set_movement_target(_compute_approach_position(farm))
+	_build_trip_state = BuildTripState.TO_BUILDING
+	_building_target = building
+	set_movement_target(_compute_approach_position(building))
+
+
+func command_build_farm(farm: Farm) -> void:
+	command_build(farm)
 
 
 func on_building_construction_finished() -> void:
@@ -74,7 +78,7 @@ func _update_gold_mine_trip() -> void:
 
 func _update_build_trip() -> void:
 	match _build_trip_state:
-		BuildTripState.TO_FARM:
+		BuildTripState.TO_BUILDING:
 			if not has_move_target:
 				if _is_near_building_target():
 					_begin_construction_wait()

@@ -2,10 +2,17 @@ extends Node
 
 ## Handles building placement preview and worker-driven construction.
 
+const PLACEMENT_FARM: StringName = &"farm"
+const PLACEMENT_BARRACKS: StringName = &"barracks"
+
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
+const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const FARM_GOLD_COST: int = 80
 const FARM_WOOD_COST: int = 20
+const BARRACKS_GOLD_COST: int = 150
+const BARRACKS_WOOD_COST: int = 100
 const FARM_GROUND_Y: float = 0.75
+const BARRACKS_GROUND_Y: float = 1.0
 const GHOST_ALPHA: float = 0.4
 const CONSTRUCTION_DURATION_ONE_WORKER: float = 3.0
 const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.0
@@ -15,12 +22,12 @@ const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.5
 @export var buildings_parent_path: NodePath = ".."
 @export var selection_manager_path: NodePath = "../SelectionManager"
 
-var _is_placing_farm: bool = false
-var _farm_ghost: Node3D = null
+var _active_placement: StringName = &""
+var _placement_ghost: Node3D = null
 
 
 func _process(_delta: float) -> void:
-	if not _is_placing_farm or _farm_ghost == null:
+	if _active_placement.is_empty() or _placement_ghost == null:
 		return
 
 	var camera: Camera3D = get_node_or_null(camera_path) as Camera3D
@@ -34,68 +41,94 @@ func _process(_delta: float) -> void:
 	if not ground_position.is_finite():
 		return
 
-	_farm_ghost.global_position = Vector3(ground_position.x, FARM_GROUND_Y, ground_position.z)
+	var ground_y: float = _get_ground_y(_active_placement)
+	_placement_ghost.global_position = Vector3(ground_position.x, ground_y, ground_position.z)
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_B and not _is_placing_farm:
-			start_farm_placement()
-			get_viewport().set_input_as_handled()
-			return
-		if event.keycode == KEY_ESCAPE and _is_placing_farm:
-			_cancel_farm_placement()
+		if _active_placement.is_empty():
+			if event.keycode == KEY_B:
+				start_farm_placement()
+				get_viewport().set_input_as_handled()
+				return
+			if event.keycode == KEY_R:
+				start_barracks_placement()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.keycode == KEY_ESCAPE:
+			_cancel_placement()
 			get_viewport().set_input_as_handled()
 			return
 
-	if not _is_placing_farm:
+	if _active_placement.is_empty():
 		return
 
 	if event is InputEventMouseButton and event.pressed:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
-				_place_farm()
+				_place_building()
 				get_viewport().set_input_as_handled()
 			MOUSE_BUTTON_RIGHT:
-				_cancel_farm_placement()
+				_cancel_placement()
 				get_viewport().set_input_as_handled()
 
 
 func start_farm_placement() -> void:
-	if _is_placing_farm:
+	_start_placement(PLACEMENT_FARM)
+
+
+func start_barracks_placement() -> void:
+	_start_placement(PLACEMENT_BARRACKS)
+
+
+func _start_placement(placement_type: StringName) -> void:
+	if not _active_placement.is_empty():
 		return
 
 	if not _has_worker_selected():
 		print("Select a Worker first")
 		return
 
-	_start_farm_placement()
-
-
-func _start_farm_placement() -> void:
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
 	if buildings_parent == null:
 		return
 
-	_is_placing_farm = true
-	_farm_ghost = FARM_SCENE.instantiate()
-	_disable_ghost_collision(_farm_ghost)
-	_apply_ghost_material(_farm_ghost)
-	buildings_parent.add_child(_farm_ghost)
-
-
-func _cancel_farm_placement() -> void:
-	_is_placing_farm = false
-	if _farm_ghost != null:
-		_farm_ghost.queue_free()
-		_farm_ghost = null
-
-
-func _place_farm() -> void:
-	if _farm_ghost == null:
+	var scene: PackedScene = _get_building_scene(placement_type)
+	if scene == null:
 		return
 
-	if not ResourceManager.try_spend(FARM_GOLD_COST, FARM_WOOD_COST):
+	_active_placement = placement_type
+	_placement_ghost = scene.instantiate()
+	_disable_ghost_collision(_placement_ghost)
+	_apply_ghost_material(_placement_ghost)
+	buildings_parent.add_child(_placement_ghost)
+
+
+func _cancel_placement() -> void:
+	_active_placement = &""
+	if _placement_ghost != null:
+		_placement_ghost.queue_free()
+		_placement_ghost = null
+
+
+func _place_building() -> void:
+	if _placement_ghost == null or _active_placement.is_empty():
+		return
+
+	var gold_cost: int = 0
+	var wood_cost: int = 0
+	match _active_placement:
+		PLACEMENT_FARM:
+			gold_cost = FARM_GOLD_COST
+			wood_cost = FARM_WOOD_COST
+		PLACEMENT_BARRACKS:
+			gold_cost = BARRACKS_GOLD_COST
+			wood_cost = BARRACKS_WOOD_COST
+		_:
+			return
+
+	if not ResourceManager.try_spend(gold_cost, wood_cost):
 		print("Not enough resources")
 		return
 
@@ -103,15 +136,41 @@ func _place_farm() -> void:
 	if buildings_parent == null:
 		return
 
-	var farm: Farm = FARM_SCENE.instantiate() as Farm
-	farm.global_position = _farm_ghost.global_position
-	buildings_parent.add_child(farm)
-	farm.start_under_construction()
+	var scene: PackedScene = _get_building_scene(_active_placement)
+	if scene == null:
+		return
+
+	var building: Building = scene.instantiate() as Building
+	building.global_position = _placement_ghost.global_position
+	buildings_parent.add_child(building)
+	building.start_under_construction()
 
 	var workers: Array[Worker] = _get_selected_workers()
-	farm.setup_construction(_get_construction_duration(workers.size()))
+	building.setup_construction(_get_construction_duration(workers.size()))
 	for worker: Worker in workers:
-		worker.command_build_farm(farm)
+		worker.command_build(building)
+
+	_cancel_placement()
+
+
+func _get_building_scene(placement_type: StringName) -> PackedScene:
+	match placement_type:
+		PLACEMENT_FARM:
+			return FARM_SCENE
+		PLACEMENT_BARRACKS:
+			return BARRACKS_SCENE
+		_:
+			return null
+
+
+func _get_ground_y(placement_type: StringName) -> float:
+	match placement_type:
+		PLACEMENT_FARM:
+			return FARM_GROUND_Y
+		PLACEMENT_BARRACKS:
+			return BARRACKS_GROUND_Y
+		_:
+			return 0.0
 
 
 func _get_selected_workers() -> Array[Worker]:
