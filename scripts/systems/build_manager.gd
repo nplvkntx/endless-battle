@@ -7,6 +7,9 @@ const FARM_GOLD_COST: int = 80
 const FARM_WOOD_COST: int = 20
 const FARM_GROUND_Y: float = 0.75
 const GHOST_ALPHA: float = 0.4
+const CONSTRUCTION_DURATION_ONE_WORKER: float = 3.0
+const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.0
+const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.5
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var buildings_parent_path: NodePath = ".."
@@ -105,25 +108,35 @@ func _place_farm() -> void:
 	buildings_parent.add_child(farm)
 	farm.start_under_construction()
 
-	var worker: Worker = _get_selected_worker()
-	if worker != null:
+	var workers: Array[Worker] = _get_selected_workers()
+	farm.setup_construction(_get_construction_duration(workers.size()))
+	for worker: Worker in workers:
 		worker.command_build_farm(farm)
 
 
-func _get_selected_worker() -> Worker:
+func _get_selected_workers() -> Array[Worker]:
+	var workers: Array[Worker] = []
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
-		return null
+		return workers
 
 	for unit: Unit in selection_manager.selected_units:
 		if unit is Worker:
-			return unit as Worker
+			workers.append(unit as Worker)
 
-	return null
+	return workers
+
+
+func _get_construction_duration(worker_count: int) -> float:
+	if worker_count >= 3:
+		return CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+	if worker_count == 2:
+		return CONSTRUCTION_DURATION_TWO_WORKERS
+	return CONSTRUCTION_DURATION_ONE_WORKER
 
 
 func _has_worker_selected() -> bool:
-	return _get_selected_worker() != null
+	return not _get_selected_workers().is_empty()
 
 
 func _disable_ghost_collision(ghost: Node3D) -> void:

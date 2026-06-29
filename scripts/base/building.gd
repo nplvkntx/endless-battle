@@ -24,6 +24,9 @@ var building_state: StringName = &""
 var _current_health: float = 0.0
 var _max_health: float = 0.0
 var _construction_progress: float = 0.0
+var _construction_duration: float = 3.0
+var _construction_timer_active: bool = false
+var _registered_builders: Array[Worker] = []
 var _mesh_instance: MeshInstance3D
 
 
@@ -60,6 +63,31 @@ func start_under_construction() -> void:
 	construction_progress_changed.emit(_construction_progress)
 
 
+func setup_construction(duration: float) -> void:
+	_construction_duration = duration
+
+
+## Called when a worker arrives at the build site.
+func register_builder(worker: Worker) -> void:
+	if building_state == STATE_COMPLETED:
+		if worker != null:
+			worker.on_building_construction_finished()
+		return
+
+	if worker != null and worker not in _registered_builders:
+		_registered_builders.append(worker)
+
+	if building_state == STATE_UNDER_CONSTRUCTION:
+		begin_construction()
+
+	if _construction_timer_active:
+		return
+
+	_construction_timer_active = true
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(_construction_duration)
+	wait_timer.timeout.connect(_on_construction_timer_finished, CONNECT_ONE_SHOT)
+
+
 ## Called when a worker arrives and begins the build timer.
 func begin_construction() -> void:
 	if building_state == STATE_COMPLETED:
@@ -84,6 +112,18 @@ func set_completed() -> void:
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
+
+
+func _on_construction_timer_finished() -> void:
+	_construction_timer_active = false
+	if building_state == STATE_COMPLETED:
+		return
+
+	complete_construction()
+	for builder: Worker in _registered_builders:
+		if is_instance_valid(builder):
+			builder.on_building_construction_finished()
+	_registered_builders.clear()
 
 
 func _apply_under_construction_visual() -> void:

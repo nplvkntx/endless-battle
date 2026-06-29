@@ -20,7 +20,6 @@ enum BuildTripState {
 
 const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
 const MINING_WAIT_SECONDS: float = 1.0
-const CONSTRUCTION_WAIT_SECONDS: float = 3.0
 const GOLD_DEPOSIT_AMOUNT: int = 5
 
 var _gold_mine_trip_state: GoldMineTripState = GoldMineTripState.IDLE
@@ -54,6 +53,14 @@ func command_build_farm(farm: Farm) -> void:
 	set_movement_target(_compute_approach_position(farm))
 
 
+func on_building_construction_finished() -> void:
+	if _build_trip_state != BuildTripState.CONSTRUCTION_WAIT:
+		return
+
+	_build_trip_state = BuildTripState.IDLE
+	_building_target = null
+
+
 func _update_gold_mine_trip() -> void:
 	match _gold_mine_trip_state:
 		GoldMineTripState.TO_GOLD_MINE:
@@ -83,9 +90,7 @@ func _begin_construction_wait() -> void:
 		return
 
 	_build_trip_state = BuildTripState.CONSTRUCTION_WAIT
-	_building_target.begin_construction()
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(CONSTRUCTION_WAIT_SECONDS)
-	wait_timer.timeout.connect(_on_construction_wait_finished, CONNECT_ONE_SHOT)
+	_building_target.register_builder(self)
 
 
 func _is_near_building_target() -> bool:
@@ -101,17 +106,6 @@ func _is_near_building_target() -> bool:
 		+ 0.5
 	)
 	return offset.length_squared() <= reach_distance * reach_distance
-
-
-func _on_construction_wait_finished() -> void:
-	if _build_trip_state != BuildTripState.CONSTRUCTION_WAIT:
-		return
-
-	if _building_target != null and is_instance_valid(_building_target):
-		_building_target.complete_construction()
-
-	_build_trip_state = BuildTripState.DONE
-	_building_target = null
 
 
 func _begin_mining_wait() -> void:
