@@ -1,0 +1,65 @@
+[gd_scene format=3 uid="uid://cpee3usuf6htk"]
+
+[ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
+[ext_resource type="Script" path="res://scripts/buildings/command_center.gd" id="2_command_center"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.35, 0.55, 0.25, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(40, 40)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_worker"]
+albedo_color = Color(0.25, 0.55, 0.95, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_worker"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_worker"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
+albedo_color = Color(0.75, 0.4, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[node name="Main" type="Node3D"]
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_ground")
+surface_material_override/0 = SubResource("StandardMaterial3D_ground")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 0, 20, 14)
+current = true
+fov = 60.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Worker" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, 3)
+script = ExtResource("1_worker")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Worker"]
+mesh = SubResource("BoxMesh_worker")
+surface_material_override/0 = SubResource("StandardMaterial3D_worker")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Worker"]
+shape = SubResource("BoxShape3D_worker")
+
+[node name="CommandCenter" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 1.25, -3)
+script = ExtResource("2_command_center")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter"]
+mesh = SubResource("BoxMesh_command_center")
+surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter"]
+shape = SubResource("BoxShape3D_command_center")
