@@ -31,9 +31,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	match event.button_index:
 		MOUSE_BUTTON_WHEEL_UP:
-			_apply_zoom(-1.0)
-		MOUSE_BUTTON_WHEEL_DOWN:
 			_apply_zoom(1.0)
+		MOUSE_BUTTON_WHEEL_DOWN:
+			_apply_zoom(-1.0)
 
 
 func _get_movement_direction() -> Vector3:

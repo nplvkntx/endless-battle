@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/buildings/command_center.gd" id="2_command_center"]
 [ext_resource type="Script" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
+[ext_resource type="Script" path="res://scripts/systems/selection_manager.gd" id="5_selection_manager"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
@@ -20,6 +21,9 @@ size = Vector3(4, 2.5, 4)
 size = Vector3(4, 2.5, 4)
 
 [node name="Main" type="Node3D"]
+
+[node name="SelectionManager" type="Node" parent="."]
+script = ExtResource("5_selection_manager")
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
