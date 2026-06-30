@@ -68,6 +68,92 @@ static func apply_damage_to_target(target: Variant, amount: float, attacker = nu
 	return true
 
 
+static func is_within_attack_range(
+	attacker: Node3D, target: Node3D, attack_range: float
+) -> bool:
+	if attacker == null or target == null:
+		return false
+
+	if is_attackable_enemy_building(target):
+		return (
+			get_horizontal_attack_distance_to_surface(attacker, target) <= attack_range
+		)
+
+	return get_horizontal_center_distance(attacker, target) <= attack_range
+
+
+static func get_horizontal_attack_distance_to_surface(from: Node3D, target: Node3D) -> float:
+	var center_distance: float = get_horizontal_center_distance(from, target)
+	if target is CollisionObject3D:
+		return maxf(
+			0.0,
+			center_distance - _get_collision_xz_radius(target as CollisionObject3D)
+		)
+
+	return center_distance
+
+
+static func get_horizontal_center_distance(from: Node3D, to: Node3D) -> float:
+	var offset: Vector3 = from.global_position - to.global_position
+	offset.y = 0.0
+	return offset.length()
+
+
+static func compute_attack_approach_position(
+	attacker: Node3D,
+	target: Node3D,
+	attack_range: float,
+	stopping_distance: float
+) -> Vector3:
+	var target_center: Vector3 = target.global_position
+	var to_attacker: Vector3 = attacker.global_position - target_center
+	to_attacker.y = 0.0
+
+	if to_attacker.length_squared() < 0.001:
+		to_attacker = Vector3.FORWARD
+
+	var standoff_distance: float
+	if is_attackable_enemy_building(target) and target is CollisionObject3D:
+		standoff_distance = (
+			_get_collision_xz_radius(target as CollisionObject3D)
+			+ _get_collision_xz_radius(attacker as CollisionObject3D)
+			+ stopping_distance
+		)
+	else:
+		standoff_distance = maxf(attack_range - stopping_distance, stopping_distance)
+
+	var approach_position: Vector3 = (
+		target_center + to_attacker.normalized() * standoff_distance
+	)
+	approach_position.y = attacker.global_position.y
+	return approach_position
+
+
+static func _get_collision_xz_radius(body: CollisionObject3D) -> float:
+	if body == null:
+		return 0.5
+
+	var collision_shape: CollisionShape3D = body.get_node_or_null(
+		"CollisionShape3D"
+	) as CollisionShape3D
+	if collision_shape == null or collision_shape.shape == null:
+		return 0.5
+
+	if collision_shape.shape is BoxShape3D:
+		var box_shape := collision_shape.shape as BoxShape3D
+		return maxf(box_shape.size.x, box_shape.size.z) * 0.5
+
+	if collision_shape.shape is CylinderShape3D:
+		var cylinder_shape := collision_shape.shape as CylinderShape3D
+		return cylinder_shape.radius
+
+	if collision_shape.shape is SphereShape3D:
+		var sphere_shape := collision_shape.shape as SphereShape3D
+		return sphere_shape.radius
+
+	return 0.5
+
+
 static func _can_receive_damage(target: Variant) -> bool:
 	if target is Node and (target as Node).get_node_or_null("HealthComponent") != null:
 		return true

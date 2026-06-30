@@ -971,25 +971,14 @@ func _is_at_attack_move_destination() -> bool:
 
 
 func _is_in_attack_range(target: Node3D) -> bool:
-	return _horizontal_distance_to(target) <= attack_range
+	return CombatTargetValidation.is_within_attack_range(self, target, attack_range)
 
 
 func _horizontal_distance_to(target: Node3D) -> float:
-	var offset: Vector3 = global_position - target.global_position
-	offset.y = 0.0
-	return offset.length()
+	return CombatTargetValidation.get_horizontal_center_distance(self, target)
 
 
 func _compute_attack_approach_position(target: Node3D) -> Vector3:
-	var to_attacker: Vector3 = global_position - target.global_position
-	to_attacker.y = 0.0
-
-	if to_attacker.length_squared() < 0.001:
-		to_attacker = Vector3.FORWARD
-
-	var standoff_distance: float = maxf(attack_range - stopping_distance, stopping_distance)
-	var approach_position: Vector3 = (
-		target.global_position + to_attacker.normalized() * standoff_distance
+	return CombatTargetValidation.compute_attack_approach_position(
+		self, target, attack_range, stopping_distance
 	)
-	approach_position.y = global_position.y
-	return approach_position
