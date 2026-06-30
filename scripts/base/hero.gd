@@ -15,6 +15,9 @@ signal respawn_requested(hero: Hero)
 const MAX_LEVEL: int = 24
 const XP_PER_LEVEL_MULTIPLIER: int = 100
 const MAX_ABILITY_POINT_LEVEL: int = 18
+const HEALTH_PER_LEVEL: int = 25
+const MANA_PER_LEVEL: int = 10
+const ATTACK_DAMAGE_PER_LEVEL: int = 2
 
 @export var hero_data: Resource
 
@@ -128,24 +131,37 @@ func _on_level_up() -> void:
 		ability_points += 1
 		ability_points_changed.emit(ability_points)
 
+	_apply_level_stat_gains()
 	level_changed.emit(level)
-	_restore_health_on_level_up()
-	_restore_mana_on_level_up()
 	_show_level_up_feedback()
 	print("Level Up! Hero reached level %d" % level)
 	print("Ability points: %d" % ability_points)
 
 
-func _restore_health_on_level_up() -> void:
+func _apply_level_stat_gains() -> void:
+	_apply_level_health_gain()
+	_apply_level_mana_gain()
+	_apply_level_attack_damage_gain()
+
+
+func _apply_level_health_gain() -> void:
 	var health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null:
 		return
 
-	health_component.current_health = health_component.max_health
+	health_component.max_health += HEALTH_PER_LEVEL
+	health_component.current_health = mini(
+		health_component.current_health + HEALTH_PER_LEVEL,
+		health_component.max_health
+	)
 	health_component.health_changed.emit(health_component.current_health, health_component.max_health)
 
 
-func _restore_mana_on_level_up() -> void:
+func _apply_level_mana_gain() -> void:
+	pass
+
+
+func _apply_level_attack_damage_gain() -> void:
 	pass
 
 

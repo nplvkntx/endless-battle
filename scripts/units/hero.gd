@@ -96,9 +96,14 @@ func _notify_hero_altars_of_death(_unit: Unit) -> void:
 			(node as HeroAltar).hero_altar_state_changed.emit()
 
 
-func _restore_mana_on_level_up() -> void:
-	current_mana = max_mana
+func _apply_level_mana_gain() -> void:
+	max_mana += MANA_PER_LEVEL
+	current_mana = mini(current_mana + MANA_PER_LEVEL, max_mana)
 	mana_changed.emit(current_mana, max_mana)
+
+
+func _apply_level_attack_damage_gain() -> void:
+	attack_damage += ATTACK_DAMAGE_PER_LEVEL
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
