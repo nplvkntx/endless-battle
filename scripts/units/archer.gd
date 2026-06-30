@@ -1,7 +1,7 @@
 class_name Archer
 extends Unit
 
-## Ranged archer unit that stops at attack range and applies damage directly.
+## Ranged archer unit that stops at attack range and fires arrow projectiles.
 
 @export var attack_damage: int = 7
 @export var attack_range: float = 8.0
@@ -9,6 +9,8 @@ extends Unit
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
+const ARROW_SCENE: PackedScene = preload("res://scenes/projectiles/arrow.tscn")
+const ARROW_SPAWN_HEIGHT := 0.5
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -144,13 +146,15 @@ func _stop_and_attack(delta: float) -> void:
 		cancel_attack()
 		return
 
-	_attack_target.take_damage(float(attack_damage), self)
-	MeleeHitSound.play_at(self, _attack_target.global_position)
-	print(
-		"Archer dealt %d damage. Target remaining health: %d"
-		% [attack_damage, _attack_target.get_current_health()]
-	)
+	_fire_arrow()
 	_attack_cooldown_timer = attack_cooldown
+
+
+func _fire_arrow() -> void:
+	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
+	get_tree().current_scene.add_child(arrow)
+	var spawn_position: Vector3 = global_position + Vector3(0.0, ARROW_SPAWN_HEIGHT, 0.0)
+	arrow.launch(self, _attack_target, float(attack_damage), spawn_position)
 
 
 func take_damage(amount: float) -> void:
