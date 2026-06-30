@@ -25,6 +25,33 @@ var _rally_point: Vector3 = Vector3.ZERO
 var _rally_resource: GatherableResource = null
 var _rally_marker: MeshInstance3D = null
 
+@onready var _health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
+
+
+func _ready() -> void:
+	super._ready()
+	if _health_component != null and _health_component.has_signal("health_depleted"):
+		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
+
+
+func take_damage(amount: float, _attacker = null) -> void:
+	if _health_component == null or _health_component.current_health <= 0:
+		return
+
+	if not _health_component.has_method("take_damage"):
+		return
+
+	_health_component.take_damage(maxi(0, int(amount)))
+
+
+func _on_health_depleted() -> void:
+	if _rally_marker != null and is_instance_valid(_rally_marker):
+		_rally_marker.queue_free()
+		_rally_marker = null
+
+	destroy_building()
+	queue_free()
+
 
 func get_worker_queue_count() -> int:
 	return _worker_queue_count

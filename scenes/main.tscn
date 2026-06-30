@@ -17,6 +17,8 @@
 [ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 [ext_resource type="PackedScene" path="res://scenes/units/enemy_dummy.tscn" id="14_enemy_dummy"]
 [ext_resource type="PackedScene" path="res://scenes/units/hero.tscn" id="15_hero"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="19_health_component"]
+[ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -79,6 +81,9 @@ size = Vector2(40, 40)
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
 albedo_color = Color(0.75, 0.4, 0.15, 1)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_command_center"]
+albedo_color = Color(0.65, 0.15, 0.15, 1)
+
 [sub_resource type="BoxMesh" id="BoxMesh_command_center"]
 size = Vector3(4, 2.5, 4)
 
@@ -95,6 +100,12 @@ script = ExtResource("13_gather_command_handler")
 
 [node name="BuildManager" type="Node" parent="."]
 script = ExtResource("11_build_manager")
+
+[node name="MatchManager" type="Node" parent="."]
+script = ExtResource("20_match_manager")
+player_command_center_path = NodePath("../CommandCenter")
+enemy_command_center_path = NodePath("../EnemyCommandCenter")
+match_result_label_path = NodePath("../GameUI/MatchResultLabel")
 
 [node name="SelectionUI" type="CanvasLayer" parent="."]
 
@@ -148,6 +159,24 @@ text = "Population cap reached"
 horizontal_alignment = 1
 vertical_alignment = 1
 script = ExtResource("17_feedback_message")
+
+[node name="MatchResultLabel" type="Label" parent="GameUI"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -24.0
+offset_right = 160.0
+offset_bottom = 24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="CommandBar" type="PanelContainer" parent="GameUI"]
 visible = false
@@ -479,7 +508,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, 1.5)
 attack_damage = 25
 attack_cooldown = 1.0
 
-[node name="CommandCenter" type="StaticBody3D" parent="."]
+[node name="CommandCenter" type="StaticBody3D" parent="." groups=["player_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 1.25, -3)
 script = ExtResource("2_command_center")
 
@@ -489,6 +518,25 @@ surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter"]
 shape = SubResource("BoxShape3D_command_center")
+
+[node name="HealthComponent" type="Node" parent="CommandCenter"]
+script = ExtResource("19_health_component")
+max_health = 500
+
+[node name="EnemyCommandCenter" type="StaticBody3D" parent="." groups=["enemy_command_center"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 10)
+script = ExtResource("2_command_center")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter"]
+mesh = SubResource("BoxMesh_command_center")
+surface_material_override/0 = SubResource("StandardMaterial3D_enemy_command_center")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="EnemyCommandCenter"]
+shape = SubResource("BoxShape3D_command_center")
+
+[node name="HealthComponent" type="Node" parent="EnemyCommandCenter"]
+script = ExtResource("19_health_component")
+max_health = 500
 
 [node name="Farm" parent="." instance=ExtResource("10_farm")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.75, 0)
