@@ -42,11 +42,17 @@ extends PanelContainer
 @onready var _ground_slam_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn/GroundSlamButton
 )
+@onready var _ground_slam_upgrade_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn/GroundSlamUpgradeButton
+)
 @onready var _divine_protection_cooldown_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn/DivineProtectionCooldownLabel
 )
 @onready var _divine_protection_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn/DivineProtectionButton
+)
+@onready var _divine_protection_upgrade_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn/DivineProtectionUpgradeButton
 )
 @onready var _power_strike_cooldown_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn/PowerStrikeCooldownLabel
@@ -54,11 +60,17 @@ extends PanelContainer
 @onready var _power_strike_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn/PowerStrikeButton
 )
+@onready var _power_strike_upgrade_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn/PowerStrikeUpgradeButton
+)
 @onready var _execute_cooldown_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteCooldownLabel
 )
 @onready var _execute_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteButton
+)
+@onready var _execute_upgrade_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteUpgradeButton
 )
 
 var _selected_command_center: CommandCenter = null
@@ -97,9 +109,14 @@ func _ready() -> void:
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
 	_ground_slam_button.pressed.connect(_on_ground_slam_pressed)
+	_ground_slam_upgrade_button.pressed.connect(_on_ground_slam_upgrade_pressed)
 	_divine_protection_button.pressed.connect(_on_divine_protection_pressed)
+	_divine_protection_upgrade_button.pressed.connect(_on_divine_protection_upgrade_pressed)
 	_power_strike_button.pressed.connect(_on_power_strike_pressed)
+	_power_strike_upgrade_button.pressed.connect(_on_power_strike_upgrade_pressed)
 	_execute_button.pressed.connect(_on_execute_pressed)
+	_execute_upgrade_button.pressed.connect(_on_execute_upgrade_pressed)
+	_hide_all_hero_upgrade_buttons()
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -186,6 +203,10 @@ func _set_tracked_hero(hero: Hero) -> void:
 	if _tracked_hero != null and is_instance_valid(_tracked_hero):
 		if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 			_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_progression_changed)
+		if not _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
+			_tracked_hero.ability_points_changed.connect(_on_tracked_hero_progression_changed)
+		if not _tracked_hero.level_changed.is_connected(_on_tracked_hero_progression_changed):
+			_tracked_hero.level_changed.connect(_on_tracked_hero_progression_changed)
 	_update_hero_abilities_ui()
 
 
@@ -195,6 +216,10 @@ func _disconnect_tracked_hero_signals() -> void:
 
 	if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 		_tracked_hero.ability_progression_changed.disconnect(_on_tracked_hero_progression_changed)
+	if _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
+		_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_progression_changed)
+	if _tracked_hero.level_changed.is_connected(_on_tracked_hero_progression_changed):
+		_tracked_hero.level_changed.disconnect(_on_tracked_hero_progression_changed)
 
 
 func _on_tracked_hero_progression_changed() -> void:
@@ -206,6 +231,57 @@ func _update_hero_abilities_ui() -> void:
 	_update_divine_protection_ui()
 	_update_power_strike_ui()
 	_update_execute_ui()
+	_update_all_hero_upgrade_arrows()
+
+
+func _hide_all_hero_upgrade_buttons() -> void:
+	_update_upgrade_arrow(_ground_slam_upgrade_button, HeroAbilityProgression.ABILITY_Q, false)
+	_update_upgrade_arrow(_divine_protection_upgrade_button, HeroAbilityProgression.ABILITY_W, false)
+	_update_upgrade_arrow(_power_strike_upgrade_button, HeroAbilityProgression.ABILITY_E, false)
+	_update_upgrade_arrow(_execute_upgrade_button, HeroAbilityProgression.ABILITY_R, false)
+
+
+func _update_all_hero_upgrade_arrows() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_hide_all_hero_upgrade_buttons()
+		return
+
+	_update_upgrade_arrow(
+		_ground_slam_upgrade_button,
+		HeroAbilityProgression.ABILITY_Q,
+		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_Q)
+	)
+	_update_upgrade_arrow(
+		_divine_protection_upgrade_button,
+		HeroAbilityProgression.ABILITY_W,
+		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_W)
+	)
+	_update_upgrade_arrow(
+		_power_strike_upgrade_button,
+		HeroAbilityProgression.ABILITY_E,
+		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_E)
+	)
+	_update_upgrade_arrow(
+		_execute_upgrade_button,
+		HeroAbilityProgression.ABILITY_R,
+		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_R)
+	)
+
+
+func _update_upgrade_arrow(upgrade_button: Button, _ability_id: StringName, show_upgrade: bool) -> void:
+	if upgrade_button == null:
+		return
+
+	upgrade_button.visible = show_upgrade
+	upgrade_button.disabled = not show_upgrade
+
+
+func _try_learn_ability_from_ui(ability_id: StringName) -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		return
+
+	_tracked_hero.try_learn_ability(ability_id)
+	_update_hero_abilities_ui()
 
 
 func _update_ground_slam_ui() -> void:
@@ -237,6 +313,10 @@ func _on_ground_slam_pressed() -> void:
 
 	_tracked_hero.try_ground_slam()
 	_update_hero_abilities_ui()
+
+
+func _on_ground_slam_upgrade_pressed() -> void:
+	_try_learn_ability_from_ui(HeroAbilityProgression.ABILITY_Q)
 
 
 func _update_divine_protection_ui() -> void:
@@ -279,6 +359,10 @@ func _on_divine_protection_pressed() -> void:
 	_update_hero_abilities_ui()
 
 
+func _on_divine_protection_upgrade_pressed() -> void:
+	_try_learn_ability_from_ui(HeroAbilityProgression.ABILITY_W)
+
+
 func _update_power_strike_ui() -> void:
 	if _power_strike_button == null or _power_strike_cooldown_label == null:
 		return
@@ -315,6 +399,10 @@ func _on_power_strike_pressed() -> void:
 
 	_tracked_hero.try_power_strike()
 	_update_hero_abilities_ui()
+
+
+func _on_power_strike_upgrade_pressed() -> void:
+	_try_learn_ability_from_ui(HeroAbilityProgression.ABILITY_E)
 
 
 func _update_execute_ui() -> void:
@@ -361,6 +449,10 @@ func _on_execute_pressed() -> void:
 
 	_tracked_hero.try_execute()
 	_update_hero_abilities_ui()
+
+
+func _on_execute_upgrade_pressed() -> void:
+	_try_learn_ability_from_ui(HeroAbilityProgression.ABILITY_R)
 
 
 func _on_building_selection_changed(building: Building) -> void:

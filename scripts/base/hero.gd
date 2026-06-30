@@ -79,6 +79,13 @@ func can_learn_ability(ability_id: StringName) -> bool:
 	return ability_progression.can_learn_ability(level, ability_points, ability_id)
 
 
+func can_show_ability_upgrade(ability_id: StringName) -> bool:
+	if ability_progression == null:
+		return false
+
+	return ability_progression.can_show_upgrade_arrow(level, ability_points, ability_id)
+
+
 func try_learn_ability(ability_id: StringName) -> bool:
 	if ability_progression == null:
 		push_warning("Hero.try_learn_ability: missing ability progression")

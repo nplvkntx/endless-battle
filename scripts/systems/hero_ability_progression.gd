@@ -50,6 +50,20 @@ func can_learn_ability(hero_level: int, ability_points: int, ability_id: StringN
 	return hero_level >= 1
 
 
+func can_show_upgrade_arrow(hero_level: int, ability_points: int, ability_id: StringName) -> bool:
+	if not can_learn_ability(hero_level, ability_points, ability_id):
+		return false
+
+	if ability_id != ABILITY_R:
+		return true
+
+	var target_rank: int = get_ability_rank(ABILITY_R) + 1
+	if target_rank > MAX_ULTIMATE_RANK:
+		return false
+
+	return hero_level == get_ultimate_rank_unlock_level(target_rank)
+
+
 func get_learn_blocked_reason(hero_level: int, ability_points: int, ability_id: StringName) -> String:
 	if not _is_valid_ability_id(ability_id):
 		return "Unknown ability"

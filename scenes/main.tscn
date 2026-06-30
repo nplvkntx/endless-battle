@@ -436,6 +436,13 @@ theme_override_font_sizes/font_size = 10
 text = "Q: Ready"
 horizontal_alignment = 1
 
+[node name="GroundSlamUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade Q"
+text = "▲"
+
 [node name="GroundSlamButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
@@ -451,6 +458,13 @@ theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "W: Ready"
 horizontal_alignment = 1
+
+[node name="DivineProtectionUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade W"
+text = "▲"
 
 [node name="DivineProtectionButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
 custom_minimum_size = Vector2(72, 28)
@@ -468,6 +482,13 @@ theme_override_font_sizes/font_size = 10
 text = "E: Ready"
 horizontal_alignment = 1
 
+[node name="PowerStrikeUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade E"
+text = "▲"
+
 [node name="PowerStrikeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
@@ -483,6 +504,13 @@ theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "R: Ready"
 horizontal_alignment = 1
+
+[node name="ExecuteUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade R"
+text = "▲"
 
 [node name="ExecuteButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
 custom_minimum_size = Vector2(72, 28)
