@@ -44,14 +44,16 @@ func _on_wave_timer() -> void:
 
 
 func _send_enemy_combat_units_to_attack(target: CommandCenter) -> void:
+	var destination: Vector3 = target.global_position
+
 	for node: Node in get_tree().get_nodes_in_group(&"enemies"):
 		if not _is_valid_enemy_combat_unit(node):
 			continue
 
 		if node is Swordsman:
-			(node as Swordsman).command_attack(target)
+			(node as Swordsman).command_attack_move(destination)
 		elif node is Archer:
-			(node as Archer).command_attack(target)
+			(node as Archer).command_attack_move(destination)
 
 
 func _is_valid_enemy_combat_unit(node: Node) -> bool:

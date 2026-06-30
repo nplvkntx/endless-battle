@@ -11,6 +11,7 @@ const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ARROW_SCENE: PackedScene = preload("res://scenes/projectiles/arrow.tscn")
 const ARROW_SPAWN_HEIGHT := 0.5
+const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -106,6 +107,8 @@ func _physics_process(delta: float) -> void:
 			cancel_attack()
 			_resume_attack_move()
 		else:
+			if CombatTargetValidation.is_enemy_faction(self):
+				_try_retarget_higher_priority_during_attack()
 			_process_attack(delta)
 			return
 
@@ -123,9 +126,48 @@ func _try_auto_attack() -> void:
 
 
 func _find_closest_attack_target_in_range() -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, attack_range
+		)
+
 	return CombatTargetValidation.find_closest_player_unit_attack_target_in_range(
 		self, attack_range
 	)
+
+
+func _find_engagement_target_in_range() -> Node3D:
+	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+		self, search_range
+	)
+
+
+func _try_retarget_higher_priority_during_attack() -> void:
+	if _attack_target == null:
+		return
+
+	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	var candidate: Node3D = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+		self, search_range
+	)
+	if candidate == null or candidate == _attack_target:
+		return
+
+	var current_distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+		self, _attack_target
+	)
+	var candidate_distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+		self, candidate
+	)
+	var current_priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
+		self, _attack_target, current_distance
+	)
+	var candidate_priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
+		self, candidate, candidate_distance
+	)
+	if candidate_priority < current_priority:
+		command_attack(candidate)
 
 
 func _process_attack(delta: float) -> void:
@@ -178,6 +220,13 @@ func take_damage(amount: float, attacker: Node = null) -> void:
 	_health_component.take_damage(damage_amount)
 	FloatingDamageNumber.spawn(self, damage_amount)
 
+	if (
+		CombatTargetValidation.is_enemy_faction(self)
+		and attacker is Node3D
+		and CombatTargetValidation.is_attack_target_for_attacker(self, attacker)
+	):
+		command_attack(attacker as Node3D)
+
 
 func get_current_health() -> int:
 	return _health_component.current_health
@@ -204,7 +253,12 @@ func _begin_chase() -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	var closest_target: Node3D = null
+	if CombatTargetValidation.is_enemy_faction(self):
+		closest_target = _find_engagement_target_in_range()
+	else:
+		closest_target = _find_closest_attack_target_in_range()
+
 	if closest_target != null:
 		command_attack(closest_target)
 

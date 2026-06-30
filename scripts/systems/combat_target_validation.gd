@@ -8,6 +8,12 @@ const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const NEUTRAL_CREEP_GROUP := &"neutral_creeps"
 const ENEMY_TEAM_ID: int = 1
 
+const ENEMY_ATTACK_PRIORITY_ENGAGED := 1
+const ENEMY_ATTACK_PRIORITY_WORKER := 2
+const ENEMY_ATTACK_PRIORITY_MILITARY := 3
+const ENEMY_ATTACK_PRIORITY_BUILDING := 4
+const ENEMY_ATTACK_PRIORITY_INVALID := 99
+
 
 static func is_neutral_creep(target: Variant) -> bool:
 	if target == null or not target is Node:
@@ -163,7 +169,21 @@ static func get_hostile_search_groups() -> Array[StringName]:
 
 
 static func find_closest_attack_target_for_attacker(attacker: Node3D) -> Node3D:
+	if is_enemy_faction(attacker):
+		return find_best_attack_target_for_attacker_in_range(attacker, INF)
 	return find_closest_player_unit_attack_target_in_range(attacker, INF)
+
+
+static func find_best_attack_target_for_attacker_in_range(
+	attacker: Node3D, search_range: float
+) -> Node3D:
+	if attacker == null or search_range <= 0.0:
+		return null
+
+	if not is_enemy_faction(attacker):
+		return find_closest_player_unit_attack_target_in_range(attacker, search_range)
+
+	return _find_best_enemy_faction_attack_target(attacker, search_range)
 
 
 static func is_tower_attack_target(target: Variant) -> bool:
@@ -288,6 +308,73 @@ static func find_closest_player_unit_attack_target_in_range(
 	if attacker == null or attack_range <= 0.0:
 		return null
 
+	return _find_closest_hostile_attack_target_in_range(attacker, attack_range)
+
+
+static func get_enemy_attack_target_priority(
+	attacker: Node3D, target: Node3D, distance: float
+) -> int:
+	if not is_attack_target_for_attacker(attacker, target):
+		return ENEMY_ATTACK_PRIORITY_INVALID
+
+	var retaliation_target: Node = CombatKillTracker.get_attacker(attacker)
+	if target == retaliation_target:
+		return ENEMY_ATTACK_PRIORITY_ENGAGED
+
+	if target is Worker:
+		return ENEMY_ATTACK_PRIORITY_WORKER
+
+	if target is Swordsman or target is Archer or target is Hero:
+		var attack_range: float = _get_attacker_attack_range(attacker)
+		if distance <= attack_range:
+			return ENEMY_ATTACK_PRIORITY_ENGAGED
+		return ENEMY_ATTACK_PRIORITY_MILITARY
+
+	if is_attackable_player_command_center(target):
+		return ENEMY_ATTACK_PRIORITY_BUILDING
+
+	return ENEMY_ATTACK_PRIORITY_INVALID
+
+
+static func _find_best_enemy_faction_attack_target(
+	attacker: Node3D, search_range: float
+) -> Node3D:
+	var best_target: Node3D = null
+	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
+	var best_distance: float = INF
+	var groups_to_search: Array[StringName] = [&"units", PLAYER_COMMAND_CENTER_GROUP]
+
+	for group_name: StringName in groups_to_search:
+		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):
+			if not node is Node3D:
+				continue
+
+			var target: Node3D = node as Node3D
+			if not is_attack_target_for_attacker(attacker, target):
+				continue
+
+			var distance: float = get_horizontal_attack_distance(attacker, target)
+			if distance > search_range:
+				continue
+
+			var priority: int = get_enemy_attack_target_priority(attacker, target, distance)
+			if priority >= ENEMY_ATTACK_PRIORITY_INVALID:
+				continue
+
+			if priority > best_priority:
+				continue
+
+			if priority < best_priority or distance < best_distance:
+				best_priority = priority
+				best_distance = distance
+				best_target = target
+
+	return best_target
+
+
+static func _find_closest_hostile_attack_target_in_range(
+	attacker: Node3D, attack_range: float
+) -> Node3D:
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
 	var groups_to_search: Array[StringName] = get_hostile_search_groups()
@@ -309,6 +396,16 @@ static func find_closest_player_unit_attack_target_in_range(
 				closest_target = target
 
 	return closest_target
+
+
+static func _get_attacker_attack_range(attacker: Node3D) -> float:
+	if attacker == null:
+		return 0.0
+
+	if "attack_range" in attacker:
+		return maxf(float(attacker.get("attack_range")), 0.0)
+
+	return 2.0
 
 
 static func compute_attack_approach_position(
