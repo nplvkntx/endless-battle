@@ -106,6 +106,14 @@ func add_food_used(amount: int) -> void:
 	food_changed.emit(food_current, food_max)
 
 
+func release_food_used(amount: int) -> void:
+	if amount <= 0:
+		return
+
+	food_current = maxi(0, food_current - amount)
+	food_changed.emit(food_current, food_max)
+
+
 func try_spend(gold_cost: int, wood_cost: int) -> bool:
 	if not can_afford(gold_cost, wood_cost):
 		return false

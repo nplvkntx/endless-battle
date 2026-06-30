@@ -87,7 +87,7 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 		return true
 
 	if target is Node and (target as Node).is_in_group(&"enemies"):
-		if target is Swordsman or target is Archer:
+		if target is Swordsman or target is Archer or target is Worker:
 			return true
 
 	return is_attackable_enemy_building(target)

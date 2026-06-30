@@ -20,7 +20,15 @@ enum BuildTripState {
 
 const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
 const TREE_COMMAND_MESSAGE: String = "Worker received tree command"
+const HEALTH_BAR_WIDTH := 1.0
+const HEALTH_BAR_HUE_GREEN := 0.333333
+const FOOD_SUPPLY_USED: int = 1
 
+@onready var _health_component: HealthComponent = $HealthComponent
+@onready var _health_bar: Node3D = $HealthBar
+@onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
+
+var _health_bar_fill_material: StandardMaterial3D
 var _gather_state: GatherTripState = GatherTripState.IDLE
 var _gather_source: GatherableResource = null
 var _carried_amount: int = 0
@@ -30,7 +38,77 @@ var _building_target: Building = null
 
 func _ready() -> void:
 	super._ready()
+	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
+	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
+	_health_component.health_changed.connect(_on_health_changed)
+	_health_component.health_depleted.connect(_on_health_depleted)
+	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_configure_faction_groups()
+
+
+func _on_health_changed(current_health: int, max_health: int) -> void:
+	_update_health_bar(current_health, max_health)
+
+
+func _update_health_bar(current_health: int, max_health: int) -> void:
+	if max_health <= 0:
+		return
+
+	var ratio: float = float(current_health) / float(max_health)
+	_health_bar_fill.scale.x = ratio
+	_health_bar_fill.position.x = HEALTH_BAR_WIDTH * (ratio - 1.0) * 0.5
+	_health_bar_fill_material.albedo_color = _get_health_bar_color(ratio)
+
+
+func _get_health_bar_color(ratio: float) -> Color:
+	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
+
+
+func _is_alive() -> bool:
+	return (
+		_health_component != null
+		and is_instance_valid(_health_component)
+		and _health_component.current_health > 0
+	)
+
+
+func take_damage(amount: float, attacker: Node = null) -> void:
+	if not _is_alive():
+		return
+
+	CombatKillTracker.record_attacker(self, attacker)
+
+	var damage_amount := int(amount)
+	_health_component.take_damage(damage_amount)
+	FloatingDamageNumber.spawn(self, damage_amount)
+
+
+func get_current_health() -> int:
+	if _health_component == null:
+		return 0
+
+	return _health_component.current_health
+
+
+func _on_health_depleted() -> void:
+	_cancel_build_trip()
+	cancel_gathering()
+	has_move_target = false
+	velocity = Vector3.ZERO
+	_health_bar.visible = false
+
+	if not _is_enemy_worker():
+		ResourceManager.release_food_used(FOOD_SUPPLY_USED)
+
+	die()
+	print("Worker died")
+	queue_free()
+
+
+func _cancel_build_trip() -> void:
+	_build_trip_state = BuildTripState.IDLE
+	_building_target = null
 
 
 func _configure_faction_groups() -> void:
@@ -48,17 +126,26 @@ func _configure_faction_groups() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not _is_alive():
+		return
+
 	super._physics_process(delta)
 	_update_gather_trip()
 	_update_build_trip()
 
 
 func command_gather_gold_mine(gold_mine: GoldMine) -> void:
+	if not _is_alive():
+		return
+
 	print(GOLD_MINE_COMMAND_MESSAGE)
 	_start_gathering(gold_mine)
 
 
 func command_gather_tree(tree: WoodTree) -> void:
+	if not _is_alive():
+		return
+
 	print(TREE_COMMAND_MESSAGE)
 	_start_gathering(tree)
 
@@ -78,6 +165,9 @@ func cancel_gathering() -> void:
 
 
 func command_build(building: Building) -> void:
+	if not _is_alive():
+		return
+
 	cancel_gathering()
 	_build_trip_state = BuildTripState.TO_BUILDING
 	_building_target = building
@@ -97,6 +187,9 @@ func on_building_construction_finished() -> void:
 
 
 func _update_gather_trip() -> void:
+	if not _is_alive():
+		return
+
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
 			if not has_move_target:
@@ -106,6 +199,9 @@ func _update_gather_trip() -> void:
 
 
 func _update_build_trip() -> void:
+	if not _is_alive():
+		return
+
 	match _build_trip_state:
 		BuildTripState.TO_BUILDING:
 			if not has_move_target:
@@ -208,7 +304,7 @@ func _begin_gather_wait() -> void:
 
 
 func _on_gather_wait_finished() -> void:
-	if _gather_state != GatherTripState.GATHER_WAIT:
+	if not _is_alive() or _gather_state != GatherTripState.GATHER_WAIT:
 		return
 
 	if _gather_source == null or not is_instance_valid(_gather_source):
