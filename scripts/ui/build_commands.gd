@@ -2,49 +2,63 @@ extends PanelContainer
 
 ## Context-sensitive command panel for the current selection (build, train, attack).
 
-@export var selection_manager_path: NodePath = "../../SelectionManager"
-@export var build_manager_path: NodePath = "../../BuildManager"
+@export var selection_manager_path: NodePath = "../../../../SelectionManager"
+@export var build_manager_path: NodePath = "../../../../BuildManager"
 
-@onready var _barracks_panel: VBoxContainer = $MarginContainer/VBoxContainer/BarracksPanel
-@onready var _hero_altar_panel: VBoxContainer = $MarginContainer/VBoxContainer/HeroAltarPanel
-@onready var _buttons_row: HBoxContainer = $MarginContainer/VBoxContainer/ButtonsRow
-@onready var _build_farm_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/BuildFarmButton
-@onready var _build_barracks_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/BuildBarracksButton
-@onready var _build_tower_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/BuildTowerButton
-@onready var _build_hero_altar_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/BuildHeroAltarButton
-@onready var _train_worker_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/TrainWorkerButton
-@onready var _attack_button: Button = $MarginContainer/VBoxContainer/ButtonsRow/AttackButton
+@onready var _barracks_panel: VBoxContainer = $MarginContainer/HBoxContainer/CenterPanel/BarracksPanel
+@onready var _hero_altar_panel: VBoxContainer = $MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel
+@onready var _barracks_training_row: HBoxContainer = $MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow
+@onready var _hero_altar_training_row: HBoxContainer = $MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow
+@onready var _buttons_row: GridContainer = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow
+@onready var _build_farm_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildFarmButton
+@onready var _build_barracks_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBarracksButton
+@onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
+@onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
+@onready var _train_worker_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/TrainWorkerButton
+@onready var _attack_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/AttackButton
 @onready var _train_swordsman_button: Button = (
-	$MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow/TrainSwordsmanButton
+	$MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow/TrainSwordsmanButton
 )
 @onready var _train_archer_button: Button = (
-	$MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow/TrainArcherButton
+	$MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow/TrainArcherButton
 )
-@onready var _worker_queue_label: Label = $MarginContainer/VBoxContainer/WorkerQueueLabel
+@onready var _worker_queue_label: Label = $MarginContainer/HBoxContainer/CenterPanel/WorkerQueueLabel
 @onready var _swordsman_queue_label: Label = (
-	$MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow/SwordsmanQueueLabel
+	$MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow/SwordsmanQueueLabel
 )
 @onready var _archer_queue_label: Label = (
-	$MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow/ArcherQueueLabel
+	$MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow/ArcherQueueLabel
 )
 @onready var _train_hero_button: Button = (
-	$MarginContainer/VBoxContainer/HeroAltarPanel/HeroAltarTrainingRow/TrainHeroButton
+	$MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow/TrainHeroButton
 )
 @onready var _hero_status_label: Label = (
-	$MarginContainer/VBoxContainer/HeroAltarPanel/HeroStatusLabel
+	$MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel/HeroStatusLabel
 )
-@onready var _hero_panel: VBoxContainer = $MarginContainer/VBoxContainer/HeroPanel
+@onready var _hero_panel: HBoxContainer = $MarginContainer/HBoxContainer/RightPanel/HeroPanel
 @onready var _ground_slam_cooldown_label: Label = (
-	$MarginContainer/VBoxContainer/HeroPanel/GroundSlamCooldownLabel
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn/GroundSlamCooldownLabel
 )
 @onready var _ground_slam_button: Button = (
-	$MarginContainer/VBoxContainer/HeroPanel/GroundSlamTrainingRow/GroundSlamButton
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn/GroundSlamButton
 )
 @onready var _divine_protection_cooldown_label: Label = (
-	$MarginContainer/VBoxContainer/HeroPanel/DivineProtectionCooldownLabel
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn/DivineProtectionCooldownLabel
 )
 @onready var _divine_protection_button: Button = (
-	$MarginContainer/VBoxContainer/HeroPanel/DivineProtectionTrainingRow/DivineProtectionButton
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn/DivineProtectionButton
+)
+@onready var _power_strike_cooldown_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn/PowerStrikeCooldownLabel
+)
+@onready var _power_strike_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn/PowerStrikeButton
+)
+@onready var _execute_cooldown_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteCooldownLabel
+)
+@onready var _execute_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteButton
 )
 
 var _selected_command_center: CommandCenter = null
@@ -60,6 +74,8 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
@@ -82,6 +98,8 @@ func _ready() -> void:
 	_attack_button.pressed.connect(_on_attack_pressed)
 	_ground_slam_button.pressed.connect(_on_ground_slam_pressed)
 	_divine_protection_button.pressed.connect(_on_divine_protection_pressed)
+	_power_strike_button.pressed.connect(_on_power_strike_pressed)
+	_execute_button.pressed.connect(_on_execute_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -116,14 +134,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_W:
 			hero.try_divine_protection()
 			get_viewport().set_input_as_handled()
+		KEY_E:
+			hero.try_power_strike()
+			get_viewport().set_input_as_handled()
+		KEY_R:
+			hero.try_execute()
+			get_viewport().set_input_as_handled()
 
 
 func _get_tracked_hero_for_input() -> Hero:
-	if _tracked_hero != null and is_instance_valid(_tracked_hero):
-		return _tracked_hero
-
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
+		return null
+
+	if selection_manager.selected_building != null:
 		return null
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
@@ -156,21 +180,23 @@ func _set_tracked_hero(hero: Hero) -> void:
 func _update_hero_abilities_ui() -> void:
 	_update_ground_slam_ui()
 	_update_divine_protection_ui()
+	_update_power_strike_ui()
+	_update_execute_ui()
 
 
 func _update_ground_slam_ui() -> void:
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_ground_slam_button.disabled = true
-		_ground_slam_cooldown_label.text = "Ground Slam (Q): Ready"
+		_ground_slam_cooldown_label.text = "Q: Ready"
 		return
 
 	var remaining: float = _tracked_hero.get_ground_slam_cooldown_remaining()
 	if remaining > 0.0:
 		_ground_slam_button.disabled = true
-		_ground_slam_cooldown_label.text = "Ground Slam (Q): %.1fs" % remaining
+		_ground_slam_cooldown_label.text = "Q: %.1fs" % remaining
 	else:
 		_ground_slam_button.disabled = false
-		_ground_slam_cooldown_label.text = "Ground Slam (Q): Ready"
+		_ground_slam_cooldown_label.text = "Q: Ready"
 
 
 func _on_ground_slam_pressed() -> void:
@@ -184,25 +210,25 @@ func _on_ground_slam_pressed() -> void:
 func _update_divine_protection_ui() -> void:
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = "Divine Protection (W): Ready"
+		_divine_protection_cooldown_label.text = "W: Ready"
 		return
 
 	if _tracked_hero.is_divine_protection_active():
 		_divine_protection_button.disabled = true
 		_divine_protection_cooldown_label.text = (
-			"Divine Protection (W): Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
+			"W: Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
 		)
 		return
 
 	var cooldown_remaining: float = _tracked_hero.get_divine_protection_cooldown_remaining()
 	if cooldown_remaining > 0.0:
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = "Divine Protection (W): %.1fs" % cooldown_remaining
+		_divine_protection_cooldown_label.text = "W: %.1fs" % cooldown_remaining
 		return
 
 	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.divine_protection_mana_cost
 	_divine_protection_button.disabled = not has_mana
-	_divine_protection_cooldown_label.text = "Divine Protection (W): Ready"
+	_divine_protection_cooldown_label.text = "W: Ready"
 
 
 func _on_divine_protection_pressed() -> void:
@@ -210,6 +236,66 @@ func _on_divine_protection_pressed() -> void:
 		return
 
 	_tracked_hero.try_divine_protection()
+	_update_hero_abilities_ui()
+
+
+func _update_power_strike_ui() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_power_strike_button.disabled = true
+		_power_strike_cooldown_label.text = "E: Ready"
+		return
+
+	if _tracked_hero.is_power_strike_pending():
+		_power_strike_button.disabled = true
+		_power_strike_cooldown_label.text = "E: Moving..."
+		return
+
+	var cooldown_remaining: float = _tracked_hero.get_power_strike_cooldown_remaining()
+	if cooldown_remaining > 0.0:
+		_power_strike_button.disabled = true
+		_power_strike_cooldown_label.text = "E: %.1fs" % cooldown_remaining
+		return
+
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.power_strike_mana_cost
+	_power_strike_button.disabled = not has_mana
+	_power_strike_cooldown_label.text = "E: Ready"
+
+
+func _on_power_strike_pressed() -> void:
+	if _tracked_hero == null:
+		return
+
+	_tracked_hero.try_power_strike()
+	_update_hero_abilities_ui()
+
+
+func _update_execute_ui() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_execute_button.disabled = true
+		_execute_cooldown_label.text = "R: Ready"
+		return
+
+	if _tracked_hero.is_execute_pending():
+		_execute_button.disabled = true
+		_execute_cooldown_label.text = "R: Moving..."
+		return
+
+	var cooldown_remaining: float = _tracked_hero.get_execute_cooldown_remaining()
+	if cooldown_remaining > 0.0:
+		_execute_button.disabled = true
+		_execute_cooldown_label.text = "R: %.1fs" % cooldown_remaining
+		return
+
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.execute_mana_cost
+	_execute_button.disabled = not has_mana
+	_execute_cooldown_label.text = "R: Ready"
+
+
+func _on_execute_pressed() -> void:
+	if _tracked_hero == null:
+		return
+
+	_tracked_hero.try_execute()
 	_update_hero_abilities_ui()
 
 
@@ -339,7 +425,9 @@ func _refresh_command_visibility() -> void:
 		_set_tracked_hero(null)
 
 	_barracks_panel.visible = show_barracks_training
+	_barracks_training_row.visible = show_barracks_training
 	_hero_altar_panel.visible = show_hero_altar_training
+	_hero_altar_training_row.visible = show_hero_altar_training
 	_hero_panel.visible = single_hero
 	_worker_queue_label.visible = show_town_center_commands
 
@@ -364,7 +452,9 @@ func _apply_hero_command_visibility() -> void:
 	_attack_button.visible = true
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
 	_worker_queue_label.visible = false
 	_hero_panel.visible = true
 
@@ -378,7 +468,9 @@ func _apply_worker_command_visibility() -> void:
 	_attack_button.visible = false
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
 	_worker_queue_label.visible = false
 	_hero_panel.visible = false
 
@@ -392,7 +484,9 @@ func _apply_combat_command_visibility() -> void:
 	_attack_button.visible = true
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
 	_worker_queue_label.visible = false
 	_hero_panel.visible = false
 
@@ -406,7 +500,9 @@ func _apply_town_center_command_visibility() -> void:
 	_attack_button.visible = false
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 
 
@@ -418,6 +514,8 @@ func _apply_hidden_command_buttons() -> void:
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 
 

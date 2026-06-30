@@ -10,6 +10,8 @@ extends Unit
 @export var ground_slam_mana_cost: int = 40
 @export var mana_regen_rate: float = 5.0
 @export var divine_protection_mana_cost: int = 30
+@export var power_strike_mana_cost: int = 25
+@export var execute_mana_cost: int = 50
 
 signal mana_changed(current_mana: int, max_mana: int)
 signal divine_protection_state_changed(is_active: bool)
@@ -19,6 +21,10 @@ const HEALTH_BAR_HUE_GREEN := 0.333333
 const ATTACK_LUNGE_DISTANCE := 0.4
 const ATTACK_LUNGE_DURATION := 0.12
 const GROUND_SLAM_EFFECT_SCENE: PackedScene = preload("res://scenes/effects/ground_slam_effect.tscn")
+const POWER_STRIKE_HIT_EFFECT_SCENE: PackedScene = preload(
+	"res://scenes/effects/power_strike_hit_effect.tscn"
+)
+const EXECUTE_HIT_EFFECT_SCENE: PackedScene = preload("res://scenes/effects/execute_hit_effect.tscn")
 const GROUND_SLAM_COOLDOWN := 9.0
 const GROUND_SLAM_RADIUS := 3.5
 const GROUND_SLAM_DAMAGE := 35
@@ -26,6 +32,13 @@ const GROUND_SLAM_BODY_PULSE_DURATION := 0.18
 const DIVINE_PROTECTION_DURATION := 4.0
 const DIVINE_PROTECTION_COOLDOWN := 20.0
 const DIVINE_PROTECTION_GLOW_PULSE_DURATION := 0.6
+const POWER_STRIKE_DAMAGE := 45
+const POWER_STRIKE_COOLDOWN := 10.0
+const POWER_STRIKE_LUNGE_DISTANCE := 0.55
+const POWER_STRIKE_FLASH_DURATION := 0.15
+const EXECUTE_HEALTH_THRESHOLD := 0.4
+const EXECUTE_COOLDOWN := 45.0
+const EXECUTE_LUNGE_DISTANCE := 0.5
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -49,6 +62,15 @@ var _divine_protection_cooldown_timer: float = 0.0
 var _body_material: StandardMaterial3D
 var _body_base_color: Color
 var _divine_protection_glow_tween: Tween
+var _power_strike_cooldown_timer: float = 0.0
+var _power_strike_target: EnemyDummy = null
+var _has_power_strike_pending: bool = false
+var _power_strike_lunge_tween: Tween
+var _power_strike_flash_tween: Tween
+var _execute_cooldown_timer: float = 0.0
+var _execute_target: EnemyDummy = null
+var _has_execute_pending: bool = false
+var _execute_lunge_tween: Tween
 
 
 func _ready() -> void:
@@ -94,6 +116,8 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 
 func command_attack(target: EnemyDummy) -> void:
+	_cancel_power_strike()
+	_cancel_execute()
 	_attack_target = target
 	_has_chase_target = false
 
@@ -102,6 +126,8 @@ func command_attack(target: EnemyDummy) -> void:
 
 
 func command_attack_move(destination: Vector3) -> void:
+	_cancel_power_strike()
+	_cancel_execute()
 	_attack_move_destination = destination
 	_has_attack_move_destination = true
 	cancel_attack()
@@ -118,6 +144,8 @@ func cancel_attack() -> void:
 
 
 func set_movement_target(target: Vector3) -> void:
+	_cancel_power_strike()
+	_cancel_execute()
 	cancel_attack_move()
 	cancel_attack()
 	_set_move_destination(target)
@@ -210,6 +238,398 @@ func _clear_divine_protection_visual() -> void:
 	_body_material.emission_enabled = false
 	_body_material.emission = Color.BLACK
 	_body_material.albedo_color = _body_base_color
+
+
+func get_power_strike_cooldown_remaining() -> float:
+	return maxf(_power_strike_cooldown_timer, 0.0)
+
+
+func is_power_strike_pending() -> bool:
+	return _has_power_strike_pending
+
+
+func try_power_strike() -> bool:
+	if _health_component.current_health <= 0:
+		return false
+
+	if _has_power_strike_pending:
+		ResourceManager.show_feedback("Power Strike already in progress")
+		return false
+
+	if _power_strike_cooldown_timer > 0.0:
+		ResourceManager.show_feedback(
+			"Power Strike on cooldown (%.0fs)" % ceilf(_power_strike_cooldown_timer)
+		)
+		return false
+
+	if current_mana < power_strike_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
+		return false
+
+	var target: EnemyDummy = _resolve_power_strike_target()
+	if target == null:
+		ResourceManager.show_feedback("No valid target")
+		return false
+
+	_begin_power_strike(target)
+	return true
+
+
+func _resolve_power_strike_target() -> EnemyDummy:
+	if _attack_target is EnemyDummy and CombatTargetValidation.is_valid_combat_target(_attack_target):
+		return _attack_target
+
+	return _find_closest_enemy_any_range()
+
+
+func _find_closest_enemy_any_range() -> EnemyDummy:
+	var closest_enemy: EnemyDummy = null
+	var closest_distance: float = INF
+
+	for node: Node in get_tree().get_nodes_in_group("enemies"):
+		if not node is EnemyDummy:
+			continue
+
+		var enemy: EnemyDummy = node as EnemyDummy
+		if not CombatTargetValidation.is_valid_combat_target(enemy):
+			continue
+
+		var distance: float = _horizontal_distance_to(enemy)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_enemy = enemy
+
+	return closest_enemy
+
+
+func _begin_power_strike(target: EnemyDummy) -> void:
+	cancel_attack_move()
+	cancel_attack()
+	_power_strike_target = target
+	_has_power_strike_pending = true
+
+	if not _is_in_attack_range(target):
+		_set_move_destination(_compute_attack_approach_position(target))
+
+
+func _cancel_power_strike() -> void:
+	_has_power_strike_pending = false
+	_power_strike_target = null
+
+
+func _process_power_strike(_delta: float) -> void:
+	if not CombatTargetValidation.is_valid_combat_target(_power_strike_target):
+		_cancel_power_strike()
+		return
+
+	if _is_in_attack_range(_power_strike_target):
+		_execute_power_strike()
+		return
+
+	if not has_move_target:
+		_set_move_destination(_compute_attack_approach_position(_power_strike_target))
+
+
+func _execute_power_strike() -> void:
+	if not CombatTargetValidation.is_valid_combat_target(_power_strike_target):
+		_cancel_power_strike()
+		return
+
+	if not _is_in_attack_range(_power_strike_target):
+		return
+
+	if current_mana < power_strike_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
+		_cancel_power_strike()
+		return
+
+	var target: EnemyDummy = _power_strike_target
+	has_move_target = false
+	velocity = Vector3.ZERO
+	current_mana = maxi(0, current_mana - power_strike_mana_cost)
+	mana_changed.emit(current_mana, max_mana)
+	_power_strike_cooldown_timer = POWER_STRIKE_COOLDOWN
+	_cancel_power_strike()
+
+	target.take_damage(float(POWER_STRIKE_DAMAGE), self)
+	FloatingDamageNumber.spawn(target, POWER_STRIKE_DAMAGE, true)
+	MeleeHitSound.play_at(self, target.global_position)
+	_play_power_strike_lunge(target)
+	_play_power_strike_flash()
+	_spawn_power_strike_hit_effect(target)
+
+
+func _play_power_strike_lunge(target: EnemyDummy) -> void:
+	if _power_strike_lunge_tween != null and _power_strike_lunge_tween.is_valid():
+		_power_strike_lunge_tween.kill()
+
+	var lunge_offset := Vector3.ZERO
+	if CombatTargetValidation.is_valid_combat_target(target):
+		var direction := target.global_position - global_position
+		direction.y = 0.0
+		if direction.length_squared() > 0.001:
+			lunge_offset = (
+				global_transform.basis.inverse()
+				* (direction.normalized() * POWER_STRIKE_LUNGE_DISTANCE)
+			)
+
+	_body_mesh.position = _body_mesh_rest_position
+	_power_strike_lunge_tween = create_tween()
+	_power_strike_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position + lunge_offset,
+		ATTACK_LUNGE_DURATION * 0.45
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_power_strike_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position,
+		ATTACK_LUNGE_DURATION * 0.55
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+func _play_power_strike_flash() -> void:
+	if is_divine_protection_active():
+		return
+
+	if _power_strike_flash_tween != null and _power_strike_flash_tween.is_valid():
+		_power_strike_flash_tween.kill()
+
+	_body_material.emission_enabled = true
+	_body_material.emission = Color(1.0, 0.65, 0.15, 1.0)
+	_body_material.albedo_color = Color(1.0, 0.82, 0.35, 1.0)
+
+	_power_strike_flash_tween = create_tween()
+	_power_strike_flash_tween.set_parallel(true)
+	_power_strike_flash_tween.tween_property(
+		_body_material,
+		"albedo_color",
+		_body_base_color,
+		POWER_STRIKE_FLASH_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_power_strike_flash_tween.tween_property(
+		_body_material,
+		"emission",
+		Color.BLACK,
+		POWER_STRIKE_FLASH_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_power_strike_flash_tween.finished.connect(_on_power_strike_flash_finished, CONNECT_ONE_SHOT)
+
+
+func _on_power_strike_flash_finished() -> void:
+	if is_divine_protection_active():
+		return
+
+	_body_material.emission_enabled = false
+	_body_material.albedo_color = _body_base_color
+
+
+func _spawn_power_strike_hit_effect(target: EnemyDummy) -> void:
+	var effect: PowerStrikeHitEffect = POWER_STRIKE_HIT_EFFECT_SCENE.instantiate() as PowerStrikeHitEffect
+	if effect == null:
+		return
+
+	var spawn_parent: Node = get_parent()
+	if spawn_parent == null:
+		spawn_parent = get_tree().current_scene
+	if spawn_parent == null:
+		effect.queue_free()
+		return
+
+	spawn_parent.add_child(effect)
+	effect.global_position = target.global_position + Vector3(0.0, 0.75, 0.0)
+
+
+func get_execute_cooldown_remaining() -> float:
+	return maxf(_execute_cooldown_timer, 0.0)
+
+
+func is_execute_pending() -> bool:
+	return _has_execute_pending
+
+
+func try_execute() -> bool:
+	if _health_component.current_health <= 0:
+		return false
+
+	if _has_execute_pending:
+		ResourceManager.show_feedback("Execute already in progress")
+		return false
+
+	if _has_power_strike_pending:
+		ResourceManager.show_feedback("Another ability is in progress")
+		return false
+
+	if _execute_cooldown_timer > 0.0:
+		ResourceManager.show_feedback(
+			"Execute on cooldown (%.0fs)" % ceilf(_execute_cooldown_timer)
+		)
+		return false
+
+	if current_mana < execute_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
+		return false
+
+	var target: EnemyDummy = _resolve_execute_target()
+	if target == null:
+		ResourceManager.show_feedback("No valid target")
+		return false
+
+	_begin_execute(target)
+	return true
+
+
+func _resolve_execute_target() -> EnemyDummy:
+	if _attack_target is EnemyDummy and CombatTargetValidation.is_valid_combat_target(_attack_target):
+		return _attack_target
+
+	return _find_closest_enemy_any_range()
+
+
+func _begin_execute(target: EnemyDummy) -> void:
+	cancel_attack_move()
+	cancel_attack()
+	_cancel_power_strike()
+	_execute_target = target
+	_has_execute_pending = true
+
+	if not _is_in_attack_range(target):
+		_set_move_destination(_compute_attack_approach_position(target))
+
+
+func _cancel_execute() -> void:
+	_has_execute_pending = false
+	_execute_target = null
+
+
+func _process_execute(_delta: float) -> void:
+	if not CombatTargetValidation.is_valid_combat_target(_execute_target):
+		_cancel_execute()
+		return
+
+	if _is_in_attack_range(_execute_target):
+		_perform_execute()
+		return
+
+	if not has_move_target:
+		_set_move_destination(_compute_attack_approach_position(_execute_target))
+
+
+func _get_target_health_ratio(target: EnemyDummy) -> float:
+	var health_component: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
+	if health_component == null or health_component.max_health <= 0:
+		return 1.0
+
+	return float(health_component.current_health) / float(health_component.max_health)
+
+
+func _can_execute_target(target: EnemyDummy) -> bool:
+	return _get_target_health_ratio(target) < EXECUTE_HEALTH_THRESHOLD
+
+
+func _perform_execute() -> void:
+	if not CombatTargetValidation.is_valid_combat_target(_execute_target):
+		_cancel_execute()
+		return
+
+	if not _is_in_attack_range(_execute_target):
+		return
+
+	if current_mana < execute_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
+		_cancel_execute()
+		return
+
+	var target: EnemyDummy = _execute_target
+	if not _can_execute_target(target):
+		ResourceManager.show_feedback("Target health too high")
+		_cancel_execute()
+		return
+
+	has_move_target = false
+	velocity = Vector3.ZERO
+	current_mana = maxi(0, current_mana - execute_mana_cost)
+	mana_changed.emit(current_mana, max_mana)
+	_execute_cooldown_timer = EXECUTE_COOLDOWN
+	_cancel_execute()
+
+	_kill_execute_target(target)
+	MeleeHitSound.play_at(self, target.global_position)
+	_play_execute_lunge(target)
+	_spawn_execute_hit_effect(target)
+
+
+func _kill_execute_target(target: EnemyDummy) -> void:
+	var health_component: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
+	if health_component == null:
+		return
+
+	var remaining_health: int = health_component.current_health
+	if remaining_health <= 0:
+		return
+
+	target.take_damage(float(remaining_health), self)
+	FloatingDamageNumber.spawn(target, remaining_health, true)
+
+
+func _play_execute_lunge(target: EnemyDummy) -> void:
+	if _execute_lunge_tween != null and _execute_lunge_tween.is_valid():
+		_execute_lunge_tween.kill()
+
+	var lunge_offset := Vector3.ZERO
+	if CombatTargetValidation.is_valid_combat_target(target):
+		var direction := target.global_position - global_position
+		direction.y = 0.0
+		if direction.length_squared() > 0.001:
+			lunge_offset = (
+				global_transform.basis.inverse() * (direction.normalized() * EXECUTE_LUNGE_DISTANCE)
+			)
+
+	_body_mesh.position = _body_mesh_rest_position
+	_execute_lunge_tween = create_tween()
+	_execute_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position + lunge_offset,
+		ATTACK_LUNGE_DURATION * 0.45
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_execute_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position,
+		ATTACK_LUNGE_DURATION * 0.55
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+func _spawn_execute_hit_effect(target: EnemyDummy) -> void:
+	var effect: ExecuteHitEffect = EXECUTE_HIT_EFFECT_SCENE.instantiate() as ExecuteHitEffect
+	if effect == null:
+		return
+
+	var spawn_parent: Node = get_parent()
+	if spawn_parent == null:
+		spawn_parent = get_tree().current_scene
+	if spawn_parent == null:
+		effect.queue_free()
+		return
+
+	spawn_parent.add_child(effect)
+	effect.global_position = target.global_position + Vector3(0.0, 0.6, 0.0)
+
+
+func _tick_execute_cooldown(delta: float) -> void:
+	if _execute_cooldown_timer <= 0.0:
+		return
+
+	_execute_cooldown_timer = maxf(_execute_cooldown_timer - delta, 0.0)
+
+
+func _tick_power_strike_cooldown(delta: float) -> void:
+	if _power_strike_cooldown_timer <= 0.0:
+		return
+
+	_power_strike_cooldown_timer = maxf(_power_strike_cooldown_timer - delta, 0.0)
 
 
 func can_use_ground_slam() -> bool:
@@ -355,15 +775,26 @@ func _physics_process(delta: float) -> void:
 	_tick_ground_slam_cooldown(delta)
 	_tick_divine_protection(delta)
 	_tick_divine_protection_cooldown(delta)
+	_tick_power_strike_cooldown(delta)
+	_tick_execute_cooldown(delta)
 	_tick_mana_regen(delta)
 
-	if _attack_target == null and not has_move_target:
+	if _has_execute_pending:
+		_process_execute(delta)
+	elif _has_power_strike_pending:
+		_process_power_strike(delta)
+	elif _attack_target == null and not has_move_target:
 		_try_auto_attack()
 
-	if _has_attack_move_destination and _attack_target == null:
+	if (
+		_has_attack_move_destination
+		and _attack_target == null
+		and not _has_power_strike_pending
+		and not _has_execute_pending
+	):
 		_try_attack_move_engagement()
 
-	if _attack_target != null:
+	if _attack_target != null and not _has_power_strike_pending and not _has_execute_pending:
 		if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			cancel_attack()
 			_resume_attack_move()
@@ -492,6 +923,8 @@ func _on_health_depleted() -> void:
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
+	_cancel_power_strike()
+	_cancel_execute()
 	has_move_target = false
 	velocity = Vector3.ZERO
 	die()

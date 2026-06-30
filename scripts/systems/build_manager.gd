@@ -57,7 +57,7 @@ func _process(_delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if _active_placement.is_empty():
+		if _active_placement.is_empty() and _can_use_worker_build_hotkeys():
 			if event.keycode == KEY_B:
 				start_farm_placement()
 				get_viewport().set_input_as_handled()
@@ -236,6 +236,25 @@ func _get_construction_duration(worker_count: int) -> float:
 
 func _has_worker_selected() -> bool:
 	return not _get_selected_workers().is_empty()
+
+
+func _can_use_worker_build_hotkeys() -> bool:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return false
+
+	if selection_manager.selected_building != null:
+		return false
+
+	var selected_units: Array[Unit] = selection_manager.selected_units
+	if selected_units.is_empty():
+		return false
+
+	for unit: Unit in selected_units:
+		if not unit is Worker:
+			return false
+
+	return true
 
 
 func _disable_ghost_collision(ghost: Node3D) -> void:

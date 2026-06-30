@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://c7cygarcrgfon"]
+
+[ext_resource type="Script" path="res://scripts/effects/power_strike_hit_effect.gd" id="1_power_strike_hit_effect"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_burst"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.72, 0.2, 0.9)
+emission_enabled = true
+emission = Color(1, 0.55, 0.1, 1)
+emission_energy_multiplier = 2.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_burst"]
+radius = 0.55
+height = 1.1
+
+[node name="PowerStrikeHitEffect" type="Node3D"]
+script = ExtResource("1_power_strike_hit_effect")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_burst")
+surface_material_override/0 = SubResource("StandardMaterial3D_burst")

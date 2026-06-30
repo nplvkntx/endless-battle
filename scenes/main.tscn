@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
 [ext_resource type="Script" path="res://scripts/ui/selection_info_panel.gd" id="16_selection_info_panel"]
 [ext_resource type="Script" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
+[ext_resource type="Script" path="res://scripts/ui/command_bar.gd" id="18_command_bar"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
@@ -25,11 +26,29 @@ content_margin_right = 12.0
 content_margin_bottom = 6.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_selection_info"]
-bg_color = Color(0.08, 0.08, 0.1, 0.85)
-content_margin_left = 12.0
-content_margin_top = 8.0
-content_margin_right = 12.0
-content_margin_bottom = 8.0
+bg_color = Color(0, 0, 0, 0)
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+border_width_right = 1
+border_color = Color(0.22, 0.24, 0.28, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_bar"]
+bg_color = Color(0.06, 0.06, 0.08, 0.94)
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+border_width_top = 2
+border_color = Color(0.28, 0.3, 0.34, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_panel"]
+bg_color = Color(0, 0, 0, 0)
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
 bg_color = Color(0.12, 0.08, 0.08, 0.9)
@@ -130,249 +149,291 @@ horizontal_alignment = 1
 vertical_alignment = 1
 script = ExtResource("17_feedback_message")
 
-[node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI"]
-anchors_preset = 2
+[node name="CommandBar" type="PanelContainer" parent="GameUI"]
+visible = false
+anchors_preset = 12
 anchor_top = 1.0
+anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = -148.0
-offset_right = 280.0
-offset_bottom = -12.0
+offset_top = -128.0
+grow_horizontal = 2
 grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_command_bar")
+script = ExtResource("18_command_bar")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer"]
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_selection_info")
 script = ExtResource("16_selection_info_panel")
 
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/SelectionInfoPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel"]
 layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
-[node name="PortraitFrame" type="PanelContainer" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer"]
-custom_minimum_size = Vector2(72, 72)
+[node name="PortraitFrame" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_portrait_frame")
 
-[node name="PortraitColor" type="ColorRect" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+[node name="PortraitColor" type="ColorRect" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
 layout_mode = 2
 offset_left = 4.0
 offset_top = 4.0
-offset_right = 68.0
-offset_bottom = 68.0
+offset_right = 60.0
+offset_bottom = 60.0
 color = Color(0.5, 0.5, 0.55, 1)
 
-[node name="PortraitLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+[node name="PortraitLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
 layout_mode = 2
 offset_left = 4.0
 offset_top = 4.0
-offset_right = 68.0
-offset_bottom = 68.0
+offset_right = 60.0
+offset_bottom = 60.0
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 text = "?"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="InfoVBox" type="VBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+[node name="InfoVBox" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
-[node name="NameLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="NameLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 14
 text = "Unit Name"
 
-[node name="TypeLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="TypeLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 12
 text = "Type: Unit"
 
-[node name="HealthLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="HealthLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
 text = "Health: 100 / 100"
 
-[node name="ManaLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="ManaLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
+theme_override_font_sizes/font_size = 12
 text = "Mana: 100 / 100"
 
-[node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI"]
+[node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer"]
 visible = false
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -320.0
-offset_top = -260.0
-offset_right = 320.0
-offset_bottom = -12.0
-grow_horizontal = 2
-grow_vertical = 0
+layout_mode = 2
+size_flags_horizontal = 3
 mouse_filter = 0
-theme_override_styles/panel = SubResource("StyleBoxFlat_selection_info")
+theme_override_styles/panel = SubResource("StyleBoxFlat_command_panel")
 script = ExtResource("12_build_commands")
 
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/SelectionCommandPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel"]
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 12
 
-[node name="WorkerQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
+[node name="CenterPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Worker Queue: 0"
-horizontal_alignment = 1
-
-[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
 theme_override_constants/separation = 4
 
-[node name="BarracksTitleLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
+[node name="WorkerQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Barracks"
-horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+text = "Worker Queue: 0"
 
-[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
+[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
 layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 16
+theme_override_constants/separation = 2
 
-[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow"]
+[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
 text = "Swordsman Queue: 0"
 
-[node name="ArcherQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow"]
+[node name="ArcherQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
 text = "Archer Queue: 0"
 
-[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
-layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 8
-
-[node name="TrainSwordsmanButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow"]
-layout_mode = 2
-text = "Train Swordsman"
-
-[node name="TrainArcherButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow"]
-layout_mode = 2
-text = "Train Archer"
-
-[node name="RallyPointHintLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
+[node name="RallyPointHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
-text = "Right-click ground to set rally point for trained units"
-horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+text = "Right-click ground to set rally point"
 
-[node name="HeroAltarPanel" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
+[node name="HeroAltarPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
-[node name="HeroAltarTitleLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroAltarPanel"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Hero Altar"
-horizontal_alignment = 1
-
-[node name="HeroStatusLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroAltarPanel"]
+[node name="HeroStatusLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 13
 text = "Hero: Ready to train"
-horizontal_alignment = 1
 
-[node name="HeroAltarTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroAltarPanel"]
-layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 8
-
-[node name="TrainHeroButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroAltarPanel/HeroAltarTrainingRow"]
-layout_mode = 2
-text = "Train Hero"
-
-[node name="HeroAltarRallyHintLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroAltarPanel"]
+[node name="HeroAltarRallyHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
-text = "Right-click ground to set rally point for trained Hero"
-horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+text = "Right-click ground to set rally point for Hero"
 
-[node name="HeroPanel" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
+[node name="RightPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
 layout_mode = 2
-theme_override_constants/separation = 4
+size_flags_vertical = 4
+theme_override_constants/separation = 6
 
-[node name="HeroAbilitiesTitleLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
+[node name="ButtonsRow" type="GridContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Hero Abilities"
-horizontal_alignment = 1
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
+columns = 3
 
-[node name="GroundSlamCooldownLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Ground Slam (Q): Ready"
-horizontal_alignment = 1
-
-[node name="GroundSlamTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
-layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 8
-
-[node name="GroundSlamButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel/GroundSlamTrainingRow"]
-layout_mode = 2
-text = "Ground Slam (Q)"
-
-[node name="DivineProtectionCooldownLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-text = "Divine Protection (W): Ready"
-horizontal_alignment = 1
-
-[node name="DivineProtectionTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
-layout_mode = 2
-alignment = 1
-theme_override_constants/separation = 8
-
-[node name="DivineProtectionButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel/DivineProtectionTrainingRow"]
-layout_mode = 2
-text = "Divine Protection (W)"
-
-[node name="ButtonsRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
-alignment = 1
-
-[node name="BuildFarmButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="BuildFarmButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Farm"
 
-[node name="BuildBarracksButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="BuildBarracksButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Barracks"
 
-[node name="BuildTowerButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="BuildTowerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Tower"
 
-[node name="BuildHeroAltarButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="BuildHeroAltarButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Hero Altar"
 
-[node name="TrainWorkerButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="TrainWorkerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Train Worker"
 
-[node name="AttackButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+[node name="AttackButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Attack"
+
+[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TrainSwordsmanButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Swordsman"
+
+[node name="TrainArcherButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Archer"
+
+[node name="HeroAltarTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+
+[node name="TrainHeroButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Hero"
+
+[node name="HeroPanel" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GroundSlamColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="GroundSlamCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "Q: Ready"
+horizontal_alignment = 1
+
+[node name="GroundSlamButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Ground Slam"
+
+[node name="DivineProtectionColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="DivineProtectionCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "W: Ready"
+horizontal_alignment = 1
+
+[node name="DivineProtectionButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Divine Prot."
+
+[node name="PowerStrikeColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="PowerStrikeCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "E: Ready"
+horizontal_alignment = 1
+
+[node name="PowerStrikeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Power Strike"
+
+[node name="ExecuteColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ExecuteCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "R: Ready"
+horizontal_alignment = 1
+
+[node name="ExecuteButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Execute"
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")

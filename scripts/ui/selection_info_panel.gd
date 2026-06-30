@@ -2,7 +2,7 @@ extends PanelContainer
 
 ## Shows basic name, type, health, and portrait placeholder for the current selection.
 
-@export var selection_manager_path: NodePath = "../../SelectionManager"
+@export var selection_manager_path: NodePath = "../../../../SelectionManager"
 
 @onready var _portrait_color: ColorRect = $MarginContainer/HBoxContainer/PortraitFrame/PortraitColor
 @onready var _portrait_label: Label = $MarginContainer/HBoxContainer/PortraitFrame/PortraitLabel
