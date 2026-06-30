@@ -62,7 +62,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _is_target_alive() -> bool:
-	return is_instance_valid(_target) and _target.get_current_health() > 0
+	return CombatTargetValidation.is_valid_combat_target(_target)
 
 
 func _is_close_to_target() -> bool:

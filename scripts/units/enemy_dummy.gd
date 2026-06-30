@@ -166,7 +166,7 @@ func _play_attack_animation() -> void:
 		_attack_lunge_tween.kill()
 
 	var lunge_offset := Vector3.ZERO
-	if is_instance_valid(_attack_target):
+	if CombatTargetValidation.is_valid_combat_target(_attack_target):
 		var direction := _attack_target.global_position - global_position
 		direction.y = 0.0
 		if direction.length_squared() > 0.001:
@@ -199,38 +199,28 @@ func _clear_invalid_attack_target() -> void:
 
 
 func _resolve_combat_attacker(attacker) -> Unit:
-	if attacker == null or not is_instance_valid(attacker):
+	if not CombatTargetValidation.is_valid_combat_target(attacker):
 		return null
 
 	if not attacker is Unit:
 		return null
 
 	var unit: Unit = attacker as Unit
-	if not _is_player_combat_unit(unit):
+	if unit is EnemyDummy:
 		return null
 
 	return unit
 
 
-func _is_player_combat_unit(unit: Unit) -> bool:
-	if not is_instance_valid(unit):
-		return false
-
-	if unit is EnemyDummy:
-		return false
-
-	return unit.has_method("get_current_health")
-
-
 func _is_valid_attack_target(target: Unit) -> bool:
-	if not _is_player_combat_unit(target):
+	if not CombatTargetValidation.is_valid_combat_target(target):
 		return false
 
-	return target.get_current_health() > 0
+	return not target is EnemyDummy
 
 
 func _is_in_attack_range(target: Unit) -> bool:
-	if not is_instance_valid(target):
+	if not CombatTargetValidation.is_valid_combat_target(target):
 		return false
 
 	var offset: Vector3 = global_position - target.global_position

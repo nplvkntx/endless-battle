@@ -101,7 +101,7 @@ func _physics_process(delta: float) -> void:
 		_try_attack_move_engagement()
 
 	if _attack_target != null:
-		if not is_instance_valid(_attack_target) or _attack_target.get_current_health() <= 0:
+		if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			cancel_attack()
 			_resume_attack_move()
 		else:
@@ -130,7 +130,7 @@ func _find_closest_enemy_in_range() -> EnemyDummy:
 			continue
 
 		var enemy: EnemyDummy = node as EnemyDummy
-		if not is_instance_valid(enemy):
+		if not CombatTargetValidation.is_valid_combat_target(enemy):
 			continue
 
 		var distance: float = _horizontal_distance_to(enemy)
@@ -168,7 +168,7 @@ func _stop_and_attack(delta: float) -> void:
 	if _attack_cooldown_timer > 0.0:
 		return
 
-	if not is_instance_valid(_attack_target):
+	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 		cancel_attack()
 		return
 
@@ -187,7 +187,7 @@ func _play_attack_animation() -> void:
 		_attack_lunge_tween.kill()
 
 	var lunge_offset := Vector3.ZERO
-	if is_instance_valid(_attack_target):
+	if CombatTargetValidation.is_valid_combat_target(_attack_target):
 		var direction := _attack_target.global_position - global_position
 		direction.y = 0.0
 		if direction.length_squared() > 0.001:

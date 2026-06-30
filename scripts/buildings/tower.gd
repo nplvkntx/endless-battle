@@ -44,10 +44,7 @@ func _find_closest_enemy_in_range() -> EnemyDummy:
 			continue
 
 		var enemy: EnemyDummy = node as EnemyDummy
-		if not is_instance_valid(enemy):
-			continue
-
-		if enemy.get_current_health() <= 0:
+		if not CombatTargetValidation.is_valid_combat_target(enemy):
 			continue
 
 		var distance: float = _horizontal_distance_to(enemy)
