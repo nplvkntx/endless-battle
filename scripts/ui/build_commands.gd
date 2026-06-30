@@ -150,11 +150,7 @@ func _get_tracked_hero_for_input() -> Hero:
 	if selection_manager.selected_building != null:
 		return null
 
-	var selected_units: Array[Unit] = selection_manager.selected_units
-	if selected_units.size() != 1 or not selected_units[0] is Hero:
-		return null
-
-	return selected_units[0] as Hero
+	return selection_manager.get_primary_ui_hero()
 
 
 func _set_hero_altar_button_labels() -> void:
@@ -386,6 +382,13 @@ func _refresh_command_visibility() -> void:
 	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
+		var primary_hero: Hero = selection_manager.get_primary_ui_hero()
+		if primary_hero != null:
+			_apply_hero_command_visibility()
+			_set_tracked_hero(primary_hero)
+			visible = true
+			return
+
 		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
 		if multi_category == &"workers":
 			_apply_worker_command_visibility()

@@ -69,6 +69,11 @@ func _refresh_panel() -> void:
 		_hide_panel()
 		return
 
+	var primary_hero: Hero = selection_manager.get_primary_ui_hero()
+	if primary_hero != null and selected_units.size() > 1:
+		_show_unit_info(primary_hero)
+		return
+
 	if selected_units.size() > 1:
 		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
 		_show_multiple_units(selected_units, multi_category)
@@ -99,6 +104,14 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 
 
 func _show_unit_info(unit: Unit) -> void:
+	if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+		_hide_panel()
+		return
+
+	if unit.is_in_group(&"enemies"):
+		_hide_panel()
+		return
+
 	var info: Dictionary = _get_unit_info(unit)
 	if info.is_empty():
 		_hide_panel()

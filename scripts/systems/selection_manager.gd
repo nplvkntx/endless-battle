@@ -47,6 +47,18 @@ func get_multi_unit_selection_category() -> StringName:
 	return MULTI_SELECTION_OTHER
 
 
+func get_primary_ui_hero() -> Hero:
+	_purge_invalid_selected_units()
+	for unit: Unit in selected_units:
+		if not _is_selectable_unit(unit):
+			continue
+		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+			continue
+		if unit is Hero:
+			return unit as Hero
+	return null
+
+
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _is_dragging: bool = false
