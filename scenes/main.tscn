@@ -126,7 +126,8 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Health: 100 / 100"
 
-[node name="BuildCommands" type="VBoxContainer" parent="GameUI"]
+[node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI"]
+visible = false
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
@@ -138,78 +139,90 @@ offset_right = 320.0
 offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 0
-mouse_filter = 2
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_selection_info")
 script = ExtResource("12_build_commands")
 
-[node name="WorkerQueueLabel" type="Label" parent="GameUI/BuildCommands"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/SelectionCommandPanel"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="WorkerQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Worker Queue: 0"
 horizontal_alignment = 1
 
-[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/BuildCommands"]
+[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="BarracksTitleLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel"]
+[node name="BarracksTitleLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Barracks"
 horizontal_alignment = 1
 
-[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/BuildCommands/BarracksPanel"]
+[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 16
 
-[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel/BarracksQueuesRow"]
+[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Swordsman Queue: 0"
 
-[node name="ArcherQueueLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel/BarracksQueuesRow"]
+[node name="ArcherQueueLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Archer Queue: 0"
 
-[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/BuildCommands/BarracksPanel"]
+[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
 layout_mode = 2
 alignment = 1
 theme_override_constants/separation = 8
 
-[node name="TrainSwordsmanButton" type="Button" parent="GameUI/BuildCommands/BarracksPanel/BarracksTrainingRow"]
+[node name="TrainSwordsmanButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow"]
 layout_mode = 2
 text = "Train Swordsman"
 
-[node name="TrainArcherButton" type="Button" parent="GameUI/BuildCommands/BarracksPanel/BarracksTrainingRow"]
+[node name="TrainArcherButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel/BarracksTrainingRow"]
 layout_mode = 2
 text = "Train Archer"
 
-[node name="RallyPointHintLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel"]
+[node name="RallyPointHintLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/BarracksPanel"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 text = "Right-click ground to set rally point for trained units"
 horizontal_alignment = 1
 
-[node name="ButtonsRow" type="HBoxContainer" parent="GameUI/BuildCommands"]
+[node name="ButtonsRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="BuildFarmButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
+[node name="BuildFarmButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
 layout_mode = 2
 text = "Build Farm"
 
-[node name="BuildBarracksButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
+[node name="BuildBarracksButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
 layout_mode = 2
 text = "Build Barracks"
 
-[node name="BuildTowerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
+[node name="BuildTowerButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
 layout_mode = 2
 text = "Build Tower"
 
-[node name="TrainWorkerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
+[node name="TrainWorkerButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
 layout_mode = 2
 text = "Train Worker"
+
+[node name="AttackButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/ButtonsRow"]
+layout_mode = 2
+text = "Attack"
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
