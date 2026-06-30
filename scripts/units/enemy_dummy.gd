@@ -67,15 +67,16 @@ func _on_health_depleted() -> void:
 	queue_free()
 
 
-func take_damage(amount: float, attacker: Unit = null) -> void:
+func take_damage(amount: float, attacker = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 
 	_health_component.take_damage(int(amount))
 	_play_hit_feedback()
 
-	if _is_player_combat_unit(attacker):
-		_set_attack_target(attacker)
+	var valid_attacker: Unit = _resolve_combat_attacker(attacker)
+	if valid_attacker != null:
+		_set_attack_target(valid_attacker)
 
 
 func _play_hit_feedback() -> void:
@@ -132,11 +133,8 @@ func _set_attack_target(target: Unit) -> void:
 
 
 func _process_counter_attack(delta: float) -> void:
+	_clear_invalid_attack_target()
 	if _attack_target == null:
-		return
-
-	if not _is_valid_attack_target(_attack_target):
-		_attack_target = null
 		return
 
 	if not _is_in_attack_range(_attack_target):
@@ -144,6 +142,10 @@ func _process_counter_attack(delta: float) -> void:
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
+		return
+
+	if not _is_valid_attack_target(_attack_target):
+		_clear_invalid_attack_target()
 		return
 
 	_attack_target.take_damage(float(attack_damage))
@@ -154,6 +156,7 @@ func _process_counter_attack(delta: float) -> void:
 		% [attack_damage, _attack_target.get_current_health()]
 	)
 	_attack_cooldown_timer = attack_cooldown
+	_clear_invalid_attack_target()
 
 
 func _play_attack_animation() -> void:
@@ -183,6 +186,30 @@ func _play_attack_animation() -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
+func _clear_invalid_attack_target() -> void:
+	if _attack_target == null:
+		return
+
+	if _is_valid_attack_target(_attack_target):
+		return
+
+	_attack_target = null
+
+
+func _resolve_combat_attacker(attacker) -> Unit:
+	if attacker == null or not is_instance_valid(attacker):
+		return null
+
+	if not attacker is Unit:
+		return null
+
+	var unit: Unit = attacker as Unit
+	if not _is_player_combat_unit(unit):
+		return null
+
+	return unit
+
+
 func _is_player_combat_unit(unit: Unit) -> bool:
 	if not is_instance_valid(unit):
 		return false
@@ -201,6 +228,9 @@ func _is_valid_attack_target(target: Unit) -> bool:
 
 
 func _is_in_attack_range(target: Unit) -> bool:
+	if not is_instance_valid(target):
+		return false
+
 	var offset: Vector3 = global_position - target.global_position
 	offset.y = 0.0
 	return offset.length() <= attack_range
