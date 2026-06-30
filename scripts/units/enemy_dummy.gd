@@ -3,6 +3,10 @@ extends Unit
 
 ## Stationary enemy placeholder for future combat features.
 
+@export var attack_damage: int = 8
+@export var attack_range: float = 2.0
+@export var attack_cooldown: float = 1.2
+
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const HIT_FLASH_DURATION := 0.12
@@ -16,6 +20,8 @@ var _health_bar_fill_material: StandardMaterial3D
 var _body_material: StandardMaterial3D
 var _body_base_color: Color
 var _hit_flash_tween: Tween
+var _attack_target: Swordsman = null
+var _attack_cooldown_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -56,12 +62,15 @@ func _on_health_depleted() -> void:
 	queue_free()
 
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, attacker: Unit = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 
 	_health_component.take_damage(int(amount))
 	_play_hit_feedback()
+
+	if attacker is Swordsman:
+		_set_attack_target(attacker as Swordsman)
 
 
 func _play_hit_feedback() -> void:
@@ -101,5 +110,53 @@ func set_movement_target(_target: Vector3) -> void:
 	pass
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	velocity = Vector3.ZERO
+
+	if _health_component.current_health <= 0:
+		return
+
+	_process_counter_attack(delta)
+
+
+func _set_attack_target(target: Swordsman) -> void:
+	if not _is_valid_attack_target(target):
+		return
+
+	_attack_target = target
+
+
+func _process_counter_attack(delta: float) -> void:
+	if _attack_target == null:
+		return
+
+	if not _is_valid_attack_target(_attack_target):
+		_attack_target = null
+		return
+
+	if not _is_in_attack_range(_attack_target):
+		return
+
+	_attack_cooldown_timer -= delta
+	if _attack_cooldown_timer > 0.0:
+		return
+
+	_attack_target.take_damage(float(attack_damage))
+	print(
+		"EnemyDummy dealt %d damage. Swordsman remaining health: %d"
+		% [attack_damage, _attack_target.get_current_health()]
+	)
+	_attack_cooldown_timer = attack_cooldown
+
+
+func _is_valid_attack_target(target: Swordsman) -> bool:
+	if not is_instance_valid(target):
+		return false
+
+	return target.get_current_health() > 0
+
+
+func _is_in_attack_range(target: Unit) -> bool:
+	var offset: Vector3 = global_position - target.global_position
+	offset.y = 0.0
+	return offset.length() <= attack_range

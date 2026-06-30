@@ -13,6 +13,7 @@
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 [ext_resource type="PackedScene" path="res://scenes/units/enemy_dummy.tscn" id="14_enemy_dummy"]
+[ext_resource type="PackedScene" path="res://scenes/units/swordsman.tscn" id="15_swordsman"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -172,8 +173,14 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.75, 0)
 [node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1, -5)
 
+[node name="Swordsman" parent="." instance=ExtResource("15_swordsman")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0.5, 5)
+
 [node name="EnemyDummy" parent="." instance=ExtResource("14_enemy_dummy")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0.5, 5)
+
+[node name="EnemyDummy2" parent="." instance=ExtResource("14_enemy_dummy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0.5, 7.5)
 
 [node name="Tree" parent="." instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, -7)

@@ -220,6 +220,8 @@ func _set_selected_units(units: Array[Unit]) -> void:
 	selected_units = units.duplicate()
 	for unit: Unit in selected_units:
 		unit.set_selected(true)
+		if not unit.died.is_connected(_on_unit_died):
+			unit.died.connect(_on_unit_died)
 	selection_changed.emit(selected_units)
 
 
@@ -263,7 +265,21 @@ func _clear_building_selection_without_signal() -> void:
 func _clear_selection_without_signal() -> void:
 	for unit: Unit in selected_units:
 		unit.set_selected(false)
+		if unit.died.is_connected(_on_unit_died):
+			unit.died.disconnect(_on_unit_died)
 	selected_units.clear()
+
+
+func _on_unit_died(unit: Unit) -> void:
+	if not selected_units.has(unit):
+		return
+
+	if unit.died.is_connected(_on_unit_died):
+		unit.died.disconnect(_on_unit_died)
+
+	unit.set_selected(false)
+	selected_units.erase(unit)
+	selection_changed.emit(selected_units)
 
 
 func _arrays_match(current: Array[Unit], next: Array[Unit]) -> bool:

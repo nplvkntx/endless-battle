@@ -7,9 +7,16 @@ extends Unit
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 1.0
 
+@onready var _health_component: HealthComponent = $HealthComponent
+
 var _attack_target: EnemyDummy = null
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
+
+
+func _ready() -> void:
+	super._ready()
+	_health_component.health_depleted.connect(_on_health_depleted)
 
 
 func command_attack(target: EnemyDummy) -> void:
@@ -30,6 +37,9 @@ func cancel_attack() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _health_component.current_health <= 0:
+		return
+
 	if _attack_target == null and not has_move_target:
 		_try_auto_attack()
 
@@ -100,12 +110,32 @@ func _stop_and_attack(delta: float) -> void:
 		cancel_attack()
 		return
 
-	_attack_target.take_damage(float(attack_damage))
+	_attack_target.take_damage(float(attack_damage), self)
 	print(
 		"Swordsman dealt %d damage. Target remaining health: %d"
 		% [attack_damage, _attack_target.get_current_health()]
 	)
 	_attack_cooldown_timer = attack_cooldown
+
+
+func take_damage(amount: float) -> void:
+	if _health_component.current_health <= 0:
+		return
+
+	_health_component.take_damage(int(amount))
+
+
+func get_current_health() -> int:
+	return _health_component.current_health
+
+
+func _on_health_depleted() -> void:
+	cancel_attack()
+	has_move_target = false
+	velocity = Vector3.ZERO
+	die()
+	print("Swordsman died")
+	queue_free()
 
 
 func _begin_chase() -> void:
