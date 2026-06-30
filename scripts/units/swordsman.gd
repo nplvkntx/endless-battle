@@ -30,6 +30,9 @@ func cancel_attack() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _attack_target == null and not has_move_target:
+		_try_auto_attack()
+
 	if _attack_target != null:
 		if not is_instance_valid(_attack_target):
 			cancel_attack()
@@ -38,6 +41,35 @@ func _physics_process(delta: float) -> void:
 			return
 
 	super._physics_process(delta)
+
+
+func _try_auto_attack() -> void:
+	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
+	if closest_enemy != null:
+		command_attack(closest_enemy)
+
+
+func _find_closest_enemy_in_range() -> EnemyDummy:
+	var closest_enemy: EnemyDummy = null
+	var closest_distance: float = INF
+
+	for node: Node in get_tree().get_nodes_in_group("enemies"):
+		if not node is EnemyDummy:
+			continue
+
+		var enemy: EnemyDummy = node as EnemyDummy
+		if not is_instance_valid(enemy):
+			continue
+
+		var distance: float = _horizontal_distance_to(enemy)
+		if distance > attack_range:
+			continue
+
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_enemy = enemy
+
+	return closest_enemy
 
 
 func _process_attack(delta: float) -> void:
