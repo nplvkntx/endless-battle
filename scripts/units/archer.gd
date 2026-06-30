@@ -115,32 +115,15 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
-	if closest_enemy != null:
-		command_attack(closest_enemy)
+	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	if closest_target != null:
+		command_attack(closest_target)
 
 
-func _find_closest_enemy_in_range() -> EnemyDummy:
-	var closest_enemy: EnemyDummy = null
-	var closest_distance: float = INF
-
-	for node: Node in get_tree().get_nodes_in_group("enemies"):
-		if not node is EnemyDummy:
-			continue
-
-		var enemy: EnemyDummy = node as EnemyDummy
-		if not CombatTargetValidation.is_valid_combat_target(enemy):
-			continue
-
-		var distance: float = _horizontal_distance_to(enemy)
-		if distance > attack_range:
-			continue
-
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_enemy = enemy
-
-	return closest_enemy
+func _find_closest_attack_target_in_range() -> Node3D:
+	return CombatTargetValidation.find_closest_player_unit_attack_target_in_range(
+		self, attack_range
+	)
 
 
 func _process_attack(delta: float) -> void:
@@ -169,6 +152,7 @@ func _stop_and_attack(delta: float) -> void:
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 		cancel_attack()
+		_resume_attack_move()
 		return
 
 	_fire_arrow()
@@ -215,9 +199,9 @@ func _begin_chase() -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
-	if closest_enemy != null:
-		command_attack(closest_enemy)
+	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	if closest_target != null:
+		command_attack(closest_target)
 
 
 func _resume_attack_move() -> void:
@@ -239,25 +223,10 @@ func _is_at_attack_move_destination() -> bool:
 
 
 func _is_in_attack_range(target: Node3D) -> bool:
-	return _horizontal_distance_to(target) <= attack_range
-
-
-func _horizontal_distance_to(target: Node3D) -> float:
-	var offset: Vector3 = global_position - target.global_position
-	offset.y = 0.0
-	return offset.length()
+	return CombatTargetValidation.is_within_attack_range(self, target, attack_range)
 
 
 func _compute_attack_approach_position(target: Node3D) -> Vector3:
-	var to_attacker: Vector3 = global_position - target.global_position
-	to_attacker.y = 0.0
-
-	if to_attacker.length_squared() < 0.001:
-		to_attacker = Vector3.FORWARD
-
-	var standoff_distance: float = maxf(attack_range - stopping_distance, stopping_distance)
-	var approach_position: Vector3 = (
-		target.global_position + to_attacker.normalized() * standoff_distance
+	return CombatTargetValidation.compute_attack_approach_position(
+		self, target, attack_range, stopping_distance
 	)
-	approach_position.y = global_position.y
-	return approach_position

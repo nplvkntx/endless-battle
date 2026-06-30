@@ -99,6 +99,45 @@ static func get_horizontal_center_distance(from: Node3D, to: Node3D) -> float:
 	return offset.length()
 
 
+static func get_horizontal_attack_distance(attacker: Node3D, target: Node3D) -> float:
+	if attacker == null or target == null:
+		return INF
+
+	if is_attackable_enemy_building(target):
+		return get_horizontal_attack_distance_to_surface(attacker, target)
+
+	return get_horizontal_center_distance(attacker, target)
+
+
+static func find_closest_player_unit_attack_target_in_range(
+	attacker: Node3D, attack_range: float
+) -> Node3D:
+	if attacker == null or attack_range <= 0.0:
+		return null
+
+	var closest_target: Node3D = null
+	var closest_distance: float = INF
+	var groups_to_search: Array[StringName] = [&"enemies", ENEMY_BUILDING_GROUP]
+
+	for group_name: StringName in groups_to_search:
+		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):
+			if not node is Node3D:
+				continue
+			if not is_player_unit_attack_target(node):
+				continue
+
+			var target: Node3D = node as Node3D
+			var distance: float = get_horizontal_attack_distance(attacker, target)
+			if distance > attack_range:
+				continue
+
+			if distance < closest_distance:
+				closest_distance = distance
+				closest_target = target
+
+	return closest_target
+
+
 static func compute_attack_approach_position(
 	attacker: Node3D,
 	target: Node3D,

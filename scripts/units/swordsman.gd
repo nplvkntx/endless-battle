@@ -119,32 +119,15 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
-	if closest_enemy != null:
-		command_attack(closest_enemy)
+	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	if closest_target != null:
+		command_attack(closest_target)
 
 
-func _find_closest_enemy_in_range() -> EnemyDummy:
-	var closest_enemy: EnemyDummy = null
-	var closest_distance: float = INF
-
-	for node: Node in get_tree().get_nodes_in_group("enemies"):
-		if not node is EnemyDummy:
-			continue
-
-		var enemy: EnemyDummy = node as EnemyDummy
-		if not CombatTargetValidation.is_valid_combat_target(enemy):
-			continue
-
-		var distance: float = _horizontal_distance_to(enemy)
-		if distance > attack_range:
-			continue
-
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_enemy = enemy
-
-	return closest_enemy
+func _find_closest_attack_target_in_range() -> Node3D:
+	return CombatTargetValidation.find_closest_player_unit_attack_target_in_range(
+		self, attack_range
+	)
 
 
 func _process_attack(delta: float) -> void:
@@ -173,10 +156,12 @@ func _stop_and_attack(delta: float) -> void:
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 		cancel_attack()
+		_resume_attack_move()
 		return
 
 	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
 		cancel_attack()
+		_resume_attack_move()
 		return
 
 	MeleeHitSound.play_at(self, _attack_target.global_position)
@@ -248,9 +233,9 @@ func _begin_chase() -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
-	if closest_enemy != null:
-		command_attack(closest_enemy)
+	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	if closest_target != null:
+		command_attack(closest_target)
 
 
 func _resume_attack_move() -> void:
