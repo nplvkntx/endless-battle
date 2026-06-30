@@ -172,6 +172,8 @@ func _configure_mana_display(unit: Unit) -> void:
 		_tracked_hero.level_changed.connect(_on_tracked_hero_stats_changed)
 	if not _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):
 		_tracked_hero.ability_points_changed.connect(_on_tracked_hero_stats_changed)
+	if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_stats_changed):
+		_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_stats_changed)
 	_update_hero_details(_tracked_hero)
 	_mana_label.visible = true
 
@@ -202,6 +204,8 @@ func _clear_mana_tracking() -> void:
 			_tracked_hero.level_changed.disconnect(_on_tracked_hero_stats_changed)
 		if _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):
 			_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_stats_changed)
+		if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_stats_changed):
+			_tracked_hero.ability_progression_changed.disconnect(_on_tracked_hero_stats_changed)
 	_tracked_hero = null
 
 

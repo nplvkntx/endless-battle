@@ -7,17 +7,20 @@ extends Unit
 signal xp_changed(current_xp: float, xp_to_next_level: float)
 signal level_changed(new_level: int)
 signal ability_points_changed(new_amount: int)
+signal ability_progression_changed()
 signal ability_ready(ability_id: StringName)
 signal inventory_changed()
 signal respawn_requested(hero: Hero)
 
-const MAX_LEVEL: int = 10
+const MAX_LEVEL: int = 24
 const XP_PER_LEVEL_MULTIPLIER: int = 100
+const MAX_ABILITY_POINT_LEVEL: int = 18
 
 @export var hero_data: Resource
 
 var level: int = 1
-var ability_points: int = 0
+var ability_points: int = 1
+var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var _current_xp: float = 0.0
 
 
@@ -25,6 +28,8 @@ func _ready() -> void:
 	super._ready()
 	if level < 1:
 		level = 1
+	if ability_progression == null:
+		ability_progression = HeroAbilityProgression.new()
 	_apply_hero_data()
 	_emit_xp_state()
 
@@ -53,9 +58,69 @@ func add_xp(amount: float) -> void:
 	_emit_xp_state()
 
 
+func is_ability_unlocked(ability_id: StringName) -> bool:
+	if ability_progression == null:
+		return false
+
+	return ability_progression.is_ability_learned(ability_id)
+
+
+func get_ability_rank(ability_id: StringName) -> int:
+	if ability_progression == null:
+		return 0
+
+	return ability_progression.get_ability_rank(ability_id)
+
+
+func can_learn_ability(ability_id: StringName) -> bool:
+	if ability_progression == null:
+		return false
+
+	return ability_progression.can_learn_ability(level, ability_points, ability_id)
+
+
+func try_learn_ability(ability_id: StringName) -> bool:
+	if ability_progression == null:
+		push_warning("Hero.try_learn_ability: missing ability progression")
+		return false
+
+	if ability_progression.can_learn_ability(level, ability_points, ability_id):
+		ability_points -= 1
+		ability_progression.learn_ability(ability_id)
+		ability_points_changed.emit(ability_points)
+		ability_progression_changed.emit()
+		print(
+			"Learned ability %s (rank %d). Ability points remaining: %d"
+			% [ability_id, get_ability_rank(ability_id), ability_points]
+		)
+		return true
+
+	var reason: String = ability_progression.get_learn_blocked_reason(
+		level, ability_points, ability_id
+	)
+	if ResourceManager != null:
+		ResourceManager.show_feedback(reason)
+	else:
+		print(reason)
+	return false
+
+
+func _require_ability_learned(ability_id: StringName) -> bool:
+	if is_ability_unlocked(ability_id):
+		return true
+
+	if ResourceManager != null:
+		ResourceManager.show_feedback("Ability locked")
+	else:
+		print("Ability locked")
+	return false
+
+
 func _on_level_up() -> void:
-	ability_points += 1
-	ability_points_changed.emit(ability_points)
+	if level <= MAX_ABILITY_POINT_LEVEL:
+		ability_points += 1
+		ability_points_changed.emit(ability_points)
+
 	level_changed.emit(level)
 	_restore_health_on_level_up()
 	_restore_mana_on_level_up()

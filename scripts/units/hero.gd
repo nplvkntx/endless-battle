@@ -191,6 +191,9 @@ func try_divine_protection() -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
+	if not _require_ability_learned(HeroAbilityProgression.ABILITY_W):
+		return false
+
 	if is_divine_protection_active():
 		ResourceManager.show_feedback("Divine Protection already active")
 		return false
@@ -266,6 +269,9 @@ func is_power_strike_pending() -> bool:
 
 func try_power_strike() -> bool:
 	if _health_component.current_health <= 0:
+		return false
+
+	if not _require_ability_learned(HeroAbilityProgression.ABILITY_E):
 		return false
 
 	if _has_power_strike_pending:
@@ -466,6 +472,9 @@ func try_execute() -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
+	if not _require_ability_learned(HeroAbilityProgression.ABILITY_R):
+		return false
+
 	if _has_execute_pending:
 		ResourceManager.show_feedback("Execute already in progress")
 		return false
@@ -657,7 +666,8 @@ func _tick_power_strike_cooldown(delta: float) -> void:
 
 func can_use_ground_slam() -> bool:
 	return (
-		_health_component.current_health > 0
+		is_ability_unlocked(HeroAbilityProgression.ABILITY_Q)
+		and _health_component.current_health > 0
 		and _ground_slam_cooldown_timer <= 0.0
 		and current_mana >= ground_slam_mana_cost
 	)
@@ -665,6 +675,9 @@ func can_use_ground_slam() -> bool:
 
 func try_ground_slam() -> bool:
 	if _health_component.current_health <= 0:
+		return false
+
+	if not _require_ability_learned(HeroAbilityProgression.ABILITY_Q):
 		return false
 
 	if _ground_slam_cooldown_timer > 0.0:

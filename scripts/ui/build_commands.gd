@@ -129,16 +129,28 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	match key_event.keycode:
 		KEY_Q:
-			hero.try_ground_slam()
+			if key_event.shift_pressed:
+				hero.try_learn_ability(HeroAbilityProgression.ABILITY_Q)
+			else:
+				hero.try_ground_slam()
 			get_viewport().set_input_as_handled()
 		KEY_W:
-			hero.try_divine_protection()
+			if key_event.shift_pressed:
+				hero.try_learn_ability(HeroAbilityProgression.ABILITY_W)
+			else:
+				hero.try_divine_protection()
 			get_viewport().set_input_as_handled()
 		KEY_E:
-			hero.try_power_strike()
+			if key_event.shift_pressed:
+				hero.try_learn_ability(HeroAbilityProgression.ABILITY_E)
+			else:
+				hero.try_power_strike()
 			get_viewport().set_input_as_handled()
 		KEY_R:
-			hero.try_execute()
+			if key_event.shift_pressed:
+				hero.try_learn_ability(HeroAbilityProgression.ABILITY_R)
+			else:
+				hero.try_execute()
 			get_viewport().set_input_as_handled()
 
 
@@ -169,7 +181,23 @@ func _on_selection_changed(_units: Array[Unit]) -> void:
 
 
 func _set_tracked_hero(hero: Hero) -> void:
+	_disconnect_tracked_hero_signals()
 	_tracked_hero = hero
+	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+		if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
+			_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_progression_changed)
+	_update_hero_abilities_ui()
+
+
+func _disconnect_tracked_hero_signals() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		return
+
+	if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
+		_tracked_hero.ability_progression_changed.disconnect(_on_tracked_hero_progression_changed)
+
+
+func _on_tracked_hero_progression_changed() -> void:
 	_update_hero_abilities_ui()
 
 
@@ -181,9 +209,17 @@ func _update_hero_abilities_ui() -> void:
 
 
 func _update_ground_slam_ui() -> void:
+	if _ground_slam_button == null or _ground_slam_cooldown_label == null:
+		return
+
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_ground_slam_button.disabled = true
-		_ground_slam_cooldown_label.text = "Q: Ready"
+		_ground_slam_cooldown_label.text = "Q: Locked"
+		return
+
+	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_Q):
+		_ground_slam_button.disabled = true
+		_ground_slam_cooldown_label.text = "Q: Locked"
 		return
 
 	var remaining: float = _tracked_hero.get_ground_slam_cooldown_remaining()
@@ -204,9 +240,17 @@ func _on_ground_slam_pressed() -> void:
 
 
 func _update_divine_protection_ui() -> void:
+	if _divine_protection_button == null or _divine_protection_cooldown_label == null:
+		return
+
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = "W: Ready"
+		_divine_protection_cooldown_label.text = "W: Locked"
+		return
+
+	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_W):
+		_divine_protection_button.disabled = true
+		_divine_protection_cooldown_label.text = "W: Locked"
 		return
 
 	if _tracked_hero.is_divine_protection_active():
@@ -236,9 +280,17 @@ func _on_divine_protection_pressed() -> void:
 
 
 func _update_power_strike_ui() -> void:
+	if _power_strike_button == null or _power_strike_cooldown_label == null:
+		return
+
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_power_strike_button.disabled = true
-		_power_strike_cooldown_label.text = "E: Ready"
+		_power_strike_cooldown_label.text = "E: Locked"
+		return
+
+	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_E):
+		_power_strike_button.disabled = true
+		_power_strike_cooldown_label.text = "E: Locked"
 		return
 
 	if _tracked_hero.is_power_strike_pending():
@@ -266,11 +318,24 @@ func _on_power_strike_pressed() -> void:
 
 
 func _update_execute_ui() -> void:
-	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
-		_execute_button.disabled = true
-		_execute_cooldown_label.text = "R: Ready"
+	if _execute_button == null or _execute_cooldown_label == null:
 		return
 
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_execute_button.disabled = true
+		_execute_cooldown_label.text = "R: Locked"
+		return
+
+	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_R):
+		_execute_button.disabled = true
+		var required_level: int = HeroAbilityProgression.R_FIRST_RANK_LEVEL
+		if _tracked_hero.level < required_level:
+			_execute_cooldown_label.text = "R: Locked (Lv %d)" % required_level
+		else:
+			_execute_cooldown_label.text = "R: Locked"
+		return
+
+	var ultimate_rank: int = _tracked_hero.get_ability_rank(HeroAbilityProgression.ABILITY_R)
 	if _tracked_hero.is_execute_pending():
 		_execute_button.disabled = true
 		_execute_cooldown_label.text = "R: Moving..."
@@ -284,7 +349,10 @@ func _update_execute_ui() -> void:
 
 	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.execute_mana_cost
 	_execute_button.disabled = not has_mana
-	_execute_cooldown_label.text = "R: Ready"
+	if ultimate_rank > 0:
+		_execute_cooldown_label.text = "R: Ready (Rank %d)" % ultimate_rank
+	else:
+		_execute_cooldown_label.text = "R: Ready"
 
 
 func _on_execute_pressed() -> void:
