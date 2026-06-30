@@ -108,18 +108,12 @@ func _refresh_command_visibility() -> void:
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
 	var selected_building: Building = selection_manager.selected_building
-	var multi_select: bool = selected_units.size() > 1
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
-	if nothing_selected or multi_select:
+	if nothing_selected:
 		visible = false
 		return
 
-	var single_worker: bool = selected_units.size() == 1 and selected_units[0] is Worker
-	var single_combat_unit: bool = (
-		selected_units.size() == 1
-		and (selected_units[0] is Swordsman or selected_units[0] is Archer)
-	)
 	var show_barracks_training: bool = (
 		selected_building is Barracks
 		and (selected_building as Barracks).building_state == Building.STATE_COMPLETED
@@ -128,16 +122,84 @@ func _refresh_command_visibility() -> void:
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
 
-	_build_farm_button.visible = single_worker
-	_build_barracks_button.visible = single_worker
-	_build_tower_button.visible = single_worker
-	_train_worker_button.visible = show_town_center_commands
-	_attack_button.visible = single_combat_unit
-	_buttons_row.visible = single_worker or show_town_center_commands or single_combat_unit
+	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
+		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
+		if multi_category == &"workers":
+			_apply_worker_command_visibility()
+			visible = true
+			return
+		if multi_category == &"combat":
+			_apply_combat_command_visibility()
+			visible = true
+			return
+		visible = false
+		return
+
+	var single_worker: bool = selected_units.size() == 1 and selected_units[0] is Worker
+	var single_combat_unit: bool = (
+		selected_units.size() == 1
+		and (selected_units[0] is Swordsman or selected_units[0] is Archer)
+	)
+
+	if single_worker:
+		_apply_worker_command_visibility()
+	elif single_combat_unit:
+		_apply_combat_command_visibility()
+	elif show_town_center_commands:
+		_apply_town_center_command_visibility()
+	else:
+		_apply_hidden_command_buttons()
+
 	_barracks_panel.visible = show_barracks_training
 	_worker_queue_label.visible = show_town_center_commands
 
-	visible = single_worker or show_town_center_commands or show_barracks_training or single_combat_unit
+	visible = (
+		single_worker
+		or show_town_center_commands
+		or show_barracks_training
+		or single_combat_unit
+	)
+
+
+func _apply_worker_command_visibility() -> void:
+	_build_farm_button.visible = true
+	_build_barracks_button.visible = true
+	_build_tower_button.visible = true
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = true
+	_barracks_panel.visible = false
+	_worker_queue_label.visible = false
+
+
+func _apply_combat_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_tower_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = true
+	_buttons_row.visible = true
+	_barracks_panel.visible = false
+	_worker_queue_label.visible = false
+
+
+func _apply_town_center_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_tower_button.visible = false
+	_train_worker_button.visible = true
+	_attack_button.visible = false
+	_buttons_row.visible = true
+	_barracks_panel.visible = false
+
+
+func _apply_hidden_command_buttons() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_tower_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
 
 
 func _on_attack_pressed() -> void:

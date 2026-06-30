@@ -22,6 +22,7 @@ const PORTRAIT_STYLES: Dictionary = {
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
 	"tower": {"color": Color(0.55, 0.58, 0.62, 1), "label": "T"},
 	"multiple": {"color": Color(0.42, 0.44, 0.48, 1), "label": "++"},
+	"mixed": {"color": Color(0.48, 0.4, 0.35, 1), "label": "Mx"},
 }
 
 
@@ -64,18 +65,31 @@ func _refresh_panel() -> void:
 		return
 
 	if selected_units.size() > 1:
-		_show_multiple_units()
+		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
+		_show_multiple_units(selected_units, multi_category)
 		return
 
 	_show_unit_info(selected_units[0])
 
 
-func _show_multiple_units() -> void:
+func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	visible = true
-	_set_portrait("multiple")
-	_name_label.text = "Multiple units selected"
 	_type_label.visible = false
 	_health_label.visible = false
+
+	match category:
+		&"workers":
+			_set_portrait("worker")
+			_name_label.text = "%d Workers selected" % units.size()
+		&"combat":
+			_set_portrait("multiple")
+			_name_label.text = "%d combat units selected" % units.size()
+		&"mixed":
+			_set_portrait("mixed")
+			_name_label.text = "Mixed Selection"
+		_:
+			_set_portrait("multiple")
+			_name_label.text = "Multiple units selected"
 
 
 func _show_unit_info(unit: Unit) -> void:

@@ -9,12 +9,43 @@ const DRAG_THRESHOLD_PIXELS: float = 4.0
 const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
 const UNIT_GROUP: StringName = &"units"
 const WORKER_GROUP: StringName = &"workers"
+const MULTI_SELECTION_WORKERS: StringName = &"workers"
+const MULTI_SELECTION_COMBAT: StringName = &"combat"
+const MULTI_SELECTION_MIXED: StringName = &"mixed"
+const MULTI_SELECTION_OTHER: StringName = &"other"
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var selection_box_path: NodePath = "../SelectionUI/SelectionBox"
 
 var selected_units: Array[Unit] = []
 var selected_building: Building = null
+
+
+func get_multi_unit_selection_category() -> StringName:
+	_purge_invalid_selected_units()
+	if selected_units.size() <= 1:
+		return &""
+
+	var has_worker: bool = false
+	var has_combat: bool = false
+	for unit: Unit in selected_units:
+		if not _is_selectable_unit(unit):
+			continue
+		if unit is Worker:
+			has_worker = true
+		elif unit is Swordsman or unit is Archer:
+			has_combat = true
+		else:
+			return MULTI_SELECTION_OTHER
+
+	if has_worker and has_combat:
+		return MULTI_SELECTION_MIXED
+	if has_worker:
+		return MULTI_SELECTION_WORKERS
+	if has_combat:
+		return MULTI_SELECTION_COMBAT
+	return MULTI_SELECTION_OTHER
+
 
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
