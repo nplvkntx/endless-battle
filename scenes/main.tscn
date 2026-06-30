@@ -1,72 +1,65 @@
 [gd_scene format=3 uid="uid://cpee3usuf6htk"]
 
-[ext_resource type="Script" path="res://scripts/buildings/command_center.gd" id="2_command_center"]
-[ext_resource type="Script" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
-[ext_resource type="Script" path="res://scripts/systems/selection_manager.gd" id="5_selection_manager"]
-[ext_resource type="Script" path="res://scripts/systems/gather_command_handler.gd" id="13_gather_command_handler"]
-[ext_resource type="Script" path="res://scripts/systems/build_manager.gd" id="11_build_manager"]
-[ext_resource type="Script" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
-[ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
-[ext_resource type="Script" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
-[ext_resource type="Script" path="res://scripts/ui/selection_info_panel.gd" id="16_selection_info_panel"]
-[ext_resource type="Script" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
-[ext_resource type="Script" path="res://scripts/ui/command_bar.gd" id="18_command_bar"]
-[ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
-[ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
-[ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
-[ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
-[ext_resource type="PackedScene" path="res://scenes/units/hero.tscn" id="15_hero"]
-[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="19_health_component"]
-[ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
-[ext_resource type="PackedScene" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
-[ext_resource type="Script" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
-[ext_resource type="Script" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
-[ext_resource type="PackedScene" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
-[ext_resource type="Script" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
+[ext_resource type="Script" uid="uid://cf1qxeyb66dtc" path="res://scripts/buildings/command_center.gd" id="2_command_center"]
+[ext_resource type="Script" uid="uid://bfyiykcfpyqqw" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
+[ext_resource type="PackedScene" uid="uid://c34sseipvxy7a" path="res://scenes/units/worker.tscn" id="4_worker"]
+[ext_resource type="Script" uid="uid://bptnc3n0k7sbg" path="res://scripts/systems/selection_manager.gd" id="5_selection_manager"]
+[ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
+[ext_resource type="Script" uid="uid://dtd2gbjgk187t" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
+[ext_resource type="PackedScene" uid="uid://ew40ufc50053" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
+[ext_resource type="PackedScene" uid="uid://bg40oion7ayqm" path="res://scenes/resources/tree.tscn" id="9_tree"]
+[ext_resource type="PackedScene" uid="uid://bg5y8ctgvhkpp" path="res://scenes/buildings/farm.tscn" id="10_farm"]
+[ext_resource type="Script" uid="uid://cxuw8agy6hjxe" path="res://scripts/systems/build_manager.gd" id="11_build_manager"]
+[ext_resource type="Script" uid="uid://cbvwh14g2aijb" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
+[ext_resource type="Script" uid="uid://c1ftguf355mf" path="res://scripts/systems/gather_command_handler.gd" id="13_gather_command_handler"]
+[ext_resource type="PackedScene" uid="uid://djfuwaovwcf3c" path="res://scenes/units/hero.tscn" id="15_hero"]
+[ext_resource type="Script" uid="uid://btxpb4kfi7pea" path="res://scripts/ui/selection_info_panel.gd" id="16_selection_info_panel"]
+[ext_resource type="Script" uid="uid://t84aco6grm0h" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
+[ext_resource type="Script" uid="uid://cyivqjvoaqcya" path="res://scripts/ui/command_bar.gd" id="18_command_bar"]
+[ext_resource type="Script" uid="uid://c0smd4kr0elli" path="res://scripts/components/health_component.gd" id="19_health_component"]
+[ext_resource type="Script" uid="uid://cgqqodo0ymy15" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
+[ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
+[ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
+[ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
+[ext_resource type="PackedScene" uid="uid://crxg17shkoebg" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
+[ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
-bg_color = Color(0.08, 0.08, 0.1, 0.85)
 content_margin_left = 12.0
 content_margin_top = 6.0
 content_margin_right = 12.0
 content_margin_bottom = 6.0
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_selection_info"]
-bg_color = Color(0, 0, 0, 0)
-content_margin_left = 8.0
-content_margin_top = 4.0
-content_margin_right = 8.0
-content_margin_bottom = 4.0
-border_width_right = 1
-border_color = Color(0.22, 0.24, 0.28, 1)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_bar"]
-bg_color = Color(0.06, 0.06, 0.08, 0.94)
-content_margin_left = 0.0
-content_margin_top = 0.0
-content_margin_right = 0.0
-content_margin_bottom = 0.0
-border_width_top = 2
-border_color = Color(0.28, 0.3, 0.34, 1)
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_panel"]
-bg_color = Color(0, 0, 0, 0)
-content_margin_left = 8.0
-content_margin_top = 4.0
-content_margin_right = 8.0
-content_margin_bottom = 4.0
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
-bg_color = Color(0.12, 0.08, 0.08, 0.9)
 content_margin_left = 16.0
 content_margin_top = 8.0
 content_margin_right = 16.0
 content_margin_bottom = 8.0
+bg_color = Color(0.12, 0.08, 0.08, 0.9)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
 border_color = Color(0.85, 0.35, 0.3, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_bar"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.06, 0.06, 0.08, 0.94)
+border_width_top = 2
+border_color = Color(0.28, 0.3, 0.34, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_selection_info"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0, 0, 0)
+border_width_right = 1
+border_color = Color(0.22, 0.24, 0.28, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_portrait_frame"]
 bg_color = Color(0.04, 0.04, 0.06, 1)
@@ -76,66 +69,69 @@ border_width_right = 2
 border_width_bottom = 2
 border_color = Color(0.35, 0.38, 0.42, 1)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
-albedo_color = Color(0.35, 0.55, 0.25, 1)
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_panel"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0, 0, 0)
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(100, 100)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_creep_placeholder"]
-transparency = 1
-albedo_color = Color(0.42, 0.18, 0.52, 0.45)
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.35, 0.55, 0.25, 1)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_creep_placeholder"]
 top_radius = 10.0
 bottom_radius = 10.0
 height = 0.12
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
-albedo_color = Color(0.75, 0.4, 0.15, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_command_center"]
-albedo_color = Color(0.65, 0.15, 0.15, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_barracks"]
-albedo_color = Color(0.55, 0.12, 0.12, 1)
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_creep_placeholder"]
+transparency = 1
+albedo_color = Color(0.42, 0.18, 0.52, 0.45)
 
 [sub_resource type="BoxMesh" id="BoxMesh_command_center"]
 size = Vector3(4, 2.5, 4)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
+albedo_color = Color(0.75, 0.4, 0.15, 1)
+
 [sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
 size = Vector3(4, 2.5, 4)
 
-[node name="Main" type="Node3D"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_command_center"]
+albedo_color = Color(0.65, 0.15, 0.15, 1)
 
-[node name="SelectionManager" type="Node" parent="."]
+[node name="Main" type="Node3D" unique_id=1133004476]
+
+[node name="SelectionManager" type="Node" parent="." unique_id=53640150]
 script = ExtResource("5_selection_manager")
 
-[node name="GatherCommandHandler" type="Node" parent="."]
+[node name="GatherCommandHandler" type="Node" parent="." unique_id=298477801]
 script = ExtResource("13_gather_command_handler")
 
-[node name="BuildManager" type="Node" parent="."]
+[node name="BuildManager" type="Node" parent="." unique_id=47046327]
 script = ExtResource("11_build_manager")
 
-[node name="MatchManager" type="Node" parent="."]
+[node name="MatchManager" type="Node" parent="." unique_id=1084555240]
 script = ExtResource("20_match_manager")
 player_command_center_path = NodePath("../CommandCenter")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 match_result_label_path = NodePath("../GameUI/MatchResultLabel")
 
-[node name="EnemyWaveManager" type="Node" parent="."]
+[node name="EnemyWaveManager" type="Node" parent="." unique_id=212905880]
 script = ExtResource("22_enemy_wave_manager")
 player_command_center_path = NodePath("../CommandCenter")
-wave_interval_seconds = 30.0
 
-[node name="EnemyGatherManager" type="Node" parent="."]
+[node name="EnemyGatherManager" type="Node" parent="." unique_id=266528595]
 script = ExtResource("23_enemy_gather_manager")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 enemy_gold_mine_path = NodePath("../EnemyGoldMine")
 
-[node name="SelectionUI" type="CanvasLayer" parent="."]
+[node name="SelectionUI" type="CanvasLayer" parent="." unique_id=370040247]
 
-[node name="SelectionBox" type="Control" parent="SelectionUI"]
+[node name="SelectionBox" type="Control" parent="SelectionUI" unique_id=1608099637]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -145,9 +141,9 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("6_selection_box")
 
-[node name="GameUI" type="CanvasLayer" parent="."]
+[node name="GameUI" type="CanvasLayer" parent="." unique_id=606134238]
 
-[node name="ResourceBar" type="PanelContainer" parent="GameUI"]
+[node name="ResourceBar" type="PanelContainer" parent="GameUI" unique_id=1805408095]
 anchors_preset = 10
 anchor_right = 1.0
 offset_bottom = 36.0
@@ -156,19 +152,19 @@ mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_resource_bar")
 script = ExtResource("7_resource_bar")
 
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/ResourceBar"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/ResourceBar" unique_id=1265382514]
 layout_mode = 2
 theme_override_constants/margin_left = 4
 theme_override_constants/margin_top = 0
 theme_override_constants/margin_right = 4
 theme_override_constants/margin_bottom = 0
 
-[node name="ResourceLabel" type="Label" parent="GameUI/ResourceBar/MarginContainer"]
+[node name="ResourceLabel" type="Label" parent="GameUI/ResourceBar/MarginContainer" unique_id=378882149]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Gold: 500 | Wood: 300 | Food: 5/15"
 
-[node name="FeedbackMessage" type="Label" parent="GameUI"]
+[node name="FeedbackMessage" type="Label" parent="GameUI" unique_id=500919632]
 visible = false
 anchors_preset = 5
 anchor_left = 0.5
@@ -186,7 +182,7 @@ horizontal_alignment = 1
 vertical_alignment = 1
 script = ExtResource("17_feedback_message")
 
-[node name="MatchResultLabel" type="Label" parent="GameUI"]
+[node name="MatchResultLabel" type="Label" parent="GameUI" unique_id=477467453]
 visible = false
 anchors_preset = 8
 anchor_left = 0.5
@@ -204,7 +200,7 @@ theme_override_font_sizes/font_size = 32
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="CommandBar" type="PanelContainer" parent="GameUI"]
+[node name="CommandBar" type="PanelContainer" parent="GameUI" unique_id=819105223]
 visible = false
 anchors_preset = 12
 anchor_top = 1.0
@@ -217,493 +213,481 @@ mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_command_bar")
 script = ExtResource("18_command_bar")
 
-[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar" unique_id=480165000]
 layout_mode = 2
 theme_override_constants/separation = 0
 
-[node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer"]
+[node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer" unique_id=1417466001]
 custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_selection_info")
 script = ExtResource("16_selection_info_panel")
 
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel" unique_id=1663470759]
 layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer" unique_id=727653405]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PortraitFrame" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+[node name="PortraitFrame" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer" unique_id=168265605]
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_portrait_frame")
 
-[node name="PortraitColor" type="ColorRect" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+[node name="PortraitColor" type="ColorRect" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame" unique_id=1894649567]
 layout_mode = 2
-offset_left = 4.0
-offset_top = 4.0
-offset_right = 60.0
-offset_bottom = 60.0
 color = Color(0.5, 0.5, 0.55, 1)
 
-[node name="PortraitLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+[node name="PortraitLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame" unique_id=471706186]
 layout_mode = 2
-offset_left = 4.0
-offset_top = 4.0
-offset_right = 60.0
-offset_bottom = 60.0
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 16
 text = "?"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="InfoVBox" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+[node name="InfoVBox" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer" unique_id=2070265580]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 2
 
-[node name="NameLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="NameLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox" unique_id=1237464429]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 14
 text = "Unit Name"
 
-[node name="TypeLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="TypeLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox" unique_id=1403300648]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 theme_override_font_sizes/font_size = 12
 text = "Type: Unit"
 
-[node name="HealthLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="HealthLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox" unique_id=148363121]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 12
 text = "Health: 100 / 100"
 
-[node name="ManaLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+[node name="ManaLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox" unique_id=2048143943]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
 theme_override_font_sizes/font_size = 12
 text = "Mana: 100 / 100"
 
-[node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer"]
+[node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI/CommandBar/HBoxContainer" unique_id=2122911018]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
-mouse_filter = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_command_panel")
 script = ExtResource("12_build_commands")
 
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel" unique_id=1069371777]
 layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer" unique_id=800866293]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="CenterPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
+[node name="CenterPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer" unique_id=719411438]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 theme_override_constants/separation = 4
 
-[node name="WorkerQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+[node name="WorkerQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel" unique_id=803905406]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 13
 text = "Worker Queue: 0"
 
-[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel" unique_id=1148402116]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
+[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel" unique_id=1148550459]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
+[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow" unique_id=1499827742]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 12
 text = "Swordsman Queue: 0"
 
-[node name="ArcherQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
+[node name="ArcherQueueLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow" unique_id=771764986]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 12
 text = "Archer Queue: 0"
 
-[node name="RallyPointHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
+[node name="RallyPointHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel" unique_id=909977471]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 theme_override_font_sizes/font_size = 11
 text = "Right-click ground to set rally point"
 
-[node name="HeroAltarPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+[node name="HeroAltarPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel" unique_id=279341910]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="HeroStatusLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
+[node name="HeroStatusLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel" unique_id=966557305]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 13
 text = "Hero: Ready to train"
 
-[node name="HeroAltarRallyHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
+[node name="HeroAltarRallyHintLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel" unique_id=669159723]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 theme_override_font_sizes/font_size = 11
 text = "Right-click ground to set rally point for Hero"
 
-[node name="RightPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
+[node name="RightPanel" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer" unique_id=1220667900]
 layout_mode = 2
 size_flags_vertical = 4
 theme_override_constants/separation = 6
 
-[node name="ButtonsRow" type="GridContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+[node name="ButtonsRow" type="GridContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel" unique_id=1390911550]
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 4
 columns = 3
 
-[node name="BuildFarmButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="BuildFarmButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=202901547]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Farm"
 
-[node name="BuildBarracksButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="BuildBarracksButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=1639712328]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Barracks"
 
-[node name="BuildTowerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="BuildTowerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=537336827]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Tower"
 
-[node name="BuildHeroAltarButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="BuildHeroAltarButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=2098723603]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Hero Altar"
 
-[node name="BuildCommandCenterButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="BuildCommandCenterButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=479269111]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Town Center"
 
-[node name="TrainWorkerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="TrainWorkerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=789346783]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Train Worker"
 
-[node name="AttackButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+[node name="AttackButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow" unique_id=689317827]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Attack"
 
-[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel" unique_id=707548453]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="TrainSwordsmanButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+[node name="TrainSwordsmanButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow" unique_id=854148432]
 custom_minimum_size = Vector2(140, 28)
 layout_mode = 2
 text = "Train Swordsman"
 
-[node name="TrainArcherButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+[node name="TrainArcherButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow" unique_id=148798360]
 custom_minimum_size = Vector2(140, 28)
 layout_mode = 2
 text = "Train Archer"
 
-[node name="HeroAltarTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+[node name="HeroAltarTrainingRow" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel" unique_id=1260910626]
 layout_mode = 2
 
-[node name="TrainHeroButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow"]
+[node name="TrainHeroButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow" unique_id=1699996671]
 custom_minimum_size = Vector2(140, 28)
 layout_mode = 2
 text = "Train Hero"
 
-[node name="HeroPanel" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+[node name="HeroPanel" type="HBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel" unique_id=2113241580]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="GroundSlamColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+[node name="GroundSlamColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel" unique_id=112394658]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="GroundSlamCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+[node name="GroundSlamCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn" unique_id=1904354389]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "Q: Ready"
 horizontal_alignment = 1
 
-[node name="GroundSlamUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+[node name="GroundSlamUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn" unique_id=1953672519]
 visible = false
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 tooltip_text = "Upgrade Q"
 text = "▲"
 
-[node name="GroundSlamButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+[node name="GroundSlamButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn" unique_id=20253313]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
 text = "Ground Slam"
 
-[node name="DivineProtectionColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+[node name="DivineProtectionColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel" unique_id=509882995]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="DivineProtectionCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+[node name="DivineProtectionCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn" unique_id=268941698]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "W: Ready"
 horizontal_alignment = 1
 
-[node name="DivineProtectionUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+[node name="DivineProtectionUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn" unique_id=1896265963]
 visible = false
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 tooltip_text = "Upgrade W"
 text = "▲"
 
-[node name="DivineProtectionButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+[node name="DivineProtectionButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn" unique_id=690022238]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
 text = "Divine Prot."
 
-[node name="PowerStrikeColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+[node name="PowerStrikeColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel" unique_id=1417316934]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="PowerStrikeCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+[node name="PowerStrikeCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn" unique_id=667323946]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "E: Ready"
 horizontal_alignment = 1
 
-[node name="PowerStrikeUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+[node name="PowerStrikeUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn" unique_id=2064951704]
 visible = false
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 tooltip_text = "Upgrade E"
 text = "▲"
 
-[node name="PowerStrikeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+[node name="PowerStrikeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn" unique_id=1520217277]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
 text = "Power Strike"
 
-[node name="ExecuteColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+[node name="ExecuteColumn" type="VBoxContainer" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel" unique_id=1769165637]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="ExecuteCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+[node name="ExecuteCooldownLabel" type="Label" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn" unique_id=1428324765]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "R: Ready"
 horizontal_alignment = 1
 
-[node name="ExecuteUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+[node name="ExecuteUpgradeButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn" unique_id=81241842]
 visible = false
 custom_minimum_size = Vector2(72, 18)
 layout_mode = 2
 tooltip_text = "Upgrade R"
 text = "▲"
 
-[node name="ExecuteButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+[node name="ExecuteButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn" unique_id=574217227]
 custom_minimum_size = Vector2(72, 28)
 layout_mode = 2
 text = "Execute"
 
-[node name="Ground" type="MeshInstance3D" parent="."]
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=1337121503]
 mesh = SubResource("PlaneMesh_ground")
 surface_material_override/0 = SubResource("StandardMaterial3D_ground")
 
-[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=2094222557]
 script = ExtResource("25_navigation_region_setup")
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=364435414]
 transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 36, 22, -26)
 current = true
 fov = 60.0
 script = ExtResource("3_camera_controller")
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1092343732]
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
 shadow_enabled = true
 
-[node name="CreepCampPlaceholder" type="Node3D" parent="."]
+[node name="CreepCampPlaceholder" type="Node3D" parent="." unique_id=1672359482]
 
-[node name="MarkerMesh" type="MeshInstance3D" parent="CreepCampPlaceholder"]
+[node name="MarkerMesh" type="MeshInstance3D" parent="CreepCampPlaceholder" unique_id=1623113975]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
 mesh = SubResource("CylinderMesh_creep_placeholder")
 surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
 
-[node name="CreepCamp" type="Node3D" parent="."]
+[node name="CreepCamp" type="Node3D" parent="." unique_id=2053903713]
 
-[node name="Creep1" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+[node name="Creep1" parent="CreepCamp" unique_id=20762309 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
 
-[node name="Creep2" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+[node name="Creep2" parent="CreepCamp" unique_id=430633536 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
 
-[node name="Creep3" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+[node name="Creep3" parent="CreepCamp" unique_id=1804294728 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
 
-[node name="Worker" parent="." instance=ExtResource("4_worker")]
+[node name="Worker" parent="." unique_id=1420813028 instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)
 
-[node name="Worker2" parent="." instance=ExtResource("4_worker")]
+[node name="Worker2" parent="." unique_id=724827494 instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0.5, -34)
 
-[node name="Worker3" parent="." instance=ExtResource("4_worker")]
+[node name="Worker3" parent="." unique_id=1912011911 instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.5, -33.5)
 
-[node name="Worker4" parent="." instance=ExtResource("4_worker")]
+[node name="Worker4" parent="." unique_id=1388403132 instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, -34)
 
-[node name="DevHero" parent="." instance=ExtResource("15_hero")]
+[node name="DevHero" parent="." unique_id=274321212 instance=ExtResource("15_hero")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.5, -33)
 
-[node name="CommandCenter" type="StaticBody3D" parent="." groups=["player_command_center"]]
+[node name="CommandCenter" type="StaticBody3D" parent="." unique_id=1715301900 groups=["player_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -38)
 script = ExtResource("2_command_center")
 worker_spawn_offset = Vector3(0, -0.75, -3.5)
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter"]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter" unique_id=119345703]
 mesh = SubResource("BoxMesh_command_center")
 surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter" unique_id=967640828]
 shape = SubResource("BoxShape3D_command_center")
 
-[node name="HealthComponent" type="Node" parent="CommandCenter"]
+[node name="HealthComponent" type="Node" parent="CommandCenter" unique_id=445003066]
 script = ExtResource("19_health_component")
 max_health = 500
 
-[node name="Barracks" parent="." instance=ExtResource("21_barracks")]
+[node name="Barracks" parent="." unique_id=155687893 instance=ExtResource("21_barracks")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 1, -38)
 swordsman_spawn_offset = Vector3(0, -0.5, -3.5)
 archer_spawn_offset = Vector3(1.5, -0.5, -3.5)
 
-[node name="HealthComponent" type="Node" parent="Barracks"]
+[node name="HealthComponent" type="Node" parent="Barracks" unique_id=1862133368]
 script = ExtResource("19_health_component")
 max_health = 300
 
-[node name="EnemyCommandCenter" type="StaticBody3D" parent="." groups=["enemy_command_center"]]
+[node name="EnemyCommandCenter" type="StaticBody3D" parent="." unique_id=124807173 groups=["enemy_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 38)
 script = ExtResource("2_command_center")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter"]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter" unique_id=423569690]
 mesh = SubResource("BoxMesh_command_center")
 surface_material_override/0 = SubResource("StandardMaterial3D_enemy_command_center")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="EnemyCommandCenter"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="EnemyCommandCenter" unique_id=600774934]
 shape = SubResource("BoxShape3D_command_center")
 
-[node name="HealthComponent" type="Node" parent="EnemyCommandCenter"]
+[node name="HealthComponent" type="Node" parent="EnemyCommandCenter" unique_id=344685389]
 script = ExtResource("19_health_component")
 max_health = 500
 
-[node name="EnemyWorker" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+[node name="EnemyWorker" parent="." unique_id=753698043 groups=["enemies", "enemy_workers"] instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 0.5, 34)
 
-[node name="EnemyWorker2" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+[node name="EnemyWorker2" parent="." unique_id=277831235 groups=["enemies", "enemy_workers"] instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -37, 0.5, 35)
 
-[node name="EnemyWorker3" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+[node name="EnemyWorker3" parent="." unique_id=441442506 groups=["enemies", "enemy_workers"] instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 0.5, 34.5)
 
-[node name="EnemyWorker4" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+[node name="EnemyWorker4" parent="." unique_id=1562796510 groups=["enemies", "enemy_workers"] instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39, 0.5, 35)
 
-[node name="EnemyBarracks" parent="." groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
+[node name="EnemyBarracks" parent="." unique_id=881263699 groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 1, 38)
 enable_enemy_auto_production = true
 
-[node name="MeshInstance3D" parent="EnemyBarracks" index="0"]
-surface_material_override/0 = SubResource("StandardMaterial3D_enemy_barracks")
-
-[node name="HealthComponent" type="Node" parent="EnemyBarracks"]
+[node name="HealthComponent" type="Node" parent="EnemyBarracks" unique_id=1939655637]
 script = ExtResource("19_health_component")
 max_health = 300
 
-[node name="EnemyGoldMine" parent="." instance=ExtResource("8_gold_mine")]
+[node name="EnemyGoldMine" parent="." unique_id=1569590764 instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1, 28)
 
-[node name="EnemyTree" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree" parent="." unique_id=22331947 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 1.25, 45)
 
-[node name="EnemyTree2" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree2" parent="." unique_id=143044998 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 1.25, 46)
 
-[node name="EnemyTree3" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree3" parent="." unique_id=1231018180 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 45)
 
-[node name="EnemyTree4" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree4" parent="." unique_id=51841487 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1.25, 47)
 
-[node name="EnemyTree5" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree5" parent="." unique_id=1589963792 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 1.25, 45)
 
-[node name="EnemyTree6" parent="." instance=ExtResource("9_tree")]
+[node name="EnemyTree6" parent="." unique_id=256292683 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44, 1.25, 46)
 
-[node name="ExpansionGoldMine" parent="." instance=ExtResource("8_gold_mine")]
+[node name="ExpansionGoldMine" parent="." unique_id=1681892859 instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 1, 5)
 
-[node name="ExpansionTree" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree" parent="." unique_id=1032302420 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.25, 3)
 
-[node name="ExpansionTree2" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree2" parent="." unique_id=1180159206 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.25, 8)
 
-[node name="ExpansionTree3" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree3" parent="." unique_id=1132195448 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26, 1.25, 4)
 
-[node name="ExpansionTree4" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree4" parent="." unique_id=1332065153 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1.25, 7)
 
-[node name="ExpansionTree5" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree5" parent="." unique_id=962316972 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 1.25, 6)
 
-[node name="ExpansionTree6" parent="." instance=ExtResource("9_tree")]
+[node name="ExpansionTree6" parent="." unique_id=482112380 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, 9)
 
-[node name="Farm" parent="." instance=ExtResource("10_farm")]
+[node name="Farm" parent="." unique_id=43908211 instance=ExtResource("10_farm")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.75, -33)
 
-[node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
+[node name="GoldMine" parent="." unique_id=1424185328 instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 45, 1, -28)
 
-[node name="Tree" parent="." instance=ExtResource("9_tree")]
+[node name="Tree" parent="." unique_id=550423773 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1.25, -45)
 
-[node name="Tree2" parent="." instance=ExtResource("9_tree")]
+[node name="Tree2" parent="." unique_id=251769148 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 1.25, -46)
 
-[node name="Tree3" parent="." instance=ExtResource("9_tree")]
+[node name="Tree3" parent="." unique_id=165393704 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -45)
 
-[node name="Tree4" parent="." instance=ExtResource("9_tree")]
+[node name="Tree4" parent="." unique_id=679638822 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 1.25, -47)
 
-[node name="Tree5" parent="." instance=ExtResource("9_tree")]
+[node name="Tree5" parent="." unique_id=1522068370 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 1.25, -45)
 
-[node name="Tree6" parent="." instance=ExtResource("9_tree")]
+[node name="Tree6" parent="." unique_id=1805590681 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44, 1.25, -46)
 
-[node name="Tree7" parent="." instance=ExtResource("9_tree")]
+[node name="Tree7" parent="." unique_id=896239248 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46, 1.25, -45)
 
-[node name="Tree8" parent="." instance=ExtResource("9_tree")]
+[node name="Tree8" parent="." unique_id=2017030389 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 1.25, -47)
