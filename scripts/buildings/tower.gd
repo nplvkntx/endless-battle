@@ -27,7 +27,7 @@ func _physics_process(delta: float) -> void:
 	if _attack_cooldown_timer > 0.0:
 		return
 
-	var target: EnemyDummy = _find_closest_enemy_in_range()
+	var target: Node3D = _find_closest_enemy_in_range()
 	if target == null:
 		return
 
@@ -35,37 +35,17 @@ func _physics_process(delta: float) -> void:
 	_attack_cooldown_timer = attack_cooldown
 
 
-func _find_closest_enemy_in_range() -> EnemyDummy:
-	var closest_enemy: EnemyDummy = null
-	var closest_distance: float = INF
-
-	for node: Node in get_tree().get_nodes_in_group("enemies"):
-		if not node is EnemyDummy:
-			continue
-
-		var enemy: EnemyDummy = node as EnemyDummy
-		if not CombatTargetValidation.is_valid_combat_target(enemy):
-			continue
-
-		var distance: float = _horizontal_distance_to(enemy)
-		if distance > attack_range:
-			continue
-
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_enemy = enemy
-
-	return closest_enemy
+func _find_closest_enemy_in_range() -> Node3D:
+	return CombatTargetValidation.find_closest_tower_attack_target_in_range(
+		self, attack_range
+	)
 
 
-func _fire_projectile(target: EnemyDummy) -> void:
+func _fire_projectile(target: Node3D) -> void:
+	if not CombatTargetValidation.is_tower_attack_target(target):
+		return
+
 	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, PROJECTILE_SPAWN_HEIGHT, 0.0)
 	arrow.launch(target, float(attack_damage), spawn_position)
-
-
-func _horizontal_distance_to(target: Node3D) -> float:
-	var offset: Vector3 = global_position - target.global_position
-	offset.y = 0.0
-	return offset.length()

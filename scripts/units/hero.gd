@@ -146,6 +146,15 @@ func cancel_attack() -> void:
 	_has_chase_target = false
 
 
+func _sanitize_attack_target() -> void:
+	if _attack_target == null:
+		return
+
+	if not is_instance_valid(_attack_target):
+		cancel_attack()
+		_resume_attack_move()
+
+
 func set_movement_target(target: Vector3) -> void:
 	_cancel_power_strike()
 	_cancel_execute()
@@ -279,10 +288,7 @@ func try_power_strike() -> bool:
 
 
 func _resolve_power_strike_target() -> EnemyDummy:
-	if _attack_target is EnemyDummy and CombatTargetValidation.is_valid_combat_target(_attack_target):
-		return _attack_target
-
-	return _find_closest_enemy_any_range()
+	return _resolve_ability_enemy_dummy_target()
 
 
 func _find_closest_enemy_any_range() -> EnemyDummy:
@@ -484,8 +490,18 @@ func try_execute() -> bool:
 
 
 func _resolve_execute_target() -> EnemyDummy:
-	if _attack_target is EnemyDummy and CombatTargetValidation.is_valid_combat_target(_attack_target):
-		return _attack_target
+	return _resolve_ability_enemy_dummy_target()
+
+
+func _resolve_ability_enemy_dummy_target() -> EnemyDummy:
+	_sanitize_attack_target()
+
+	if (
+		_attack_target != null
+		and _attack_target is EnemyDummy
+		and CombatTargetValidation.is_valid_combat_target(_attack_target)
+	):
+		return _attack_target as EnemyDummy
 
 	return _find_closest_enemy_any_range()
 
@@ -774,6 +790,8 @@ func _tick_mana_regen(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
+
+	_sanitize_attack_target()
 
 	_tick_ground_slam_cooldown(delta)
 	_tick_divine_protection(delta)

@@ -46,6 +46,53 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 	return is_attackable_enemy_building(target)
 
 
+static func is_tower_attack_target(target: Variant) -> bool:
+	if not is_valid_combat_target(target):
+		return false
+
+	if not target is Node:
+		return false
+
+	var node: Node = target as Node
+	if not node.is_in_group("enemies"):
+		return false
+
+	if target is GatherableResource:
+		return false
+
+	if target is Building:
+		return false
+
+	return true
+
+
+static func find_closest_tower_attack_target_in_range(
+	tower: Node3D, attack_range: float
+) -> Node3D:
+	if tower == null or attack_range <= 0.0:
+		return null
+
+	var closest_target: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tower.get_tree().get_nodes_in_group("enemies"):
+		if not node is Node3D:
+			continue
+		if not is_tower_attack_target(node):
+			continue
+
+		var target: Node3D = node as Node3D
+		var distance: float = get_horizontal_center_distance(tower, target)
+		if distance > attack_range:
+			continue
+
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = target
+
+	return closest_target
+
+
 static func get_target_current_health(target: Variant) -> int:
 	var health_component: HealthComponent = _get_health_component(target)
 	if health_component != null:
