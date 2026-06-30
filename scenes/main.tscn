@@ -30,6 +30,14 @@ content_margin_top = 8.0
 content_margin_right = 12.0
 content_margin_bottom = 8.0
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_portrait_frame"]
+bg_color = Color(0.04, 0.04, 0.06, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.35, 0.38, 0.42, 1)
+
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
 albedo_color = Color(0.35, 0.55, 0.25, 1)
 
@@ -96,8 +104,8 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
-offset_top = -108.0
-offset_right = 240.0
+offset_top = -128.0
+offset_right = 280.0
 offset_bottom = -12.0
 grow_vertical = 0
 mouse_filter = 2
@@ -107,21 +115,51 @@ script = ExtResource("16_selection_info_panel")
 [node name="MarginContainer" type="MarginContainer" parent="GameUI/SelectionInfoPanel"]
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer"]
 layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PortraitFrame" type="PanelContainer" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_portrait_frame")
+
+[node name="PortraitColor" type="ColorRect" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+layout_mode = 2
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 68.0
+offset_bottom = 68.0
+color = Color(0.5, 0.5, 0.55, 1)
+
+[node name="PortraitLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+layout_mode = 2
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 68.0
+offset_bottom = 68.0
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 18
+text = "?"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="InfoVBox" type="VBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 4
 
-[node name="NameLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+[node name="NameLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Unit Name"
 
-[node name="TypeLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+[node name="TypeLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 text = "Type: Unit"
 
-[node name="HealthLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+[node name="HealthLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Health: 100 / 100"
