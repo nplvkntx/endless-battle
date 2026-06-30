@@ -14,6 +14,7 @@
 [ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 [ext_resource type="PackedScene" path="res://scenes/units/enemy_dummy.tscn" id="14_enemy_dummy"]
 [ext_resource type="PackedScene" path="res://scenes/units/swordsman.tscn" id="15_swordsman"]
+[ext_resource type="PackedScene" path="res://scenes/units/archer.tscn" id="16_archer"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -155,6 +156,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 3)
 
 [node name="Worker4" parent="." instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 5)
+
+[node name="Archer" parent="." instance=ExtResource("16_archer")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -1)
 
 [node name="CommandCenter" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 1.25, -3)
