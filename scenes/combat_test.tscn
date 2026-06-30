@@ -1,0 +1,179 @@
+[gd_scene format=3 uid="uid://cbcx5yvy3idyd"]
+
+[ext_resource type="Script" uid="uid://cf1qxeyb66dtc" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
+[ext_resource type="Script" uid="uid://bfyiykcfpyqqw" path="res://scripts/systems/camera_controller.gd" id="2_camera_controller"]
+[ext_resource type="Script" uid="uid://bptnc3n0k7sbg" path="res://scripts/systems/selection_manager.gd" id="3_selection_manager"]
+[ext_resource type="Script" uid="uid://c1ftguf355mf" path="res://scripts/systems/gather_command_handler.gd" id="4_gather_command_handler"]
+[ext_resource type="Script" uid="uid://cxuw8agy6hjxe" path="res://scripts/systems/build_manager.gd" id="5_build_manager"]
+[ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
+[ext_resource type="Script" uid="uid://dtd2gbjgk187t" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
+[ext_resource type="Script" uid="uid://cbvwh14g2aijb" path="res://scripts/ui/build_commands.gd" id="8_build_commands"]
+[ext_resource type="PackedScene" uid="uid://c6j7ryh4ug3lh" path="res://scenes/units/swordsman.tscn" id="9_swordsman"]
+[ext_resource type="PackedScene" uid="uid://dxexovy4airee" path="res://scenes/units/enemy_dummy.tscn" id="10_enemy_dummy"]
+[ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="11_barracks"]
+[ext_resource type="PackedScene" uid="uid://ew40ufc50053" path="res://scenes/resources/gold_mine.tscn" id="12_gold_mine"]
+[ext_resource type="PackedScene" uid="uid://bg40oion7ayqm" path="res://scenes/resources/tree.tscn" id="13_tree"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(24, 24)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.35, 0.55, 0.25, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
+albedo_color = Color(0.75, 0.4, 0.15, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[node name="CombatTest" type="Node3D" unique_id=923520480]
+
+[node name="SelectionManager" type="Node" parent="." unique_id=443404194]
+script = ExtResource("3_selection_manager")
+
+[node name="GatherCommandHandler" type="Node" parent="." unique_id=1097789747]
+script = ExtResource("4_gather_command_handler")
+
+[node name="BuildManager" type="Node" parent="." unique_id=2088720785]
+script = ExtResource("5_build_manager")
+
+[node name="SelectionUI" type="CanvasLayer" parent="." unique_id=1588734910]
+
+[node name="SelectionBox" type="Control" parent="SelectionUI" unique_id=1012450066]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("6_selection_box")
+
+[node name="GameUI" type="CanvasLayer" parent="." unique_id=1335902170]
+
+[node name="ResourceBar" type="PanelContainer" parent="GameUI" unique_id=409989866]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 36.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_resource_bar")
+script = ExtResource("7_resource_bar")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/ResourceBar" unique_id=149901848]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 0
+
+[node name="ResourceLabel" type="Label" parent="GameUI/ResourceBar/MarginContainer" unique_id=642012989]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Gold: 500 | Wood: 300 | Food: 5/15"
+
+[node name="BuildCommands" type="VBoxContainer" parent="GameUI" unique_id=1542040372]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -240.0
+offset_top = -96.0
+offset_right = 240.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("8_build_commands")
+
+[node name="WorkerQueueLabel" type="Label" parent="GameUI/BuildCommands" unique_id=37865322]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Worker Queue: 0"
+horizontal_alignment = 1
+
+[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/BuildCommands" unique_id=259792688]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Swordsman Queue: 0"
+horizontal_alignment = 1
+
+[node name="ButtonsRow" type="HBoxContainer" parent="GameUI/BuildCommands" unique_id=1199649065]
+layout_mode = 2
+alignment = 1
+
+[node name="BuildFarmButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow" unique_id=1688360359]
+layout_mode = 2
+text = "Build Farm"
+
+[node name="BuildBarracksButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow" unique_id=119693491]
+layout_mode = 2
+text = "Build Barracks"
+
+[node name="TrainWorkerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow" unique_id=1694824092]
+layout_mode = 2
+text = "Train Worker"
+
+[node name="TrainSwordsmanButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow" unique_id=1217426368]
+layout_mode = 2
+text = "Train Swordsman"
+
+[node name="Ground" type="MeshInstance3D" parent="." unique_id=283332596]
+mesh = SubResource("PlaneMesh_ground")
+surface_material_override/0 = SubResource("StandardMaterial3D_ground")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=916768392]
+transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 2.5, 14, 8)
+current = true
+fov = 60.0
+script = ExtResource("2_camera_controller")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1602374795]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Swordsman" parent="." unique_id=1964443168 instance=ExtResource("9_swordsman")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.5, 1.5)
+
+[node name="EnemyDummy" parent="." unique_id=1211842225 instance=ExtResource("10_enemy_dummy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 1.5)
+
+[node name="CommandCenter" type="StaticBody3D" parent="." unique_id=844845862]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1.25, -2)
+script = ExtResource("1_command_center")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter" unique_id=46718147]
+mesh = SubResource("BoxMesh_command_center")
+surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter" unique_id=2002550365]
+shape = SubResource("BoxShape3D_command_center")
+
+[node name="Barracks" parent="." unique_id=685582678 instance=ExtResource("11_barracks")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 1, 0)
+
+[node name="GoldMine" parent="." unique_id=1730606991 instance=ExtResource("12_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 1, -1)
+
+[node name="Tree" parent="." unique_id=524955015 instance=ExtResource("13_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1.25, 3)
+
+[node name="Tree2" parent="." unique_id=1146909903 instance=ExtResource("13_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 1.25, 4)
+
+[node name="Tree3" parent="." unique_id=1789543959 instance=ExtResource("13_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1.25, 2)
+
+[node name="Tree4" parent="." unique_id=734915046 instance=ExtResource("13_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1.25, 5)
