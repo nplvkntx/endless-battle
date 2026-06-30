@@ -15,6 +15,7 @@
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 [ext_resource type="PackedScene" path="res://scenes/units/enemy_dummy.tscn" id="14_enemy_dummy"]
+[ext_resource type="PackedScene" path="res://scenes/units/hero.tscn" id="15_hero"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -384,18 +385,21 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 3)
 [node name="Worker4" parent="." instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 5)
 
+[node name="DevHero" parent="." instance=ExtResource("15_hero")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, 0)
+
 [node name="HeroTestDummy1" parent="." instance=ExtResource("14_enemy_dummy")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0.5, -3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.5, 0.5, 0)
 attack_damage = 25
 attack_cooldown = 1.0
 
 [node name="HeroTestDummy2" parent="." instance=ExtResource("14_enemy_dummy")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8.5, 0.5, -1)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, 1)
 attack_damage = 25
 attack_cooldown = 1.0
 
 [node name="HeroTestDummy3" parent="." instance=ExtResource("14_enemy_dummy")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, 1.5)
 attack_damage = 25
 attack_cooldown = 1.0
 
