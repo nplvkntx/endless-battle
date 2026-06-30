@@ -16,6 +16,7 @@ const ARCHER_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 2.0)
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const ENEMY_TEAM_ID: int = 1
+const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
 
 @export var enable_enemy_auto_production: bool = false
 
@@ -88,6 +89,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	unit.global_position = global_position + SWORDSMAN_SPAWN_OFFSET
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
+	unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
 
 
 func _finalize_enemy_unit(unit: Unit) -> void:

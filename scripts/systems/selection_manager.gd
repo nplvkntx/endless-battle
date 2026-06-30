@@ -424,8 +424,8 @@ func _clear_building_selection_without_signal() -> void:
 
 
 func _clear_selection_without_signal() -> void:
-	for unit: Unit in selected_units:
-		_untrack_unit_selection(unit)
+	for index: int in range(selected_units.size() - 1, -1, -1):
+		_untrack_unit_selection(selected_units[index])
 	selected_units.clear()
 
 
@@ -463,10 +463,14 @@ func _track_unit_selection(unit: Unit) -> void:
 		unit.tree_exiting.connect(tree_exiting_callable, CONNECT_ONE_SHOT)
 
 
-func _untrack_unit_selection(unit: Unit) -> void:
-	if not is_instance_valid(unit):
+func _untrack_unit_selection(candidate: Variant) -> void:
+	if candidate == null or not is_instance_valid(candidate):
 		return
 
+	if not candidate is Unit:
+		return
+
+	var unit: Unit = candidate as Unit
 	_safe_set_unit_selected(unit, false)
 
 	if unit.died.is_connected(_on_unit_died):
@@ -482,9 +486,11 @@ func _purge_invalid_selected_units() -> void:
 	var removed_any: bool = false
 
 	for index: int in range(selected_units.size() - 1, -1, -1):
-		if _is_selectable_unit(selected_units[index]):
+		var candidate: Variant = selected_units[index]
+		if _is_selectable_unit(candidate):
 			continue
 
+		_untrack_unit_selection(candidate)
 		selected_units.remove_at(index)
 		removed_any = true
 
@@ -502,14 +508,28 @@ func _purge_invalid_selected_building() -> void:
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
 	var selectable_units: Array[Unit] = []
-	for unit: Unit in units:
-		if _is_selectable_unit(unit):
-			selectable_units.append(unit)
+	for candidate: Variant in units:
+		if not _is_selectable_unit(candidate):
+			continue
+		selectable_units.append(candidate as Unit)
 	return selectable_units
 
 
-func _is_selectable_unit(unit: Unit) -> bool:
-	if unit == null or not is_instance_valid(unit):
+func _is_selectable_unit(candidate: Variant) -> bool:
+	if candidate == null:
+		return false
+
+	if not is_instance_valid(candidate):
+		return false
+
+	if not candidate is Node:
+		return false
+
+	if not candidate is Unit:
+		return false
+
+	var unit: Unit = candidate as Unit
+	if unit.is_queued_for_deletion():
 		return false
 
 	if unit.is_in_group(&"enemies"):
@@ -518,22 +538,31 @@ func _is_selectable_unit(unit: Unit) -> bool:
 	return true
 
 
-func _is_selectable_building(building: Building) -> bool:
-	return building != null and is_instance_valid(building)
+func _is_selectable_building(candidate: Variant) -> bool:
+	if candidate == null:
+		return false
+
+	if not is_instance_valid(candidate):
+		return false
+
+	if not candidate is Building:
+		return false
+
+	return true
 
 
-func _safe_set_unit_selected(unit: Unit, selected: bool) -> void:
-	if not _is_selectable_unit(unit):
+func _safe_set_unit_selected(candidate: Variant, selected: bool) -> void:
+	if not _is_selectable_unit(candidate):
 		return
 
-	unit.set_selected(selected)
+	(candidate as Unit).set_selected(selected)
 
 
-func _safe_set_building_selected(building: Building, selected: bool) -> void:
-	if not _is_selectable_building(building):
+func _safe_set_building_selected(candidate: Variant, selected: bool) -> void:
+	if not _is_selectable_building(candidate):
 		return
 
-	building.set_selected(selected)
+	(candidate as Building).set_selected(selected)
 
 
 func _arrays_match(current: Array[Unit], next: Array[Unit]) -> bool:

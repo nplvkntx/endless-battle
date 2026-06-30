@@ -20,6 +20,7 @@
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="19_health_component"]
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -110,6 +111,11 @@ script = ExtResource("20_match_manager")
 player_command_center_path = NodePath("../CommandCenter")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 match_result_label_path = NodePath("../GameUI/MatchResultLabel")
+
+[node name="EnemyWaveManager" type="Node" parent="."]
+script = ExtResource("22_enemy_wave_manager")
+player_command_center_path = NodePath("../CommandCenter")
+wave_interval_seconds = 30.0
 
 [node name="SelectionUI" type="CanvasLayer" parent="."]
 

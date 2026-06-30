@@ -4,6 +4,7 @@ extends RefCounted
 ## Shared checks for whether a node can be safely targeted or damaged in combat.
 
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
+const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const ENEMY_TEAM_ID: int = 1
 
 
@@ -35,6 +36,19 @@ static func is_attackable_enemy_building(target: Variant) -> bool:
 
 	var building_node: Node = target as Node
 	return building_node.is_in_group(ENEMY_BUILDING_GROUP)
+
+
+static func is_attackable_player_command_center(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+
+	if not target is Building:
+		return false
+
+	if target is GatherableResource:
+		return false
+
+	return (target as Node).is_in_group(PLAYER_COMMAND_CENTER_GROUP)
 
 
 static func is_player_unit_attack_target(target: Variant) -> bool:
@@ -80,7 +94,9 @@ static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bo
 		return false
 
 	if is_enemy_faction(attacker):
-		return target is Unit and not target is Building
+		if target is Unit and not target is Building:
+			return true
+		return is_attackable_player_command_center(target)
 
 	return is_player_unit_attack_target(target)
 
