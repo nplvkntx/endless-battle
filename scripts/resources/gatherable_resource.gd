@@ -15,6 +15,8 @@ var _feedback_tween: Tween
 
 
 func _ready() -> void:
+	NavigationObstacleSetup.apply_from_collision_body(self)
+
 	if _mesh == null:
 		return
 

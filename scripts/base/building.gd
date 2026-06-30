@@ -41,6 +41,7 @@ func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
 	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
+	NavigationObstacleSetup.apply_from_collision_body(self)
 	_apply_building_data()
 
 

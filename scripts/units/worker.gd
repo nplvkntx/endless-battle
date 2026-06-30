@@ -27,6 +27,9 @@ const FOOD_SUPPLY_USED: int = 1
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
 @onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
+@onready var _navigation_agent: NavigationAgent3D = (
+	get_node_or_null("NavigationAgent3D") as NavigationAgent3D
+)
 
 var _health_bar_fill_material: StandardMaterial3D
 var _gather_state: GatherTripState = GatherTripState.IDLE
@@ -45,6 +48,7 @@ var _task_nudge_direction: Vector3 = Vector3.ZERO
 var _task_nudge_start_position: Vector3 = Vector3.ZERO
 var _task_nudge_side_sign: float = 1.0
 var _task_nudge_side_attempts: int = 0
+var _task_navigation_active: bool = false
 
 
 func _ready() -> void:
@@ -56,6 +60,7 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_configure_faction_groups()
+	_configure_task_navigation_agent()
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -123,6 +128,7 @@ func _cancel_build_trip() -> void:
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
 	_task_has_saved_destination = false
+	_disable_task_navigation()
 	_reset_task_corner_nudge()
 
 
@@ -148,6 +154,12 @@ func _physics_process(delta: float) -> void:
 
 	if _task_nudge_active:
 		_process_task_corner_nudge(delta)
+	elif _task_navigation_active and _is_on_task_movement() and has_move_target:
+		if _process_task_navigation_movement():
+			has_move_target = false
+			velocity = Vector3.ZERO
+		else:
+			_update_task_corner_stuck_detection(delta, position_before)
 	else:
 		super._physics_process(delta)
 		if _is_on_task_movement() and has_move_target:
@@ -162,6 +174,7 @@ func set_movement_target(target: Vector3) -> void:
 	if _is_on_task_movement():
 		_task_movement_destination = Vector3(target.x, global_position.y, target.z)
 		_task_has_saved_destination = true
+		_refresh_task_navigation()
 	_reset_task_corner_nudge()
 
 
@@ -179,6 +192,56 @@ func _reset_task_corner_nudge() -> void:
 	_task_stuck_time = 0.0
 	_task_nudge_side_attempts = 0
 	_task_nudge_side_sign = 1.0
+
+
+func _configure_task_navigation_agent() -> void:
+	if _navigation_agent == null:
+		return
+
+	WorkerTaskNavigation.configure_agent(_navigation_agent, stopping_distance)
+	call_deferred("_sync_navigation_agent_position")
+
+
+func _sync_navigation_agent_position() -> void:
+	if _navigation_agent == null:
+		return
+
+	_navigation_agent.target_position = global_position
+
+
+func _refresh_task_navigation() -> void:
+	_task_navigation_active = false
+	if not _is_on_task_movement() or not _task_has_saved_destination:
+		return
+
+	if not WorkerTaskNavigation.can_use(_navigation_agent):
+		return
+
+	_navigation_agent.target_position = _task_movement_destination
+	_check_task_navigation_reachable.call_deferred()
+
+
+func _check_task_navigation_reachable() -> void:
+	if not _is_on_task_movement() or not has_move_target:
+		_task_navigation_active = false
+		return
+
+	if WorkerTaskNavigation.can_use(_navigation_agent):
+		_task_navigation_active = _navigation_agent.is_target_reachable()
+
+
+func _process_task_navigation_movement() -> bool:
+	return WorkerTaskNavigation.process_movement(
+		self,
+		_navigation_agent,
+		_task_movement_destination,
+		move_speed,
+		stopping_distance
+	)
+
+
+func _disable_task_navigation() -> void:
+	_task_navigation_active = false
 
 
 func _update_task_corner_stuck_detection(delta: float, position_before: Vector3) -> void:
@@ -203,6 +266,7 @@ func _begin_task_corner_nudge() -> void:
 	if not _task_has_saved_destination:
 		return
 
+	_disable_task_navigation()
 	has_move_target = false
 	_task_nudge_side_sign = _choose_task_nudge_side()
 	_task_nudge_direction = _get_task_nudge_direction()
@@ -324,6 +388,7 @@ func cancel_gathering() -> void:
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
 	_task_has_saved_destination = false
+	_disable_task_navigation()
 	_reset_task_corner_nudge()
 
 

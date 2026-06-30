@@ -22,6 +22,7 @@
 [ext_resource type="Script" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 [ext_resource type="Script" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
 [ext_resource type="PackedScene" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
+[ext_resource type="Script" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -525,6 +526,9 @@ text = "Execute"
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
 surface_material_override/0 = SubResource("StandardMaterial3D_ground")
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+script = ExtResource("25_navigation_region_setup")
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 36, 22, -26)
