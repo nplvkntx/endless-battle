@@ -142,6 +142,7 @@ func _process_counter_attack(delta: float) -> void:
 		return
 
 	_attack_target.take_damage(float(attack_damage))
+	MeleeHitSound.play_at(self, _attack_target.global_position)
 	print(
 		"EnemyDummy dealt %d damage. Swordsman remaining health: %d"
 		% [attack_damage, _attack_target.get_current_health()]

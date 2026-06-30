@@ -140,6 +140,7 @@ func _stop_and_attack(delta: float) -> void:
 		return
 
 	_attack_target.take_damage(float(attack_damage), self)
+	MeleeHitSound.play_at(self, _attack_target.global_position)
 	print(
 		"Swordsman dealt %d damage. Target remaining health: %d"
 		% [attack_damage, _attack_target.get_current_health()]
