@@ -210,6 +210,14 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		_dispatch_attack_command(clicked_unit as EnemyDummy)
 		return
 
+	var attack_building: Building = _raycast_building(camera, screen_position)
+	if (
+		attack_building != null
+		and CombatTargetValidation.is_attackable_enemy_building(attack_building)
+	):
+		_dispatch_attack_command(attack_building)
+		return
+
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
 	if gold_mine != null:
 		_dispatch_gold_mine_gather_command(gold_mine)
@@ -244,18 +252,21 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		unit.set_movement_target(move_targets[index])
 
 
-func _dispatch_attack_command(enemy: EnemyDummy) -> void:
+func _dispatch_attack_command(target: Node3D) -> void:
+	if not CombatTargetValidation.is_player_unit_attack_target(target):
+		return
+
 	InputManager.disarm_attack_move()
 	_purge_invalid_selected_units()
 	for unit: Unit in selected_units:
 		if not _is_selectable_unit(unit):
 			continue
 		if unit is Swordsman:
-			(unit as Swordsman).command_attack(enemy)
+			(unit as Swordsman).command_attack(target)
 		elif unit is Archer:
-			(unit as Archer).command_attack(enemy)
+			(unit as Archer).command_attack(target)
 		elif unit is Hero:
-			(unit as Hero).command_attack(enemy)
+			(unit as Hero).command_attack(target)
 
 
 func _dispatch_attack_move_command(ground_position: Vector3) -> void:

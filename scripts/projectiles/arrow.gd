@@ -7,7 +7,7 @@ const SPEED := 20.0
 const HIT_DISTANCE := 0.45
 const MAX_LIFETIME := 5.0
 
-var _target: EnemyDummy = null
+var _target: Node3D = null
 var _attacker: Unit = null
 var _damage: float = 0.0
 var _direction: Vector3 = Vector3.ZERO
@@ -16,13 +16,13 @@ var _traveled: float = 0.0
 var _lifetime: float = 0.0
 
 
-func launch(target: EnemyDummy, damage: float, spawn_position: Vector3, attacker: Unit = null) -> void:
+func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Unit = null) -> void:
 	_attacker = attacker
 	_target = target
 	_damage = damage
 	global_position = spawn_position
 
-	if not _is_target_alive():
+	if not CombatTargetValidation.is_valid_combat_target(_target):
 		queue_free()
 		return
 
@@ -72,12 +72,14 @@ func _is_close_to_target() -> bool:
 
 
 func _apply_hit() -> void:
-	if not _is_target_alive():
+	if not CombatTargetValidation.is_valid_combat_target(_target):
 		return
 
-	_target.take_damage(_damage, _attacker)
+	if not CombatTargetValidation.apply_damage_to_target(_target, _damage, _attacker):
+		return
+
 	MeleeHitSound.play_at(self, _target.global_position)
 	print(
 		"Projectile dealt %d damage. Target remaining health: %d"
-		% [int(_damage), _target.get_current_health()]
+		% [int(_damage), CombatTargetValidation.get_target_current_health(_target)]
 	)

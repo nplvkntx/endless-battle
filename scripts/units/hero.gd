@@ -48,7 +48,7 @@ const EXECUTE_LUNGE_DISTANCE := 0.5
 var _health_bar_fill_material: StandardMaterial3D
 var _body_mesh_rest_position: Vector3
 var _attack_lunge_tween: Tween
-var _attack_target: EnemyDummy = null
+var _attack_target: Node3D = null
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
@@ -115,7 +115,10 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
-func command_attack(target: EnemyDummy) -> void:
+func command_attack(target: Node3D) -> void:
+	if not CombatTargetValidation.is_player_unit_attack_target(target):
+		return
+
 	_cancel_power_strike()
 	_cancel_execute()
 	_attack_target = target
@@ -866,12 +869,15 @@ func _stop_and_attack(delta: float) -> void:
 		cancel_attack()
 		return
 
-	_attack_target.take_damage(float(attack_damage), self)
+	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
+		cancel_attack()
+		return
+
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
 	print(
 		"Hero dealt %d damage. Target remaining health: %d"
-		% [attack_damage, _attack_target.get_current_health()]
+		% [attack_damage, CombatTargetValidation.get_target_current_health(_attack_target)]
 	)
 	_attack_cooldown_timer = attack_cooldown
 
@@ -964,17 +970,17 @@ func _is_at_attack_move_destination() -> bool:
 	return offset.length() <= stopping_distance
 
 
-func _is_in_attack_range(target: Unit) -> bool:
+func _is_in_attack_range(target: Node3D) -> bool:
 	return _horizontal_distance_to(target) <= attack_range
 
 
-func _horizontal_distance_to(target: Unit) -> float:
+func _horizontal_distance_to(target: Node3D) -> float:
 	var offset: Vector3 = global_position - target.global_position
 	offset.y = 0.0
 	return offset.length()
 
 
-func _compute_attack_approach_position(target: Unit) -> Vector3:
+func _compute_attack_approach_position(target: Node3D) -> Vector3:
 	var to_attacker: Vector3 = global_position - target.global_position
 	to_attacker.y = 0.0
 
