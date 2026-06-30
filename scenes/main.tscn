@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
 [ext_resource type="Script" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
+[ext_resource type="Script" path="res://scripts/ui/selection_info_panel.gd" id="16_selection_info_panel"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
@@ -21,6 +22,13 @@ content_margin_left = 12.0
 content_margin_top = 6.0
 content_margin_right = 12.0
 content_margin_bottom = 6.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_selection_info"]
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
 albedo_color = Color(0.35, 0.55, 0.25, 1)
@@ -82,6 +90,41 @@ theme_override_constants/margin_bottom = 0
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Gold: 500 | Wood: 300 | Food: 5/15"
+
+[node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI"]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -108.0
+offset_right = 240.0
+offset_bottom = -12.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_selection_info")
+script = ExtResource("16_selection_info_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/SelectionInfoPanel"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="GameUI/SelectionInfoPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="NameLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Unit Name"
+
+[node name="TypeLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+text = "Type: Unit"
+
+[node name="HealthLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Health: 100 / 100"
 
 [node name="BuildCommands" type="VBoxContainer" parent="GameUI"]
 anchors_preset = 7
