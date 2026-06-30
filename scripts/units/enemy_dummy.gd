@@ -4,14 +4,29 @@ extends Unit
 ## Stationary enemy placeholder for future combat features.
 
 const HEALTH_BAR_WIDTH := 1.2
+const HEALTH_BAR_HUE_GREEN := 0.333333
+const HIT_FLASH_DURATION := 0.12
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
 @onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
+@onready var _body_mesh: MeshInstance3D = $MeshInstance3D
+
+var _health_bar_fill_material: StandardMaterial3D
+var _body_material: StandardMaterial3D
+var _body_base_color: Color
+var _hit_flash_tween: Tween
 
 
 func _ready() -> void:
 	super._ready()
+	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
+	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
+	var body_material := _body_mesh.get_surface_override_material(0) as StandardMaterial3D
+	_body_material = body_material.duplicate() as StandardMaterial3D
+	_body_mesh.set_surface_override_material(0, _body_material)
+	_body_base_color = _body_material.albedo_color
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
@@ -28,6 +43,11 @@ func _update_health_bar(current_health: int, max_health: int) -> void:
 	var ratio: float = float(current_health) / float(max_health)
 	_health_bar_fill.scale.x = ratio
 	_health_bar_fill.position.x = HEALTH_BAR_WIDTH * (ratio - 1.0) * 0.5
+	_health_bar_fill_material.albedo_color = _get_health_bar_color(ratio)
+
+
+func _get_health_bar_color(ratio: float) -> Color:
+	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
 func _on_health_depleted() -> void:
@@ -37,7 +57,40 @@ func _on_health_depleted() -> void:
 
 
 func take_damage(amount: float) -> void:
+	if _health_component.current_health <= 0:
+		return
+
 	_health_component.take_damage(int(amount))
+	_play_hit_feedback()
+
+
+func _play_hit_feedback() -> void:
+	if _hit_flash_tween != null and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+
+	_body_material.emission_enabled = true
+	_body_material.emission = Color(1.0, 0.35, 0.35, 1.0)
+	_body_material.albedo_color = Color(1.0, 0.75, 0.75, 1.0)
+
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.set_parallel(true)
+	_hit_flash_tween.tween_property(
+		_body_material,
+		"albedo_color",
+		_body_base_color,
+		HIT_FLASH_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_hit_flash_tween.tween_property(
+		_body_material,
+		"emission",
+		Color.BLACK,
+		HIT_FLASH_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_hit_flash_tween.finished.connect(_on_hit_flash_finished, CONNECT_ONE_SHOT)
+
+
+func _on_hit_flash_finished() -> void:
+	_body_material.emission_enabled = false
 
 
 func get_current_health() -> int:
