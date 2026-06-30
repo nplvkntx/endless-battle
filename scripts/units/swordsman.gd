@@ -58,14 +58,10 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 func command_attack(target: EnemyDummy) -> void:
 	_attack_target = target
-	_attack_cooldown_timer = 0.0
 	_has_chase_target = false
 
-	if _is_in_attack_range(_attack_target):
-		_stop_and_attack(0.0)
-		return
-
-	_begin_chase()
+	if not _is_in_attack_range(_attack_target):
+		_begin_chase()
 
 
 func command_attack_move(destination: Vector3) -> void:
