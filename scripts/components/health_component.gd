@@ -3,6 +3,7 @@ extends Node
 
 ## Reusable health storage and damage handling for units and buildings.
 
+signal health_changed(current_health: int, max_health: int)
 signal health_depleted
 
 @export var max_health: int = 100
@@ -23,6 +24,7 @@ func take_damage(amount: int) -> void:
 		"Took %d damage. Remaining health: %d / %d"
 		% [amount, current_health, max_health]
 	)
+	health_changed.emit(current_health, max_health)
 
 	if current_health <= 0:
 		health_depleted.emit()
