@@ -517,6 +517,13 @@ shape = SubResource("BoxShape3D_command_center")
 script = ExtResource("19_health_component")
 max_health = 500
 
+[node name="Barracks" parent="." instance=ExtResource("21_barracks")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -3)
+
+[node name="HealthComponent" type="Node" parent="Barracks"]
+script = ExtResource("19_health_component")
+max_health = 300
+
 [node name="EnemyCommandCenter" type="StaticBody3D" parent="." groups=["enemy_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 10)
 script = ExtResource("2_command_center")
