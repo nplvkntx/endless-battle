@@ -12,10 +12,17 @@ const TRAIN_SECONDS: float = 3.0
 const WORKER_SPAWN_OFFSET: Vector3 = Vector3(3.5, -0.75, 0.0)
 const RALLY_MARKER_Y: float = 0.05
 
+enum RallyTargetType {
+	NONE,
+	GROUND,
+	RESOURCE,
+}
+
 var _worker_queue_count: int = 0
 var _is_training: bool = false
-var _has_rally_point: bool = false
+var _rally_target_type: RallyTargetType = RallyTargetType.NONE
 var _rally_point: Vector3 = Vector3.ZERO
+var _rally_resource: GatherableResource = null
 var _rally_marker: MeshInstance3D = null
 
 
@@ -24,9 +31,24 @@ func get_worker_queue_count() -> int:
 
 
 func set_rally_point(ground_position: Vector3) -> void:
-	_has_rally_point = true
+	_rally_target_type = RallyTargetType.GROUND
+	_rally_resource = null
 	_rally_point = Vector3(ground_position.x, global_position.y + WORKER_SPAWN_OFFSET.y, ground_position.z)
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
+
+
+func set_rally_resource(resource: GatherableResource) -> void:
+	if resource == null or not is_instance_valid(resource):
+		return
+
+	_rally_target_type = RallyTargetType.RESOURCE
+	_rally_resource = resource
+	_rally_point = Vector3.ZERO
+
+	var marker_position: Vector3 = resource.global_position
+	marker_position.y = RALLY_MARKER_Y
+	_update_rally_marker(marker_position)
+	resource.play_target_feedback()
 
 
 func _update_rally_marker(marker_position: Vector3) -> void:
@@ -97,5 +119,34 @@ func _spawn_worker() -> void:
 	spawn_parent.add_child(worker)
 	worker.global_position = global_position + WORKER_SPAWN_OFFSET
 
-	if _has_rally_point:
-		worker.set_movement_target(_rally_point)
+	_apply_worker_rally(worker)
+
+
+func _apply_worker_rally(worker: Worker) -> void:
+	if worker == null:
+		return
+
+	match _rally_target_type:
+		RallyTargetType.GROUND:
+			worker.set_movement_target(_rally_point)
+		RallyTargetType.RESOURCE:
+			_assign_worker_to_rally_resource(worker)
+
+
+func _assign_worker_to_rally_resource(worker: Worker) -> void:
+	if not _is_valid_rally_resource(_rally_resource):
+		return
+
+	if _rally_resource is GoldMine:
+		worker.command_gather_gold_mine(_rally_resource as GoldMine)
+	elif _rally_resource is WoodTree:
+		worker.command_gather_tree(_rally_resource as WoodTree)
+
+
+func _is_valid_rally_resource(resource: GatherableResource) -> bool:
+	return (
+		resource != null
+		and is_instance_valid(resource)
+		and not resource.is_queued_for_deletion()
+		and resource.can_gather()
+	)

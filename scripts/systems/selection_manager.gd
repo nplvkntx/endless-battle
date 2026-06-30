@@ -170,9 +170,20 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		return
 
 	if selected_building is CommandCenter:
+		var command_center: CommandCenter = selected_building as CommandCenter
+		var rally_gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
+		if rally_gold_mine != null:
+			command_center.set_rally_resource(rally_gold_mine)
+			return
+
+		var rally_tree: WoodTree = _raycast_tree(camera, screen_position)
+		if rally_tree != null:
+			command_center.set_rally_resource(rally_tree)
+			return
+
 		var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
 		if rally_ground_position.is_finite():
-			(selected_building as CommandCenter).set_rally_point(rally_ground_position)
+			command_center.set_rally_point(rally_ground_position)
 		return
 
 	if selected_building is Barracks:
@@ -510,6 +521,30 @@ func _find_gold_mine_from_collider(node: Node) -> GoldMine:
 	while current:
 		if current is GoldMine:
 			return current as GoldMine
+		current = current.get_parent()
+	return null
+
+
+func _raycast_tree(camera: Camera3D, screen_position: Vector2) -> WoodTree:
+	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
+		return null
+
+	return _find_tree_from_collider(result.collider as Node)
+
+
+func _find_tree_from_collider(node: Node) -> WoodTree:
+	var current: Node = node
+	while current:
+		if current is WoodTree:
+			return current as WoodTree
 		current = current.get_parent()
 	return null
 
