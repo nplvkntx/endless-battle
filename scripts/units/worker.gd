@@ -32,8 +32,19 @@ var _health_bar_fill_material: StandardMaterial3D
 var _gather_state: GatherTripState = GatherTripState.IDLE
 var _gather_source: GatherableResource = null
 var _carried_amount: int = 0
+var _source_approach_candidate_index: int = 0
+var _dropoff_candidate_index: int = 0
 var _build_trip_state: BuildTripState = BuildTripState.IDLE
 var _building_target: Building = null
+var _task_movement_destination: Vector3 = Vector3.ZERO
+var _task_has_saved_destination: bool = false
+var _task_stuck_time: float = 0.0
+var _task_nudge_active: bool = false
+var _task_nudge_time: float = 0.0
+var _task_nudge_direction: Vector3 = Vector3.ZERO
+var _task_nudge_start_position: Vector3 = Vector3.ZERO
+var _task_nudge_side_sign: float = 1.0
+var _task_nudge_side_attempts: int = 0
 
 
 func _ready() -> void:
@@ -111,6 +122,8 @@ func _on_health_depleted() -> void:
 func _cancel_build_trip() -> void:
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
+	_task_has_saved_destination = false
+	_reset_task_corner_nudge()
 
 
 func _configure_faction_groups() -> void:
@@ -131,9 +144,151 @@ func _physics_process(delta: float) -> void:
 	if not _is_alive():
 		return
 
-	super._physics_process(delta)
+	var position_before: Vector3 = global_position
+
+	if _task_nudge_active:
+		_process_task_corner_nudge(delta)
+	else:
+		super._physics_process(delta)
+		if _is_on_task_movement() and has_move_target:
+			_update_task_corner_stuck_detection(delta, position_before)
+
 	_update_gather_trip()
 	_update_build_trip()
+
+
+func set_movement_target(target: Vector3) -> void:
+	super.set_movement_target(target)
+	if _is_on_task_movement():
+		_task_movement_destination = Vector3(target.x, global_position.y, target.z)
+		_task_has_saved_destination = true
+	_reset_task_corner_nudge()
+
+
+func _is_on_task_movement() -> bool:
+	return (
+		_gather_state == GatherTripState.TO_SOURCE
+		or _gather_state == GatherTripState.TO_COMMAND_CENTER
+		or _build_trip_state == BuildTripState.TO_BUILDING
+	)
+
+
+func _reset_task_corner_nudge() -> void:
+	_task_nudge_active = false
+	_task_nudge_time = 0.0
+	_task_stuck_time = 0.0
+	_task_nudge_side_attempts = 0
+	_task_nudge_side_sign = 1.0
+
+
+func _update_task_corner_stuck_detection(delta: float, position_before: Vector3) -> void:
+	var moved: Vector3 = global_position - position_before
+	moved.y = 0.0
+	var expected_move: float = (
+		move_speed * delta * GatheringConfig.TASK_CORNER_NUDGE_STUCK_MOVE_RATIO
+	)
+	var hit_obstacle: bool = get_slide_collision_count() > 0
+	var is_stuck: bool = hit_obstacle and moved.length() < expected_move
+
+	if not is_stuck:
+		_task_stuck_time = 0.0
+		return
+
+	_task_stuck_time += delta
+	if _task_stuck_time >= GatheringConfig.TASK_CORNER_NUDGE_STUCK_DELAY:
+		_begin_task_corner_nudge()
+
+
+func _begin_task_corner_nudge() -> void:
+	if not _task_has_saved_destination:
+		return
+
+	has_move_target = false
+	_task_nudge_side_sign = _choose_task_nudge_side()
+	_task_nudge_direction = _get_task_nudge_direction()
+	_task_nudge_active = true
+	_task_nudge_time = 0.0
+	_task_nudge_start_position = global_position
+	_task_stuck_time = 0.0
+	velocity = Vector3.ZERO
+
+
+func _restart_task_corner_nudge_on_opposite_side() -> void:
+	_task_nudge_side_sign *= -1.0
+	_task_nudge_direction = _get_task_nudge_direction()
+	_task_nudge_time = 0.0
+	_task_nudge_start_position = global_position
+	_task_stuck_time = 0.0
+
+
+func _get_task_nudge_direction() -> Vector3:
+	var to_target: Vector3 = _task_movement_destination - global_position
+	to_target.y = 0.0
+	if to_target.length_squared() < 0.001:
+		to_target = Vector3.FORWARD
+
+	var forward: Vector3 = to_target.normalized()
+	return Vector3(-forward.z, 0.0, forward.x).normalized() * _task_nudge_side_sign
+
+
+func _choose_task_nudge_side() -> float:
+	var to_target: Vector3 = _task_movement_destination - global_position
+	to_target.y = 0.0
+	if to_target.length_squared() < 0.001:
+		return 1.0
+
+	var forward: Vector3 = to_target.normalized()
+	var lateral_right: Vector3 = Vector3(-forward.z, 0.0, forward.x).normalized()
+	var lateral_left: Vector3 = -lateral_right
+
+	if get_slide_collision_count() > 0:
+		var collision_normal: Vector3 = get_slide_collision(0).get_normal()
+		collision_normal.y = 0.0
+		if collision_normal.length_squared() > 0.001:
+			collision_normal = collision_normal.normalized()
+			if lateral_right.dot(collision_normal) >= lateral_left.dot(collision_normal):
+				return -1.0
+			return 1.0
+
+	return 1.0
+
+
+func _process_task_corner_nudge(delta: float) -> void:
+	_task_nudge_time += delta
+	velocity = _task_nudge_direction * move_speed
+	velocity.y = 0.0
+	move_and_slide()
+
+	var nudged_offset: Vector3 = global_position - _task_nudge_start_position
+	nudged_offset.y = 0.0
+	var duration_complete: bool = (
+		_task_nudge_time >= GatheringConfig.TASK_CORNER_NUDGE_DURATION
+	)
+	var distance_complete: bool = (
+		nudged_offset.length() >= GatheringConfig.TASK_CORNER_NUDGE_DISTANCE
+	)
+	if not duration_complete and not distance_complete:
+		return
+
+	if (
+		get_slide_collision_count() > 0
+		and _task_nudge_side_attempts < GatheringConfig.TASK_CORNER_NUDGE_MAX_SIDE_ATTEMPTS - 1
+	):
+		_task_nudge_side_attempts += 1
+		_restart_task_corner_nudge_on_opposite_side()
+		return
+
+	_finish_task_corner_nudge()
+
+
+func _finish_task_corner_nudge() -> void:
+	_task_nudge_active = false
+	_task_nudge_time = 0.0
+	_task_stuck_time = 0.0
+	velocity = Vector3.ZERO
+
+	if _task_has_saved_destination and _is_on_task_movement():
+		super.set_movement_target(_task_movement_destination)
 
 
 func command_gather_gold_mine(gold_mine: GoldMine) -> void:
@@ -156,14 +311,20 @@ func _start_gathering(source: GatherableResource) -> void:
 	cancel_gathering()
 	_gather_source = source
 	_carried_amount = 0
+	_source_approach_candidate_index = 0
+	_dropoff_candidate_index = 0
 	_gather_state = GatherTripState.TO_SOURCE
-	set_movement_target(_compute_approach_position(source))
+	set_movement_target(_compute_resource_approach_position(source))
 
 
 func cancel_gathering() -> void:
 	_gather_state = GatherTripState.IDLE
 	_gather_source = null
 	_carried_amount = 0
+	_source_approach_candidate_index = 0
+	_dropoff_candidate_index = 0
+	_task_has_saved_destination = false
+	_reset_task_corner_nudge()
 
 
 func command_build(building: Building) -> void:
@@ -194,9 +355,13 @@ func _update_gather_trip() -> void:
 
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
+			if _task_nudge_active:
+				return
 			if not has_move_target:
 				_handle_arrived_at_source()
 		GatherTripState.TO_COMMAND_CENTER:
+			if _task_nudge_active:
+				return
 			_handle_command_center_arrival()
 
 
@@ -206,6 +371,8 @@ func _update_build_trip() -> void:
 
 	match _build_trip_state:
 		BuildTripState.TO_BUILDING:
+			if _task_nudge_active:
+				return
 			if not has_move_target:
 				if _is_near_building_target():
 					_begin_construction_wait()
@@ -252,8 +419,15 @@ func _handle_arrived_at_source() -> void:
 		return
 
 	if not _is_near_collision_target(_gather_source):
-		set_movement_target(_compute_approach_position(_gather_source))
+		_source_approach_candidate_index += 1
+		if _source_approach_candidate_index >= GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES:
+			_finish_gathering_idle()
+			return
+
+		set_movement_target(_compute_resource_approach_position(_gather_source))
 		return
+
+	_source_approach_candidate_index = 0
 
 	if not _gather_source.can_gather():
 		_finish_gathering_idle()
@@ -266,24 +440,39 @@ func _handle_arrived_at_source() -> void:
 
 
 func _handle_command_center_arrival() -> void:
-	if not _has_reached_command_center():
-		return
-
-	if _carried_amount > 0:
-		_deposit_carried()
-
-	if _carried_amount > 0:
-		return
-
-	_continue_gather_cycle()
-
-
-func _has_reached_command_center() -> bool:
-	if not has_move_target:
-		return true
-
 	var command_center: CommandCenter = _find_command_center()
-	return _is_near_collision_target(command_center)
+	if command_center == null or not _can_use_command_center_for_deposit(command_center):
+		_finish_gathering_idle()
+		return
+
+	if _is_near_command_center_for_deposit(command_center):
+		if _carried_amount > 0:
+			_deposit_carried()
+
+		if _carried_amount > 0:
+			return
+
+		_dropoff_candidate_index = 0
+		_continue_gather_cycle()
+		return
+
+	if not has_move_target:
+		_dropoff_candidate_index += 1
+		if _dropoff_candidate_index >= GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES:
+			if _carried_amount > 0 and _is_near_command_center_for_deposit(
+				command_center, true
+			):
+				_deposit_carried()
+				if _carried_amount <= 0:
+					_dropoff_candidate_index = 0
+					_continue_gather_cycle()
+				return
+
+			_finish_gathering_idle()
+			return
+
+		set_movement_target(_compute_command_center_dropoff_position(command_center))
+
 
 
 func _should_return_to_command_center_from_source() -> bool:
@@ -332,12 +521,13 @@ func _on_gather_wait_finished() -> void:
 
 func _begin_return_to_command_center() -> void:
 	var command_center: CommandCenter = _find_command_center()
-	if command_center == null:
+	if command_center == null or not _can_use_command_center_for_deposit(command_center):
 		_gather_state = GatherTripState.DONE
 		return
 
+	_dropoff_candidate_index = 0
 	_gather_state = GatherTripState.TO_COMMAND_CENTER
-	set_movement_target(_compute_approach_position(command_center))
+	set_movement_target(_compute_command_center_dropoff_position(command_center))
 
 
 func _deposit_carried() -> void:
@@ -362,7 +552,8 @@ func _continue_gather_cycle() -> void:
 		return
 
 	_gather_state = GatherTripState.TO_SOURCE
-	set_movement_target(_compute_approach_position(_gather_source))
+	_source_approach_candidate_index = 0
+	set_movement_target(_compute_resource_approach_position(_gather_source))
 
 
 func _finish_gathering_idle() -> void:
@@ -432,6 +623,86 @@ func _find_enemy_command_center() -> CommandCenter:
 			return node as CommandCenter
 
 	return null
+
+
+func _is_near_command_center_for_deposit(
+	command_center: CommandCenter, use_extended_reach: bool = false
+) -> bool:
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	var reach_bonus: float = GatheringConfig.COMMAND_CENTER_DEPOSIT_REACH_BONUS
+	if use_extended_reach:
+		reach_bonus += GatheringConfig.COMMAND_CENTER_DEPOSIT_EXTENDED_REACH
+
+	var reach_distance: float = (
+		stopping_distance
+		+ _get_collision_xz_radius(command_center)
+		+ _get_collision_xz_radius(self)
+		+ reach_bonus
+	)
+	var offset: Vector3 = global_position - command_center.global_position
+	offset.y = 0.0
+	return offset.length_squared() <= reach_distance * reach_distance
+
+
+func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
+	if source == null:
+		return global_position
+
+	var target_center: Vector3 = source.global_position
+	var direction: Vector3 = global_position - target_center
+	direction.y = 0.0
+
+	if direction.length_squared() < 0.001:
+		direction = Vector3.FORWARD
+
+	if _source_approach_candidate_index > 0:
+		var angle: float = deg_to_rad(float(_source_approach_candidate_index * 45))
+		direction = direction.normalized().rotated(Vector3.UP, angle)
+
+	var stand_off_distance: float = (
+		_get_collision_xz_radius(source)
+		+ _get_collision_xz_radius(self)
+		+ stopping_distance
+	)
+	var approach_position: Vector3 = target_center + direction.normalized() * stand_off_distance
+	approach_position.y = global_position.y
+	return approach_position
+
+
+func _compute_command_center_dropoff_position(command_center: CommandCenter) -> Vector3:
+	if command_center == null:
+		return global_position
+
+	var target_center: Vector3 = command_center.global_position
+	var direction: Vector3 = Vector3(
+		command_center.worker_spawn_offset.x,
+		0.0,
+		command_center.worker_spawn_offset.z
+	)
+	if direction.length_squared() < 0.001:
+		direction = global_position - target_center
+		direction.y = 0.0
+
+	if direction.length_squared() < 0.001:
+		direction = Vector3.FORWARD
+
+	if _dropoff_candidate_index > 0:
+		var angle: float = deg_to_rad(float(_dropoff_candidate_index * 45))
+		direction = direction.normalized().rotated(Vector3.UP, angle)
+	else:
+		direction = direction.normalized()
+
+	var stand_off_distance: float = (
+		_get_collision_xz_radius(command_center)
+		+ _get_collision_xz_radius(self)
+		+ stopping_distance
+		+ 0.25
+	)
+	var dropoff_position: Vector3 = target_center + direction * stand_off_distance
+	dropoff_position.y = global_position.y
+	return dropoff_position
 
 
 func _compute_approach_position(target: CollisionObject3D) -> Vector3:
