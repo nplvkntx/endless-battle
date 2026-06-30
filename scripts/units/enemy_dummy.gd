@@ -24,7 +24,7 @@ var _body_base_color: Color
 var _body_mesh_rest_position: Vector3
 var _hit_flash_tween: Tween
 var _attack_lunge_tween: Tween
-var _attack_target: Swordsman = null
+var _attack_target: Unit = null
 var _attack_cooldown_timer: float = 0.0
 
 
@@ -74,8 +74,8 @@ func take_damage(amount: float, attacker: Unit = null) -> void:
 	_health_component.take_damage(int(amount))
 	_play_hit_feedback()
 
-	if attacker is Swordsman:
-		_set_attack_target(attacker as Swordsman)
+	if _is_player_combat_unit(attacker):
+		_set_attack_target(attacker)
 
 
 func _play_hit_feedback() -> void:
@@ -124,7 +124,7 @@ func _physics_process(delta: float) -> void:
 	_process_counter_attack(delta)
 
 
-func _set_attack_target(target: Swordsman) -> void:
+func _set_attack_target(target: Unit) -> void:
 	if not _is_valid_attack_target(target):
 		return
 
@@ -150,7 +150,7 @@ func _process_counter_attack(delta: float) -> void:
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
 	print(
-		"EnemyDummy dealt %d damage. Swordsman remaining health: %d"
+		"EnemyDummy dealt %d damage. Target remaining health: %d"
 		% [attack_damage, _attack_target.get_current_health()]
 	)
 	_attack_cooldown_timer = attack_cooldown
@@ -183,8 +183,18 @@ func _play_attack_animation() -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
-func _is_valid_attack_target(target: Swordsman) -> bool:
-	if not is_instance_valid(target):
+func _is_player_combat_unit(unit: Unit) -> bool:
+	if not is_instance_valid(unit):
+		return false
+
+	if unit is EnemyDummy:
+		return false
+
+	return unit.has_method("get_current_health")
+
+
+func _is_valid_attack_target(target: Unit) -> bool:
+	if not _is_player_combat_unit(target):
 		return false
 
 	return target.get_current_health() > 0
