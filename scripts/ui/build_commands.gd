@@ -9,8 +9,10 @@ extends Control
 @onready var _build_barracks_button: Button = $ButtonsRow/BuildBarracksButton
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
 @onready var _train_swordsman_button: Button = $ButtonsRow/TrainSwordsmanButton
+@onready var _train_archer_button: Button = $ButtonsRow/TrainArcherButton
 @onready var _worker_queue_label: Label = $WorkerQueueLabel
 @onready var _swordsman_queue_label: Label = $SwordsmanQueueLabel
+@onready var _archer_queue_label: Label = $ArcherQueueLabel
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
@@ -22,12 +24,15 @@ func _ready() -> void:
 	_build_barracks_button.visible = false
 	_train_worker_button.visible = false
 	_train_swordsman_button.visible = false
+	_train_archer_button.visible = false
 	_worker_queue_label.visible = false
 	_swordsman_queue_label.visible = false
+	_archer_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 	_train_swordsman_button.pressed.connect(_on_train_swordsman_pressed)
+	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -59,9 +64,12 @@ func _on_building_selection_changed(building: Building) -> void:
 		_tracked_barracks = building as Barracks
 		_tracked_barracks.building_state_changed.connect(_on_barracks_state_changed)
 		_tracked_barracks.swordsman_queue_changed.connect(_on_swordsman_queue_changed)
+		_tracked_barracks.archer_queue_changed.connect(_on_archer_queue_changed)
 		_on_swordsman_queue_changed(_tracked_barracks.get_swordsman_queue_count())
+		_on_archer_queue_changed(_tracked_barracks.get_archer_queue_count())
 	else:
 		_swordsman_queue_label.text = "Swordsman Queue: 0"
+		_archer_queue_label.text = "Archer Queue: 0"
 
 	_refresh_command_visibility()
 
@@ -82,19 +90,21 @@ func _refresh_command_visibility() -> void:
 			break
 
 	var selected_building: Building = selection_manager.selected_building
-	var show_train_swordsman: bool = (
+	var show_barracks_training: bool = (
 		selected_building is Barracks
 		and (selected_building as Barracks).building_state == Building.STATE_COMPLETED
 	)
 
-	_selected_barracks = selected_building as Barracks if show_train_swordsman else null
+	_selected_barracks = selected_building as Barracks if show_barracks_training else null
 
 	_build_farm_button.visible = has_worker
 	_build_barracks_button.visible = has_worker
-	_train_swordsman_button.visible = show_train_swordsman
+	_train_swordsman_button.visible = show_barracks_training
+	_train_archer_button.visible = show_barracks_training
 	_train_worker_button.visible = _selected_command_center != null
 	_worker_queue_label.visible = _selected_command_center != null
-	_swordsman_queue_label.visible = show_train_swordsman
+	_swordsman_queue_label.visible = show_barracks_training
+	_archer_queue_label.visible = show_barracks_training
 
 
 func _on_worker_queue_changed(queue_count: int) -> void:
@@ -103,6 +113,10 @@ func _on_worker_queue_changed(queue_count: int) -> void:
 
 func _on_swordsman_queue_changed(queue_count: int) -> void:
 	_swordsman_queue_label.text = "Swordsman Queue: %d" % queue_count
+
+
+func _on_archer_queue_changed(queue_count: int) -> void:
+	_archer_queue_label.text = "Archer Queue: %d" % queue_count
 
 
 func _disconnect_worker_queue_signal() -> void:
@@ -124,6 +138,9 @@ func _disconnect_barracks_signals() -> void:
 
 	if _tracked_barracks.swordsman_queue_changed.is_connected(_on_swordsman_queue_changed):
 		_tracked_barracks.swordsman_queue_changed.disconnect(_on_swordsman_queue_changed)
+
+	if _tracked_barracks.archer_queue_changed.is_connected(_on_archer_queue_changed):
+		_tracked_barracks.archer_queue_changed.disconnect(_on_archer_queue_changed)
 
 	_tracked_barracks = null
 
@@ -156,3 +173,10 @@ func _on_train_swordsman_pressed() -> void:
 		return
 
 	_selected_barracks.try_train_swordsman()
+
+
+func _on_train_archer_pressed() -> void:
+	if _selected_barracks == null:
+		return
+
+	_selected_barracks.try_train_archer()
