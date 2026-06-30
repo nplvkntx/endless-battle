@@ -146,7 +146,7 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		var building_distance: float = _raycast_hit_distance(
 			camera, screen_position, PhysicsLayers.BUILDINGS
 		)
-		if building_distance < unit_distance:
+		if building_distance < unit_distance and _is_selectable_building(building):
 			_set_selected_building(building)
 			_reset_click_tracking()
 			return
@@ -394,6 +394,9 @@ func _clear_selection() -> void:
 
 
 func _set_selected_building(building: Building) -> void:
+	if not _is_selectable_building(building):
+		return
+
 	if selected_building == building:
 		return
 
@@ -548,7 +551,7 @@ func _is_selectable_building(candidate: Variant) -> bool:
 	if not candidate is Building:
 		return false
 
-	return true
+	return CombatTargetValidation.is_player_selectable_building(candidate)
 
 
 func _safe_set_unit_selected(candidate: Variant, selected: bool) -> void:

@@ -38,6 +38,23 @@ static func is_attackable_enemy_building(target: Variant) -> bool:
 	return building_node.is_in_group(ENEMY_BUILDING_GROUP)
 
 
+static func is_player_selectable_building(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+
+	if not target is Building:
+		return false
+
+	if target is GatherableResource:
+		return false
+
+	var building_node: Node = target as Node
+	if building_node.is_queued_for_deletion():
+		return false
+
+	return not building_node.is_in_group(ENEMY_BUILDING_GROUP)
+
+
 static func is_attackable_player_command_center(target: Variant) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
