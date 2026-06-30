@@ -28,6 +28,25 @@ var _build_trip_state: BuildTripState = BuildTripState.IDLE
 var _building_target: Building = null
 
 
+func _ready() -> void:
+	super._ready()
+	_configure_faction_groups()
+
+
+func _configure_faction_groups() -> void:
+	if not is_in_group(&"enemy_workers"):
+		return
+
+	if is_in_group(&"workers"):
+		remove_from_group(&"workers")
+
+	if is_in_group(&"units"):
+		remove_from_group(&"units")
+
+	if not is_in_group(&"enemies"):
+		add_to_group(&"enemies")
+
+
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 	_update_gather_trip()
@@ -227,7 +246,11 @@ func _deposit_carried() -> void:
 	if _gather_source == null:
 		return
 
-	WorkerGathering.deposit(_gather_source.get_resource_id(), _carried_amount)
+	WorkerGathering.deposit(
+		_gather_source.get_resource_id(),
+		_carried_amount,
+		_is_enemy_worker()
+	)
 	_carried_amount = 0
 
 
@@ -251,11 +274,30 @@ func _finish_gathering_idle() -> void:
 
 
 func _find_command_center() -> CommandCenter:
+	if _is_enemy_worker():
+		return _find_enemy_command_center()
+
+	return _find_player_command_center()
+
+
+func _is_enemy_worker() -> bool:
+	return is_in_group(&"enemy_workers")
+
+
+func _find_player_command_center() -> CommandCenter:
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
 		return null
 
 	return scene_root.find_child("CommandCenter", true, false) as CommandCenter
+
+
+func _find_enemy_command_center() -> CommandCenter:
+	for node: Node in get_tree().get_nodes_in_group(&"enemy_command_center"):
+		if node is CommandCenter:
+			return node as CommandCenter
+
+	return null
 
 
 func _compute_approach_position(target: CollisionObject3D) -> Vector3:

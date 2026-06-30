@@ -20,6 +20,7 @@
 [ext_resource type="Script" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
 [ext_resource type="PackedScene" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
 [ext_resource type="Script" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -115,6 +116,11 @@ match_result_label_path = NodePath("../GameUI/MatchResultLabel")
 script = ExtResource("22_enemy_wave_manager")
 player_command_center_path = NodePath("../CommandCenter")
 wave_interval_seconds = 30.0
+
+[node name="EnemyGatherManager" type="Node" parent="."]
+script = ExtResource("23_enemy_gather_manager")
+enemy_command_center_path = NodePath("../EnemyCommandCenter")
+enemy_gold_mine_path = NodePath("../EnemyGoldMine")
 
 [node name="SelectionUI" type="CanvasLayer" parent="."]
 
@@ -539,8 +545,20 @@ shape = SubResource("BoxShape3D_command_center")
 script = ExtResource("19_health_component")
 max_health = 500
 
+[node name="EnemyWorker" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.5, 7)
+
+[node name="EnemyWorker2" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 0.5, 8)
+
+[node name="EnemyWorker3" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 0.5, 7.5)
+
+[node name="EnemyWorker4" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.5, 8.5)
+
 [node name="EnemyBarracks" parent="." groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 1, 12)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1, 15)
 enable_enemy_auto_production = true
 
 [node name="MeshInstance3D" parent="EnemyBarracks" index="0"]
@@ -551,25 +569,25 @@ script = ExtResource("19_health_component")
 max_health = 300
 
 [node name="EnemyGoldMine" parent="." instance=ExtResource("8_gold_mine")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1, 12)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1, 6)
 
 [node name="EnemyTree" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.25, 6)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.25, 4)
 
 [node name="EnemyTree2" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 1.25, 7)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 1.25, 3)
 
 [node name="EnemyTree3" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 1.25, 7)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 4)
 
 [node name="EnemyTree4" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 5)
 
 [node name="EnemyTree5" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 12)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 3)
 
 [node name="EnemyTree6" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.25, 5)
 
 [node name="Farm" parent="." instance=ExtResource("10_farm")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.75, 0)
