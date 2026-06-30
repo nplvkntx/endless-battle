@@ -5,19 +5,24 @@ extends Node
 const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
 const PLACEMENT_TOWER: StringName = &"tower"
+const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
+const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const FARM_GOLD_COST: int = 80
 const FARM_WOOD_COST: int = 20
 const BARRACKS_GOLD_COST: int = 150
 const BARRACKS_WOOD_COST: int = 100
 const TOWER_GOLD_COST: int = 120
 const TOWER_WOOD_COST: int = 80
+const HERO_ALTAR_GOLD_COST: int = 180
+const HERO_ALTAR_WOOD_COST: int = 110
 const FARM_GROUND_Y: float = 0.75
 const BARRACKS_GROUND_Y: float = 1.0
 const TOWER_GROUND_Y: float = 1.5
+const HERO_ALTAR_GROUND_Y: float = 1.25
 const GHOST_ALPHA: float = 0.4
 const CONSTRUCTION_DURATION_ONE_WORKER: float = 3.0
 const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.0
@@ -65,6 +70,10 @@ func _input(event: InputEvent) -> void:
 				start_tower_placement()
 				get_viewport().set_input_as_handled()
 				return
+			if event.keycode == KEY_H:
+				start_hero_altar_placement()
+				get_viewport().set_input_as_handled()
+				return
 		elif event.keycode == KEY_ESCAPE:
 			_cancel_placement()
 			get_viewport().set_input_as_handled()
@@ -93,6 +102,10 @@ func start_barracks_placement() -> void:
 
 func start_tower_placement() -> void:
 	_start_placement(PLACEMENT_TOWER)
+
+
+func start_hero_altar_placement() -> void:
+	_start_placement(PLACEMENT_HERO_ALTAR)
 
 
 func _start_placement(placement_type: StringName) -> void:
@@ -141,6 +154,9 @@ func _place_building() -> void:
 		PLACEMENT_TOWER:
 			gold_cost = TOWER_GOLD_COST
 			wood_cost = TOWER_WOOD_COST
+		PLACEMENT_HERO_ALTAR:
+			gold_cost = HERO_ALTAR_GOLD_COST
+			wood_cost = HERO_ALTAR_WOOD_COST
 		_:
 			return
 
@@ -177,6 +193,8 @@ func _get_building_scene(placement_type: StringName) -> PackedScene:
 			return BARRACKS_SCENE
 		PLACEMENT_TOWER:
 			return TOWER_SCENE
+		PLACEMENT_HERO_ALTAR:
+			return HERO_ALTAR_SCENE
 		_:
 			return null
 
@@ -189,6 +207,8 @@ func _get_ground_y(placement_type: StringName) -> float:
 			return BARRACKS_GROUND_Y
 		PLACEMENT_TOWER:
 			return TOWER_GROUND_Y
+		PLACEMENT_HERO_ALTAR:
+			return HERO_ALTAR_GROUND_Y
 		_:
 			return 0.0
 

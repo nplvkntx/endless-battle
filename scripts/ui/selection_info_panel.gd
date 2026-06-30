@@ -16,9 +16,11 @@ const PORTRAIT_STYLES: Dictionary = {
 	"worker": {"color": Color(0.55, 0.35, 0.15, 1), "label": "W"},
 	"swordsman": {"color": Color(0.35, 0.45, 0.75, 1), "label": "SW"},
 	"archer": {"color": Color(0.15, 0.65, 0.25, 1), "label": "A"},
+	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
 	"barracks": {"color": Color(0.5, 0.32, 0.22, 1), "label": "B"},
+	"hero_altar": {"color": Color(0.55, 0.35, 0.75, 1), "label": "HA"},
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
 	"tower": {"color": Color(0.55, 0.58, 0.62, 1), "label": "T"},
 	"multiple": {"color": Color(0.42, 0.44, 0.48, 1), "label": "++"},
@@ -164,6 +166,8 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 		return {"name": "Swordsman", "type": "Unit", "portrait_key": "swordsman"}
 	if unit is Archer:
 		return {"name": "Archer", "type": "Unit", "portrait_key": "archer"}
+	if unit is Hero:
+		return {"name": "Hero", "type": "Unit", "portrait_key": "hero"}
 	if unit is Worker:
 		return {"name": "Worker", "type": "Unit", "portrait_key": "worker"}
 	if unit is EnemyDummy:
@@ -176,6 +180,8 @@ func _get_building_info(building: Building) -> Dictionary:
 		return {"name": "Town Center", "type": "Building", "portrait_key": "town_center"}
 	if building is Barracks:
 		return {"name": "Barracks", "type": "Building", "portrait_key": "barracks"}
+	if building is HeroAltar:
+		return {"name": "Hero Altar", "type": "Building", "portrait_key": "hero_altar"}
 	if building is Farm:
 		return {"name": "Farm", "type": "Building", "portrait_key": "farm"}
 	if building is Tower:

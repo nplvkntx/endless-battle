@@ -33,7 +33,7 @@ func get_multi_unit_selection_category() -> StringName:
 			continue
 		if unit is Worker:
 			has_worker = true
-		elif unit is Swordsman or unit is Archer:
+		elif unit is Swordsman or unit is Archer or unit is Hero:
 			has_combat = true
 		else:
 			return MULTI_SELECTION_OTHER
@@ -181,6 +181,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(selected_building as Barracks).set_rally_point(barracks_rally_position)
 		return
 
+	if selected_building is HeroAltar:
+		var hero_altar_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if hero_altar_rally_position.is_finite():
+			(selected_building as HeroAltar).set_rally_point(hero_altar_rally_position)
+		return
+
 	if selected_units.is_empty():
 		return
 
@@ -222,6 +228,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(unit as Swordsman).cancel_attack()
 		if unit is Archer:
 			(unit as Archer).cancel_attack()
+		if unit is Hero:
+			(unit as Hero).cancel_attack()
 		unit.set_movement_target(move_targets[index])
 
 
@@ -235,6 +243,8 @@ func _dispatch_attack_command(enemy: EnemyDummy) -> void:
 			(unit as Swordsman).command_attack(enemy)
 		elif unit is Archer:
 			(unit as Archer).command_attack(enemy)
+		elif unit is Hero:
+			(unit as Hero).command_attack(enemy)
 
 
 func _dispatch_attack_move_command(ground_position: Vector3) -> void:
@@ -251,6 +261,8 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 			(unit as Swordsman).command_attack_move(move_targets[index])
 		elif unit is Archer:
 			(unit as Archer).command_attack_move(move_targets[index])
+		elif unit is Hero:
+			(unit as Hero).command_attack_move(move_targets[index])
 		elif unit is Worker:
 			(unit as Worker).cancel_gathering()
 			unit.set_movement_target(move_targets[index])
