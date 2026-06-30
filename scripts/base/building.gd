@@ -29,6 +29,12 @@ var _construction_duration: float = 3.0
 var _construction_timer_active: bool = false
 var _registered_builders: Array[Worker] = []
 var _mesh_instance: MeshInstance3D
+var _feedback_material_ready: bool = false
+var _mesh_material: StandardMaterial3D
+var _base_albedo: Color
+var _base_emission: Color
+var _base_emission_enabled: bool
+var _feedback_tween: Tween
 
 
 func _ready() -> void:
@@ -40,6 +46,49 @@ func _ready() -> void:
 
 func set_selected(selected: bool) -> void:
 	is_selected = selected
+
+
+func play_target_feedback() -> void:
+	_ensure_feedback_material_ready()
+	if _mesh_instance == null or _mesh_material == null:
+		return
+
+	_feedback_tween = TargetFeedback.play(
+		self,
+		_mesh_instance,
+		_mesh_material,
+		_base_albedo,
+		_base_emission,
+		_base_emission_enabled,
+		_feedback_tween
+	)
+
+
+func _ensure_feedback_material_ready() -> void:
+	if _feedback_material_ready:
+		return
+
+	if _mesh_instance == null:
+		return
+
+	var source_material: StandardMaterial3D = (
+		_mesh_instance.get_surface_override_material(0) as StandardMaterial3D
+	)
+	if source_material == null:
+		source_material = _mesh_instance.material_override as StandardMaterial3D
+	if source_material == null:
+		return
+
+	_mesh_material = source_material.duplicate() as StandardMaterial3D
+	if _mesh_instance.get_surface_override_material(0) != null:
+		_mesh_instance.set_surface_override_material(0, _mesh_material)
+	else:
+		_mesh_instance.material_override = _mesh_material
+
+	_base_albedo = _mesh_material.albedo_color
+	_base_emission = _mesh_material.emission
+	_base_emission_enabled = _mesh_material.emission_enabled
+	_feedback_material_ready = true
 
 
 ## Loads runtime state from building_data when the data pipeline is available.

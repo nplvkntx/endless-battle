@@ -258,15 +258,22 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 	InputManager.disarm_attack_move()
 	_purge_invalid_selected_units()
+	var dispatched_to_military := false
 	for unit: Unit in selected_units:
 		if not _is_selectable_unit(unit):
 			continue
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack(target)
+			dispatched_to_military = true
 		elif unit is Archer:
 			(unit as Archer).command_attack(target)
+			dispatched_to_military = true
 		elif unit is Hero:
 			(unit as Hero).command_attack(target)
+			dispatched_to_military = true
+
+	if dispatched_to_military and target is Building:
+		_play_attack_target_feedback(target as Building)
 
 
 func _dispatch_attack_move_command(ground_position: Vector3) -> void:
@@ -311,6 +318,16 @@ func _play_gather_target_feedback(resource: GatherableResource) -> void:
 	if not resource.has_method("play_target_feedback"):
 		return
 	resource.play_target_feedback()
+
+
+func _play_attack_target_feedback(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	if not CombatTargetValidation.is_attackable_enemy_building(building):
+		return
+	if not building.has_method("play_target_feedback"):
+		return
+	building.play_target_feedback()
 
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:
