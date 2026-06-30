@@ -20,6 +20,8 @@ var _health_bar_fill_material: StandardMaterial3D
 var _attack_target: EnemyDummy = null
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
+var _attack_move_destination: Vector3 = Vector3.ZERO
+var _has_attack_move_destination: bool = false
 
 
 func _ready() -> void:
@@ -62,13 +64,29 @@ func command_attack(target: EnemyDummy) -> void:
 	_begin_chase()
 
 
+func command_attack_move(destination: Vector3) -> void:
+	_attack_move_destination = destination
+	_has_attack_move_destination = true
+	cancel_attack()
+	_set_move_destination(destination)
+
+
+func cancel_attack_move() -> void:
+	_has_attack_move_destination = false
+
+
 func cancel_attack() -> void:
 	_attack_target = null
 	_has_chase_target = false
 
 
 func set_movement_target(target: Vector3) -> void:
+	cancel_attack_move()
 	cancel_attack()
+	_set_move_destination(target)
+
+
+func _set_move_destination(target: Vector3) -> void:
 	super.set_movement_target(target)
 
 
@@ -79,14 +97,22 @@ func _physics_process(delta: float) -> void:
 	if _attack_target == null and not has_move_target:
 		_try_auto_attack()
 
+	if _has_attack_move_destination and _attack_target == null:
+		_try_attack_move_engagement()
+
 	if _attack_target != null:
-		if not is_instance_valid(_attack_target):
+		if not is_instance_valid(_attack_target) or _attack_target.get_current_health() <= 0:
 			cancel_attack()
+			_resume_attack_move()
 		else:
 			_process_attack(delta)
 			return
 
 	super._physics_process(delta)
+
+	if _has_attack_move_destination and _attack_target == null and not has_move_target:
+		if _is_at_attack_move_destination():
+			cancel_attack_move()
 
 
 func _try_auto_attack() -> void:
@@ -170,6 +196,7 @@ func get_current_health() -> int:
 
 func _on_health_depleted() -> void:
 	_health_bar.visible = false
+	cancel_attack_move()
 	cancel_attack()
 	has_move_target = false
 	velocity = Vector3.ZERO
@@ -182,8 +209,32 @@ func _begin_chase() -> void:
 	if _attack_target == null or _has_chase_target:
 		return
 
-	super.set_movement_target(_compute_attack_approach_position(_attack_target))
+	_set_move_destination(_compute_attack_approach_position(_attack_target))
 	_has_chase_target = true
+
+
+func _try_attack_move_engagement() -> void:
+	var closest_enemy: EnemyDummy = _find_closest_enemy_in_range()
+	if closest_enemy != null:
+		command_attack(closest_enemy)
+
+
+func _resume_attack_move() -> void:
+	if not _has_attack_move_destination:
+		return
+
+	if _is_at_attack_move_destination():
+		cancel_attack_move()
+		return
+
+	_has_chase_target = false
+	_set_move_destination(_attack_move_destination)
+
+
+func _is_at_attack_move_destination() -> bool:
+	var offset: Vector3 = global_position - _attack_move_destination
+	offset.y = 0.0
+	return offset.length() <= stopping_distance
 
 
 func _is_in_attack_range(target: Unit) -> bool:

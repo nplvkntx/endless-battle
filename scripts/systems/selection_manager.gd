@@ -120,6 +120,13 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		_reset_click_tracking()
 		return
 
+	if InputManager.attack_move_armed and not selected_units.is_empty():
+		var attack_move_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if attack_move_position.is_finite():
+			_dispatch_attack_move_command(attack_move_position)
+			InputManager.disarm_attack_move()
+			return
+
 	_clear_selection()
 	_clear_building_selection()
 	_reset_click_tracking()
@@ -159,6 +166,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if not ground_position.is_finite():
 		return
 
+	if InputManager.attack_move_armed:
+		_dispatch_attack_move_command(ground_position)
+		InputManager.disarm_attack_move()
+		return
+
+	InputManager.disarm_attack_move()
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		selected_units.size()
@@ -175,11 +188,30 @@ func _handle_right_click(screen_position: Vector2) -> void:
 
 
 func _dispatch_attack_command(enemy: EnemyDummy) -> void:
+	InputManager.disarm_attack_move()
 	for unit: Unit in selected_units:
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack(enemy)
 		elif unit is Archer:
 			(unit as Archer).command_attack(enemy)
+
+
+func _dispatch_attack_move_command(ground_position: Vector3) -> void:
+	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+		ground_position,
+		selected_units.size()
+	)
+	for index: int in selected_units.size():
+		var unit: Unit = selected_units[index]
+		if unit is Swordsman:
+			(unit as Swordsman).command_attack_move(move_targets[index])
+		elif unit is Archer:
+			(unit as Archer).command_attack_move(move_targets[index])
+		elif unit is Worker:
+			(unit as Worker).cancel_gathering()
+			unit.set_movement_target(move_targets[index])
+		else:
+			unit.set_movement_target(move_targets[index])
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
