@@ -550,6 +550,27 @@ surface_material_override/0 = SubResource("StandardMaterial3D_enemy_barracks")
 script = ExtResource("19_health_component")
 max_health = 300
 
+[node name="EnemyGoldMine" parent="." instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1, 12)
+
+[node name="EnemyTree" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.25, 6)
+
+[node name="EnemyTree2" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 1.25, 7)
+
+[node name="EnemyTree3" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 1.25, 7)
+
+[node name="EnemyTree4" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 10)
+
+[node name="EnemyTree5" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 12)
+
+[node name="EnemyTree6" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 5)
+
 [node name="Farm" parent="." instance=ExtResource("10_farm")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.75, 0)
 
