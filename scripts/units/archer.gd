@@ -183,7 +183,9 @@ func take_damage(amount: float) -> void:
 	if _health_component.current_health <= 0:
 		return
 
-	_health_component.take_damage(int(amount))
+	var damage_amount := int(amount)
+	_health_component.take_damage(damage_amount)
+	FloatingDamageNumber.spawn(self, damage_amount)
 
 
 func get_current_health() -> int:

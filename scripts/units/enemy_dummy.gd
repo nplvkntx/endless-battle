@@ -71,7 +71,9 @@ func take_damage(amount: float, attacker = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 
-	_health_component.take_damage(int(amount))
+	var damage_amount := int(amount)
+	_health_component.take_damage(damage_amount)
+	FloatingDamageNumber.spawn(self, damage_amount)
 	_play_hit_feedback()
 
 	var valid_attacker: Unit = _resolve_combat_attacker(attacker)
