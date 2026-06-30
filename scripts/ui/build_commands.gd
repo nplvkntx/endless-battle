@@ -33,18 +33,28 @@ extends PanelContainer
 @onready var _hero_status_label: Label = (
 	$MarginContainer/VBoxContainer/HeroAltarPanel/HeroStatusLabel
 )
+@onready var _hero_panel: VBoxContainer = $MarginContainer/VBoxContainer/HeroPanel
+@onready var _ground_slam_cooldown_label: Label = (
+	$MarginContainer/VBoxContainer/HeroPanel/GroundSlamCooldownLabel
+)
+@onready var _ground_slam_button: Button = (
+	$MarginContainer/VBoxContainer/HeroPanel/GroundSlamTrainingRow/GroundSlamButton
+)
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
 var _selected_hero_altar: HeroAltar = null
 var _tracked_barracks: Barracks = null
 var _tracked_hero_altar: HeroAltar = null
+var _tracked_hero: Hero = null
 
 
 func _ready() -> void:
 	visible = false
+	set_process_unhandled_input(true)
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
+	_hero_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
@@ -64,6 +74,7 @@ func _ready() -> void:
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
+	_ground_slam_button.pressed.connect(_on_ground_slam_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -73,6 +84,44 @@ func _ready() -> void:
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
 	_on_building_selection_changed(selection_manager.selected_building)
 	_on_selection_changed(selection_manager.selected_units)
+
+
+func _process(_delta: float) -> void:
+	_update_ground_slam_ui()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not event is InputEventKey:
+		return
+
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+
+	if key_event.keycode != KEY_Q:
+		return
+
+	var hero: Hero = _get_tracked_hero_for_input()
+	if hero == null:
+		return
+
+	hero.try_ground_slam()
+	get_viewport().set_input_as_handled()
+
+
+func _get_tracked_hero_for_input() -> Hero:
+	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+		return _tracked_hero
+
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return null
+
+	var selected_units: Array[Unit] = selection_manager.selected_units
+	if selected_units.size() != 1 or not selected_units[0] is Hero:
+		return null
+
+	return selected_units[0] as Hero
 
 
 func _set_hero_altar_button_labels() -> void:
@@ -88,6 +137,34 @@ func _set_barracks_button_labels() -> void:
 
 func _on_selection_changed(_units: Array[Unit]) -> void:
 	_refresh_command_visibility()
+
+
+func _set_tracked_hero(hero: Hero) -> void:
+	_tracked_hero = hero
+	_update_ground_slam_ui()
+
+
+func _update_ground_slam_ui() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_ground_slam_button.disabled = true
+		_ground_slam_cooldown_label.text = "Ground Slam (Q): Ready"
+		return
+
+	var remaining: float = _tracked_hero.get_ground_slam_cooldown_remaining()
+	if remaining > 0.0:
+		_ground_slam_button.disabled = true
+		_ground_slam_cooldown_label.text = "Ground Slam (Q): %.1fs" % remaining
+	else:
+		_ground_slam_button.disabled = false
+		_ground_slam_cooldown_label.text = "Ground Slam (Q): Ready"
+
+
+func _on_ground_slam_pressed() -> void:
+	if _tracked_hero == null:
+		return
+
+	_tracked_hero.try_ground_slam()
+	_update_ground_slam_ui()
 
 
 func _on_building_selection_changed(building: Building) -> void:
@@ -159,6 +236,7 @@ func _refresh_command_visibility() -> void:
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
 	if nothing_selected:
+		_set_tracked_hero(null)
 		visible = false
 		return
 
@@ -179,16 +257,20 @@ func _refresh_command_visibility() -> void:
 		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
 		if multi_category == &"workers":
 			_apply_worker_command_visibility()
+			_set_tracked_hero(null)
 			visible = true
 			return
 		if multi_category == &"combat":
 			_apply_combat_command_visibility()
+			_set_tracked_hero(null)
 			visible = true
 			return
+		_set_tracked_hero(null)
 		visible = false
 		return
 
 	var single_worker: bool = selected_units.size() == 1 and selected_units[0] is Worker
+	var single_hero: bool = selected_units.size() == 1 and selected_units[0] is Hero
 	var single_combat_unit: bool = (
 		selected_units.size() == 1
 		and (selected_units[0] is Swordsman or selected_units[0] is Archer or selected_units[0] is Hero)
@@ -196,15 +278,23 @@ func _refresh_command_visibility() -> void:
 
 	if single_worker:
 		_apply_worker_command_visibility()
+		_set_tracked_hero(null)
+	elif single_hero:
+		_apply_hero_command_visibility()
+		_set_tracked_hero(selected_units[0] as Hero)
 	elif single_combat_unit:
 		_apply_combat_command_visibility()
+		_set_tracked_hero(null)
 	elif show_town_center_commands:
 		_apply_town_center_command_visibility()
+		_set_tracked_hero(null)
 	else:
 		_apply_hidden_command_buttons()
+		_set_tracked_hero(null)
 
 	_barracks_panel.visible = show_barracks_training
 	_hero_altar_panel.visible = show_hero_altar_training
+	_hero_panel.visible = single_hero
 	_worker_queue_label.visible = show_town_center_commands
 
 	if show_hero_altar_training:
@@ -219,6 +309,20 @@ func _refresh_command_visibility() -> void:
 	)
 
 
+func _apply_hero_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_tower_button.visible = false
+	_build_hero_altar_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = true
+	_buttons_row.visible = true
+	_barracks_panel.visible = false
+	_hero_altar_panel.visible = false
+	_worker_queue_label.visible = false
+	_hero_panel.visible = true
+
+
 func _apply_worker_command_visibility() -> void:
 	_build_farm_button.visible = true
 	_build_barracks_button.visible = true
@@ -230,6 +334,7 @@ func _apply_worker_command_visibility() -> void:
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
 	_worker_queue_label.visible = false
+	_hero_panel.visible = false
 
 
 func _apply_combat_command_visibility() -> void:
@@ -243,6 +348,7 @@ func _apply_combat_command_visibility() -> void:
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
 	_worker_queue_label.visible = false
+	_hero_panel.visible = false
 
 
 func _apply_town_center_command_visibility() -> void:
@@ -255,6 +361,7 @@ func _apply_town_center_command_visibility() -> void:
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
+	_hero_panel.visible = false
 
 
 func _apply_hidden_command_buttons() -> void:
@@ -265,6 +372,7 @@ func _apply_hidden_command_buttons() -> void:
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
+	_hero_panel.visible = false
 
 
 func _on_attack_pressed() -> void:

@@ -202,7 +202,7 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -320.0
-offset_top = -160.0
+offset_top = -210.0
 offset_right = 320.0
 offset_bottom = -12.0
 grow_horizontal = 2
@@ -298,6 +298,31 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 text = "Right-click ground to set rally point for trained Hero"
 horizontal_alignment = 1
+
+[node name="HeroPanel" type="VBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HeroAbilitiesTitleLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Hero Abilities"
+horizontal_alignment = 1
+
+[node name="GroundSlamCooldownLabel" type="Label" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Ground Slam (Q): Ready"
+horizontal_alignment = 1
+
+[node name="GroundSlamTrainingRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="GroundSlamButton" type="Button" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer/HeroPanel/GroundSlamTrainingRow"]
+layout_mode = 2
+text = "Ground Slam (Q)"
 
 [node name="ButtonsRow" type="HBoxContainer" parent="GameUI/SelectionCommandPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2

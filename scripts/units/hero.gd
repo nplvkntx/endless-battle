@@ -11,6 +11,11 @@ const HEALTH_BAR_WIDTH := 1.4
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ATTACK_LUNGE_DISTANCE := 0.4
 const ATTACK_LUNGE_DURATION := 0.12
+const GROUND_SLAM_EFFECT_SCENE: PackedScene = preload("res://scenes/effects/ground_slam_effect.tscn")
+const GROUND_SLAM_COOLDOWN := 9.0
+const GROUND_SLAM_RADIUS := 3.5
+const GROUND_SLAM_DAMAGE := 35
+const GROUND_SLAM_BODY_PULSE_DURATION := 0.18
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -25,6 +30,8 @@ var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
+var _ground_slam_cooldown_timer: float = 0.0
+var _ground_slam_pulse_tween: Tween
 
 
 func _ready() -> void:
@@ -97,9 +104,99 @@ func _set_move_destination(target: Vector3) -> void:
 	super.set_movement_target(target)
 
 
+func get_ground_slam_cooldown_remaining() -> float:
+	return maxf(_ground_slam_cooldown_timer, 0.0)
+
+
+func can_use_ground_slam() -> bool:
+	return _health_component.current_health > 0 and _ground_slam_cooldown_timer <= 0.0
+
+
+func try_ground_slam() -> bool:
+	if not can_use_ground_slam():
+		if _ground_slam_cooldown_timer > 0.0:
+			ResourceManager.show_feedback(
+				"Ground Slam on cooldown (%.0fs)" % ceilf(_ground_slam_cooldown_timer)
+			)
+		return false
+
+	_execute_ground_slam()
+	return true
+
+
+func _execute_ground_slam() -> void:
+	_ground_slam_cooldown_timer = GROUND_SLAM_COOLDOWN
+	_damage_enemies_in_ground_slam_radius()
+	_spawn_ground_slam_effect()
+	_play_ground_slam_pulse()
+	MeleeHitSound.play_at(self, global_position)
+
+
+func _damage_enemies_in_ground_slam_radius() -> void:
+	for node: Node in get_tree().get_nodes_in_group("enemies"):
+		if not node is EnemyDummy:
+			continue
+
+		var enemy: EnemyDummy = node as EnemyDummy
+		if not CombatTargetValidation.is_valid_combat_target(enemy):
+			continue
+
+		if _horizontal_distance_to(enemy) > GROUND_SLAM_RADIUS:
+			continue
+
+		enemy.take_damage(float(GROUND_SLAM_DAMAGE), self)
+
+
+func _spawn_ground_slam_effect() -> void:
+	var effect: GroundSlamEffect = GROUND_SLAM_EFFECT_SCENE.instantiate() as GroundSlamEffect
+	if effect == null:
+		return
+
+	effect.radius = GROUND_SLAM_RADIUS
+
+	var spawn_parent: Node = get_parent()
+	if spawn_parent == null:
+		spawn_parent = get_tree().current_scene
+	if spawn_parent == null:
+		effect.queue_free()
+		return
+
+	spawn_parent.add_child(effect)
+	effect.global_position = Vector3(global_position.x, 0.03, global_position.z)
+
+
+func _play_ground_slam_pulse() -> void:
+	if _ground_slam_pulse_tween != null and _ground_slam_pulse_tween.is_valid():
+		_ground_slam_pulse_tween.kill()
+
+	_body_mesh.scale = Vector3.ONE
+	_ground_slam_pulse_tween = create_tween()
+	_ground_slam_pulse_tween.tween_property(
+		_body_mesh,
+		"scale",
+		Vector3(1.25, 0.75, 1.25),
+		GROUND_SLAM_BODY_PULSE_DURATION * 0.45
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_ground_slam_pulse_tween.tween_property(
+		_body_mesh,
+		"scale",
+		Vector3.ONE,
+		GROUND_SLAM_BODY_PULSE_DURATION * 0.55
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+func _tick_ground_slam_cooldown(delta: float) -> void:
+	if _ground_slam_cooldown_timer <= 0.0:
+		return
+
+	_ground_slam_cooldown_timer = maxf(_ground_slam_cooldown_timer - delta, 0.0)
+
+
 func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
+
+	_tick_ground_slam_cooldown(delta)
 
 	if _attack_target == null and not has_move_target:
 		_try_auto_attack()
