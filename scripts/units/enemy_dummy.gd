@@ -49,13 +49,15 @@ func _on_health_changed(current_health: int, max_health: int) -> void:
 
 
 func _update_health_bar(current_health: int, max_health: int) -> void:
-	if max_health <= 0:
-		return
-
-	var ratio: float = float(current_health) / float(max_health)
-	_health_bar_fill.scale.x = ratio
-	_health_bar_fill.position.x = HEALTH_BAR_WIDTH * (ratio - 1.0) * 0.5
-	_health_bar_fill_material.albedo_color = _get_health_bar_color(ratio)
+	HealthBarDisplay.update_world_bar(
+		_health_bar,
+		_health_bar_fill,
+		_health_bar_fill_material,
+		current_health,
+		max_health,
+		HEALTH_BAR_WIDTH,
+		HEALTH_BAR_HUE_GREEN
+	)
 
 
 func _get_health_bar_color(ratio: float) -> Color:
