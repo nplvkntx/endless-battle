@@ -127,6 +127,7 @@ func _start_placement(placement_type: StringName) -> void:
 	_active_placement = placement_type
 	_placement_ghost = scene.instantiate()
 	_disable_ghost_collision(_placement_ghost)
+	_disable_ghost_processing(_placement_ghost)
 	_apply_ghost_material(_placement_ghost)
 	buildings_parent.add_child(_placement_ghost)
 
@@ -265,6 +266,11 @@ func _disable_ghost_collision(ghost: Node3D) -> void:
 	var collision_shape: CollisionShape3D = ghost.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collision_shape:
 		collision_shape.disabled = true
+
+
+func _disable_ghost_processing(ghost: Node3D) -> void:
+	ghost.set_process(false)
+	ghost.set_physics_process(false)
 
 
 func _apply_ghost_material(ghost: Node3D) -> void:

@@ -8,7 +8,7 @@ const HIT_DISTANCE := 0.45
 const MAX_LIFETIME := 5.0
 
 var _target: Node3D = null
-var _attacker: Unit = null
+var _attacker: Node = null
 var _damage: float = 0.0
 var _direction: Vector3 = Vector3.ZERO
 var _max_travel: float = 0.0
@@ -16,13 +16,13 @@ var _traveled: float = 0.0
 var _lifetime: float = 0.0
 
 
-func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Unit = null) -> void:
+func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Node = null) -> void:
 	_attacker = attacker
 	_target = target
 	_damage = damage
 	global_position = spawn_position
 
-	if not CombatTargetValidation.is_valid_combat_target(_target):
+	if not _is_target_alive():
 		queue_free()
 		return
 
@@ -62,17 +62,24 @@ func _physics_process(delta: float) -> void:
 
 
 func _is_target_alive() -> bool:
+	if _target == null or not is_instance_valid(_target):
+		_target = null
+		return false
+
 	return CombatTargetValidation.is_valid_combat_target(_target)
 
 
 func _is_close_to_target() -> bool:
+	if not _is_target_alive():
+		return false
+
 	var offset: Vector3 = global_position - _target.global_position
 	offset.y = 0.0
 	return offset.length() <= HIT_DISTANCE
 
 
 func _apply_hit() -> void:
-	if not CombatTargetValidation.is_valid_combat_target(_target):
+	if not _is_target_alive():
 		return
 
 	if not CombatTargetValidation.apply_damage_to_target(_target, _damage, _attacker):

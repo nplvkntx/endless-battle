@@ -15,8 +15,6 @@ var _attack_cooldown_timer: float = 0.0
 
 func _ready() -> void:
 	super._ready()
-	if building_state.is_empty():
-		set_completed()
 
 
 func _physics_process(delta: float) -> void:
@@ -29,6 +27,9 @@ func _physics_process(delta: float) -> void:
 
 	var target: Node3D = _find_closest_enemy_in_range()
 	if target == null:
+		return
+
+	if not CombatTargetValidation.is_within_attack_range(self, target, attack_range):
 		return
 
 	_fire_projectile(target)
@@ -45,7 +46,10 @@ func _fire_projectile(target: Node3D) -> void:
 	if not CombatTargetValidation.is_tower_attack_target(target):
 		return
 
+	if not CombatTargetValidation.is_within_attack_range(self, target, attack_range):
+		return
+
 	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, PROJECTILE_SPAWN_HEIGHT, 0.0)
-	arrow.launch(target, float(attack_damage), spawn_position)
+	arrow.launch(target, float(attack_damage), spawn_position, self)

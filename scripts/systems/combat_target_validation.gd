@@ -63,6 +63,9 @@ static func is_tower_attack_target(target: Variant) -> bool:
 	if target is Building:
 		return false
 
+	if target is EnemyDummy and (target as EnemyDummy).exclude_from_tower_auto_target:
+		return false
+
 	return true
 
 

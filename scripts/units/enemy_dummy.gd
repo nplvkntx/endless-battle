@@ -6,6 +6,7 @@ extends Unit
 @export var attack_damage: int = 8
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 1.2
+@export var exclude_from_tower_auto_target: bool = false
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
