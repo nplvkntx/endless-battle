@@ -30,9 +30,14 @@ func _input(event: InputEvent) -> void:
 	if tree == null:
 		return
 
+	var dispatched_to_worker := false
 	for unit: Node in selected_units:
 		if unit is Worker:
 			(unit as Worker).command_gather_tree(tree)
+			dispatched_to_worker = true
+
+	if dispatched_to_worker and tree != null and is_instance_valid(tree) and tree.has_method("play_target_feedback"):
+		tree.play_target_feedback()
 
 	get_viewport().set_input_as_handled()
 

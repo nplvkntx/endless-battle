@@ -283,11 +283,23 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
 	_purge_invalid_selected_units()
+	var dispatched_to_worker := false
 	for unit: Unit in selected_units:
 		if not _is_selectable_unit(unit):
 			continue
 		if unit is Worker:
 			(unit as Worker).command_gather_gold_mine(gold_mine)
+			dispatched_to_worker = true
+	if dispatched_to_worker:
+		_play_gather_target_feedback(gold_mine)
+
+
+func _play_gather_target_feedback(resource: GatherableResource) -> void:
+	if resource == null or not is_instance_valid(resource):
+		return
+	if not resource.has_method("play_target_feedback"):
+		return
+	resource.play_target_feedback()
 
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:
