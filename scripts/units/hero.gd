@@ -8,6 +8,7 @@ extends Unit
 @export var attack_cooldown: float = 0.85
 @export var max_mana: int = 100
 @export var ground_slam_mana_cost: int = 40
+@export var mana_regen_rate: float = 5.0
 
 signal mana_changed(current_mana: int, max_mana: int)
 
@@ -37,6 +38,7 @@ var _has_attack_move_destination: bool = false
 var _ground_slam_cooldown_timer: float = 0.0
 var _ground_slam_pulse_tween: Tween
 var current_mana: int = 0
+var _mana_regen_accumulator: float = 0.0
 
 
 func _ready() -> void:
@@ -211,11 +213,34 @@ func _tick_ground_slam_cooldown(delta: float) -> void:
 	_ground_slam_cooldown_timer = maxf(_ground_slam_cooldown_timer - delta, 0.0)
 
 
+func _tick_mana_regen(delta: float) -> void:
+	if current_mana >= max_mana:
+		_mana_regen_accumulator = 0.0
+		return
+
+	if mana_regen_rate <= 0.0:
+		return
+
+	_mana_regen_accumulator += mana_regen_rate * delta
+	if _mana_regen_accumulator < 1.0:
+		return
+
+	var mana_gain: int = int(_mana_regen_accumulator)
+	_mana_regen_accumulator -= float(mana_gain)
+	var new_mana: int = mini(max_mana, current_mana + mana_gain)
+	if new_mana == current_mana:
+		return
+
+	current_mana = new_mana
+	mana_changed.emit(current_mana, max_mana)
+
+
 func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
 
 	_tick_ground_slam_cooldown(delta)
+	_tick_mana_regen(delta)
 
 	if _attack_target == null and not has_move_target:
 		_try_auto_attack()
