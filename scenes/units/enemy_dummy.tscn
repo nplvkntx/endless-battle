@@ -1,6 +1,7 @@
-[gd_scene format=3 uid="uid://dxexovy4airee"]
+[gd_scene load_steps=8 format=3 uid="uid://dxexovy4airee"]
 
 [ext_resource type="Script" path="res://scripts/units/enemy_dummy.gd" id="1_enemy_dummy"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy"]
 albedo_color = Color(0.45, 0.1, 0.55, 1)
@@ -38,3 +39,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_selection")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_body")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 100

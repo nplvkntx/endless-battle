@@ -3,6 +3,16 @@ extends Unit
 
 ## Stationary enemy placeholder for future combat features.
 
+@onready var _health_component: HealthComponent = $HealthComponent
+
+
+func take_damage(amount: float) -> void:
+	_health_component.take_damage(int(amount))
+
+
+func get_current_health() -> int:
+	return _health_component.current_health
+
 
 func set_movement_target(_target: Vector3) -> void:
 	pass

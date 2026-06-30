@@ -145,6 +145,11 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if selected_units.is_empty():
 		return
 
+	var clicked_unit: Unit = _raycast_unit(camera, screen_position)
+	if clicked_unit is EnemyDummy:
+		_dispatch_attack_command(clicked_unit as EnemyDummy)
+		return
+
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
 	if gold_mine != null:
 		_dispatch_gold_mine_gather_command(gold_mine)
@@ -162,7 +167,15 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		var unit: Unit = selected_units[index]
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
+		if unit is Swordsman:
+			(unit as Swordsman).cancel_attack()
 		unit.set_movement_target(move_targets[index])
+
+
+func _dispatch_attack_command(enemy: EnemyDummy) -> void:
+	for unit: Unit in selected_units:
+		if unit is Swordsman:
+			(unit as Swordsman).command_attack(enemy)
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
