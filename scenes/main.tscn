@@ -91,9 +91,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -240.0
-offset_top = -120.0
-offset_right = 240.0
+offset_left = -320.0
+offset_top = -160.0
+offset_right = 320.0
 offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -106,16 +106,48 @@ theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Worker Queue: 0"
 horizontal_alignment = 1
 
-[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/BuildCommands"]
+[node name="BarracksPanel" type="VBoxContainer" parent="GameUI/BuildCommands"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BarracksTitleLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+text = "Barracks"
+horizontal_alignment = 1
+
+[node name="BarracksQueuesRow" type="HBoxContainer" parent="GameUI/BuildCommands/BarracksPanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="SwordsmanQueueLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Swordsman Queue: 0"
-horizontal_alignment = 1
 
-[node name="ArcherQueueLabel" type="Label" parent="GameUI/BuildCommands"]
+[node name="ArcherQueueLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel/BarracksQueuesRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Archer Queue: 0"
+
+[node name="BarracksTrainingRow" type="HBoxContainer" parent="GameUI/BuildCommands/BarracksPanel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="TrainSwordsmanButton" type="Button" parent="GameUI/BuildCommands/BarracksPanel/BarracksTrainingRow"]
+layout_mode = 2
+text = "Train Swordsman"
+
+[node name="TrainArcherButton" type="Button" parent="GameUI/BuildCommands/BarracksPanel/BarracksTrainingRow"]
+layout_mode = 2
+text = "Train Archer"
+
+[node name="RallyPointHintLabel" type="Label" parent="GameUI/BuildCommands/BarracksPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+text = "Right-click ground to set rally point for trained units"
 horizontal_alignment = 1
 
 [node name="ButtonsRow" type="HBoxContainer" parent="GameUI/BuildCommands"]
@@ -137,14 +169,6 @@ text = "Build Tower"
 [node name="TrainWorkerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
 layout_mode = 2
 text = "Train Worker"
-
-[node name="TrainSwordsmanButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
-layout_mode = 2
-text = "Train Swordsman"
-
-[node name="TrainArcherButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
-layout_mode = 2
-text = "Train Archer"
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")

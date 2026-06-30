@@ -24,6 +24,7 @@ var _last_click_time_msec: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	_purge_invalid_selection()
 	if event is InputEventMouseButton:
 		var mouse_button := event as InputEventMouseButton
 		match mouse_button.button_index:
@@ -152,6 +153,10 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if selected_units.is_empty():
 		return
 
+	_purge_invalid_selected_units()
+	if selected_units.is_empty():
+		return
+
 	var clicked_unit: Unit = _raycast_unit(camera, screen_position)
 	if clicked_unit is EnemyDummy:
 		_dispatch_attack_command(clicked_unit as EnemyDummy)
@@ -178,6 +183,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	)
 	for index: int in selected_units.size():
 		var unit: Unit = selected_units[index]
+		if not _is_selectable_unit(unit):
+			continue
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
 		if unit is Swordsman:
@@ -189,7 +196,10 @@ func _handle_right_click(screen_position: Vector2) -> void:
 
 func _dispatch_attack_command(enemy: EnemyDummy) -> void:
 	InputManager.disarm_attack_move()
+	_purge_invalid_selected_units()
 	for unit: Unit in selected_units:
+		if not _is_selectable_unit(unit):
+			continue
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack(enemy)
 		elif unit is Archer:
@@ -197,12 +207,15 @@ func _dispatch_attack_command(enemy: EnemyDummy) -> void:
 
 
 func _dispatch_attack_move_command(ground_position: Vector3) -> void:
+	_purge_invalid_selected_units()
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		selected_units.size()
 	)
 	for index: int in selected_units.size():
 		var unit: Unit = selected_units[index]
+		if not _is_selectable_unit(unit):
+			continue
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack_move(move_targets[index])
 		elif unit is Archer:
@@ -215,7 +228,10 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
+	_purge_invalid_selected_units()
 	for unit: Unit in selected_units:
+		if not _is_selectable_unit(unit):
+			continue
 		if unit is Worker:
 			(unit as Worker).command_gather_gold_mine(gold_mine)
 
@@ -253,11 +269,10 @@ func _set_selected_units(units: Array[Unit]) -> void:
 
 	_clear_building_selection_without_signal()
 	_clear_selection_without_signal()
-	selected_units = units.duplicate()
+	selected_units = _filter_selectable_units(units.duplicate())
 	for unit: Unit in selected_units:
-		unit.set_selected(true)
-		if not unit.died.is_connected(_on_unit_died):
-			unit.died.connect(_on_unit_died)
+		_safe_set_unit_selected(unit, true)
+		_track_unit_selection(unit)
 	selection_changed.emit(selected_units)
 
 
@@ -276,8 +291,8 @@ func _set_selected_building(building: Building) -> void:
 	_clear_selection_without_signal()
 	_clear_building_selection_without_signal()
 	selected_building = building
-	if selected_building != null:
-		selected_building.set_selected(true)
+	if _is_selectable_building(selected_building):
+		_safe_set_building_selected(selected_building, true)
 	building_selection_changed.emit(selected_building)
 	selection_changed.emit(selected_units)
 
@@ -291,18 +306,17 @@ func _clear_building_selection() -> void:
 
 
 func _clear_building_selection_without_signal() -> void:
-	if selected_building == null:
+	if not _is_selectable_building(selected_building):
+		selected_building = null
 		return
 
-	selected_building.set_selected(false)
+	_safe_set_building_selected(selected_building, false)
 	selected_building = null
 
 
 func _clear_selection_without_signal() -> void:
 	for unit: Unit in selected_units:
-		unit.set_selected(false)
-		if unit.died.is_connected(_on_unit_died):
-			unit.died.disconnect(_on_unit_died)
+		_untrack_unit_selection(unit)
 	selected_units.clear()
 
 
@@ -310,12 +324,101 @@ func _on_unit_died(unit: Unit) -> void:
 	if not selected_units.has(unit):
 		return
 
+	_remove_unit_from_selection(unit, true)
+
+
+func _on_selected_unit_tree_exiting(unit: Unit) -> void:
+	if not selected_units.has(unit):
+		return
+
+	_remove_unit_from_selection(unit, true)
+
+
+func _remove_unit_from_selection(unit: Unit, emit_signal: bool) -> void:
+	_untrack_unit_selection(unit)
+	selected_units.erase(unit)
+
+	if emit_signal:
+		selection_changed.emit(selected_units)
+
+
+func _track_unit_selection(unit: Unit) -> void:
+	if not _is_selectable_unit(unit):
+		return
+
+	if not unit.died.is_connected(_on_unit_died):
+		unit.died.connect(_on_unit_died)
+
+	var tree_exiting_callable := _on_selected_unit_tree_exiting.bind(unit)
+	if not unit.tree_exiting.is_connected(tree_exiting_callable):
+		unit.tree_exiting.connect(tree_exiting_callable, CONNECT_ONE_SHOT)
+
+
+func _untrack_unit_selection(unit: Unit) -> void:
+	if not is_instance_valid(unit):
+		return
+
+	_safe_set_unit_selected(unit, false)
+
 	if unit.died.is_connected(_on_unit_died):
 		unit.died.disconnect(_on_unit_died)
 
-	unit.set_selected(false)
-	selected_units.erase(unit)
-	selection_changed.emit(selected_units)
+
+func _purge_invalid_selection() -> void:
+	_purge_invalid_selected_units()
+	_purge_invalid_selected_building()
+
+
+func _purge_invalid_selected_units() -> void:
+	var removed_any: bool = false
+
+	for index: int in range(selected_units.size() - 1, -1, -1):
+		if _is_selectable_unit(selected_units[index]):
+			continue
+
+		selected_units.remove_at(index)
+		removed_any = true
+
+	if removed_any:
+		selection_changed.emit(selected_units)
+
+
+func _purge_invalid_selected_building() -> void:
+	if _is_selectable_building(selected_building):
+		return
+
+	selected_building = null
+	building_selection_changed.emit(null)
+
+
+func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
+	var selectable_units: Array[Unit] = []
+	for unit: Unit in units:
+		if _is_selectable_unit(unit):
+			selectable_units.append(unit)
+	return selectable_units
+
+
+func _is_selectable_unit(unit: Unit) -> bool:
+	return unit != null and is_instance_valid(unit)
+
+
+func _is_selectable_building(building: Building) -> bool:
+	return building != null and is_instance_valid(building)
+
+
+func _safe_set_unit_selected(unit: Unit, selected: bool) -> void:
+	if not _is_selectable_unit(unit):
+		return
+
+	unit.set_selected(selected)
+
+
+func _safe_set_building_selected(building: Building, selected: bool) -> void:
+	if not _is_selectable_building(building):
+		return
+
+	building.set_selected(selected)
 
 
 func _arrays_match(current: Array[Unit], next: Array[Unit]) -> bool:
@@ -369,7 +472,7 @@ func _find_gold_mine_from_collider(node: Node) -> GoldMine:
 
 
 func _is_double_click(unit: Unit) -> bool:
-	if _last_clicked_unit == null or _last_click_time_msec < 0:
+	if not _is_selectable_unit(_last_clicked_unit) or _last_click_time_msec < 0:
 		return false
 
 	if not _is_same_unit_type(_last_clicked_unit, unit):
@@ -390,6 +493,9 @@ func _reset_click_tracking() -> void:
 
 
 func _is_same_unit_type(first_unit: Unit, second_unit: Unit) -> bool:
+	if not _is_selectable_unit(first_unit) or not _is_selectable_unit(second_unit):
+		return false
+
 	var first_type: StringName = _get_unit_selection_group(first_unit)
 	var second_type: StringName = _get_unit_selection_group(second_unit)
 	if first_type.is_empty() or second_type.is_empty():

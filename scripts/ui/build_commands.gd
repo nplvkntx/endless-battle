@@ -5,15 +5,16 @@ extends Control
 @export var selection_manager_path: NodePath = "../../SelectionManager"
 @export var build_manager_path: NodePath = "../../BuildManager"
 
+@onready var _barracks_panel: VBoxContainer = $BarracksPanel
 @onready var _build_farm_button: Button = $ButtonsRow/BuildFarmButton
 @onready var _build_barracks_button: Button = $ButtonsRow/BuildBarracksButton
 @onready var _build_tower_button: Button = $ButtonsRow/BuildTowerButton
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
-@onready var _train_swordsman_button: Button = $ButtonsRow/TrainSwordsmanButton
-@onready var _train_archer_button: Button = $ButtonsRow/TrainArcherButton
+@onready var _train_swordsman_button: Button = $BarracksPanel/BarracksTrainingRow/TrainSwordsmanButton
+@onready var _train_archer_button: Button = $BarracksPanel/BarracksTrainingRow/TrainArcherButton
 @onready var _worker_queue_label: Label = $WorkerQueueLabel
-@onready var _swordsman_queue_label: Label = $SwordsmanQueueLabel
-@onready var _archer_queue_label: Label = $ArcherQueueLabel
+@onready var _swordsman_queue_label: Label = $BarracksPanel/BarracksQueuesRow/SwordsmanQueueLabel
+@onready var _archer_queue_label: Label = $BarracksPanel/BarracksQueuesRow/ArcherQueueLabel
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
@@ -21,15 +22,13 @@ var _tracked_barracks: Barracks = null
 
 
 func _ready() -> void:
+	_barracks_panel.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_train_worker_button.visible = false
-	_train_swordsman_button.visible = false
-	_train_archer_button.visible = false
 	_worker_queue_label.visible = false
-	_swordsman_queue_label.visible = false
-	_archer_queue_label.visible = false
+	_set_barracks_button_labels()
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
@@ -45,6 +44,12 @@ func _ready() -> void:
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
 	_on_building_selection_changed(selection_manager.selected_building)
 	_on_selection_changed(selection_manager.selected_units)
+
+
+func _set_barracks_button_labels() -> void:
+	var cost_label := " (%d Gold, %d Food)" % [Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST]
+	_train_swordsman_button.text = "Train Swordsman%s" % cost_label
+	_train_archer_button.text = "Train Archer%s" % cost_label
 
 
 func _on_selection_changed(_units: Array[Unit]) -> void:
@@ -100,15 +105,12 @@ func _refresh_command_visibility() -> void:
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
 
+	_barracks_panel.visible = show_barracks_training
 	_build_farm_button.visible = has_worker
 	_build_barracks_button.visible = has_worker
 	_build_tower_button.visible = has_worker
-	_train_swordsman_button.visible = show_barracks_training
-	_train_archer_button.visible = show_barracks_training
 	_train_worker_button.visible = _selected_command_center != null
 	_worker_queue_label.visible = _selected_command_center != null
-	_swordsman_queue_label.visible = show_barracks_training
-	_archer_queue_label.visible = show_barracks_training
 
 
 func _on_worker_queue_changed(queue_count: int) -> void:
