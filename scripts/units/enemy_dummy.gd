@@ -6,6 +6,16 @@ extends Unit
 @onready var _health_component: HealthComponent = $HealthComponent
 
 
+func _ready() -> void:
+	super._ready()
+	_health_component.health_depleted.connect(_on_health_depleted)
+
+
+func _on_health_depleted() -> void:
+	print("EnemyDummy died")
+	queue_free()
+
+
 func take_damage(amount: float) -> void:
 	_health_component.take_damage(int(amount))
 
