@@ -9,8 +9,9 @@ const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
-const WORKER_SPAWN_OFFSET: Vector3 = Vector3(3.5, -0.75, 0.0)
 const RALLY_MARKER_Y: float = 0.05
+
+@export var worker_spawn_offset: Vector3 = Vector3(3.5, -0.75, 0.0)
 
 enum RallyTargetType {
 	NONE,
@@ -60,7 +61,7 @@ func get_worker_queue_count() -> int:
 func set_rally_point(ground_position: Vector3) -> void:
 	_rally_target_type = RallyTargetType.GROUND
 	_rally_resource = null
-	_rally_point = Vector3(ground_position.x, global_position.y + WORKER_SPAWN_OFFSET.y, ground_position.z)
+	_rally_point = Vector3(ground_position.x, global_position.y + worker_spawn_offset.y, ground_position.z)
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
 
 
@@ -144,7 +145,7 @@ func _spawn_worker() -> void:
 		return
 
 	spawn_parent.add_child(worker)
-	worker.global_position = global_position + WORKER_SPAWN_OFFSET
+	worker.global_position = global_position + worker_spawn_offset
 
 	_apply_worker_rally(worker)
 

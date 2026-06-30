@@ -11,12 +11,13 @@ const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
 const TRAIN_GOLD_COST: int = 100
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 4.0
-const SWORDSMAN_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
-const ARCHER_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 2.0)
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
+
+@export var swordsman_spawn_offset: Vector3 = Vector3(3.0, -0.5, 0.0)
+@export var archer_spawn_offset: Vector3 = Vector3(3.0, -0.5, 2.0)
 
 @export var enable_enemy_auto_production: bool = false
 
@@ -86,7 +87,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 		return
 
 	spawn_parent.add_child(unit)
-	unit.global_position = global_position + SWORDSMAN_SPAWN_OFFSET
+	unit.global_position = global_position + swordsman_spawn_offset
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
@@ -139,7 +140,7 @@ func set_rally_point(ground_position: Vector3) -> void:
 	_has_rally_point = true
 	_rally_point = Vector3(
 		ground_position.x,
-		global_position.y + SWORDSMAN_SPAWN_OFFSET.y,
+		global_position.y + swordsman_spawn_offset.y,
 		ground_position.z
 	)
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
@@ -208,7 +209,7 @@ func _on_swordsman_training_finished() -> void:
 
 
 func _spawn_swordsman() -> void:
-	_spawn_trained_unit(SWORDSMAN_SCENE, SWORDSMAN_SPAWN_OFFSET)
+	_spawn_trained_unit(SWORDSMAN_SCENE, swordsman_spawn_offset)
 
 
 func try_train_archer() -> void:
@@ -251,7 +252,7 @@ func _on_archer_training_finished() -> void:
 
 
 func _spawn_archer() -> void:
-	_spawn_trained_unit(ARCHER_SCENE, ARCHER_SPAWN_OFFSET)
+	_spawn_trained_unit(ARCHER_SCENE, archer_spawn_offset)
 
 
 func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
