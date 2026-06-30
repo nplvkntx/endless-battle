@@ -7,8 +7,14 @@ extends Unit
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 1.0
 
-@onready var _health_component: HealthComponent = $HealthComponent
+const HEALTH_BAR_WIDTH := 1.2
+const HEALTH_BAR_HUE_GREEN := 0.333333
 
+@onready var _health_component: HealthComponent = $HealthComponent
+@onready var _health_bar: Node3D = $HealthBar
+@onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
+
+var _health_bar_fill_material: StandardMaterial3D
 var _attack_target: EnemyDummy = null
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
@@ -16,7 +22,30 @@ var _has_chase_target: bool = false
 
 func _ready() -> void:
 	super._ready()
+	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
+	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
+	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
+	_update_health_bar(_health_component.current_health, _health_component.max_health)
+
+
+func _on_health_changed(current_health: int, max_health: int) -> void:
+	_update_health_bar(current_health, max_health)
+
+
+func _update_health_bar(current_health: int, max_health: int) -> void:
+	if max_health <= 0:
+		return
+
+	var ratio: float = float(current_health) / float(max_health)
+	_health_bar_fill.scale.x = ratio
+	_health_bar_fill.position.x = HEALTH_BAR_WIDTH * (ratio - 1.0) * 0.5
+	_health_bar_fill_material.albedo_color = _get_health_bar_color(ratio)
+
+
+func _get_health_bar_color(ratio: float) -> Color:
+	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
 func command_attack(target: EnemyDummy) -> void:
@@ -130,6 +159,7 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
+	_health_bar.visible = false
 	cancel_attack()
 	has_move_target = false
 	velocity = Vector3.ZERO
