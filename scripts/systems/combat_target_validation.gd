@@ -137,6 +137,35 @@ static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bo
 	return is_player_unit_attack_target(target)
 
 
+static func is_hero_unit_ability_target(attacker: Node, target: Variant) -> bool:
+	if attacker == null:
+		return false
+	if target == null:
+		return false
+	if not is_instance_valid(target):
+		return false
+
+	var target_node: Node = target as Node
+	if target_node != null and target_node.is_queued_for_deletion():
+		return false
+
+	if not is_attack_target_for_attacker(attacker, target):
+		return false
+
+	if target is Building:
+		return false
+
+	return target is Node3D
+
+
+static func get_hostile_search_groups() -> Array[StringName]:
+	return [&"enemies", ENEMY_BUILDING_GROUP, NEUTRAL_CREEP_GROUP]
+
+
+static func find_closest_attack_target_for_attacker(attacker: Node3D) -> Node3D:
+	return find_closest_player_unit_attack_target_in_range(attacker, INF)
+
+
 static func is_tower_attack_target(target: Variant) -> bool:
 	if not is_valid_combat_target(target):
 		return false
@@ -261,7 +290,7 @@ static func find_closest_player_unit_attack_target_in_range(
 
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
-	var groups_to_search: Array[StringName] = [&"enemies", ENEMY_BUILDING_GROUP, NEUTRAL_CREEP_GROUP]
+	var groups_to_search: Array[StringName] = get_hostile_search_groups()
 
 	for group_name: StringName in groups_to_search:
 		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):

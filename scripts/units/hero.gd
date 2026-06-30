@@ -62,12 +62,12 @@ var _body_material: StandardMaterial3D
 var _body_base_color: Color
 var _divine_protection_glow_tween: Tween
 var _power_strike_cooldown_timer: float = 0.0
-var _power_strike_target: EnemyDummy = null
+var _power_strike_target: Node3D = null
 var _has_power_strike_pending: bool = false
 var _power_strike_lunge_tween: Tween
 var _power_strike_flash_tween: Tween
 var _execute_cooldown_timer: float = 0.0
-var _execute_target: EnemyDummy = null
+var _execute_target: Node3D = null
 var _has_execute_pending: bool = false
 var _execute_lunge_tween: Tween
 
@@ -293,7 +293,7 @@ func try_power_strike() -> bool:
 		ResourceManager.show_feedback("Not enough mana")
 		return false
 
-	var target: EnemyDummy = _resolve_power_strike_target()
+	var target: Node3D = _resolve_ability_target()
 	if target == null:
 		ResourceManager.show_feedback("No valid target")
 		return false
@@ -302,31 +302,20 @@ func try_power_strike() -> bool:
 	return true
 
 
-func _resolve_power_strike_target() -> EnemyDummy:
-	return _resolve_ability_enemy_dummy_target()
+func _resolve_power_strike_target() -> Node3D:
+	return _resolve_ability_target()
 
 
-func _find_closest_enemy_any_range() -> EnemyDummy:
-	var closest_enemy: EnemyDummy = null
-	var closest_distance: float = INF
+func _resolve_ability_target() -> Node3D:
+	_sanitize_attack_target()
 
-	for node: Node in get_tree().get_nodes_in_group("enemies"):
-		if not node is EnemyDummy:
-			continue
+	if CombatTargetValidation.is_hero_unit_ability_target(self, _attack_target):
+		return _attack_target
 
-		var enemy: EnemyDummy = node as EnemyDummy
-		if not CombatTargetValidation.is_valid_combat_target(enemy):
-			continue
-
-		var distance: float = _horizontal_distance_to(enemy)
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_enemy = enemy
-
-	return closest_enemy
+	return CombatTargetValidation.find_closest_attack_target_for_attacker(self)
 
 
-func _begin_power_strike(target: EnemyDummy) -> void:
+func _begin_power_strike(target: Node3D) -> void:
 	cancel_attack_move()
 	cancel_attack()
 	_power_strike_target = target
@@ -367,7 +356,7 @@ func _execute_power_strike() -> void:
 		_cancel_power_strike()
 		return
 
-	var target: EnemyDummy = _power_strike_target
+	var target: Node3D = _power_strike_target
 	has_move_target = false
 	velocity = Vector3.ZERO
 	current_mana = maxi(0, current_mana - power_strike_mana_cost)
@@ -375,7 +364,11 @@ func _execute_power_strike() -> void:
 	_power_strike_cooldown_timer = POWER_STRIKE_COOLDOWN
 	_cancel_power_strike()
 
-	target.take_damage(float(POWER_STRIKE_DAMAGE), self)
+	if not CombatTargetValidation.apply_damage_to_target(
+		target, float(POWER_STRIKE_DAMAGE), self
+	):
+		return
+
 	FloatingDamageNumber.spawn(target, POWER_STRIKE_DAMAGE, true)
 	MeleeHitSound.play_at(self, target.global_position)
 	_play_power_strike_lunge(target)
@@ -383,7 +376,7 @@ func _execute_power_strike() -> void:
 	_spawn_power_strike_hit_effect(target)
 
 
-func _play_power_strike_lunge(target: EnemyDummy) -> void:
+func _play_power_strike_lunge(target: Node3D) -> void:
 	if _power_strike_lunge_tween != null and _power_strike_lunge_tween.is_valid():
 		_power_strike_lunge_tween.kill()
 
@@ -449,7 +442,7 @@ func _on_power_strike_flash_finished() -> void:
 	_body_material.albedo_color = _body_base_color
 
 
-func _spawn_power_strike_hit_effect(target: EnemyDummy) -> void:
+func _spawn_power_strike_hit_effect(target: Node3D) -> void:
 	var effect: PowerStrikeHitEffect = POWER_STRIKE_HIT_EFFECT_SCENE.instantiate() as PowerStrikeHitEffect
 	if effect == null:
 		return
@@ -498,7 +491,7 @@ func try_execute() -> bool:
 		ResourceManager.show_feedback("Not enough mana")
 		return false
 
-	var target: EnemyDummy = _resolve_execute_target()
+	var target: Node3D = _resolve_execute_target()
 	if target == null:
 		ResourceManager.show_feedback("No valid target")
 		return false
@@ -507,24 +500,11 @@ func try_execute() -> bool:
 	return true
 
 
-func _resolve_execute_target() -> EnemyDummy:
-	return _resolve_ability_enemy_dummy_target()
+func _resolve_execute_target() -> Node3D:
+	return _resolve_ability_target()
 
 
-func _resolve_ability_enemy_dummy_target() -> EnemyDummy:
-	_sanitize_attack_target()
-
-	if (
-		_attack_target != null
-		and _attack_target is EnemyDummy
-		and CombatTargetValidation.is_valid_combat_target(_attack_target)
-	):
-		return _attack_target as EnemyDummy
-
-	return _find_closest_enemy_any_range()
-
-
-func _begin_execute(target: EnemyDummy) -> void:
+func _begin_execute(target: Node3D) -> void:
 	cancel_attack_move()
 	cancel_attack()
 	_cancel_power_strike()
@@ -553,7 +533,7 @@ func _process_execute(_delta: float) -> void:
 		_set_move_destination(_compute_attack_approach_position(_execute_target))
 
 
-func _get_target_health_ratio(target: EnemyDummy) -> float:
+func _get_target_health_ratio(target: Node3D) -> float:
 	var health_component: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null or health_component.max_health <= 0:
 		return 1.0
@@ -561,7 +541,7 @@ func _get_target_health_ratio(target: EnemyDummy) -> float:
 	return float(health_component.current_health) / float(health_component.max_health)
 
 
-func _can_execute_target(target: EnemyDummy) -> bool:
+func _can_execute_target(target: Node3D) -> bool:
 	return _get_target_health_ratio(target) < EXECUTE_HEALTH_THRESHOLD
 
 
@@ -578,7 +558,7 @@ func _perform_execute() -> void:
 		_cancel_execute()
 		return
 
-	var target: EnemyDummy = _execute_target
+	var target: Node3D = _execute_target
 	if not _can_execute_target(target):
 		ResourceManager.show_feedback("Target health too high")
 		_cancel_execute()
@@ -597,20 +577,21 @@ func _perform_execute() -> void:
 	_spawn_execute_hit_effect(target)
 
 
-func _kill_execute_target(target: EnemyDummy) -> void:
-	var health_component: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
-	if health_component == null:
+func _kill_execute_target(target: Node3D) -> void:
+	if not CombatTargetValidation.is_valid_combat_target(target):
 		return
 
-	var remaining_health: int = health_component.current_health
+	var remaining_health: int = CombatTargetValidation.get_target_current_health(target)
 	if remaining_health <= 0:
 		return
 
-	target.take_damage(float(remaining_health), self)
+	if not CombatTargetValidation.apply_damage_to_target(target, float(remaining_health), self):
+		return
+
 	FloatingDamageNumber.spawn(target, remaining_health, true)
 
 
-func _play_execute_lunge(target: EnemyDummy) -> void:
+func _play_execute_lunge(target: Node3D) -> void:
 	if _execute_lunge_tween != null and _execute_lunge_tween.is_valid():
 		_execute_lunge_tween.kill()
 
@@ -639,7 +620,7 @@ func _play_execute_lunge(target: EnemyDummy) -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
-func _spawn_execute_hit_effect(target: EnemyDummy) -> void:
+func _spawn_execute_hit_effect(target: Node3D) -> void:
 	var effect: ExecuteHitEffect = EXECUTE_HIT_EFFECT_SCENE.instantiate() as ExecuteHitEffect
 	if effect == null:
 		return
@@ -710,18 +691,20 @@ func _execute_ground_slam() -> void:
 
 
 func _damage_enemies_in_ground_slam_radius() -> void:
-	for node: Node in get_tree().get_nodes_in_group("enemies"):
-		if not node is EnemyDummy:
-			continue
+	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not node is Node3D:
+				continue
+			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
+				continue
 
-		var enemy: EnemyDummy = node as EnemyDummy
-		if not CombatTargetValidation.is_valid_combat_target(enemy):
-			continue
+			var target: Node3D = node as Node3D
+			if _horizontal_distance_to(target) > GROUND_SLAM_RADIUS:
+				continue
 
-		if _horizontal_distance_to(enemy) > GROUND_SLAM_RADIUS:
-			continue
-
-		enemy.take_damage(float(GROUND_SLAM_DAMAGE), self)
+			CombatTargetValidation.apply_damage_to_target(
+				target, float(GROUND_SLAM_DAMAGE), self
+			)
 
 
 func _spawn_ground_slam_effect() -> void:
