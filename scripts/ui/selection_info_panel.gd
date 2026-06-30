@@ -9,8 +9,10 @@ extends PanelContainer
 @onready var _name_label: Label = $MarginContainer/HBoxContainer/InfoVBox/NameLabel
 @onready var _type_label: Label = $MarginContainer/HBoxContainer/InfoVBox/TypeLabel
 @onready var _health_label: Label = $MarginContainer/HBoxContainer/InfoVBox/HealthLabel
+@onready var _mana_label: Label = $MarginContainer/HBoxContainer/InfoVBox/ManaLabel
 
 var _tracked_health_component: HealthComponent = null
+var _tracked_hero: Hero = null
 
 const PORTRAIT_STYLES: Dictionary = {
 	"worker": {"color": Color(0.55, 0.35, 0.15, 1), "label": "W"},
@@ -50,6 +52,7 @@ func _on_building_selection_changed(_building: Building) -> void:
 
 func _refresh_panel() -> void:
 	_clear_health_tracking()
+	_clear_mana_tracking()
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -78,6 +81,7 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	visible = true
 	_type_label.visible = false
 	_health_label.visible = false
+	_mana_label.visible = false
 
 	match category:
 		&"workers":
@@ -106,6 +110,7 @@ func _show_unit_info(unit: Unit) -> void:
 	_type_label.text = "Type: %s" % info.type
 	_type_label.visible = true
 	_configure_health_display(unit)
+	_configure_mana_display(unit)
 
 
 func _show_building_info(building: Building) -> void:
@@ -120,6 +125,7 @@ func _show_building_info(building: Building) -> void:
 	_type_label.text = "Type: %s" % info.type
 	_type_label.visible = true
 	_configure_health_display(building)
+	_mana_label.visible = false
 
 
 func _set_portrait(portrait_key: String) -> void:
@@ -138,6 +144,37 @@ func _configure_health_display(node: Node) -> void:
 	health_component.health_changed.connect(_on_tracked_health_changed)
 	_update_health_label(health_component.current_health, health_component.max_health)
 	_health_label.visible = true
+
+
+func _configure_mana_display(unit: Unit) -> void:
+	_clear_mana_tracking()
+
+	if not unit is Hero:
+		_mana_label.visible = false
+		return
+
+	_tracked_hero = unit as Hero
+	_tracked_hero.mana_changed.connect(_on_tracked_mana_changed)
+	_update_mana_label(_tracked_hero.current_mana, _tracked_hero.max_mana)
+	_mana_label.visible = true
+
+
+func _update_mana_label(current_mana: int, max_mana: int) -> void:
+	_mana_label.text = "Mana: %d / %d" % [current_mana, max_mana]
+
+
+func _on_tracked_mana_changed(current_mana: int, max_mana: int) -> void:
+	_update_mana_label(current_mana, max_mana)
+
+
+func _clear_mana_tracking() -> void:
+	if (
+		_tracked_hero != null
+		and is_instance_valid(_tracked_hero)
+		and _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed)
+	):
+		_tracked_hero.mana_changed.disconnect(_on_tracked_mana_changed)
+	_tracked_hero = null
 
 
 func _update_health_label(current_health: int, max_health: int) -> void:

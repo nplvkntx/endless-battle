@@ -6,6 +6,10 @@ extends Unit
 @export var attack_damage: int = 18
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 0.85
+@export var max_mana: int = 100
+@export var ground_slam_mana_cost: int = 40
+
+signal mana_changed(current_mana: int, max_mana: int)
 
 const HEALTH_BAR_WIDTH := 1.4
 const HEALTH_BAR_HUE_GREEN := 0.333333
@@ -32,6 +36,7 @@ var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
 var _ground_slam_cooldown_timer: float = 0.0
 var _ground_slam_pulse_tween: Tween
+var current_mana: int = 0
 
 
 func _ready() -> void:
@@ -43,6 +48,8 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
+	current_mana = max_mana
+	mana_changed.emit(current_mana, max_mana)
 	died.connect(_notify_hero_altars_of_death)
 
 
@@ -109,15 +116,25 @@ func get_ground_slam_cooldown_remaining() -> float:
 
 
 func can_use_ground_slam() -> bool:
-	return _health_component.current_health > 0 and _ground_slam_cooldown_timer <= 0.0
+	return (
+		_health_component.current_health > 0
+		and _ground_slam_cooldown_timer <= 0.0
+		and current_mana >= ground_slam_mana_cost
+	)
 
 
 func try_ground_slam() -> bool:
-	if not can_use_ground_slam():
-		if _ground_slam_cooldown_timer > 0.0:
-			ResourceManager.show_feedback(
-				"Ground Slam on cooldown (%.0fs)" % ceilf(_ground_slam_cooldown_timer)
-			)
+	if _health_component.current_health <= 0:
+		return false
+
+	if _ground_slam_cooldown_timer > 0.0:
+		ResourceManager.show_feedback(
+			"Ground Slam on cooldown (%.0fs)" % ceilf(_ground_slam_cooldown_timer)
+		)
+		return false
+
+	if current_mana < ground_slam_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
 		return false
 
 	_execute_ground_slam()
@@ -125,6 +142,8 @@ func try_ground_slam() -> bool:
 
 
 func _execute_ground_slam() -> void:
+	current_mana = maxi(0, current_mana - ground_slam_mana_cost)
+	mana_changed.emit(current_mana, max_mana)
 	_ground_slam_cooldown_timer = GROUND_SLAM_COOLDOWN
 	_damage_enemies_in_ground_slam_radius()
 	_spawn_ground_slam_effect()

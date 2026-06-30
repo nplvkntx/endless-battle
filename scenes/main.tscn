@@ -134,7 +134,7 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
-offset_top = -128.0
+offset_top = -148.0
 offset_right = 280.0
 offset_bottom = -12.0
 grow_vertical = 0
@@ -193,6 +193,12 @@ text = "Type: Unit"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Health: 100 / 100"
+
+[node name="ManaLabel" type="Label" parent="GameUI/SelectionInfoPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
+text = "Mana: 100 / 100"
 
 [node name="SelectionCommandPanel" type="PanelContainer" parent="GameUI"]
 visible = false
