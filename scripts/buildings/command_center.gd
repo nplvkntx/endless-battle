@@ -53,12 +53,10 @@ func _update_rally_marker(marker_position: Vector3) -> void:
 
 
 func try_train_worker() -> void:
-	if not ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
-		return
-
 	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
+		ResourceManager.show_feedback(
+			ResourceManager.get_training_failure_message(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+		)
 		return
 
 	_worker_queue_count += 1

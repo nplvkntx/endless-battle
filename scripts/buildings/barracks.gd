@@ -69,12 +69,10 @@ func try_train_swordsman() -> void:
 	if building_state != STATE_COMPLETED:
 		return
 
-	if not ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
-		return
-
 	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
+		ResourceManager.show_feedback(
+			ResourceManager.get_training_failure_message(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+		)
 		return
 
 	_swordsman_queue_count += 1
@@ -114,12 +112,10 @@ func try_train_archer() -> void:
 	if building_state != STATE_COMPLETED:
 		return
 
-	if not ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
-		return
-
 	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		print("Not enough resources")
+		ResourceManager.show_feedback(
+			ResourceManager.get_training_failure_message(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+		)
 		return
 
 	_archer_queue_count += 1

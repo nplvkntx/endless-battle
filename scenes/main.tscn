@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_resource_bar"]
 [ext_resource type="Script" path="res://scripts/ui/build_commands.gd" id="12_build_commands"]
 [ext_resource type="Script" path="res://scripts/ui/selection_info_panel.gd" id="16_selection_info_panel"]
+[ext_resource type="Script" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
 [ext_resource type="PackedScene" path="res://scenes/units/worker.tscn" id="4_worker"]
 [ext_resource type="PackedScene" path="res://scenes/resources/gold_mine.tscn" id="8_gold_mine"]
 [ext_resource type="PackedScene" path="res://scenes/resources/tree.tscn" id="9_tree"]
@@ -29,6 +30,18 @@ content_margin_left = 12.0
 content_margin_top = 8.0
 content_margin_right = 12.0
 content_margin_bottom = 8.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
+bg_color = Color(0.12, 0.08, 0.08, 0.9)
+content_margin_left = 16.0
+content_margin_top = 8.0
+content_margin_right = 16.0
+content_margin_bottom = 8.0
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.35, 0.3, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_portrait_frame"]
 bg_color = Color(0.04, 0.04, 0.06, 1)
@@ -98,6 +111,24 @@ theme_override_constants/margin_bottom = 0
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 text = "Gold: 500 | Wood: 300 | Food: 5/15"
+
+[node name="FeedbackMessage" type="Label" parent="GameUI"]
+visible = false
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -180.0
+offset_top = 44.0
+offset_right = 180.0
+offset_bottom = 76.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.78, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleBoxFlat_feedback_message")
+text = "Population cap reached"
+horizontal_alignment = 1
+vertical_alignment = 1
+script = ExtResource("17_feedback_message")
 
 [node name="SelectionInfoPanel" type="PanelContainer" parent="GameUI"]
 anchors_preset = 2

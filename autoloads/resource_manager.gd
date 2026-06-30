@@ -6,6 +6,7 @@ extends Node
 signal resources_changed()
 signal food_changed(current: int, maximum: int)
 signal resource_spent_failed(resource_id: StringName, amount: float)
+signal feedback_message(message: String)
 
 const STARTING_GOLD: int = 500
 const STARTING_WOOD: int = 300
@@ -57,6 +58,20 @@ func can_afford(gold_cost: int, wood_cost: int) -> bool:
 
 func has_food_supply(additional: int) -> bool:
 	return food_current + additional <= food_max
+
+
+func get_training_failure_message(gold_cost: int, food_cost: int) -> String:
+	if not has_food_supply(food_cost):
+		return "Population cap reached"
+	if gold < gold_cost:
+		return "Not enough gold"
+	return ""
+
+
+func show_feedback(message: String) -> void:
+	if message.is_empty():
+		return
+	feedback_message.emit(message)
 
 
 func can_afford_worker_training(gold_cost: int, food_cost: int) -> bool:
