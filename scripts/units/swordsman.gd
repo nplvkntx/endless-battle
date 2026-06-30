@@ -200,9 +200,11 @@ func _play_attack_animation() -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
-func take_damage(amount: float, _attacker: Node = null) -> void:
+func take_damage(amount: float, attacker: Node = null) -> void:
 	if _health_component.current_health <= 0:
 		return
+
+	CombatKillTracker.record_attacker(self, attacker)
 
 	var damage_amount := int(amount)
 	_health_component.take_damage(damage_amount)
@@ -214,6 +216,7 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
+	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()

@@ -63,6 +63,7 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 
 func _on_health_depleted() -> void:
+	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
 	print("EnemyDummy died")
 	queue_free()
@@ -71,6 +72,8 @@ func _on_health_depleted() -> void:
 func take_damage(amount: float, attacker: Node = null) -> void:
 	if _health_component.current_health <= 0:
 		return
+
+	CombatKillTracker.record_attacker(self, attacker)
 
 	var damage_amount := int(amount)
 	_health_component.take_damage(damage_amount)

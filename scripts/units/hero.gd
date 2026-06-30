@@ -1,5 +1,4 @@
-class_name Hero
-extends Unit
+extends Hero
 
 ## Player hero unit — melee combat, stronger than a Swordsman.
 
@@ -95,6 +94,11 @@ func _notify_hero_altars_of_death(_unit: Unit) -> void:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is HeroAltar:
 			(node as HeroAltar).hero_altar_state_changed.emit()
+
+
+func _restore_mana_on_level_up() -> void:
+	current_mana = max_mana
+	mana_changed.emit(current_mana, max_mana)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:

@@ -13,29 +13,44 @@ const NORMAL_FONT_SIZE := 48
 const EMPHASIZED_FONT_SIZE := 72
 
 static func spawn(target: Node3D, amount: int, emphasized: bool = false) -> void:
+	spawn_message(target, str(amount), Color(1.0, 0.85, 0.2, 1.0), emphasized)
+
+
+static func spawn_message(
+	target: Node3D,
+	message: String,
+	message_color: Color = Color(1.0, 0.85, 0.2, 1.0),
+	emphasized: bool = false
+) -> void:
 	if not is_instance_valid(target):
 		return
 
 	var instance: FloatingDamageNumber = SCENE.instantiate() as FloatingDamageNumber
 	target.get_tree().current_scene.add_child(instance)
 	instance._play(
-		str(amount),
+		message,
 		target.global_position + Vector3(0.0, SPAWN_HEIGHT, 0.0),
-		emphasized
+		emphasized,
+		message_color
 	)
 
 
-func _play(damage_text: String, start_position: Vector3, emphasized: bool = false) -> void:
+func _play(
+	damage_text: String,
+	start_position: Vector3,
+	emphasized: bool = false,
+	message_color: Color = Color(1.0, 0.85, 0.2, 1.0)
+) -> void:
 	text = damage_text
 	global_position = start_position
 	modulate.a = 1.0
 
 	if emphasized:
 		font_size = EMPHASIZED_FONT_SIZE
-		modulate = Color(1.0, 0.55, 0.15, 1.0)
+		modulate = message_color.lightened(0.15)
 	else:
 		font_size = NORMAL_FONT_SIZE
-		modulate = Color(1.0, 0.85, 0.2, 1.0)
+		modulate = message_color
 
 	var float_distance: float = EMPHASIZED_FLOAT_DISTANCE if emphasized else FLOAT_DISTANCE
 	var duration: float = EMPHASIZED_DURATION if emphasized else DURATION
