@@ -16,7 +16,7 @@ var _traveled: float = 0.0
 var _lifetime: float = 0.0
 
 
-func launch(attacker: Unit, target: EnemyDummy, damage: float, spawn_position: Vector3) -> void:
+func launch(target: EnemyDummy, damage: float, spawn_position: Vector3, attacker: Unit = null) -> void:
 	_attacker = attacker
 	_target = target
 	_damage = damage
@@ -78,6 +78,6 @@ func _apply_hit() -> void:
 	_target.take_damage(_damage, _attacker)
 	MeleeHitSound.play_at(self, _target.global_position)
 	print(
-		"Archer arrow dealt %d damage. Target remaining health: %d"
+		"Projectile dealt %d damage. Target remaining health: %d"
 		% [int(_damage), _target.get_current_health()]
 	)

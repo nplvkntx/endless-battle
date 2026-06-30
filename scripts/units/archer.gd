@@ -180,7 +180,7 @@ func _fire_arrow() -> void:
 	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, ARROW_SPAWN_HEIGHT, 0.0)
-	arrow.launch(self, _attack_target, float(attack_damage), spawn_position)
+	arrow.launch(_attack_target, float(attack_damage), spawn_position, self)
 
 
 func take_damage(amount: float) -> void:

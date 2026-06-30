@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://bxwg81vxxo5na"]
+
+[ext_resource type="Script" path="res://scripts/buildings/tower.gd" id="1_tower"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tower"]
+albedo_color = Color(0.45, 0.45, 0.5, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tower"]
+size = Vector3(2, 3, 2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tower"]
+size = Vector3(2, 3, 2)
+
+[node name="Tower" type="StaticBody3D" groups=["buildings"]]
+script = ExtResource("1_tower")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_tower")
+surface_material_override/0 = SubResource("StandardMaterial3D_tower")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_tower")
