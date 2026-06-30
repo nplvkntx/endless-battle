@@ -389,6 +389,11 @@ custom_minimum_size = Vector2(110, 28)
 layout_mode = 2
 text = "Build Hero Altar"
 
+[node name="BuildCommandCenterButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Town Center"
+
 [node name="TrainWorkerButton" type="Button" parent="GameUI/CommandBar/HBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
 custom_minimum_size = Vector2(110, 28)
 layout_mode = 2

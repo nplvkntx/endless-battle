@@ -1,0 +1,28 @@
+[gd_scene format=3 uid="uid://dthkmgtnrowg3"]
+
+[ext_resource type="Script" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
+albedo_color = Color(0.75, 0.4, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
+size = Vector3(4, 2.5, 4)
+
+[node name="CommandCenter" type="StaticBody3D" groups=["buildings", "player_command_center"]]
+script = ExtResource("1_command_center")
+worker_spawn_offset = Vector3(0, -0.75, -3.5)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_command_center")
+surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_command_center")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 500

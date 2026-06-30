@@ -14,6 +14,9 @@ extends PanelContainer
 @onready var _build_barracks_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBarracksButton
 @onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
 @onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
+@onready var _build_command_center_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildCommandCenterButton
+)
 @onready var _train_worker_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/TrainWorkerButton
 @onready var _attack_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/AttackButton
 @onready var _train_swordsman_button: Button = (
@@ -94,6 +97,7 @@ func _ready() -> void:
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_worker_queue_label.visible = false
@@ -103,6 +107,7 @@ func _ready() -> void:
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
 	_build_hero_altar_button.pressed.connect(_on_build_hero_altar_pressed)
+	_build_command_center_button.pressed.connect(_on_build_command_center_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 	_train_swordsman_button.pressed.connect(_on_train_swordsman_pressed)
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
@@ -611,6 +616,7 @@ func _apply_hero_command_visibility() -> void:
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = true
 	_buttons_row.visible = true
@@ -627,6 +633,7 @@ func _apply_worker_command_visibility() -> void:
 	_build_barracks_button.visible = true
 	_build_tower_button.visible = true
 	_build_hero_altar_button.visible = true
+	_build_command_center_button.visible = true
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = true
@@ -643,6 +650,7 @@ func _apply_combat_command_visibility() -> void:
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = true
 	_buttons_row.visible = true
@@ -659,6 +667,7 @@ func _apply_town_center_command_visibility() -> void:
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
 	_train_worker_button.visible = true
 	_attack_button.visible = false
 	_buttons_row.visible = true
@@ -674,6 +683,7 @@ func _apply_hidden_command_buttons() -> void:
 	_build_barracks_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
@@ -767,6 +777,14 @@ func _on_build_hero_altar_pressed() -> void:
 		return
 
 	build_manager.start_hero_altar_placement()
+
+
+func _on_build_command_center_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_command_center_placement()
 
 
 func _on_train_worker_pressed() -> void:

@@ -285,11 +285,47 @@ func _is_enemy_worker() -> bool:
 
 
 func _find_player_command_center() -> CommandCenter:
-	var scene_root: Node = get_tree().current_scene
-	if scene_root == null:
-		return null
+	var closest_command_center: CommandCenter = null
+	var closest_distance_squared: float = INF
 
-	return scene_root.find_child("CommandCenter", true, false) as CommandCenter
+	for node: Node in get_tree().get_nodes_in_group(&"player_command_center"):
+		if not node is CommandCenter:
+			continue
+
+		var command_center: CommandCenter = node as CommandCenter
+		if not _can_use_command_center_for_deposit(command_center):
+			continue
+
+		var offset: Vector3 = global_position - command_center.global_position
+		offset.y = 0.0
+		var distance_squared: float = offset.length_squared()
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_command_center = command_center
+
+	return closest_command_center
+
+
+func _can_use_command_center_for_deposit(command_center: CommandCenter) -> bool:
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	if command_center.is_queued_for_deletion():
+		return false
+
+	if (
+		command_center.building_state == Building.STATE_UNDER_CONSTRUCTION
+		or command_center.building_state == Building.STATE_CONSTRUCTING
+	):
+		return false
+
+	var health_component: HealthComponent = (
+		command_center.get_node_or_null("HealthComponent") as HealthComponent
+	)
+	if health_component != null and health_component.current_health <= 0:
+		return false
+
+	return true
 
 
 func _find_enemy_command_center() -> CommandCenter:
