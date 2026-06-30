@@ -7,6 +7,7 @@ extends Control
 
 @onready var _build_farm_button: Button = $ButtonsRow/BuildFarmButton
 @onready var _build_barracks_button: Button = $ButtonsRow/BuildBarracksButton
+@onready var _build_tower_button: Button = $ButtonsRow/BuildTowerButton
 @onready var _train_worker_button: Button = $ButtonsRow/TrainWorkerButton
 @onready var _train_swordsman_button: Button = $ButtonsRow/TrainSwordsmanButton
 @onready var _train_archer_button: Button = $ButtonsRow/TrainArcherButton
@@ -22,6 +23,7 @@ var _tracked_barracks: Barracks = null
 func _ready() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_tower_button.visible = false
 	_train_worker_button.visible = false
 	_train_swordsman_button.visible = false
 	_train_archer_button.visible = false
@@ -30,6 +32,7 @@ func _ready() -> void:
 	_archer_queue_label.visible = false
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
+	_build_tower_button.pressed.connect(_on_build_tower_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 	_train_swordsman_button.pressed.connect(_on_train_swordsman_pressed)
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
@@ -99,6 +102,7 @@ func _refresh_command_visibility() -> void:
 
 	_build_farm_button.visible = has_worker
 	_build_barracks_button.visible = has_worker
+	_build_tower_button.visible = has_worker
 	_train_swordsman_button.visible = show_barracks_training
 	_train_archer_button.visible = show_barracks_training
 	_train_worker_button.visible = _selected_command_center != null
@@ -159,6 +163,14 @@ func _on_build_barracks_pressed() -> void:
 		return
 
 	build_manager.start_barracks_placement()
+
+
+func _on_build_tower_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_tower_placement()
 
 
 func _on_train_worker_pressed() -> void:

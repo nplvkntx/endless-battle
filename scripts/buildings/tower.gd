@@ -20,6 +20,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if building_state != STATE_COMPLETED:
+		return
+
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
 		return

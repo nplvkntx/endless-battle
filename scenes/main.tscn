@@ -130,6 +130,10 @@ text = "Build Farm"
 layout_mode = 2
 text = "Build Barracks"
 
+[node name="BuildTowerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
+layout_mode = 2
+text = "Build Tower"
+
 [node name="TrainWorkerButton" type="Button" parent="GameUI/BuildCommands/ButtonsRow"]
 layout_mode = 2
 text = "Train Worker"
