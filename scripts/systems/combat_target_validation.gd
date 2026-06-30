@@ -5,7 +5,15 @@ extends RefCounted
 
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
+const NEUTRAL_CREEP_GROUP := &"neutral_creeps"
 const ENEMY_TEAM_ID: int = 1
+
+
+static func is_neutral_creep(target: Variant) -> bool:
+	if target == null or not target is Node:
+		return false
+
+	return (target as Node).is_in_group(NEUTRAL_CREEP_GROUP)
 
 
 static func is_valid_combat_target(target: Variant) -> bool:
@@ -75,6 +83,9 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 	if target is EnemyDummy:
 		return true
 
+	if is_neutral_creep(target):
+		return true
+
 	if target is Node and (target as Node).is_in_group(&"enemies"):
 		if target is Swordsman or target is Archer:
 			return true
@@ -103,6 +114,12 @@ static func are_hostile(attacker: Node, target: Variant) -> bool:
 	if attacker == null or not is_valid_combat_target(target):
 		return false
 
+	if is_neutral_creep(target) and not is_neutral_creep(attacker):
+		return true
+
+	if is_neutral_creep(attacker) and not is_neutral_creep(target):
+		return is_valid_combat_target(target)
+
 	return is_enemy_faction(attacker) != is_enemy_faction(target)
 
 
@@ -111,6 +128,8 @@ static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bo
 		return false
 
 	if is_enemy_faction(attacker):
+		if is_neutral_creep(target):
+			return true
 		if target is Unit and not target is Building:
 			return true
 		return is_attackable_player_command_center(target)
@@ -242,7 +261,7 @@ static func find_closest_player_unit_attack_target_in_range(
 
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
-	var groups_to_search: Array[StringName] = [&"enemies", ENEMY_BUILDING_GROUP]
+	var groups_to_search: Array[StringName] = [&"enemies", ENEMY_BUILDING_GROUP, NEUTRAL_CREEP_GROUP]
 
 	for group_name: StringName in groups_to_search:
 		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):

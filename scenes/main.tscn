@@ -21,6 +21,7 @@
 [ext_resource type="PackedScene" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
 [ext_resource type="Script" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 [ext_resource type="Script" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
+[ext_resource type="PackedScene" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
 bg_color = Color(0.08, 0.08, 0.1, 0.85)
@@ -508,6 +509,17 @@ shadow_enabled = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
 mesh = SubResource("CylinderMesh_creep_placeholder")
 surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
+
+[node name="CreepCamp" type="Node3D" parent="."]
+
+[node name="Creep1" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+
+[node name="Creep2" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+
+[node name="Creep3" parent="CreepCamp" instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
 
 [node name="Worker" parent="." instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)

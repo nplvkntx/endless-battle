@@ -538,6 +538,9 @@ func _is_selectable_unit(candidate: Variant) -> bool:
 	if unit.is_in_group(&"enemies"):
 		return false
 
+	if unit.is_in_group(&"neutral_creeps"):
+		return false
+
 	return true
 
 
