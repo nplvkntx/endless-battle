@@ -1,6 +1,6 @@
 extends Node
 
-## Tracks enemy gold and wood from gathering. No UI yet.
+## Internal enemy gold/wood stockpile from worker gathering. Not shown on player HUD.
 
 signal resources_changed()
 
@@ -14,6 +14,7 @@ func add_gold(amount: int) -> void:
 
 	gold += amount
 	resources_changed.emit()
+	_log_totals_if_debug()
 
 
 func add_wood(amount: int) -> void:
@@ -22,3 +23,15 @@ func add_wood(amount: int) -> void:
 
 	wood += amount
 	resources_changed.emit()
+	_log_totals_if_debug()
+
+
+func is_stockpile_available() -> bool:
+	return is_inside_tree()
+
+
+func _log_totals_if_debug() -> void:
+	if not OS.is_debug_build():
+		return
+
+	print("Enemy stockpile: gold=%d wood=%d" % [gold, wood])
