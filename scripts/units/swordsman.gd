@@ -9,12 +9,17 @@ extends Unit
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
+const ATTACK_LUNGE_DISTANCE := 0.35
+const ATTACK_LUNGE_DURATION := 0.12
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
 @onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
+@onready var _body_mesh: MeshInstance3D = $MeshInstance3D
 
 var _health_bar_fill_material: StandardMaterial3D
+var _body_mesh_rest_position: Vector3
+var _attack_lunge_tween: Tween
 var _attack_target: EnemyDummy = null
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
@@ -28,6 +33,7 @@ func _ready() -> void:
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
+	_body_mesh_rest_position = _body_mesh.position
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -141,11 +147,39 @@ func _stop_and_attack(delta: float) -> void:
 
 	_attack_target.take_damage(float(attack_damage), self)
 	MeleeHitSound.play_at(self, _attack_target.global_position)
+	_play_attack_animation()
 	print(
 		"Swordsman dealt %d damage. Target remaining health: %d"
 		% [attack_damage, _attack_target.get_current_health()]
 	)
 	_attack_cooldown_timer = attack_cooldown
+
+
+func _play_attack_animation() -> void:
+	if _attack_lunge_tween != null and _attack_lunge_tween.is_valid():
+		_attack_lunge_tween.kill()
+
+	var lunge_offset := Vector3.ZERO
+	if is_instance_valid(_attack_target):
+		var direction := _attack_target.global_position - global_position
+		direction.y = 0.0
+		if direction.length_squared() > 0.001:
+			lunge_offset = global_transform.basis.inverse() * (direction.normalized() * ATTACK_LUNGE_DISTANCE)
+
+	_body_mesh.position = _body_mesh_rest_position
+	_attack_lunge_tween = create_tween()
+	_attack_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position + lunge_offset,
+		ATTACK_LUNGE_DURATION * 0.45
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_attack_lunge_tween.tween_property(
+		_body_mesh,
+		"position",
+		_body_mesh_rest_position,
+		ATTACK_LUNGE_DURATION * 0.55
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
 func take_damage(amount: float) -> void:
