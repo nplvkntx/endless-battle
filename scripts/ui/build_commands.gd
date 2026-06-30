@@ -40,6 +40,12 @@ extends PanelContainer
 @onready var _ground_slam_button: Button = (
 	$MarginContainer/VBoxContainer/HeroPanel/GroundSlamTrainingRow/GroundSlamButton
 )
+@onready var _divine_protection_cooldown_label: Label = (
+	$MarginContainer/VBoxContainer/HeroPanel/DivineProtectionCooldownLabel
+)
+@onready var _divine_protection_button: Button = (
+	$MarginContainer/VBoxContainer/HeroPanel/DivineProtectionTrainingRow/DivineProtectionButton
+)
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
@@ -75,6 +81,7 @@ func _ready() -> void:
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
 	_ground_slam_button.pressed.connect(_on_ground_slam_pressed)
+	_divine_protection_button.pressed.connect(_on_divine_protection_pressed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -87,7 +94,7 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	_update_ground_slam_ui()
+	_update_hero_abilities_ui()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -98,15 +105,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not key_event.pressed or key_event.echo:
 		return
 
-	if key_event.keycode != KEY_Q:
-		return
-
 	var hero: Hero = _get_tracked_hero_for_input()
 	if hero == null:
 		return
 
-	hero.try_ground_slam()
-	get_viewport().set_input_as_handled()
+	match key_event.keycode:
+		KEY_Q:
+			hero.try_ground_slam()
+			get_viewport().set_input_as_handled()
+		KEY_W:
+			hero.try_divine_protection()
+			get_viewport().set_input_as_handled()
 
 
 func _get_tracked_hero_for_input() -> Hero:
@@ -141,7 +150,12 @@ func _on_selection_changed(_units: Array[Unit]) -> void:
 
 func _set_tracked_hero(hero: Hero) -> void:
 	_tracked_hero = hero
+	_update_hero_abilities_ui()
+
+
+func _update_hero_abilities_ui() -> void:
 	_update_ground_slam_ui()
+	_update_divine_protection_ui()
 
 
 func _update_ground_slam_ui() -> void:
@@ -164,7 +178,39 @@ func _on_ground_slam_pressed() -> void:
 		return
 
 	_tracked_hero.try_ground_slam()
-	_update_ground_slam_ui()
+	_update_hero_abilities_ui()
+
+
+func _update_divine_protection_ui() -> void:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_divine_protection_button.disabled = true
+		_divine_protection_cooldown_label.text = "Divine Protection (W): Ready"
+		return
+
+	if _tracked_hero.is_divine_protection_active():
+		_divine_protection_button.disabled = true
+		_divine_protection_cooldown_label.text = (
+			"Divine Protection (W): Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
+		)
+		return
+
+	var cooldown_remaining: float = _tracked_hero.get_divine_protection_cooldown_remaining()
+	if cooldown_remaining > 0.0:
+		_divine_protection_button.disabled = true
+		_divine_protection_cooldown_label.text = "Divine Protection (W): %.1fs" % cooldown_remaining
+		return
+
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.divine_protection_mana_cost
+	_divine_protection_button.disabled = not has_mana
+	_divine_protection_cooldown_label.text = "Divine Protection (W): Ready"
+
+
+func _on_divine_protection_pressed() -> void:
+	if _tracked_hero == null:
+		return
+
+	_tracked_hero.try_divine_protection()
+	_update_hero_abilities_ui()
 
 
 func _on_building_selection_changed(building: Building) -> void:

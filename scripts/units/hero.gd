@@ -9,8 +9,10 @@ extends Unit
 @export var max_mana: int = 100
 @export var ground_slam_mana_cost: int = 40
 @export var mana_regen_rate: float = 5.0
+@export var divine_protection_mana_cost: int = 30
 
 signal mana_changed(current_mana: int, max_mana: int)
+signal divine_protection_state_changed(is_active: bool)
 
 const HEALTH_BAR_WIDTH := 1.4
 const HEALTH_BAR_HUE_GREEN := 0.333333
@@ -21,6 +23,9 @@ const GROUND_SLAM_COOLDOWN := 9.0
 const GROUND_SLAM_RADIUS := 3.5
 const GROUND_SLAM_DAMAGE := 35
 const GROUND_SLAM_BODY_PULSE_DURATION := 0.18
+const DIVINE_PROTECTION_DURATION := 4.0
+const DIVINE_PROTECTION_COOLDOWN := 20.0
+const DIVINE_PROTECTION_GLOW_PULSE_DURATION := 0.6
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -39,6 +44,11 @@ var _ground_slam_cooldown_timer: float = 0.0
 var _ground_slam_pulse_tween: Tween
 var current_mana: int = 0
 var _mana_regen_accumulator: float = 0.0
+var _divine_protection_timer: float = 0.0
+var _divine_protection_cooldown_timer: float = 0.0
+var _body_material: StandardMaterial3D
+var _body_base_color: Color
+var _divine_protection_glow_tween: Tween
 
 
 func _ready() -> void:
@@ -50,6 +60,10 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
+	var body_material := _body_mesh.get_surface_override_material(0) as StandardMaterial3D
+	_body_material = body_material.duplicate() as StandardMaterial3D
+	_body_mesh.set_surface_override_material(0, _body_material)
+	_body_base_color = _body_material.albedo_color
 	current_mana = max_mana
 	mana_changed.emit(current_mana, max_mana)
 	died.connect(_notify_hero_altars_of_death)
@@ -115,6 +129,87 @@ func _set_move_destination(target: Vector3) -> void:
 
 func get_ground_slam_cooldown_remaining() -> float:
 	return maxf(_ground_slam_cooldown_timer, 0.0)
+
+
+func get_divine_protection_cooldown_remaining() -> float:
+	return maxf(_divine_protection_cooldown_timer, 0.0)
+
+
+func get_divine_protection_remaining() -> float:
+	return maxf(_divine_protection_timer, 0.0)
+
+
+func is_divine_protection_active() -> bool:
+	return _divine_protection_timer > 0.0
+
+
+func try_divine_protection() -> bool:
+	if _health_component.current_health <= 0:
+		return false
+
+	if is_divine_protection_active():
+		ResourceManager.show_feedback("Divine Protection already active")
+		return false
+
+	if _divine_protection_cooldown_timer > 0.0:
+		ResourceManager.show_feedback(
+			"Divine Protection on cooldown (%.0fs)" % ceilf(_divine_protection_cooldown_timer)
+		)
+		return false
+
+	if current_mana < divine_protection_mana_cost:
+		ResourceManager.show_feedback("Not enough mana")
+		return false
+
+	_execute_divine_protection()
+	return true
+
+
+func _execute_divine_protection() -> void:
+	current_mana = maxi(0, current_mana - divine_protection_mana_cost)
+	mana_changed.emit(current_mana, max_mana)
+	_divine_protection_timer = DIVINE_PROTECTION_DURATION
+	_apply_divine_protection_visual()
+	divine_protection_state_changed.emit(true)
+
+
+func _deactivate_divine_protection() -> void:
+	_divine_protection_timer = 0.0
+	_clear_divine_protection_visual()
+	_divine_protection_cooldown_timer = DIVINE_PROTECTION_COOLDOWN
+	divine_protection_state_changed.emit(false)
+
+
+func _apply_divine_protection_visual() -> void:
+	if _divine_protection_glow_tween != null and _divine_protection_glow_tween.is_valid():
+		_divine_protection_glow_tween.kill()
+
+	_body_material.emission_enabled = true
+	_body_material.albedo_color = Color(0.95, 0.92, 0.55, 1.0)
+	_body_material.emission = Color(0.75, 0.9, 1.0, 1.0)
+
+	_divine_protection_glow_tween = create_tween().set_loops()
+	_divine_protection_glow_tween.tween_property(
+		_body_material,
+		"emission",
+		Color(0.45, 0.75, 1.0, 1.0),
+		DIVINE_PROTECTION_GLOW_PULSE_DURATION * 0.5
+	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_divine_protection_glow_tween.tween_property(
+		_body_material,
+		"emission",
+		Color(0.95, 0.98, 1.0, 1.0),
+		DIVINE_PROTECTION_GLOW_PULSE_DURATION * 0.5
+	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func _clear_divine_protection_visual() -> void:
+	if _divine_protection_glow_tween != null and _divine_protection_glow_tween.is_valid():
+		_divine_protection_glow_tween.kill()
+
+	_body_material.emission_enabled = false
+	_body_material.emission = Color.BLACK
+	_body_material.albedo_color = _body_base_color
 
 
 func can_use_ground_slam() -> bool:
@@ -213,6 +308,24 @@ func _tick_ground_slam_cooldown(delta: float) -> void:
 	_ground_slam_cooldown_timer = maxf(_ground_slam_cooldown_timer - delta, 0.0)
 
 
+func _tick_divine_protection(delta: float) -> void:
+	if _divine_protection_timer <= 0.0:
+		return
+
+	_divine_protection_timer = maxf(_divine_protection_timer - delta, 0.0)
+	if _divine_protection_timer > 0.0:
+		return
+
+	_deactivate_divine_protection()
+
+
+func _tick_divine_protection_cooldown(delta: float) -> void:
+	if _divine_protection_cooldown_timer <= 0.0:
+		return
+
+	_divine_protection_cooldown_timer = maxf(_divine_protection_cooldown_timer - delta, 0.0)
+
+
 func _tick_mana_regen(delta: float) -> void:
 	if current_mana >= max_mana:
 		_mana_regen_accumulator = 0.0
@@ -240,6 +353,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_tick_ground_slam_cooldown(delta)
+	_tick_divine_protection(delta)
+	_tick_divine_protection_cooldown(delta)
 	_tick_mana_regen(delta)
 
 	if _attack_target == null and not has_move_target:
@@ -359,6 +474,9 @@ func _play_attack_animation() -> void:
 
 func take_damage(amount: float) -> void:
 	if _health_component.current_health <= 0:
+		return
+
+	if is_divine_protection_active():
 		return
 
 	var damage_amount := int(amount)
