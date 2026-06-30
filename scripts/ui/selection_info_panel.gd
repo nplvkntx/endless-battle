@@ -156,6 +156,7 @@ func _configure_health_display(node: Node) -> void:
 	_tracked_health_component = health_component
 	health_component.health_changed.connect(_on_tracked_health_changed)
 	_update_health_label(health_component.current_health, health_component.max_health)
+	_health_label.visible = true
 
 
 func _configure_mana_display(unit: Unit) -> void:
@@ -209,11 +210,7 @@ func _clear_mana_tracking() -> void:
 
 
 func _update_health_label(current_health: int, max_health: int) -> void:
-	if HealthBarDisplay.should_show(current_health, max_health):
-		_health_label.text = "Health: %d / %d" % [current_health, max_health]
-		_health_label.visible = true
-	else:
-		_health_label.visible = false
+	_health_label.text = "Health: %d / %d" % [current_health, max_health]
 
 
 func _on_tracked_health_changed(current_health: int, max_health: int) -> void:
