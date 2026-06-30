@@ -78,7 +78,16 @@ border_color = Color(0.35, 0.38, 0.42, 1)
 albedo_color = Color(0.35, 0.55, 0.25, 1)
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
-size = Vector2(40, 40)
+size = Vector2(100, 100)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_creep_placeholder"]
+transparency = 1
+albedo_color = Color(0.42, 0.18, 0.52, 0.45)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_creep_placeholder"]
+top_radius = 10.0
+bottom_radius = 10.0
+height = 0.12
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
 albedo_color = Color(0.75, 0.4, 0.15, 1)
@@ -484,7 +493,7 @@ mesh = SubResource("PlaneMesh_ground")
 surface_material_override/0 = SubResource("StandardMaterial3D_ground")
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 12, 20, -2)
+transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 36, 22, -26)
 current = true
 fov = 60.0
 script = ExtResource("3_camera_controller")
@@ -493,23 +502,30 @@ script = ExtResource("3_camera_controller")
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
 shadow_enabled = true
 
+[node name="CreepCampPlaceholder" type="Node3D" parent="."]
+
+[node name="MarkerMesh" type="MeshInstance3D" parent="CreepCampPlaceholder"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
+mesh = SubResource("CylinderMesh_creep_placeholder")
+surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
+
 [node name="Worker" parent="." instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 0.5, -10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)
 
 [node name="Worker2" parent="." instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0.5, -10.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0.5, -34)
 
 [node name="Worker3" parent="." instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0.5, -10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.5, -33.5)
 
 [node name="Worker4" parent="." instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 0.5, -11)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, -34)
 
 [node name="DevHero" parent="." instance=ExtResource("15_hero")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.5, -10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.5, -33)
 
 [node name="CommandCenter" type="StaticBody3D" parent="." groups=["player_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1.25, -12)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -38)
 script = ExtResource("2_command_center")
 worker_spawn_offset = Vector3(0, -0.75, -3.5)
 
@@ -525,7 +541,7 @@ script = ExtResource("19_health_component")
 max_health = 500
 
 [node name="Barracks" parent="." instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 1, -12)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 1, -38)
 swordsman_spawn_offset = Vector3(0, -0.5, -3.5)
 archer_spawn_offset = Vector3(1.5, -0.5, -3.5)
 
@@ -534,7 +550,7 @@ script = ExtResource("19_health_component")
 max_health = 300
 
 [node name="EnemyCommandCenter" type="StaticBody3D" parent="." groups=["enemy_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 10)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 38)
 script = ExtResource("2_command_center")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter"]
@@ -549,19 +565,19 @@ script = ExtResource("19_health_component")
 max_health = 500
 
 [node name="EnemyWorker" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.5, 7)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 0.5, 34)
 
 [node name="EnemyWorker2" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 0.5, 8)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -37, 0.5, 35)
 
 [node name="EnemyWorker3" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 0.5, 7.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 0.5, 34.5)
 
 [node name="EnemyWorker4" parent="." groups=["enemy_workers", "enemies"] instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.5, 8.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39, 0.5, 35)
 
 [node name="EnemyBarracks" parent="." groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1, 15)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 1, 38)
 enable_enemy_auto_production = true
 
 [node name="MeshInstance3D" parent="EnemyBarracks" index="0"]
@@ -572,52 +588,73 @@ script = ExtResource("19_health_component")
 max_health = 300
 
 [node name="EnemyGoldMine" parent="." instance=ExtResource("8_gold_mine")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1, 6)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1, 28)
 
 [node name="EnemyTree" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.25, 4)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 1.25, 45)
 
 [node name="EnemyTree2" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 1.25, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 1.25, 46)
 
 [node name="EnemyTree3" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 4)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 45)
 
 [node name="EnemyTree4" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1.25, 5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1.25, 47)
 
 [node name="EnemyTree5" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 1.25, 45)
 
 [node name="EnemyTree6" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.25, 5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44, 1.25, 46)
+
+[node name="ExpansionGoldMine" parent="." instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 1, 5)
+
+[node name="ExpansionTree" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.25, 3)
+
+[node name="ExpansionTree2" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.25, 8)
+
+[node name="ExpansionTree3" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26, 1.25, 4)
+
+[node name="ExpansionTree4" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1.25, 7)
+
+[node name="ExpansionTree5" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 1.25, 6)
+
+[node name="ExpansionTree6" parent="." instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, 9)
 
 [node name="Farm" parent="." instance=ExtResource("10_farm")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 0.75, -9)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.75, -33)
 
 [node name="GoldMine" parent="." instance=ExtResource("8_gold_mine")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, 1, -15)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 45, 1, -28)
 
 [node name="Tree" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 1.25, -18)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1.25, -45)
 
 [node name="Tree2" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1.25, -19)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 1.25, -46)
 
 [node name="Tree3" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 1.25, -18)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -45)
 
 [node name="Tree4" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 1.25, -17)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 1.25, -47)
 
 [node name="Tree5" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1.25, -19)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 1.25, -45)
 
 [node name="Tree6" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 1.25, -17)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44, 1.25, -46)
 
 [node name="Tree7" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 1.25, -17)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46, 1.25, -45)
 
 [node name="Tree8" parent="." instance=ExtResource("9_tree")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 1.25, -19)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 1.25, -47)
