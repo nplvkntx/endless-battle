@@ -68,7 +68,7 @@ func _on_health_depleted() -> void:
 	queue_free()
 
 
-func take_damage(amount: float, attacker = null) -> void:
+func take_damage(amount: float, attacker: Node = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 

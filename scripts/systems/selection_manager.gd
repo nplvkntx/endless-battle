@@ -206,8 +206,11 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		return
 
 	var clicked_unit: Unit = _raycast_unit(camera, screen_position)
-	if clicked_unit is EnemyDummy:
-		_dispatch_attack_command(clicked_unit as EnemyDummy)
+	if (
+		clicked_unit != null
+		and CombatTargetValidation.is_player_unit_attack_target(clicked_unit)
+	):
+		_dispatch_attack_command(clicked_unit)
 		return
 
 	var attack_building: Building = _raycast_building(camera, screen_position)
@@ -494,7 +497,13 @@ func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
 
 
 func _is_selectable_unit(unit: Unit) -> bool:
-	return unit != null and is_instance_valid(unit)
+	if unit == null or not is_instance_valid(unit):
+		return false
+
+	if unit.is_in_group(&"enemies"):
+		return false
+
+	return true
 
 
 func _is_selectable_building(building: Building) -> bool:

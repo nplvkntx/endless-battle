@@ -547,6 +547,7 @@ max_health = 500
 
 [node name="EnemyBarracks" parent="." groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 1, 12)
+enable_enemy_auto_production = true
 
 [node name="MeshInstance3D" parent="EnemyBarracks" index="0"]
 surface_material_override/0 = SubResource("StandardMaterial3D_enemy_barracks")

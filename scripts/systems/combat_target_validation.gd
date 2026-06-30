@@ -4,6 +4,7 @@ extends RefCounted
 ## Shared checks for whether a node can be safely targeted or damaged in combat.
 
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
+const ENEMY_TEAM_ID: int = 1
 
 
 static func is_valid_combat_target(target: Variant) -> bool:
@@ -43,7 +44,45 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 	if target is EnemyDummy:
 		return true
 
+	if target is Node and (target as Node).is_in_group(&"enemies"):
+		if target is Swordsman or target is Archer:
+			return true
+
 	return is_attackable_enemy_building(target)
+
+
+static func is_enemy_faction(node: Variant) -> bool:
+	if node == null or not node is Node:
+		return false
+
+	var scene_node: Node = node as Node
+	if scene_node.is_in_group(ENEMY_BUILDING_GROUP):
+		return true
+
+	if scene_node.is_in_group(&"enemies"):
+		return true
+
+	if node is Unit and (node as Unit).team_id >= ENEMY_TEAM_ID:
+		return true
+
+	return false
+
+
+static func are_hostile(attacker: Node, target: Variant) -> bool:
+	if attacker == null or not is_valid_combat_target(target):
+		return false
+
+	return is_enemy_faction(attacker) != is_enemy_faction(target)
+
+
+static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bool:
+	if not are_hostile(attacker, target):
+		return false
+
+	if is_enemy_faction(attacker):
+		return target is Unit and not target is Building
+
+	return is_player_unit_attack_target(target)
 
 
 static func is_tower_attack_target(target: Variant) -> bool:
@@ -111,6 +150,9 @@ static func apply_damage_to_target(target: Variant, amount: float, attacker = nu
 	if not is_valid_combat_target(target):
 		return false
 
+	if attacker != null and not are_hostile(attacker as Node, target):
+		return false
+
 	if not target is Object or not (target as Object).has_method("take_damage"):
 		return false
 
@@ -173,7 +215,7 @@ static func find_closest_player_unit_attack_target_in_range(
 		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):
 			if not node is Node3D:
 				continue
-			if not is_player_unit_attack_target(node):
+			if not is_attack_target_for_attacker(attacker, node):
 				continue
 
 			var target: Node3D = node as Node3D

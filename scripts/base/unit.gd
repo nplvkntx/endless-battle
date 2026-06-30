@@ -249,7 +249,7 @@ func _apply_unit_data() -> void:
 
 
 ## Applies damage using values derived from unit_data.
-func take_damage(_amount: float) -> void:
+func take_damage(_amount: float, _attacker: Node = null) -> void:
 	# TODO: Implement damage handling.
 	pass
 

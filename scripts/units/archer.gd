@@ -53,7 +53,7 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 
 func command_attack(target: Node3D) -> void:
-	if not CombatTargetValidation.is_player_unit_attack_target(target):
+	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
 	_attack_target = target
@@ -166,7 +166,7 @@ func _fire_arrow() -> void:
 	arrow.launch(_attack_target, float(attack_damage), spawn_position, self)
 
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, _attacker: Node = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 

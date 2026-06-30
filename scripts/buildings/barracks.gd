@@ -14,6 +14,10 @@ const TRAIN_SECONDS: float = 4.0
 const SWORDSMAN_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
 const ARCHER_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 2.0)
 const RALLY_MARKER_Y: float = 0.05
+const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
+const ENEMY_TEAM_ID: int = 1
+
+@export var enable_enemy_auto_production: bool = false
 
 var _swordsman_queue_count: int = 0
 var _archer_queue_count: int = 0
@@ -22,6 +26,8 @@ var _is_training_archer: bool = false
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
+var _enemy_production_spawn_swordsman_next: bool = true
+var _enemy_production_active: bool = false
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -36,6 +42,67 @@ func _ready() -> void:
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
 
+	if enable_enemy_auto_production:
+		_start_enemy_auto_production()
+
+
+func _start_enemy_auto_production() -> void:
+	_enemy_production_active = true
+	_schedule_enemy_production_tick()
+
+
+func _schedule_enemy_production_tick() -> void:
+	if not _enemy_production_active:
+		return
+
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(
+		ENEMY_PRODUCTION_INTERVAL_SECONDS
+	)
+	wait_timer.timeout.connect(_on_enemy_production_tick, CONNECT_ONE_SHOT)
+
+
+func _on_enemy_production_tick() -> void:
+	if not _enemy_production_active or not is_instance_valid(self):
+		return
+
+	if building_state != STATE_COMPLETED:
+		_schedule_enemy_production_tick()
+		return
+
+	if _enemy_production_spawn_swordsman_next:
+		_spawn_enemy_unit(SWORDSMAN_SCENE)
+	else:
+		_spawn_enemy_unit(ARCHER_SCENE)
+
+	_enemy_production_spawn_swordsman_next = not _enemy_production_spawn_swordsman_next
+	_schedule_enemy_production_tick()
+
+
+func _spawn_enemy_unit(scene: PackedScene) -> void:
+	var unit: Unit = scene.instantiate() as Unit
+	var spawn_parent: Node = get_parent()
+	if spawn_parent == null or unit == null:
+		return
+
+	spawn_parent.add_child(unit)
+	unit.global_position = global_position + SWORDSMAN_SPAWN_OFFSET
+	_finalize_spawned_unit(unit)
+	_finalize_enemy_unit(unit)
+
+
+func _finalize_enemy_unit(unit: Unit) -> void:
+	unit.team_id = ENEMY_TEAM_ID
+
+	if not unit.is_in_group(&"enemies"):
+		unit.add_to_group(&"enemies")
+
+	if unit.is_in_group(&"units"):
+		unit.remove_from_group(&"units")
+
+
+func _stop_enemy_auto_production() -> void:
+	_enemy_production_active = false
+
 
 func take_damage(amount: float, _attacker = null) -> void:
 	if _health_component == null or _health_component.current_health <= 0:
@@ -48,6 +115,8 @@ func take_damage(amount: float, _attacker = null) -> void:
 
 
 func _on_health_depleted() -> void:
+	_stop_enemy_auto_production()
+
 	if _rally_marker != null and is_instance_valid(_rally_marker):
 		_rally_marker.queue_free()
 		_rally_marker = null
