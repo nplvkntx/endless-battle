@@ -18,6 +18,7 @@ const MAX_ABILITY_POINT_LEVEL: int = 18
 const HEALTH_PER_LEVEL: int = 25
 const MANA_PER_LEVEL: int = 10
 const ATTACK_DAMAGE_PER_LEVEL: int = 2
+const BASE_MAX_HEALTH: int = 200
 
 @export var hero_data: Resource
 
@@ -173,6 +174,60 @@ func _show_level_up_feedback() -> void:
 
 func _emit_xp_state() -> void:
 	xp_changed.emit(_current_xp, get_xp_required_for_next_level())
+
+
+func export_progression_snapshot() -> Dictionary:
+	var ability_ranks: Dictionary = {}
+	if ability_progression != null:
+		ability_ranks = ability_progression.export_ranks()
+
+	return {
+		"level": level,
+		"current_xp": _current_xp,
+		"ability_points": ability_points,
+		"ability_ranks": ability_ranks,
+	}
+
+
+func restore_progression_snapshot(snapshot: Dictionary) -> void:
+	if snapshot.is_empty():
+		return
+
+	level = maxi(1, int(snapshot.get("level", 1)))
+	_current_xp = maxf(0.0, float(snapshot.get("current_xp", 0.0)))
+	ability_points = maxi(0, int(snapshot.get("ability_points", 0)))
+
+	if ability_progression == null:
+		ability_progression = HeroAbilityProgression.new()
+	ability_progression.import_ranks(snapshot.get("ability_ranks", {}))
+
+	_reapply_all_level_stat_scaling()
+
+	_emit_xp_state()
+	ability_points_changed.emit(ability_points)
+	level_changed.emit(level)
+	ability_progression_changed.emit()
+	_on_progression_restored()
+
+
+func _reapply_all_level_stat_scaling() -> void:
+	var health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
+	if health_component != null:
+		health_component.max_health = BASE_MAX_HEALTH + (level - 1) * HEALTH_PER_LEVEL
+		health_component.current_health = health_component.max_health
+		health_component.health_changed.emit(
+			health_component.current_health, health_component.max_health
+		)
+
+	_apply_accumulated_level_combat_stats(maxi(0, level - 1))
+
+
+func _apply_accumulated_level_combat_stats(_levels_gained: int) -> void:
+	pass
+
+
+func _on_progression_restored() -> void:
+	pass
 
 
 ## Loads hero-specific runtime state from hero_data when the data pipeline is available.

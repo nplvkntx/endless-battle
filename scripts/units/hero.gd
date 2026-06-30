@@ -38,6 +38,8 @@ const POWER_STRIKE_FLASH_DURATION := 0.15
 const EXECUTE_HEALTH_THRESHOLD := 0.4
 const EXECUTE_COOLDOWN := 45.0
 const EXECUTE_LUNGE_DISTANCE := 0.5
+const BASE_ATTACK_DAMAGE := 18
+const BASE_MAX_MANA := 100
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -79,14 +81,17 @@ func _ready() -> void:
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
-	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
 	var body_material := _body_mesh.get_surface_override_material(0) as StandardMaterial3D
 	_body_material = body_material.duplicate() as StandardMaterial3D
 	_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
-	current_mana = max_mana
-	mana_changed.emit(current_mana, max_mana)
+	if HeroProgressionStore.has_saved_progression():
+		HeroProgressionStore.apply_to_hero(self)
+	else:
+		current_mana = max_mana
+		mana_changed.emit(current_mana, max_mana)
+	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	died.connect(_notify_hero_altars_of_death)
 
 
@@ -104,6 +109,17 @@ func _apply_level_mana_gain() -> void:
 
 func _apply_level_attack_damage_gain() -> void:
 	attack_damage += ATTACK_DAMAGE_PER_LEVEL
+
+
+func _apply_accumulated_level_combat_stats(levels_gained: int) -> void:
+	attack_damage = BASE_ATTACK_DAMAGE + levels_gained * ATTACK_DAMAGE_PER_LEVEL
+	max_mana = BASE_MAX_MANA + levels_gained * MANA_PER_LEVEL
+	current_mana = max_mana
+	mana_changed.emit(current_mana, max_mana)
+
+
+func _on_progression_restored() -> void:
+	_update_health_bar(_health_component.current_health, _health_component.max_health)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -936,6 +952,7 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
+	HeroProgressionStore.save_from_hero(self)
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()

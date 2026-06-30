@@ -88,6 +88,18 @@ func learn_ability(ability_id: StringName) -> void:
 	_ranks[ability_id] = get_ability_rank(ability_id) + 1
 
 
+func export_ranks() -> Dictionary:
+	return _ranks.duplicate()
+
+
+func import_ranks(data: Variant) -> void:
+	if data == null or not data is Dictionary:
+		return
+
+	for ability_id: StringName in _ranks.keys():
+		_ranks[ability_id] = int((data as Dictionary).get(ability_id, 0))
+
+
 func get_ultimate_rank_unlock_level(target_rank: int) -> int:
 	match target_rank:
 		1:
