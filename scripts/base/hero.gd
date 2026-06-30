@@ -6,6 +6,7 @@ extends Unit
 
 signal xp_changed(current_xp: float, xp_to_next_level: float)
 signal level_changed(new_level: int)
+signal ability_points_changed(new_amount: int)
 signal ability_ready(ability_id: StringName)
 signal inventory_changed()
 signal respawn_requested(hero: Hero)
@@ -16,6 +17,7 @@ const XP_PER_LEVEL_MULTIPLIER: int = 100
 @export var hero_data: Resource
 
 var level: int = 1
+var ability_points: int = 0
 var _current_xp: float = 0.0
 
 
@@ -52,11 +54,14 @@ func add_xp(amount: float) -> void:
 
 
 func _on_level_up() -> void:
+	ability_points += 1
+	ability_points_changed.emit(ability_points)
 	level_changed.emit(level)
 	_restore_health_on_level_up()
 	_restore_mana_on_level_up()
 	_show_level_up_feedback()
 	print("Level Up! Hero reached level %d" % level)
+	print("Ability points: %d" % ability_points)
 
 
 func _restore_health_on_level_up() -> void:

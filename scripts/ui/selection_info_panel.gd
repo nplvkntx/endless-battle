@@ -168,8 +168,22 @@ func _configure_mana_display(unit: Unit) -> void:
 
 	_tracked_hero = unit as Hero
 	_tracked_hero.mana_changed.connect(_on_tracked_mana_changed)
-	_update_mana_label(_tracked_hero.current_mana, _tracked_hero.max_mana)
+	if not _tracked_hero.level_changed.is_connected(_on_tracked_hero_stats_changed):
+		_tracked_hero.level_changed.connect(_on_tracked_hero_stats_changed)
+	if not _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):
+		_tracked_hero.ability_points_changed.connect(_on_tracked_hero_stats_changed)
+	_update_hero_details(_tracked_hero)
 	_mana_label.visible = true
+
+
+func _update_hero_details(hero: Hero) -> void:
+	_type_label.text = "Type: Hero | Level %d | AP: %d" % [hero.level, hero.ability_points]
+	_update_mana_label(hero.current_mana, hero.max_mana)
+
+
+func _on_tracked_hero_stats_changed(_value: int = 0) -> void:
+	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+		_update_hero_details(_tracked_hero)
 
 
 func _update_mana_label(current_mana: int, max_mana: int) -> void:
@@ -181,12 +195,13 @@ func _on_tracked_mana_changed(current_mana: int, max_mana: int) -> void:
 
 
 func _clear_mana_tracking() -> void:
-	if (
-		_tracked_hero != null
-		and is_instance_valid(_tracked_hero)
-		and _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed)
-	):
-		_tracked_hero.mana_changed.disconnect(_on_tracked_mana_changed)
+	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+		if _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed):
+			_tracked_hero.mana_changed.disconnect(_on_tracked_mana_changed)
+		if _tracked_hero.level_changed.is_connected(_on_tracked_hero_stats_changed):
+			_tracked_hero.level_changed.disconnect(_on_tracked_hero_stats_changed)
+		if _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):
+			_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_stats_changed)
 	_tracked_hero = null
 
 
