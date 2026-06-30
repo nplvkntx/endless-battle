@@ -1,6 +1,7 @@
-[gd_scene format=3 uid="uid://cg7dpeipvxy7a"]
+[gd_scene load_steps=10 format=3 uid="uid://cg7dpeipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/archer.gd" id="1_archer"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_green"]
 albedo_color = Color(0.15, 0.65, 0.25, 1)
@@ -23,6 +24,15 @@ size = Vector3(1, 1, 1)
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_bg"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_fill"]
+albedo_color = Color(0.15, 0.65, 0.25, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_health_bar"]
+size = Vector3(1.2, 0.08, 0.02)
+
 [node name="Archer" type="CharacterBody3D" groups=["units"]]
 script = ExtResource("1_archer")
 
@@ -36,5 +46,21 @@ visible = false
 mesh = SubResource("CylinderMesh_selection")
 surface_material_override/0 = SubResource("StandardMaterial3D_selection")
 
+[node name="HealthBar" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+
+[node name="Background" type="MeshInstance3D" parent="HealthBar"]
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_bg")
+
+[node name="Fill" type="MeshInstance3D" parent="HealthBar"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.015)
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_fill")
+
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_body")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 100

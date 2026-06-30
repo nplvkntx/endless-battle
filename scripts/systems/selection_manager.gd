@@ -169,6 +169,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(unit as Worker).cancel_gathering()
 		if unit is Swordsman:
 			(unit as Swordsman).cancel_attack()
+		if unit is Archer:
+			(unit as Archer).cancel_attack()
 		unit.set_movement_target(move_targets[index])
 
 
@@ -176,6 +178,8 @@ func _dispatch_attack_command(enemy: EnemyDummy) -> void:
 	for unit: Unit in selected_units:
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack(enemy)
+		elif unit is Archer:
+			(unit as Archer).command_attack(enemy)
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
