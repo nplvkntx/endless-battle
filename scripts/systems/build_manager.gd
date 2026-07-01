@@ -335,10 +335,16 @@ func _is_placement_valid_at(position: Vector3) -> bool:
 	if buildings_parent == null:
 		return false
 
+	var exclude_nodes: Array[Node] = []
+	if _placement_ghost != null:
+		exclude_nodes.append(_placement_ghost)
+
 	return EnemyBuildPlacement.is_position_valid(
 		position,
 		_active_placement,
-		_collect_placement_obstacles(buildings_parent)
+		_collect_placement_obstacles(buildings_parent),
+		buildings_parent,
+		exclude_nodes
 	)
 
 

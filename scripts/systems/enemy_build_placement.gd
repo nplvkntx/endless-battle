@@ -10,6 +10,10 @@ const MAP_MIN_Z: float = -50.0
 const MAP_MAX_Z: float = 50.0
 
 const BUILDING_PADDING: float = 1.25
+const FOOTPRINT_PROBE_HEIGHT: float = 2.5
+const PLACEMENT_COLLISION_MASK: int = (
+	PhysicsLayers.WORLD | PhysicsLayers.UNITS | PhysicsLayers.BUILDINGS
+)
 const BASE_SEARCH_RADIUS: float = 28.0
 const GOLD_MINE_CLEARANCE: float = 5.0
 const TREE_CLEARANCE: float = 4.0
@@ -73,7 +77,12 @@ static func find_position(
 			if not is_footprint_within_bounds(candidate, footprint):
 				continue
 
-			if not _is_position_clear(candidate, footprint, existing_buildings):
+			if not is_position_valid(
+				candidate,
+				building_type,
+				existing_buildings,
+				scene_root
+			):
 				continue
 
 			if _is_too_close_to_resources(candidate, gold_mines, trees):
@@ -119,13 +128,26 @@ static func is_footprint_within_bounds(center: Vector3, footprint: Vector2) -> b
 static func is_position_valid(
 	candidate: Vector3,
 	building_type: StringName,
-	existing_buildings: Array[Node3D]
+	existing_buildings: Array[Node3D],
+	scene_root: Node = null,
+	exclude_nodes: Array[Node] = []
 ) -> bool:
 	var footprint: Vector2 = get_footprint(building_type)
 	if not is_footprint_within_bounds(candidate, footprint):
 		return false
 
-	return _is_position_clear(candidate, footprint, existing_buildings)
+	if not _is_position_clear(candidate, footprint, existing_buildings):
+		return false
+
+	if scene_root != null and _footprint_overlaps_blocked_colliders(
+		candidate,
+		footprint,
+		scene_root,
+		exclude_nodes
+	):
+		return false
+
+	return true
 
 
 static func get_footprint(building_type: StringName) -> Vector2:
@@ -341,6 +363,70 @@ static func _distance_point_to_segment(point: Vector2, segment_a: Vector2, segme
 	var t: float = clampf((point - segment_a).dot(segment) / length_sq, 0.0, 1.0)
 	var projection: Vector2 = segment_a + segment * t
 	return point.distance_to(projection)
+
+
+static func _footprint_overlaps_blocked_colliders(
+	candidate: Vector3,
+	footprint: Vector2,
+	scene_root: Node,
+	exclude_nodes: Array[Node] = []
+) -> bool:
+	var world: World3D = scene_root.get_world_3d()
+	if world == null:
+		return false
+
+	var space_state: PhysicsDirectSpaceState3D = world.direct_space_state
+	if space_state == null:
+		return false
+
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(
+		footprint.x + BUILDING_PADDING * 2.0,
+		FOOTPRINT_PROBE_HEIGHT,
+		footprint.y + BUILDING_PADDING * 2.0
+	)
+
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(
+		Basis.IDENTITY,
+		Vector3(
+			candidate.x,
+			candidate.y + FOOTPRINT_PROBE_HEIGHT * 0.5,
+			candidate.z
+		)
+	)
+	query.collision_mask = PLACEMENT_COLLISION_MASK
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+
+	var exclude_rids: Array[RID] = []
+	for node: Node in exclude_nodes:
+		if node == null or not is_instance_valid(node):
+			continue
+		if node is CollisionObject3D:
+			exclude_rids.append((node as CollisionObject3D).get_rid())
+	query.exclude = exclude_rids
+
+	for hit: Dictionary in space_state.intersect_shape(query, 32):
+		var collider: Object = hit.get("collider")
+		if _collider_blocks_placement(collider):
+			return true
+
+	return false
+
+
+static func _collider_blocks_placement(collider: Object) -> bool:
+	if collider == null or not is_instance_valid(collider):
+		return false
+
+	if collider is CharacterBody3D:
+		return true
+
+	if collider is StaticBody3D:
+		return true
+
+	return false
 
 
 static func _is_position_clear(
