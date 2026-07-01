@@ -59,6 +59,18 @@ func get_item_at_slot(slot_index: int):
 	return inventory[slot_index]
 
 
+func find_first_empty_inventory_slot() -> int:
+	for slot_index: int in inventory.size():
+		if inventory[slot_index] == null:
+			return slot_index
+
+	return -1
+
+
+func is_inventory_full() -> bool:
+	return find_first_empty_inventory_slot() < 0
+
+
 func set_item_at_slot(slot_index: int, item) -> bool:
 	if not _is_valid_inventory_slot(slot_index):
 		return false
@@ -224,7 +236,20 @@ func export_progression_snapshot() -> Dictionary:
 		"current_xp": _current_xp,
 		"ability_points": ability_points,
 		"ability_ranks": ability_ranks,
+		"inventory_item_ids": _export_inventory_item_ids(),
 	}
+
+
+func _export_inventory_item_ids() -> Array:
+	var item_ids: Array = []
+	for slot_index: int in inventory.size():
+		var item = inventory[slot_index]
+		if item is HeroItemDefinition:
+			item_ids.append(String((item as HeroItemDefinition).item_id))
+		else:
+			item_ids.append("")
+
+	return item_ids
 
 
 func restore_progression_snapshot(snapshot: Dictionary) -> void:
@@ -240,6 +265,7 @@ func restore_progression_snapshot(snapshot: Dictionary) -> void:
 	ability_progression.import_ranks(snapshot.get("ability_ranks", {}))
 
 	_reapply_all_level_stat_scaling()
+	_restore_inventory_from_snapshot(snapshot.get("inventory_item_ids", []))
 
 	_emit_xp_state()
 	ability_points_changed.emit(ability_points)
@@ -266,6 +292,26 @@ func _apply_accumulated_level_combat_stats(_levels_gained: int) -> void:
 
 func _on_progression_restored() -> void:
 	pass
+
+
+func _restore_inventory_from_snapshot(item_ids: Array) -> void:
+	_init_inventory()
+
+	for slot_index: int in inventory.size():
+		if slot_index >= item_ids.size():
+			break
+
+		var item_id_text: String = String(item_ids[slot_index])
+		if item_id_text.is_empty():
+			continue
+
+		var item: HeroItemDefinition = HeroItemCatalog.get_definition(StringName(item_id_text))
+		if item == null:
+			continue
+
+		inventory[slot_index] = item
+
+	HeroItemService.restore_inventory_items(self)
 
 
 ## Loads hero-specific runtime state from hero_data when the data pipeline is available.

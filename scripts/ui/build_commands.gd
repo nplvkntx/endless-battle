@@ -110,13 +110,43 @@ extends PanelContainer
 @onready var _archer_range_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn/ArcherRangeButton
 )
+@onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
+@onready var _shop_status_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
+)
+@onready var _long_sword_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn/LongSwordInfoLabel
+)
+@onready var _long_sword_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn/LongSwordButton
+)
+@onready var _ruby_crystal_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn/RubyCrystalInfoLabel
+)
+@onready var _ruby_crystal_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn/RubyCrystalButton
+)
+@onready var _boots_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn/BootsInfoLabel
+)
+@onready var _boots_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn/BootsButton
+)
+@onready var _wizard_orb_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn/WizardOrbInfoLabel
+)
+@onready var _wizard_orb_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn/WizardOrbButton
+)
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
 var _selected_blacksmith: Blacksmith = null
+var _selected_shop: Shop = null
 var _selected_hero_altar: HeroAltar = null
 var _tracked_barracks: Barracks = null
 var _tracked_blacksmith: Blacksmith = null
+var _tracked_shop: Shop = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
 var _auto_training_label: Label = null
@@ -136,6 +166,9 @@ const BLACKSMITH_UPGRADE_MAX_COLOR := Color(0.55, 0.58, 0.62, 1)
 var _blacksmith_upgrade_buttons: Array[Button] = []
 var _blacksmith_upgrade_info_labels: Array[Label] = []
 var _blacksmith_upgrade_ids: Array[StringName] = []
+var _shop_item_buttons: Array[Button] = []
+var _shop_item_info_labels: Array[Label] = []
+var _shop_item_ids: Array[StringName] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 
 
@@ -148,6 +181,7 @@ func _ready() -> void:
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
@@ -160,6 +194,7 @@ func _ready() -> void:
 	_attack_button.visible = false
 	_setup_production_controls()
 	_setup_blacksmith_upgrade_controls()
+	_setup_shop_item_controls()
 	_set_town_center_button_labels()
 	_set_barracks_button_labels()
 	_set_hero_altar_button_labels()
@@ -184,6 +219,7 @@ func _ready() -> void:
 	_execute_button.pressed.connect(_on_execute_pressed)
 	_execute_upgrade_button.pressed.connect(_on_execute_upgrade_pressed)
 	_connect_blacksmith_upgrade_buttons()
+	_connect_shop_item_buttons()
 	_hide_all_hero_upgrade_buttons()
 
 	if not UpgradeManager.upgrade_levels_changed.is_connected(_on_upgrade_levels_changed):
@@ -203,6 +239,8 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_update_hero_abilities_ui()
+	if _shop_panel.visible:
+		_update_shop_item_ui()
 
 
 func _setup_production_controls() -> void:
@@ -243,6 +281,82 @@ func _setup_blacksmith_upgrade_controls() -> void:
 	_update_blacksmith_upgrade_ui()
 
 
+func _setup_shop_item_controls() -> void:
+	_shop_item_ids = HeroItemCatalog.SHOP_ITEM_ORDER.duplicate()
+	_shop_item_info_labels = [
+		_long_sword_info_label,
+		_ruby_crystal_info_label,
+		_boots_info_label,
+		_wizard_orb_info_label,
+	]
+	_shop_item_buttons = [
+		_long_sword_button,
+		_ruby_crystal_button,
+		_boots_button,
+		_wizard_orb_button,
+	]
+	_update_shop_item_ui()
+
+
+func _connect_shop_item_buttons() -> void:
+	for index: int in _shop_item_buttons.size():
+		var button: Button = _shop_item_buttons[index]
+		if button == null:
+			continue
+		var item_id: StringName = _shop_item_ids[index]
+		if not button.pressed.is_connected(_on_shop_item_button_pressed.bind(item_id)):
+			button.pressed.connect(_on_shop_item_button_pressed.bind(item_id))
+
+
+func _on_shop_item_button_pressed(item_id: StringName) -> void:
+	if _selected_shop == null:
+		return
+
+	if _selected_shop.try_purchase_item(item_id):
+		_update_shop_item_ui()
+
+
+func _update_shop_item_ui() -> void:
+	if _selected_shop == null:
+		_shop_status_label.visible = false
+		return
+
+	var nearby_hero: Hero = _selected_shop.get_nearby_shop_hero()
+	_shop_status_label.visible = nearby_hero == null
+	if nearby_hero == null:
+		_shop_status_label.text = "Move hero near shop"
+	else:
+		_shop_status_label.text = "Buying for nearby hero"
+
+	for index: int in _shop_item_buttons.size():
+		if index >= _shop_item_ids.size():
+			break
+
+		var item_id: StringName = _shop_item_ids[index]
+		var item: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+		var info_label: Label = _shop_item_info_labels[index]
+		var button: Button = _shop_item_buttons[index]
+		if item == null or info_label == null or button == null:
+			continue
+
+		info_label.text = "%s\n%s" % [item.display_name, _get_shop_item_effect_label(item)]
+		button.text = "%s\n%dG" % [HeroItemCatalog.get_hotkey_label(item_id), item.gold_cost]
+		button.disabled = not HeroItemService.can_purchase_from_shop(_selected_shop, item_id)
+
+
+func _get_shop_item_effect_label(item: HeroItemDefinition) -> String:
+	if item.bonus_attack_damage > 0:
+		return "+%d AD" % item.bonus_attack_damage
+	if item.bonus_max_health > 0:
+		return "+%d HP" % item.bonus_max_health
+	if item.bonus_move_speed > 0.0:
+		return "+%d MS" % int(item.bonus_move_speed)
+	if item.bonus_max_mana > 0:
+		return "+%d Mana" % item.bonus_max_mana
+
+	return ""
+
+
 func _connect_blacksmith_upgrade_buttons() -> void:
 	for index: int in _blacksmith_upgrade_buttons.size():
 		var button: Button = _blacksmith_upgrade_buttons[index]
@@ -268,6 +382,8 @@ func _on_upgrade_levels_changed() -> void:
 func _on_resources_changed() -> void:
 	if _blacksmith_panel.visible:
 		_update_blacksmith_upgrade_ui()
+	if _shop_panel.visible:
+		_update_shop_item_ui()
 
 
 func _update_blacksmith_upgrade_ui() -> void:
@@ -317,6 +433,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not key_event.pressed or key_event.echo:
 		return
 
+	if _try_handle_shop_item_hotkey(key_event):
+		return
+
 	if _try_handle_blacksmith_upgrade_hotkey(key_event):
 		return
 
@@ -349,6 +468,30 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				hero.try_execute()
 			get_viewport().set_input_as_handled()
+
+
+func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
+	if _selected_shop == null or not _selected_shop.can_sell_items():
+		return false
+
+	var item_id: StringName = &""
+	match key_event.keycode:
+		KEY_Q:
+			item_id = HeroItemCatalog.ITEM_LONG_SWORD
+		KEY_W:
+			item_id = HeroItemCatalog.ITEM_RUBY_CRYSTAL
+		KEY_E:
+			item_id = HeroItemCatalog.ITEM_BOOTS
+		KEY_R:
+			item_id = HeroItemCatalog.ITEM_WIZARD_ORB
+		_:
+			return false
+
+	if _selected_shop.try_purchase_item(item_id):
+		_update_shop_item_ui()
+
+	get_viewport().set_input_as_handled()
+	return true
 
 
 func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:
@@ -922,6 +1065,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_barracks_signals()
 	_disconnect_hero_altar_signals()
 	_disconnect_blacksmith_signals()
+	_disconnect_shop_signals()
 	_selected_command_center = null
 
 	if building is CommandCenter:
@@ -964,6 +1108,12 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_tracked_blacksmith = null
 
+	if building is Shop:
+		_tracked_shop = building as Shop
+		_tracked_shop.building_state_changed.connect(_on_shop_state_changed)
+	else:
+		_tracked_shop = null
+
 	_refresh_command_visibility()
 
 
@@ -978,6 +1128,11 @@ func _on_blacksmith_state_changed(_state: StringName) -> void:
 
 func _on_blacksmith_research_state_changed() -> void:
 	_update_blacksmith_upgrade_ui()
+
+
+func _on_shop_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+	_update_shop_item_ui()
 
 
 func _on_hero_altar_state_changed(_state: Variant = null) -> void:
@@ -1027,10 +1182,15 @@ func _refresh_command_visibility() -> void:
 		selected_building is Blacksmith
 		and (selected_building as Blacksmith).can_research()
 	)
+	var show_shop_items: bool = (
+		selected_building is Shop
+		and (selected_building as Shop).can_show_purchase_ui()
+	)
 	var show_town_center_commands: bool = selected_building is CommandCenter
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
 	_selected_blacksmith = selected_building as Blacksmith if show_blacksmith_upgrades else null
+	_selected_shop = selected_building as Shop if show_shop_items else null
 	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
@@ -1078,6 +1238,9 @@ func _refresh_command_visibility() -> void:
 	elif show_blacksmith_upgrades:
 		_apply_blacksmith_command_visibility()
 		_set_tracked_hero(null)
+	elif show_shop_items:
+		_apply_shop_command_visibility()
+		_set_tracked_hero(null)
 	else:
 		_apply_hidden_command_buttons()
 		_set_tracked_hero(null)
@@ -1090,10 +1253,14 @@ func _refresh_command_visibility() -> void:
 	_hero_altar_panel.visible = show_hero_altar_training
 	_hero_altar_training_row.visible = show_hero_altar_training
 	_blacksmith_panel.visible = show_blacksmith_upgrades
+	_shop_panel.visible = show_shop_items
 	_hero_panel.visible = single_hero
 
 	if show_blacksmith_upgrades:
 		_update_blacksmith_upgrade_ui()
+
+	if show_shop_items:
+		_update_shop_item_ui()
 
 	if show_hero_altar_training:
 		_update_hero_altar_status()
@@ -1122,6 +1289,7 @@ func _refresh_command_visibility() -> void:
 		or show_barracks_training
 		or show_hero_altar_training
 		or show_blacksmith_upgrades
+		or show_shop_items
 		or single_combat_unit
 	)
 
@@ -1142,6 +1310,7 @@ func _apply_hero_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
 
@@ -1162,6 +1331,7 @@ func _apply_worker_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -1182,6 +1352,7 @@ func _apply_combat_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -1202,6 +1373,7 @@ func _apply_town_center_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -1222,6 +1394,31 @@ func _apply_blacksmith_command_visibility() -> void:
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_blacksmith_panel.visible = true
+	_shop_panel.visible = false
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
+
+
+func _apply_shop_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
+	_build_tower_button.visible = false
+	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_hero_panel.visible = false
+	_blacksmith_panel.visible = false
+	_shop_panel.visible = true
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
@@ -1242,6 +1439,7 @@ func _apply_hidden_command_buttons() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -1323,6 +1521,16 @@ func _disconnect_blacksmith_signals() -> void:
 		_tracked_blacksmith.research_state_changed.disconnect(_on_blacksmith_research_state_changed)
 
 	_tracked_blacksmith = null
+
+
+func _disconnect_shop_signals() -> void:
+	if _tracked_shop == null:
+		return
+
+	if _tracked_shop.building_state_changed.is_connected(_on_shop_state_changed):
+		_tracked_shop.building_state_changed.disconnect(_on_shop_state_changed)
+
+	_tracked_shop = null
 
 
 func _on_build_farm_pressed() -> void:

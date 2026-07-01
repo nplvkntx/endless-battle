@@ -6,6 +6,7 @@ class_name HeroInventorySlots
 const SLOT_SIZE := Vector2(24, 24)
 const EMPTY_SLOT_COLOR := Color(0.1, 0.11, 0.13, 1)
 const EMPTY_SLOT_BORDER_COLOR := Color(0.28, 0.3, 0.34, 1)
+const FILLED_SLOT_BORDER_COLOR := Color(0.62, 0.66, 0.72, 1)
 
 var _slot_panels: Array[PanelContainer] = []
 var _tracked_hero: Hero = null
@@ -82,17 +83,30 @@ func _update_slot_display(slot_index: int) -> void:
 	if _tracked_hero != null and is_instance_valid(_tracked_hero):
 		item = _tracked_hero.get_item_at_slot(slot_index)
 
-	# Items are not implemented yet; keep empty placeholders until Shop fills slots.
-	_set_slot_empty(_slot_panels[slot_index], item == null)
+	if item is HeroItemDefinition:
+		_set_slot_item(_slot_panels[slot_index], item as HeroItemDefinition)
+	else:
+		_set_slot_empty(_slot_panels[slot_index])
 
 
-func _set_slot_empty(slot: PanelContainer, _is_empty: bool) -> void:
+func _set_slot_item(slot: PanelContainer, item: HeroItemDefinition) -> void:
+	var style := slot.get_theme_stylebox("panel") as StyleBoxFlat
+	if style == null:
+		return
+
+	style.bg_color = item.icon_color
+	style.border_color = FILLED_SLOT_BORDER_COLOR
+	slot.tooltip_text = item.display_name
+
+
+func _set_slot_empty(slot: PanelContainer) -> void:
 	var style := slot.get_theme_stylebox("panel") as StyleBoxFlat
 	if style == null:
 		return
 
 	style.bg_color = EMPTY_SLOT_COLOR
 	style.border_color = EMPTY_SLOT_BORDER_COLOR
+	slot.tooltip_text = "Empty inventory slot"
 
 
 func _on_inventory_changed() -> void:

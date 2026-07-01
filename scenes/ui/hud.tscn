@@ -741,6 +741,98 @@ theme_override_font_sizes/font_size = 8
 text = "T
 100W 100G"
 
+[node name="ShopPanel" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ShopStatusLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.72, 0.45, 1)
+theme_override_font_sizes/font_size = 8
+text = "Move hero near shop"
+horizontal_alignment = 1
+
+[node name="ShopItemsRow" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="LongSwordColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="LongSwordInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Long Sword
++10 AD"
+horizontal_alignment = 1
+
+[node name="LongSwordButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "Q
+350G"
+
+[node name="RubyCrystalColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="RubyCrystalInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Ruby Crystal
++100 HP"
+horizontal_alignment = 1
+
+[node name="RubyCrystalButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "W
+400G"
+
+[node name="BootsColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="BootsInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Boots
++10 MS"
+horizontal_alignment = 1
+
+[node name="BootsButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "E
+300G"
+
+[node name="WizardOrbColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="WizardOrbInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Wizard Orb
++75 Mana"
+horizontal_alignment = 1
+
+[node name="WizardOrbButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "R
+450G"
+
 [node name="CommandButtonGrid" type="GridContainer" parent="CommandBar/MarginContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 4

@@ -1,7 +1,7 @@
 class_name Shop
 extends Building
 
-## Placeholder shop building for future items and consumables.
+## Hero item shop. Sells permanent stat items to nearby friendly heroes.
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -15,6 +15,25 @@ func _ready() -> void:
 
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
+
+
+func can_sell_items() -> bool:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	return TeamVisuals.resolve_team(self, team_id) == TeamVisuals.PLAYER_TEAM_ID
+
+
+func can_show_purchase_ui() -> bool:
+	return can_sell_items()
+
+
+func try_purchase_item(item_id: StringName) -> bool:
+	return HeroItemService.try_purchase_from_shop(self, item_id)
+
+
+func get_nearby_shop_hero() -> Hero:
+	return HeroItemService.find_closest_shop_hero(self)
 
 
 func take_damage(amount: float, _attacker = null) -> void:
