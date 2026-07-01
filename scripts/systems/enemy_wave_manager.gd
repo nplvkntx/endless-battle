@@ -1,7 +1,7 @@
 class_name EnemyWaveManager
 extends Node
 
-## Sends gathered enemy combat units to attack the player Command Center on a timer.
+## Launches scaled enemy attack waves on a timer and keeps the enemy hero with the army.
 
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 
@@ -9,6 +9,7 @@ const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 @export var wave_interval_seconds: float = 30.0
 
 var _wave_active: bool = true
+var _waves_launched: int = 0
 var _tracked_player_command_center: CommandCenter = null
 
 
@@ -34,18 +35,51 @@ func _on_wave_timer() -> void:
 	if not _wave_active:
 		return
 
-	var target: CommandCenter = _resolve_player_command_center()
-	if target == null or not _is_living_command_center(target):
+	if not _has_any_attack_target():
 		_wave_active = false
 		return
 
-	_send_enemy_combat_units_to_attack(target)
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	var next_wave_number: int = _waves_launched + 1
+	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
+		next_wave_number
+	)
+	var wave_plan: Dictionary = EnemyArmyCommand.build_attack_wave_units(
+		get_tree(),
+		min_non_hero_units
+	)
+
+	if not wave_plan.get("can_launch", false):
+		_hold_army_until_ready(rally_position, int(wave_plan.get("non_hero_count", 0)))
+		_schedule_next_wave()
+		return
+
+	var attack_destination: Vector3 = EnemyArmyCommand.resolve_wave_attack_destination(
+		get_tree(),
+		rally_position
+	)
+	EnemyArmyCommand.command_attack_move(wave_plan.get("units", []), attack_destination)
+	_waves_launched += 1
 	_schedule_next_wave()
 
 
-func _send_enemy_combat_units_to_attack(target: CommandCenter) -> void:
-	var combat_units: Array = EnemyArmyCommand.collect_living_combat_units(get_tree())
-	EnemyArmyCommand.command_attack_move(combat_units, target.global_position)
+func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero == null:
+		return
+
+	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
+		_waves_launched + 1
+	)
+	if non_hero_count >= min_non_hero_units:
+		return
+
+	EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
+
+
+func _has_any_attack_target() -> bool:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	return EnemyArmyCommand.has_player_attack_targets(get_tree(), rally_position)
 
 
 func _resolve_player_command_center() -> CommandCenter:
@@ -83,5 +117,4 @@ func _is_living_command_center(command_center: CommandCenter) -> bool:
 
 
 func _on_player_command_center_destroyed(_building: Building) -> void:
-	_wave_active = false
 	_tracked_player_command_center = null

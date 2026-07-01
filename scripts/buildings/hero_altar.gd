@@ -195,3 +195,8 @@ func _spawn_enemy_hero() -> void:
 	var collision_shape: CollisionShape3D = hero.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collision_shape != null:
 		collision_shape.disabled = false
+
+	EnemyArmyCommand.command_hold_at_rally(
+		[hero],
+		EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	)
