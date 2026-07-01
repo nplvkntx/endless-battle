@@ -37,8 +37,29 @@ var _rally_marker: MeshInstance3D = null
 
 func _ready() -> void:
 	super._ready()
+	if building_state == STATE_COMPLETED:
+		_ensure_dropoff_registration()
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
+
+
+func complete_construction() -> void:
+	super.complete_construction()
+	_ensure_dropoff_registration()
+
+
+func _ensure_dropoff_registration() -> void:
+	if is_in_group(&"enemy_command_center") or team_id == ENEMY_TEAM_ID:
+		if is_in_group(&"player_command_center"):
+			remove_from_group(&"player_command_center")
+		if not is_in_group(&"enemy_command_center"):
+			add_to_group(&"enemy_command_center")
+		return
+
+	if not is_in_group(&"player_command_center"):
+		add_to_group(&"player_command_center")
+	if is_in_group(&"enemy_command_center"):
+		remove_from_group(&"enemy_command_center")
 
 
 func take_damage(amount: float, _attacker = null) -> void:

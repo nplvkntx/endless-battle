@@ -38,6 +38,8 @@ var _assigned_resource_id: StringName = &""
 var _carried_amount: int = 0
 var _source_approach_candidate_index: int = 0
 var _dropoff_candidate_index: int = 0
+var _assigned_dropoff: CommandCenter = null
+var _return_dropoff: CommandCenter = null
 var _build_approach_candidate_index: int = 0
 var _build_trip_state: BuildTripState = BuildTripState.IDLE
 var _building_target: Building = null
@@ -418,9 +420,9 @@ func _finish_task_corner_nudge() -> void:
 		_gather_state == GatherTripState.TO_COMMAND_CENTER
 		and _carried_amount > 0
 	):
-		var command_center: CommandCenter = _find_command_center()
-		if command_center != null and _can_use_command_center_for_deposit(command_center):
-			_move_toward_command_center_for_deposit(command_center)
+		var dropoff: CommandCenter = _resolve_dropoff_target()
+		if dropoff != null:
+			_move_toward_command_center_for_deposit(dropoff)
 			return
 
 	if _task_has_saved_destination:
@@ -453,6 +455,12 @@ func _start_gathering(source: GatherableResource) -> void:
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
+	_return_dropoff = null
+	_assigned_dropoff = WorkerGathering.find_nearest_dropoff(
+		source.global_position,
+		_is_enemy_worker(),
+		get_tree()
+	)
 	_gather_stuck_recovery_cooldown = 0.0
 	_reset_gather_stuck_watch()
 	_gather_state = GatherTripState.TO_SOURCE
@@ -466,6 +474,8 @@ func cancel_gathering() -> void:
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
+	_assigned_dropoff = null
+	_return_dropoff = null
 	_gather_stuck_recovery_cooldown = 0.0
 	_task_has_saved_destination = false
 	_disable_task_navigation()
@@ -520,11 +530,13 @@ func _update_gather_trip() -> void:
 		GatherTripState.TO_COMMAND_CENTER:
 			if _task_nudge_active:
 				return
+			if _carried_amount > 0:
+				_ensure_returning_to_current_dropoff()
 			if _attempt_dropoff_proximity_resolve():
 				return
 			if not has_move_target:
 				if _carried_amount > 0 and not _has_valid_dropoff_target():
-					_retry_return_to_command_center()
+					has_move_target = false
 					return
 				_handle_command_center_arrival()
 		GatherTripState.DONE:
@@ -590,11 +602,11 @@ func _attempt_dropoff_proximity_resolve() -> bool:
 	if _carried_amount <= 0:
 		return false
 
-	var command_center: CommandCenter = _find_command_center()
-	if command_center == null or not _can_use_command_center_for_deposit(command_center):
+	var dropoff: CommandCenter = _resolve_dropoff_target()
+	if dropoff == null:
 		return false
 
-	if not _is_near_command_center_for_deposit(command_center, true):
+	if not _is_near_command_center_for_deposit(dropoff, true):
 		return false
 
 	has_move_target = false
@@ -695,9 +707,9 @@ func _try_repath_task_movement() -> void:
 		_gather_state == GatherTripState.TO_COMMAND_CENTER
 		and _carried_amount > 0
 	):
-		var command_center: CommandCenter = _find_command_center()
-		if command_center != null and _can_use_command_center_for_deposit(command_center):
-			_move_toward_command_center_for_deposit(command_center)
+		var dropoff: CommandCenter = _resolve_dropoff_target()
+		if dropoff != null:
+			_move_toward_command_center_for_deposit(dropoff)
 			return
 
 	_attempt_task_proximity_resolve()
@@ -735,10 +747,10 @@ func _apply_current_task_movement_target() -> void:
 				return
 			set_movement_target(_compute_resource_approach_position(_gather_source))
 		GatherTripState.TO_COMMAND_CENTER:
-			var command_center: CommandCenter = _find_command_center()
-			if command_center == null or not _can_use_command_center_for_deposit(command_center):
+			var dropoff: CommandCenter = _resolve_dropoff_target()
+			if dropoff == null:
 				return
-			set_movement_target(_compute_command_center_dropoff_position(command_center))
+			set_movement_target(_compute_command_center_dropoff_position(dropoff))
 		_:
 			pass
 
@@ -814,16 +826,19 @@ func _handle_arrived_at_source() -> void:
 
 
 func _handle_command_center_arrival() -> void:
-	var command_center: CommandCenter = _find_command_center()
-	if command_center == null or not _can_use_command_center_for_deposit(command_center):
+	var dropoff: CommandCenter = _resolve_dropoff_target()
+	if dropoff == null or not WorkerGathering.is_valid_dropoff(dropoff, _is_enemy_worker()):
 		if _carried_amount > 0:
+			_return_dropoff = null
+			has_move_target = false
 			return
 		_finish_gathering_idle()
 		return
 
 	if _carried_amount > 0:
-		if _try_deposit_at_command_center(command_center):
+		if _try_deposit_at_command_center(dropoff):
 			_dropoff_candidate_index = 0
+			_return_dropoff = null
 			_continue_gather_cycle()
 			return
 
@@ -831,10 +846,11 @@ func _handle_command_center_arrival() -> void:
 			_apply_current_task_movement_target()
 			return
 
-		_move_toward_command_center_for_deposit(command_center)
+		_move_toward_command_center_for_deposit(dropoff)
 		return
 
 	_dropoff_candidate_index = 0
+	_return_dropoff = null
 	_continue_gather_cycle()
 
 
@@ -890,21 +906,18 @@ func _on_gather_wait_finished() -> void:
 
 func _begin_return_to_command_center() -> void:
 	_dropoff_candidate_index = 0
+	_return_dropoff = null
 	_gather_state = GatherTripState.TO_COMMAND_CENTER
-	_retry_return_to_command_center()
+	_ensure_returning_to_current_dropoff()
 
 
 func _retry_return_to_command_center() -> void:
-	var command_center: CommandCenter = _find_command_center()
-	if command_center == null or not _can_use_command_center_for_deposit(command_center):
-		return
-
-	set_movement_target(_compute_command_center_dropoff_position(command_center))
+	if not _ensure_returning_to_current_dropoff():
+		has_move_target = false
 
 
 func _has_valid_dropoff_target() -> bool:
-	var command_center: CommandCenter = _find_command_center()
-	return command_center != null and _can_use_command_center_for_deposit(command_center)
+	return _resolve_dropoff_target() != null
 
 
 func _deposit_carried() -> void:
@@ -944,10 +957,12 @@ func _move_toward_command_center_for_deposit(command_center: CommandCenter) -> v
 	if command_center == null or not is_instance_valid(command_center):
 		return
 
-	var target: Vector3 = command_center.global_position
-	target.y = global_position.y
+	if not WorkerGathering.is_valid_dropoff(command_center, _is_enemy_worker()):
+		return
+
+	_return_dropoff = command_center
 	_dropoff_candidate_index = 0
-	set_movement_target(_snap_task_target_to_navigation(target))
+	set_movement_target(_compute_command_center_dropoff_position(command_center))
 
 
 func _continue_gather_cycle() -> void:
@@ -1018,8 +1033,8 @@ func _recover_done_gather_state() -> void:
 
 func _finish_gathering_idle() -> void:
 	if _carried_amount > 0:
-		var command_center: CommandCenter = _find_command_center()
-		if command_center != null and _try_deposit_at_command_center(command_center):
+		var dropoff: CommandCenter = _resolve_dropoff_target()
+		if dropoff != null and _try_deposit_at_command_center(dropoff):
 			pass
 		if _carried_amount > 0:
 			return
@@ -1027,84 +1042,44 @@ func _finish_gathering_idle() -> void:
 	_gather_state = GatherTripState.IDLE
 	_gather_source = null
 	_assigned_resource_id = &""
+	_assigned_dropoff = null
+	_return_dropoff = null
 	_carried_amount = 0
 
 
-func _find_command_center() -> CommandCenter:
-	if _is_enemy_worker():
-		return _find_enemy_command_center()
+func _get_dropoff_search_position() -> Vector3:
+	if _is_valid_gather_source(_gather_source):
+		return _gather_source.global_position
 
-	return _find_player_command_center()
+	return global_position
+
+
+func _resolve_dropoff_target() -> CommandCenter:
+	_assigned_dropoff = WorkerGathering.find_nearest_dropoff(
+		_get_dropoff_search_position(),
+		_is_enemy_worker(),
+		get_tree()
+	)
+	return _assigned_dropoff
+
+
+func _ensure_returning_to_current_dropoff() -> bool:
+	var dropoff: CommandCenter = _resolve_dropoff_target()
+	if dropoff == null:
+		_return_dropoff = null
+		return false
+
+	if dropoff == _return_dropoff and has_move_target:
+		return true
+
+	_return_dropoff = dropoff
+	_dropoff_candidate_index = 0
+	set_movement_target(_compute_command_center_dropoff_position(dropoff))
+	return true
 
 
 func _is_enemy_worker() -> bool:
 	return is_in_group(&"enemy_workers")
-
-
-func _find_player_command_center() -> CommandCenter:
-	var closest_command_center: CommandCenter = null
-	var closest_distance_squared: float = INF
-
-	for node: Node in get_tree().get_nodes_in_group(&"player_command_center"):
-		if not node is CommandCenter:
-			continue
-
-		var command_center: CommandCenter = node as CommandCenter
-		if not _can_use_command_center_for_deposit(command_center):
-			continue
-
-		var offset: Vector3 = global_position - command_center.global_position
-		offset.y = 0.0
-		var distance_squared: float = offset.length_squared()
-		if distance_squared < closest_distance_squared:
-			closest_distance_squared = distance_squared
-			closest_command_center = command_center
-
-	return closest_command_center
-
-
-func _can_use_command_center_for_deposit(command_center: CommandCenter) -> bool:
-	if command_center == null or not is_instance_valid(command_center):
-		return false
-
-	if command_center.is_queued_for_deletion():
-		return false
-
-	if (
-		command_center.building_state == Building.STATE_UNDER_CONSTRUCTION
-		or command_center.building_state == Building.STATE_CONSTRUCTING
-	):
-		return false
-
-	var health_component: HealthComponent = (
-		command_center.get_node_or_null("HealthComponent") as HealthComponent
-	)
-	if health_component != null and health_component.current_health <= 0:
-		return false
-
-	return true
-
-
-func _find_enemy_command_center() -> CommandCenter:
-	var closest_command_center: CommandCenter = null
-	var closest_distance_squared: float = INF
-
-	for node: Node in get_tree().get_nodes_in_group(&"enemy_command_center"):
-		if not node is CommandCenter:
-			continue
-
-		var command_center: CommandCenter = node as CommandCenter
-		if not _can_use_command_center_for_deposit(command_center):
-			continue
-
-		var offset: Vector3 = global_position - command_center.global_position
-		offset.y = 0.0
-		var distance_squared: float = offset.length_squared()
-		if distance_squared < closest_distance_squared:
-			closest_distance_squared = distance_squared
-			closest_command_center = command_center
-
-	return closest_command_center
 
 
 func is_busy_with_task() -> bool:

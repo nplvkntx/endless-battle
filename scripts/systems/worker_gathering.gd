@@ -3,7 +3,82 @@ extends RefCounted
 
 ## Shared deposit helpers for worker gathering trips.
 
+const PLAYER_DROPOFF_GROUP := &"player_command_center"
+const ENEMY_DROPOFF_GROUP := &"enemy_command_center"
+
 static var _enemy_stockpile_warning_shown: bool = false
+
+
+static func find_nearest_dropoff(
+	from_position: Vector3,
+	for_enemy: bool,
+	tree: SceneTree
+) -> CommandCenter:
+	if tree == null:
+		return null
+
+	var group_name: StringName = (
+		ENEMY_DROPOFF_GROUP if for_enemy else PLAYER_DROPOFF_GROUP
+	)
+	var closest_dropoff: CommandCenter = null
+	var closest_distance_squared: float = INF
+
+	for node: Node in tree.get_nodes_in_group(group_name):
+		if not node is CommandCenter:
+			continue
+
+		var command_center: CommandCenter = node as CommandCenter
+		if not is_valid_dropoff(command_center, for_enemy):
+			continue
+
+		var offset: Vector3 = from_position - command_center.global_position
+		offset.y = 0.0
+		var distance_squared: float = offset.length_squared()
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_dropoff = command_center
+
+	return closest_dropoff
+
+
+static func is_valid_dropoff(command_center: CommandCenter, for_enemy: bool) -> bool:
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	if command_center.is_queued_for_deletion():
+		return false
+
+	if (
+		command_center.building_state == Building.STATE_UNDER_CONSTRUCTION
+		or command_center.building_state == Building.STATE_CONSTRUCTING
+	):
+		return false
+
+	var health_component: HealthComponent = (
+		command_center.get_node_or_null("HealthComponent") as HealthComponent
+	)
+	if health_component != null and health_component.current_health <= 0:
+		return false
+
+	if for_enemy:
+		if not command_center.is_in_group(ENEMY_DROPOFF_GROUP):
+			return false
+		if command_center.is_in_group(PLAYER_DROPOFF_GROUP):
+			return false
+		if (
+			command_center.team_id >= 0
+			and command_center.team_id != CommandCenter.ENEMY_TEAM_ID
+		):
+			return false
+	else:
+		if not command_center.is_in_group(PLAYER_DROPOFF_GROUP):
+			return false
+		if command_center.is_in_group(ENEMY_DROPOFF_GROUP):
+			return false
+		if command_center.team_id == CommandCenter.ENEMY_TEAM_ID:
+			return false
+
+	return true
 
 
 static func find_nearest_gather_source(
