@@ -10,6 +10,12 @@ const TARGET_WORKERS: int = 8
 const FOOD_RESERVE: int = 2
 const MAX_FARMS: int = 3
 const DEFAULT_MAX_BARRACKS: int = 2
+const DESIRED_ARMY_EARLY: int = 8
+const DESIRED_ARMY_MID: int = 14
+const DESIRED_ARMY_LATE: int = 22
+const ARMY_SIZE_MID_AFTER_SECONDS: float = 300.0
+const ARMY_SIZE_LATE_AFTER_SECONDS: float = 600.0
+const MILITARY_TRAIN_FOOD_COST: int = 1
 const ENEMY_TEAM_ID: int = 1
 
 const PLACEMENT_FARM: StringName = &"farm"
@@ -109,8 +115,7 @@ func _run_build_order() -> void:
 			return
 
 	if not defer_military:
-		for barracks: Barracks in _find_all_completed_enemy_barracks():
-			_try_train_military(barracks)
+		_try_sustain_military_production()
 
 	if _should_build_expansion_command_center():
 		_try_place_building(PLACEMENT_COMMAND_CENTER, true)
@@ -141,7 +146,7 @@ func _needs_barracks() -> bool:
 	return (
 		not _has_completed_building(PLACEMENT_BARRACKS)
 		and not _is_building_type_in_progress(PLACEMENT_BARRACKS)
-		and _count_enemy_military_units() > 0
+		and _count_living_military_units() > 0
 	)
 
 
@@ -205,10 +210,52 @@ func _try_train_enemy_workers() -> bool:
 	return command_center.try_train_enemy_worker()
 
 
-func _try_train_military(barracks: Barracks) -> void:
-	if barracks.is_enemy_training_busy():
+func _try_sustain_military_production() -> void:
+	if not _needs_more_military_units():
 		return
 
+	if not EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST):
+		if _count_farms() < MAX_FARMS:
+			_try_place_building(PLACEMENT_FARM)
+		return
+
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		if not _needs_more_military_units():
+			break
+
+		_try_train_military(barracks)
+
+
+func _get_desired_army_size() -> int:
+	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
+		return DESIRED_ARMY_EARLY
+	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
+		return DESIRED_ARMY_MID
+
+	return DESIRED_ARMY_LATE
+
+
+func _count_living_military_units() -> int:
+	return EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()).size()
+
+
+func _count_pending_military_units() -> int:
+	var pending: int = 0
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		pending += barracks.get_enemy_pending_unit_count()
+
+	return pending
+
+
+func _needs_more_military_units() -> bool:
+	return (
+		_count_living_military_units() + _count_pending_military_units()
+		< _get_desired_army_size()
+	)
+
+
+func _try_train_military(barracks: Barracks) -> void:
 	if _train_swordsman_next:
 		if barracks.try_train_enemy_swordsman():
 			_train_swordsman_next = false
@@ -475,16 +522,6 @@ func _count_enemy_workers() -> int:
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
 		if node is Worker and is_instance_valid(node) and not node.is_queued_for_deletion():
 			count += 1
-
-	return count
-
-
-func _count_enemy_military_units() -> int:
-	var count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(&"enemies"):
-		if node is Swordsman or node is Archer:
-			if is_instance_valid(node) and not node.is_queued_for_deletion():
-				count += 1
 
 	return count
 

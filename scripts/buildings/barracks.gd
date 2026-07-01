@@ -86,6 +86,10 @@ func is_enemy_training_busy() -> bool:
 	return _is_training or _is_training_archer
 
 
+func get_enemy_pending_unit_count() -> int:
+	return _swordsman_queue_count + _archer_queue_count
+
+
 func try_train_enemy_swordsman() -> bool:
 	if building_state != STATE_COMPLETED or _is_training:
 		return false
