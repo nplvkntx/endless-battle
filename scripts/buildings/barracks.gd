@@ -546,6 +546,8 @@ func _finalize_spawned_unit(unit: Unit) -> void:
 	if not unit.is_in_group(&"units"):
 		unit.add_to_group(&"units")
 
+	UpgradeManager.apply_player_upgrades_to_unit(unit)
+
 	var collision_shape: CollisionShape3D = unit.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collision_shape != null:
 		collision_shape.disabled = false

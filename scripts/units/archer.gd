@@ -7,6 +7,10 @@ extends Unit
 @export var attack_range: float = 8.0
 @export var attack_cooldown: float = 1.2
 
+var _base_attack_damage: int = -1
+var _base_attack_range: float = -1.0
+var _base_attack_cooldown: float = -1.0
+
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ARROW_SCENE: PackedScene = preload("res://scenes/projectiles/arrow.tscn")
@@ -33,6 +37,7 @@ func _ready() -> void:
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
+	call_deferred("_try_apply_blacksmith_upgrades")
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -208,6 +213,29 @@ func _fire_arrow() -> void:
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, ARROW_SPAWN_HEIGHT, 0.0)
 	arrow.launch(_attack_target, float(attack_damage), spawn_position, self)
+
+
+func apply_blacksmith_upgrades() -> void:
+	_cache_base_stats()
+	var attack_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_ATTACK)
+	var speed_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED)
+	var range_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_RANGE)
+	attack_damage = _base_attack_damage + attack_level * 2
+	attack_cooldown = _base_attack_cooldown * (1.0 - 0.05 * float(speed_level))
+	attack_range = _base_attack_range + float(range_level) * 8.0
+
+
+func _cache_base_stats() -> void:
+	if _base_attack_damage < 0:
+		_base_attack_damage = attack_damage
+	if _base_attack_range < 0.0:
+		_base_attack_range = attack_range
+	if _base_attack_cooldown < 0.0:
+		_base_attack_cooldown = attack_cooldown
+
+
+func _try_apply_blacksmith_upgrades() -> void:
+	UpgradeManager.apply_player_upgrades_to_unit(self)
 
 
 func take_damage(amount: float, attacker = null) -> void:

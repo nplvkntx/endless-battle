@@ -1,0 +1,127 @@
+[gd_scene format=3 uid="uid://3ejjgom0w2q5"]
+
+[ext_resource type="Script" path="res://scripts/buildings/shop.gd" id="1_shop"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wood"]
+albedo_color = Color(0.52, 0.36, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.72, 0.68, 0.58, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_awning"]
+albedo_color = Color(0.78, 0.22, 0.18, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_counter"]
+albedo_color = Color(0.42, 0.3, 0.18, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sign"]
+albedo_color = Color(0.92, 0.82, 0.28, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_door"]
+albedo_color = Color(0.18, 0.12, 0.08, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_hall"]
+size = Vector3(3, 1.4, 2.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_awning"]
+size = Vector3(3.2, 0.08, 1.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_counter"]
+size = Vector3(1.6, 0.55, 0.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sign"]
+size = Vector3(0.08, 0.45, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_door"]
+size = Vector3(0.75, 1.05, 0.1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(3.12, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 2.62)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shop"]
+size = Vector3(3, 2, 2.5)
+
+[node name="Shop" type="StaticBody3D" groups=["buildings"]]
+collision_layer = 4
+collision_mask = 3
+script = ExtResource("1_shop")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+mesh = SubResource("BoxMesh_hall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="Awning" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.62, -1.05)
+mesh = SubResource("BoxMesh_awning")
+surface_material_override/0 = SubResource("StandardMaterial3D_awning")
+
+[node name="Counter" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.02, -1.0)
+mesh = SubResource("BoxMesh_counter")
+surface_material_override/0 = SubResource("StandardMaterial3D_counter")
+
+[node name="Sign" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.55, -1.28)
+mesh = SubResource("BoxMesh_sign")
+surface_material_override/0 = SubResource("StandardMaterial3D_sign")
+
+[node name="Door" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.85, -0.38, -1.27)
+mesh = SubResource("BoxMesh_door")
+surface_material_override/0 = SubResource("StandardMaterial3D_door")
+
+[node name="PillarLeft" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.35, 0.15, -1.05)
+mesh = SubResource("BoxMesh_sign")
+surface_material_override/0 = SubResource("StandardMaterial3D_wood")
+
+[node name="PillarRight" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, 0.15, -1.05)
+mesh = SubResource("BoxMesh_sign")
+surface_material_override/0 = SubResource("StandardMaterial3D_wood")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.88, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.25)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.25)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_shop")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 600

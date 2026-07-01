@@ -12,6 +12,8 @@ extends PanelContainer
 @onready var _buttons_row: GridContainer = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow
 @onready var _build_farm_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildFarmButton
 @onready var _build_barracks_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBarracksButton
+@onready var _build_blacksmith_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBlacksmithButton
+@onready var _build_shop_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildShopButton
 @onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
 @onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
 @onready var _build_command_center_button: Button = (
@@ -77,11 +79,44 @@ extends PanelContainer
 @onready var _execute_upgrade_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn/ExecuteUpgradeButton
 )
+@onready var _blacksmith_panel: HBoxContainer = $MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel
+@onready var _swordsman_attack_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanAttackColumn/SwordsmanAttackInfoLabel
+)
+@onready var _swordsman_attack_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanAttackColumn/SwordsmanAttackButton
+)
+@onready var _swordsman_armor_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanArmorColumn/SwordsmanArmorInfoLabel
+)
+@onready var _swordsman_armor_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanArmorColumn/SwordsmanArmorButton
+)
+@onready var _archer_attack_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherAttackColumn/ArcherAttackInfoLabel
+)
+@onready var _archer_attack_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherAttackColumn/ArcherAttackButton
+)
+@onready var _archer_speed_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherSpeedColumn/ArcherSpeedInfoLabel
+)
+@onready var _archer_speed_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherSpeedColumn/ArcherSpeedButton
+)
+@onready var _archer_range_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn/ArcherRangeInfoLabel
+)
+@onready var _archer_range_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn/ArcherRangeButton
+)
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
+var _selected_blacksmith: Blacksmith = null
 var _selected_hero_altar: HeroAltar = null
 var _tracked_barracks: Barracks = null
+var _tracked_blacksmith: Blacksmith = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
 var _auto_training_label: Label = null
@@ -96,6 +131,11 @@ var _hero_queue_row: HBoxContainer = null
 const QUEUE_SLOT_SIZE := Vector2(28, 28)
 const QUEUE_SLOT_HINT := "Right-click to cancel"
 const QUEUE_SLOT_COLOR := Color(0.28, 0.32, 0.38, 1)
+const BLACKSMITH_UPGRADE_MAX_COLOR := Color(0.55, 0.58, 0.62, 1)
+
+var _blacksmith_upgrade_buttons: Array[Button] = []
+var _blacksmith_upgrade_info_labels: Array[Label] = []
+var _blacksmith_upgrade_ids: Array[StringName] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 
 
@@ -107,20 +147,26 @@ func _ready() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
+	_blacksmith_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_setup_production_controls()
+	_setup_blacksmith_upgrade_controls()
 	_set_town_center_button_labels()
 	_set_barracks_button_labels()
 	_set_hero_altar_button_labels()
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
+	_build_blacksmith_button.pressed.connect(_on_build_blacksmith_pressed)
+	_build_shop_button.pressed.connect(_on_build_shop_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
 	_build_hero_altar_button.pressed.connect(_on_build_hero_altar_pressed)
 	_build_command_center_button.pressed.connect(_on_build_command_center_pressed)
@@ -137,7 +183,13 @@ func _ready() -> void:
 	_power_strike_upgrade_button.pressed.connect(_on_power_strike_upgrade_pressed)
 	_execute_button.pressed.connect(_on_execute_pressed)
 	_execute_upgrade_button.pressed.connect(_on_execute_upgrade_pressed)
+	_connect_blacksmith_upgrade_buttons()
 	_hide_all_hero_upgrade_buttons()
+
+	if not UpgradeManager.upgrade_levels_changed.is_connected(_on_upgrade_levels_changed):
+		UpgradeManager.upgrade_levels_changed.connect(_on_upgrade_levels_changed)
+	if not ResourceManager.resources_changed.is_connected(_on_resources_changed):
+		ResourceManager.resources_changed.connect(_on_resources_changed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -172,12 +224,92 @@ func _setup_production_controls() -> void:
 	_hero_altar_panel.move_child(_hero_queue_row, _hero_status_label.get_index() + 1)
 
 
+func _setup_blacksmith_upgrade_controls() -> void:
+	_blacksmith_upgrade_ids = UpgradeManager.BLACKSMITH_UPGRADE_ORDER.duplicate()
+	_blacksmith_upgrade_info_labels = [
+		_swordsman_attack_info_label,
+		_swordsman_armor_info_label,
+		_archer_attack_info_label,
+		_archer_speed_info_label,
+		_archer_range_info_label,
+	]
+	_blacksmith_upgrade_buttons = [
+		_swordsman_attack_button,
+		_swordsman_armor_button,
+		_archer_attack_button,
+		_archer_speed_button,
+		_archer_range_button,
+	]
+	_update_blacksmith_upgrade_ui()
+
+
+func _connect_blacksmith_upgrade_buttons() -> void:
+	for index: int in _blacksmith_upgrade_buttons.size():
+		var button: Button = _blacksmith_upgrade_buttons[index]
+		if button == null:
+			continue
+		var upgrade_id: StringName = _blacksmith_upgrade_ids[index]
+		if not button.pressed.is_connected(_on_blacksmith_upgrade_button_pressed.bind(upgrade_id)):
+			button.pressed.connect(_on_blacksmith_upgrade_button_pressed.bind(upgrade_id))
+
+
+func _on_blacksmith_upgrade_button_pressed(upgrade_id: StringName) -> void:
+	if _selected_blacksmith == null:
+		return
+
+	if _selected_blacksmith.try_research_upgrade(upgrade_id):
+		_update_blacksmith_upgrade_ui()
+
+
+func _on_upgrade_levels_changed() -> void:
+	_update_blacksmith_upgrade_ui()
+
+
+func _on_resources_changed() -> void:
+	if _blacksmith_panel.visible:
+		_update_blacksmith_upgrade_ui()
+
+
+func _update_blacksmith_upgrade_ui() -> void:
+	for index: int in _blacksmith_upgrade_buttons.size():
+		if index >= _blacksmith_upgrade_ids.size():
+			break
+
+		var upgrade_id: StringName = _blacksmith_upgrade_ids[index]
+		var info_label: Label = _blacksmith_upgrade_info_labels[index]
+		var button: Button = _blacksmith_upgrade_buttons[index]
+		if info_label == null or button == null:
+			continue
+
+		var level: int = UpgradeManager.get_level(upgrade_id)
+		var display_name: String = UpgradeManager.get_display_name(upgrade_id)
+		info_label.text = "%s\n%d/%d" % [display_name, level, UpgradeManager.MAX_LEVEL]
+
+		if UpgradeManager.is_max_level(upgrade_id):
+			info_label.add_theme_color_override("font_color", BLACKSMITH_UPGRADE_MAX_COLOR)
+			button.text = "%s\nMAX" % UpgradeManager.get_hotkey_label(upgrade_id)
+			button.disabled = true
+			continue
+
+		info_label.remove_theme_color_override("font_color")
+		var cost: Dictionary = UpgradeManager.get_next_level_cost(upgrade_id)
+		button.text = "%s\n%dW %dG" % [
+			UpgradeManager.get_hotkey_label(upgrade_id),
+			cost.wood,
+			cost.gold,
+		]
+		button.disabled = not UpgradeManager.can_afford_upgrade(upgrade_id)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 
 	var key_event := event as InputEventKey
 	if not key_event.pressed or key_event.echo:
+		return
+
+	if _try_handle_blacksmith_upgrade_hotkey(key_event):
 		return
 
 	var hero: Hero = _get_tracked_hero_for_input()
@@ -209,6 +341,36 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				hero.try_execute()
 			get_viewport().set_input_as_handled()
+
+
+func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:
+	if _selected_blacksmith == null or not _selected_blacksmith.can_research():
+		return false
+
+	var upgrade_id: StringName = &""
+	match key_event.keycode:
+		KEY_Q:
+			upgrade_id = UpgradeManager.UPGRADE_SWORDSMAN_ATTACK
+		KEY_W:
+			upgrade_id = UpgradeManager.UPGRADE_SWORDSMAN_ARMOR
+		KEY_E:
+			upgrade_id = UpgradeManager.UPGRADE_ARCHER_ATTACK
+		KEY_R:
+			upgrade_id = UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED
+		KEY_T:
+			upgrade_id = UpgradeManager.UPGRADE_ARCHER_RANGE
+		_:
+			return false
+
+	if UpgradeManager.is_max_level(upgrade_id):
+		get_viewport().set_input_as_handled()
+		return true
+
+	if _selected_blacksmith.try_research_upgrade(upgrade_id):
+		_update_blacksmith_upgrade_ui()
+
+	get_viewport().set_input_as_handled()
+	return true
 
 
 func _get_tracked_hero_for_input() -> Hero:
@@ -747,6 +909,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_worker_queue_signal()
 	_disconnect_barracks_signals()
 	_disconnect_hero_altar_signals()
+	_disconnect_blacksmith_signals()
 	_selected_command_center = null
 
 	if building is CommandCenter:
@@ -781,11 +944,22 @@ func _on_building_selection_changed(building: Building) -> void:
 		_hero_status_label.text = "Hero: Ready to train"
 		_clear_queue_row(_hero_queue_row)
 
+	if building is Blacksmith:
+		_tracked_blacksmith = building as Blacksmith
+		_tracked_blacksmith.building_state_changed.connect(_on_blacksmith_state_changed)
+	else:
+		_tracked_blacksmith = null
+
 	_refresh_command_visibility()
 
 
 func _on_barracks_state_changed(_state: StringName) -> void:
 	_refresh_command_visibility()
+
+
+func _on_blacksmith_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+	_update_blacksmith_upgrade_ui()
 
 
 func _on_hero_altar_state_changed(_state: Variant = null) -> void:
@@ -831,9 +1005,14 @@ func _refresh_command_visibility() -> void:
 		selected_building is HeroAltar
 		and (selected_building as HeroAltar).building_state == Building.STATE_COMPLETED
 	)
+	var show_blacksmith_upgrades: bool = (
+		selected_building is Blacksmith
+		and (selected_building as Blacksmith).can_research()
+	)
 	var show_town_center_commands: bool = selected_building is CommandCenter
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
+	_selected_blacksmith = selected_building as Blacksmith if show_blacksmith_upgrades else null
 	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
@@ -878,6 +1057,9 @@ func _refresh_command_visibility() -> void:
 	elif show_town_center_commands:
 		_apply_town_center_command_visibility()
 		_set_tracked_hero(null)
+	elif show_blacksmith_upgrades:
+		_apply_blacksmith_command_visibility()
+		_set_tracked_hero(null)
 	else:
 		_apply_hidden_command_buttons()
 		_set_tracked_hero(null)
@@ -889,7 +1071,11 @@ func _refresh_command_visibility() -> void:
 	_barracks_training_row.visible = show_barracks_training
 	_hero_altar_panel.visible = show_hero_altar_training
 	_hero_altar_training_row.visible = show_hero_altar_training
+	_blacksmith_panel.visible = show_blacksmith_upgrades
 	_hero_panel.visible = single_hero
+
+	if show_blacksmith_upgrades:
+		_update_blacksmith_upgrade_ui()
 
 	if show_hero_altar_training:
 		_update_hero_altar_status()
@@ -917,6 +1103,7 @@ func _refresh_command_visibility() -> void:
 		or show_town_center_commands
 		or show_barracks_training
 		or show_hero_altar_training
+		or show_blacksmith_upgrades
 		or single_combat_unit
 	)
 
@@ -924,6 +1111,8 @@ func _refresh_command_visibility() -> void:
 func _apply_hero_command_visibility() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
@@ -934,6 +1123,7 @@ func _apply_hero_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
 
@@ -941,6 +1131,8 @@ func _apply_hero_command_visibility() -> void:
 func _apply_worker_command_visibility() -> void:
 	_build_farm_button.visible = true
 	_build_barracks_button.visible = true
+	_build_blacksmith_button.visible = true
+	_build_shop_button.visible = true
 	_build_tower_button.visible = true
 	_build_hero_altar_button.visible = true
 	_build_command_center_button.visible = true
@@ -951,6 +1143,7 @@ func _apply_worker_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -958,6 +1151,8 @@ func _apply_worker_command_visibility() -> void:
 func _apply_combat_command_visibility() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
@@ -968,6 +1163,7 @@ func _apply_combat_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -975,6 +1171,8 @@ func _apply_combat_command_visibility() -> void:
 func _apply_town_center_command_visibility() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
@@ -985,12 +1183,38 @@ func _apply_town_center_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
 	_hero_panel.visible = false
+
+
+func _apply_blacksmith_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
+	_build_tower_button.visible = false
+	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_hero_panel.visible = false
+	_blacksmith_panel.visible = true
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
 
 
 func _apply_hidden_command_buttons() -> void:
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
@@ -999,6 +1223,7 @@ func _apply_hidden_command_buttons() -> void:
 	_buttons_row.visible = false
 	_barracks_training_row.visible = false
 	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -1069,6 +1294,16 @@ func _disconnect_hero_altar_signals() -> void:
 	_tracked_hero_altar = null
 
 
+func _disconnect_blacksmith_signals() -> void:
+	if _tracked_blacksmith == null:
+		return
+
+	if _tracked_blacksmith.building_state_changed.is_connected(_on_blacksmith_state_changed):
+		_tracked_blacksmith.building_state_changed.disconnect(_on_blacksmith_state_changed)
+
+	_tracked_blacksmith = null
+
+
 func _on_build_farm_pressed() -> void:
 	var build_manager: Node = get_node_or_null(build_manager_path)
 	if build_manager == null:
@@ -1083,6 +1318,22 @@ func _on_build_barracks_pressed() -> void:
 		return
 
 	build_manager.start_barracks_placement()
+
+
+func _on_build_blacksmith_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_blacksmith_placement()
+
+
+func _on_build_shop_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_shop_placement()
 
 
 func _on_build_tower_pressed() -> void:

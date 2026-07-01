@@ -4,12 +4,16 @@ extends Node
 
 const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
+const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
+const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_TOWER: StringName = &"tower"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
+const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
+const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
@@ -17,6 +21,10 @@ const FARM_GOLD_COST: int = 80
 const FARM_WOOD_COST: int = 20
 const BARRACKS_GOLD_COST: int = 150
 const BARRACKS_WOOD_COST: int = 100
+const BLACKSMITH_GOLD_COST: int = 100
+const BLACKSMITH_WOOD_COST: int = 150
+const SHOP_GOLD_COST: int = 80
+const SHOP_WOOD_COST: int = 120
 const TOWER_GOLD_COST: int = 120
 const TOWER_WOOD_COST: int = 80
 const HERO_ALTAR_GOLD_COST: int = 180
@@ -25,6 +33,8 @@ const COMMAND_CENTER_GOLD_COST: int = 200
 const COMMAND_CENTER_WOOD_COST: int = 400
 const FARM_GROUND_Y: float = 0.75
 const BARRACKS_GROUND_Y: float = 1.0
+const BLACKSMITH_GROUND_Y: float = 1.0
+const SHOP_GROUND_Y: float = 1.0
 const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.25
 const COMMAND_CENTER_GROUND_Y: float = 1.25
@@ -34,6 +44,9 @@ const GHOST_COLOR_INVALID := Color(0.9, 0.35, 0.35, GHOST_ALPHA)
 const CONSTRUCTION_DURATION_ONE_WORKER: float = 4.0
 const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.5
 const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 2.0
+const SHOP_CONSTRUCTION_DURATION_ONE_WORKER: float = 3.5
+const SHOP_CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.2
+const SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.8
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var buildings_parent_path: NodePath = ".."
@@ -115,6 +128,14 @@ func start_barracks_placement() -> void:
 	_start_placement(PLACEMENT_BARRACKS)
 
 
+func start_blacksmith_placement() -> void:
+	_start_placement(PLACEMENT_BLACKSMITH)
+
+
+func start_shop_placement() -> void:
+	_start_placement(PLACEMENT_SHOP)
+
+
 func start_tower_placement() -> void:
 	_start_placement(PLACEMENT_TOWER)
 
@@ -176,6 +197,12 @@ func _place_building() -> void:
 		PLACEMENT_BARRACKS:
 			gold_cost = BARRACKS_GOLD_COST
 			wood_cost = BARRACKS_WOOD_COST
+		PLACEMENT_BLACKSMITH:
+			gold_cost = BLACKSMITH_GOLD_COST
+			wood_cost = BLACKSMITH_WOOD_COST
+		PLACEMENT_SHOP:
+			gold_cost = SHOP_GOLD_COST
+			wood_cost = SHOP_WOOD_COST
 		PLACEMENT_TOWER:
 			gold_cost = TOWER_GOLD_COST
 			wood_cost = TOWER_WOOD_COST
@@ -206,7 +233,7 @@ func _place_building() -> void:
 	building.start_under_construction()
 
 	var workers: Array[Worker] = _get_selected_workers()
-	building.setup_construction(_get_construction_duration(workers.size()))
+	building.setup_construction(_get_construction_duration(workers.size(), _active_placement))
 	for worker: Worker in workers:
 		worker.start_construction_order(building)
 
@@ -219,6 +246,10 @@ func _get_building_scene(placement_type: StringName) -> PackedScene:
 			return FARM_SCENE
 		PLACEMENT_BARRACKS:
 			return BARRACKS_SCENE
+		PLACEMENT_BLACKSMITH:
+			return BLACKSMITH_SCENE
+		PLACEMENT_SHOP:
+			return SHOP_SCENE
 		PLACEMENT_TOWER:
 			return TOWER_SCENE
 		PLACEMENT_HERO_ALTAR:
@@ -235,6 +266,10 @@ func _get_ground_y(placement_type: StringName) -> float:
 			return FARM_GROUND_Y
 		PLACEMENT_BARRACKS:
 			return BARRACKS_GROUND_Y
+		PLACEMENT_BLACKSMITH:
+			return BLACKSMITH_GROUND_Y
+		PLACEMENT_SHOP:
+			return SHOP_GROUND_Y
 		PLACEMENT_TOWER:
 			return TOWER_GROUND_Y
 		PLACEMENT_HERO_ALTAR:
@@ -258,7 +293,14 @@ func _get_selected_workers() -> Array[Worker]:
 	return workers
 
 
-func _get_construction_duration(worker_count: int) -> float:
+func _get_construction_duration(worker_count: int, placement_type: StringName = &"") -> float:
+	if placement_type == PLACEMENT_SHOP:
+		if worker_count >= 3:
+			return SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+		if worker_count == 2:
+			return SHOP_CONSTRUCTION_DURATION_TWO_WORKERS
+		return SHOP_CONSTRUCTION_DURATION_ONE_WORKER
+
 	if worker_count >= 3:
 		return CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
 	if worker_count == 2:

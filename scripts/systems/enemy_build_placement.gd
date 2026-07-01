@@ -24,6 +24,8 @@ const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.5
 
 const FARM_SIZE := Vector2(3.0, 2.0)
 const BARRACKS_SIZE := Vector2(4.0, 3.0)
+const BLACKSMITH_SIZE := Vector2(3.5, 3.0)
+const SHOP_SIZE := Vector2(3.0, 2.5)
 const TOWER_SIZE := Vector2(2.0, 2.0)
 const HERO_ALTAR_SIZE := Vector2(3.5, 3.5)
 const COMMAND_CENTER_SIZE := Vector2(4.0, 4.0)
@@ -31,6 +33,8 @@ const DEFAULT_FOOTPRINT := Vector2(3.0, 3.0)
 
 const FARM_GROUND_Y: float = 0.75
 const BARRACKS_GROUND_Y: float = 1.0
+const BLACKSMITH_GROUND_Y: float = 1.0
+const SHOP_GROUND_Y: float = 1.0
 const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.25
 const COMMAND_CENTER_GROUND_Y: float = 1.25
@@ -156,6 +160,10 @@ static func get_footprint(building_type: StringName) -> Vector2:
 			return FARM_SIZE
 		&"barracks":
 			return BARRACKS_SIZE
+		&"blacksmith":
+			return BLACKSMITH_SIZE
+		&"shop":
+			return SHOP_SIZE
 		&"tower":
 			return TOWER_SIZE
 		&"hero_altar":
@@ -172,6 +180,10 @@ static func get_ground_y(building_type: StringName) -> float:
 			return FARM_GROUND_Y
 		&"barracks":
 			return BARRACKS_GROUND_Y
+		&"blacksmith":
+			return BLACKSMITH_GROUND_Y
+		&"shop":
+			return SHOP_GROUND_Y
 		&"tower":
 			return TOWER_GROUND_Y
 		&"hero_altar":
@@ -450,6 +462,10 @@ static func _resolve_footprint(building: Node3D) -> Vector2:
 		return FARM_SIZE
 	if building is Barracks:
 		return BARRACKS_SIZE
+	if building is Blacksmith:
+		return BLACKSMITH_SIZE
+	if building is Shop:
+		return SHOP_SIZE
 	if building is Tower:
 		return TOWER_SIZE
 	if building is HeroAltar:

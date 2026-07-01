@@ -477,6 +477,16 @@ custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 text = "Build Barracks"
 
+[node name="BuildBlacksmithButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Build Blacksmith"
+
+[node name="BuildShopButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Build Shop"
+
 [node name="BuildTowerButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
@@ -623,6 +633,106 @@ custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 text = "R"
 tooltip_text = "Execute"
+
+[node name="BlacksmithPanel" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SwordsmanAttackColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="SwordsmanAttackInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanAttackColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Swordsman Attack
+0/5"
+horizontal_alignment = 1
+
+[node name="SwordsmanAttackButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanAttackColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "Q
+100W 100G"
+
+[node name="SwordsmanArmorColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="SwordsmanArmorInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanArmorColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Swordsman Armor
+0/5"
+horizontal_alignment = 1
+
+[node name="SwordsmanArmorButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/SwordsmanArmorColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "W
+100W 100G"
+
+[node name="ArcherAttackColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ArcherAttackInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherAttackColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Archer Attack
+0/5"
+horizontal_alignment = 1
+
+[node name="ArcherAttackButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherAttackColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "E
+100W 100G"
+
+[node name="ArcherSpeedColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ArcherSpeedInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherSpeedColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Archer Attack Speed
+0/5"
+horizontal_alignment = 1
+
+[node name="ArcherSpeedButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherSpeedColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "R
+100W 100G"
+
+[node name="ArcherRangeColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ArcherRangeInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Archer Range
+0/5"
+horizontal_alignment = 1
+
+[node name="ArcherRangeButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "T
+100W 100G"
 
 [node name="CommandButtonGrid" type="GridContainer" parent="CommandBar/MarginContainer/VBoxContainer"]
 layout_mode = 2

@@ -90,6 +90,9 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 	if building is HeroAltar:
 		return (building as HeroAltar).building_state == Building.STATE_COMPLETED
 
+	if building is Blacksmith:
+		return (building as Blacksmith).can_research()
+
 	return false
 
 

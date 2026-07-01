@@ -42,6 +42,8 @@ const PORTRAIT_STYLES: Dictionary = {
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
 	"barracks": {"color": Color(0.5, 0.32, 0.22, 1), "label": "B"},
+	"blacksmith": {"color": Color(0.58, 0.42, 0.22, 1), "label": "BS"},
+	"shop": {"color": Color(0.72, 0.48, 0.22, 1), "label": "Sh"},
 	"hero_altar": {"color": Color(0.55, 0.35, 0.75, 1), "label": "HA"},
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
 	"tower": {"color": Color(0.55, 0.58, 0.62, 1), "label": "T"},
@@ -519,6 +521,9 @@ func _get_display_stats(node: Node) -> Dictionary:
 	if "attack_damage" in node:
 		damage = str(node.get("attack_damage"))
 
+	if "armor" in node:
+		armor = str(node.get("armor"))
+
 	if node is Unit:
 		var unit: Unit = node as Unit
 		speed = str(snapped(unit.move_speed, 0.1))
@@ -795,6 +800,10 @@ func _get_building_info(building: Building) -> Dictionary:
 		return {"name": "Town Center", "type": "Building", "portrait_key": "town_center"}
 	if building is Barracks:
 		return {"name": "Barracks", "type": "Building", "portrait_key": "barracks"}
+	if building is Blacksmith:
+		return {"name": "Blacksmith", "type": "Building", "portrait_key": "blacksmith"}
+	if building is Shop:
+		return {"name": "Shop", "type": "Building", "portrait_key": "shop"}
 	if building is HeroAltar:
 		return {"name": "Hero Altar", "type": "Building", "portrait_key": "hero_altar"}
 	if building is Farm:

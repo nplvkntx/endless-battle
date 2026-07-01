@@ -6,6 +6,9 @@ extends Unit
 @export var attack_damage: int = 10
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 1.0
+@export var armor: int = 0
+
+var _base_attack_damage: int = -1
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
@@ -37,6 +40,7 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
+	call_deferred("_try_apply_blacksmith_upgrades")
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -244,6 +248,23 @@ func _play_attack_animation() -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
+func apply_blacksmith_upgrades() -> void:
+	_cache_base_stats()
+	var attack_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_SWORDSMAN_ATTACK)
+	var armor_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_SWORDSMAN_ARMOR)
+	attack_damage = _base_attack_damage + attack_level * 2
+	armor = armor_level
+
+
+func _cache_base_stats() -> void:
+	if _base_attack_damage < 0:
+		_base_attack_damage = attack_damage
+
+
+func _try_apply_blacksmith_upgrades() -> void:
+	UpgradeManager.apply_player_upgrades_to_unit(self)
+
+
 func take_damage(amount: float, attacker = null) -> void:
 	if _health_component.current_health <= 0:
 		return
@@ -251,7 +272,7 @@ func take_damage(amount: float, attacker = null) -> void:
 	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
 	CombatKillTracker.record_attacker(self, attacker)
 
-	var damage_amount := int(amount)
+	var damage_amount := maxi(1, int(amount) - armor)
 	_health_component.take_damage(damage_amount)
 	FloatingDamageNumber.spawn(self, damage_amount)
 
