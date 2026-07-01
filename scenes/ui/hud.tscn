@@ -116,6 +116,7 @@ theme_override_font_sizes/font_size = 14
 text = "Food: 0/0"
 
 [node name="BottomPanel" type="PanelContainer" parent="."]
+visible = false
 layout_mode = 1
 anchors_preset = 12
 anchor_top = 1.0
@@ -127,6 +128,7 @@ grow_vertical = 0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_bottom_panel")
 script = ExtResource("3_command_bar")
+selection_manager_path = NodePath("../../../SelectionManager")
 
 [node name="MarginContainer" type="MarginContainer" parent="BottomPanel"]
 layout_mode = 2

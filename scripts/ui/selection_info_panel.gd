@@ -225,12 +225,7 @@ func _clear_health_tracking() -> void:
 
 
 func _hide_panel() -> void:
-	_set_portrait("multiple")
-	_name_label.text = ""
-	_type_label.visible = false
-	_health_label.visible = false
-	_mana_label.visible = false
-	visible = true
+	visible = false
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:
