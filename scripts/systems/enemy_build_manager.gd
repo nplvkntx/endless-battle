@@ -9,6 +9,7 @@ const TICK_INTERVAL_SECONDS: float = 4.0
 const TARGET_WORKERS: int = 8
 const FOOD_RESERVE: int = 2
 const MAX_FARMS: int = 3
+const DEFAULT_MAX_BARRACKS: int = 2
 const ENEMY_TEAM_ID: int = 1
 
 const PLACEMENT_FARM: StringName = &"farm"
@@ -39,6 +40,7 @@ const COMMAND_CENTER_MAX_HEALTH: int = 500
 @export var enemy_command_center_path: NodePath
 @export var enemy_gather_manager_path: NodePath
 @export var buildings_parent_path: NodePath = NodePath("..")
+@export var max_barracks: int = DEFAULT_MAX_BARRACKS
 
 var _primary_command_center: CommandCenter = null
 var _train_swordsman_next: bool = true
@@ -102,9 +104,13 @@ func _run_build_order() -> void:
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
-	var barracks: Barracks = _find_enemy_barracks()
-	if barracks != null and not defer_military:
-		_try_train_military(barracks)
+	if _should_build_expansion_barracks():
+		if _try_place_building(PLACEMENT_BARRACKS):
+			return
+
+	if not defer_military:
+		for barracks: Barracks in _find_all_completed_enemy_barracks():
+			_try_train_military(barracks)
 
 	if _should_build_expansion_command_center():
 		_try_place_building(PLACEMENT_COMMAND_CENTER, true)
@@ -153,6 +159,19 @@ func _should_build_hero_altar() -> bool:
 		return false
 
 	return true
+
+
+func _should_build_expansion_barracks() -> bool:
+	if _count_barracks() >= max_barracks:
+		return false
+
+	if not _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if _count_enemy_workers() < TARGET_WORKERS:
+		return false
+
+	return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
 
 
 func _needs_farm() -> bool:
@@ -377,13 +396,26 @@ func _get_training_command_center() -> CommandCenter:
 	return null
 
 
-func _find_enemy_barracks() -> Barracks:
+func _find_all_completed_enemy_barracks() -> Array[Barracks]:
+	var barracks_list: Array[Barracks] = []
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is Barracks or not _is_living_building(node as Building):
+			continue
+
+		var barracks: Barracks = node as Barracks
+		if barracks.building_state == Building.STATE_COMPLETED:
+			barracks_list.append(barracks)
+
+	return barracks_list
+
+
+func _count_barracks() -> int:
+	var count: int = 0
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
 		if node is Barracks and _is_living_building(node as Building):
-			if (node as Barracks).building_state == Building.STATE_COMPLETED:
-				return node as Barracks
+			count += 1
 
-	return null
+	return count
 
 
 func _find_enemy_hero_altar() -> HeroAltar:
