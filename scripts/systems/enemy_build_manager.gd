@@ -84,6 +84,8 @@ func _run_build_order() -> void:
 	if _try_train_enemy_workers():
 		return
 
+	var defer_military: bool = _update_enemy_hero_restoration()
+
 	var command_center: CommandCenter = _get_training_command_center()
 	if command_center == null:
 		return
@@ -101,21 +103,32 @@ func _run_build_order() -> void:
 			return
 
 	var barracks: Barracks = _find_enemy_barracks()
-	if barracks != null:
-		_try_train_military(barracks)
-
-	if _should_build_hero_altar() and _try_place_building(PLACEMENT_HERO_ALTAR):
-		return
-
-	var hero_altar: HeroAltar = _find_enemy_hero_altar()
-	if hero_altar != null and hero_altar.can_train_enemy_hero():
-		hero_altar.try_train_enemy_hero()
-
-	if barracks != null:
+	if barracks != null and not defer_military:
 		_try_train_military(barracks)
 
 	if _should_build_expansion_command_center():
 		_try_place_building(PLACEMENT_COMMAND_CENTER, true)
+
+
+func _update_enemy_hero_restoration() -> bool:
+	if _has_living_enemy_hero():
+		return false
+
+	var hero_altar: HeroAltar = _find_enemy_hero_altar()
+	if hero_altar != null and hero_altar.is_training_hero():
+		return true
+
+	if hero_altar == null and _should_build_hero_altar():
+		_try_place_building(PLACEMENT_HERO_ALTAR)
+
+	if hero_altar != null:
+		hero_altar.try_train_enemy_hero()
+
+	return true
+
+
+func _has_living_enemy_hero() -> bool:
+	return EnemyArmyCommand.find_living_enemy_hero(get_tree()) != null
 
 
 func _needs_barracks() -> bool:
@@ -156,7 +169,7 @@ func _should_build_expansion_command_center() -> bool:
 	if _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
 		return false
 
-	if not _has_completed_building(PLACEMENT_HERO_ALTAR) or not _enemy_has_hero():
+	if not _has_completed_building(PLACEMENT_HERO_ALTAR) or not _has_living_enemy_hero():
 		return false
 
 	return EnemyResourceManager.can_afford(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
@@ -460,14 +473,6 @@ func _count_living_command_centers() -> int:
 			count += 1
 
 	return count
-
-
-func _enemy_has_hero() -> bool:
-	for node: Node in get_tree().get_nodes_in_group(&"enemies"):
-		if node is Hero and is_instance_valid(node) and not node.is_queued_for_deletion():
-			return true
-
-	return false
 
 
 func _is_living_building(building: Building) -> bool:

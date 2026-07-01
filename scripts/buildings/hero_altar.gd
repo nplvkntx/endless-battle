@@ -15,6 +15,7 @@ const HERO_GROUP: StringName = &"heroes"
 const ENEMY_TEAM_ID: int = 1
 
 var _is_training: bool = false
+var _training_for_enemy: bool = false
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
@@ -24,34 +25,41 @@ func is_training_hero() -> bool:
 	return _is_training
 
 
+func is_training_hero_for_owner(is_enemy_owned: bool) -> bool:
+	return _is_training and _training_for_enemy == is_enemy_owned
+
+
+func has_living_owner_hero(is_enemy_owned: bool) -> bool:
+	if is_enemy_owned:
+		return EnemyArmyCommand.find_living_enemy_hero(get_tree()) != null
+
+	return _has_living_player_hero()
+
+
 func player_has_hero() -> bool:
-	for node: Node in get_tree().get_nodes_in_group(HERO_GROUP):
-		if node is Hero and is_instance_valid(node):
-			return true
-	return false
+	return has_living_owner_hero(false)
 
 
 func can_train_hero() -> bool:
-	return (
-		building_state == STATE_COMPLETED
-		and not _is_training
-		and not player_has_hero()
-	)
+	return can_begin_hero_training(false)
 
 
 func enemy_has_hero() -> bool:
-	for node: Node in get_tree().get_nodes_in_group(&"enemies"):
-		if node is Hero and is_instance_valid(node) and not node.is_queued_for_deletion():
-			return true
-
-	return false
+	return has_living_owner_hero(true)
 
 
 func can_train_enemy_hero() -> bool:
+	return can_begin_hero_training(true)
+
+
+func can_begin_hero_training(is_enemy_owned: bool) -> bool:
+	if is_enemy_owned != is_in_group(&"enemy_command_center"):
+		return false
+
 	return (
 		building_state == STATE_COMPLETED
 		and not _is_training
-		and not enemy_has_hero()
+		and not has_living_owner_hero(is_enemy_owned)
 	)
 
 
@@ -89,14 +97,9 @@ func _update_rally_marker(marker_position: Vector3) -> void:
 
 
 func try_train_hero() -> void:
-	if building_state != STATE_COMPLETED:
-		return
-
-	if player_has_hero():
-		ResourceManager.show_feedback("A Hero already exists")
-		return
-
-	if _is_training:
+	if not can_begin_hero_training(false):
+		if building_state == STATE_COMPLETED and has_living_owner_hero(false):
+			ResourceManager.show_feedback("A Hero already exists")
 		return
 
 	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
@@ -105,16 +108,26 @@ func try_train_hero() -> void:
 		)
 		return
 
+	_training_for_enemy = false
 	_begin_hero_training()
 
 
 func try_train_enemy_hero() -> bool:
-	if not can_train_enemy_hero():
+	return try_begin_hero_training(true)
+
+
+func try_begin_hero_training(is_enemy_owned: bool) -> bool:
+	if not can_begin_hero_training(is_enemy_owned):
 		return false
 
-	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
-		return false
+	if is_enemy_owned:
+		if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+			return false
+	else:
+		if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+			return false
 
+	_training_for_enemy = is_enemy_owned
 	_begin_hero_training()
 	return true
 
@@ -127,10 +140,12 @@ func _begin_hero_training() -> void:
 
 
 func _on_hero_training_finished() -> void:
+	var training_was_for_enemy: bool = _training_for_enemy
 	_is_training = false
+	_training_for_enemy = false
 
-	if is_in_group(&"enemy_command_center"):
-		if enemy_has_hero():
+	if training_was_for_enemy:
+		if has_living_owner_hero(true):
 			hero_altar_state_changed.emit()
 			return
 
@@ -138,7 +153,7 @@ func _on_hero_training_finished() -> void:
 		hero_altar_state_changed.emit()
 		return
 
-	if player_has_hero():
+	if has_living_owner_hero(false):
 		hero_altar_state_changed.emit()
 		return
 
@@ -200,3 +215,41 @@ func _spawn_enemy_hero() -> void:
 		[hero],
 		EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	)
+
+
+func _has_living_player_hero() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(HERO_GROUP):
+		if _is_living_player_hero(node):
+			return true
+
+	for node: Node in get_tree().get_nodes_in_group(&"units"):
+		if _is_living_player_hero(node):
+			return true
+
+	return false
+
+
+func _is_living_player_hero(node: Node) -> bool:
+	if not _is_living_hero_node(node):
+		return false
+
+	return not CombatTargetValidation.is_enemy_faction(node)
+
+
+func _is_living_hero_node(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if node.is_queued_for_deletion():
+		return false
+
+	if not node is Hero:
+		return false
+
+	var health_component: HealthComponent = node.get_node_or_null(
+		"HealthComponent"
+	) as HealthComponent
+	if health_component != null:
+		return health_component.current_health > 0
+
+	return true

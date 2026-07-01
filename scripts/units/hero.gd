@@ -967,6 +967,9 @@ func get_current_health() -> int:
 func _on_health_depleted() -> void:
 	if not CombatTargetValidation.is_enemy_faction(self):
 		HeroProgressionStore.save_from_hero(self)
+	else:
+		if is_in_group(&"enemy_combat_units"):
+			remove_from_group(&"enemy_combat_units")
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
