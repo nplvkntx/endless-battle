@@ -13,6 +13,8 @@ extends PanelContainer
 @onready var _building_detail_label: Label = $MarginContainer/HBoxContainer/InfoVBox/BuildingDetailLabel
 @onready var _hp_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/HPBar
 @onready var _mana_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/ManaBar
+@onready var _xp_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/XPBar
+@onready var _xp_label: Label = $MarginContainer/HBoxContainer/InfoVBox/XPBar/XPLabel
 @onready var _health_label: Label = $MarginContainer/HBoxContainer/InfoVBox/HealthLabel
 @onready var _mana_label: Label = $MarginContainer/HBoxContainer/InfoVBox/ManaLabel
 @onready var _stats_row: HBoxContainer = $MarginContainer/HBoxContainer/InfoVBox/StatsRow
@@ -75,6 +77,7 @@ func _on_building_selection_changed(_building: Building) -> void:
 func _refresh_panel() -> void:
 	_clear_health_tracking()
 	_clear_mana_tracking()
+	_hide_xp_display()
 	_clear_production_tracking()
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
@@ -124,6 +127,7 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	_type_label.visible = true
 	_hp_bar.visible = false
 	_mana_bar.visible = false
+	_hide_xp_display()
 	_health_label.visible = false
 	_mana_label.visible = false
 	_stats_row.visible = false
@@ -169,6 +173,10 @@ func _show_unit_info(unit: Unit) -> void:
 	_configure_level_display(unit)
 	_configure_health_display(unit)
 	_configure_mana_display(unit)
+	if unit is Hero:
+		_configure_xp_display(unit as Hero)
+	else:
+		_hide_xp_display()
 	_configure_stats_display(unit)
 	_hide_production_display()
 
@@ -191,6 +199,7 @@ func _show_building_info(building: Building) -> void:
 	_configure_health_display(building)
 	_mana_bar.visible = false
 	_mana_label.visible = false
+	_hide_xp_display()
 	_configure_stats_display(building)
 	_configure_production_display(building)
 
@@ -225,6 +234,7 @@ func _show_enemy_unit_info(unit: Unit) -> void:
 	_configure_health_display(unit, true)
 	_mana_bar.visible = false
 	_mana_label.visible = false
+	_hide_xp_display()
 	_configure_stats_display(unit)
 
 
@@ -249,6 +259,7 @@ func _show_enemy_building_info(building: Building) -> void:
 	_configure_health_display(building, true)
 	_mana_bar.visible = false
 	_mana_label.visible = false
+	_hide_xp_display()
 	_stats_row.visible = false
 	_hide_production_display()
 
@@ -357,6 +368,49 @@ func _configure_health_display(node: Node, show_numeric: bool = false) -> void:
 	_health_label.visible = show_numeric
 
 
+func _configure_xp_display(hero: Hero) -> void:
+	if hero == null or not is_instance_valid(hero):
+		_hide_xp_display()
+		return
+
+	if not hero.xp_changed.is_connected(_on_tracked_xp_changed):
+		hero.xp_changed.connect(_on_tracked_xp_changed)
+	if not hero.level_changed.is_connected(_on_tracked_xp_level_changed):
+		hero.level_changed.connect(_on_tracked_xp_level_changed)
+	_update_xp_display(hero)
+	_xp_bar.visible = true
+	_xp_label.visible = true
+
+
+func _hide_xp_display() -> void:
+	_xp_bar.visible = false
+	_xp_label.visible = false
+
+
+func _update_xp_display(hero: Hero) -> void:
+	var xp_required: float = hero.get_xp_required_for_next_level()
+	if xp_required <= 0.0 or hero.level >= Hero.MAX_LEVEL:
+		_xp_bar.max_value = 1.0
+		_xp_bar.value = 1.0
+		_xp_label.text = "XP: MAX"
+		return
+
+	var current_xp: float = hero.get_current_xp()
+	_xp_bar.max_value = xp_required
+	_xp_bar.value = current_xp
+	_xp_label.text = "XP: %d / %d" % [int(current_xp), int(xp_required)]
+
+
+func _on_tracked_xp_changed(_current_xp: float = 0.0, _xp_to_next_level: float = 0.0) -> void:
+	if _tracked_hero != null and is_instance_valid(_tracked_hero) and not _is_enemy_inspect:
+		_update_xp_display(_tracked_hero)
+
+
+func _on_tracked_xp_level_changed(_new_level: int = 0) -> void:
+	if _tracked_hero != null and is_instance_valid(_tracked_hero) and not _is_enemy_inspect:
+		_update_xp_display(_tracked_hero)
+
+
 func _configure_mana_display(unit: Unit) -> void:
 	_clear_mana_tracking()
 
@@ -427,8 +481,12 @@ func _clear_mana_tracking() -> void:
 	if _tracked_hero != null and is_instance_valid(_tracked_hero):
 		if _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed):
 			_tracked_hero.mana_changed.disconnect(_on_tracked_mana_changed)
+		if _tracked_hero.xp_changed.is_connected(_on_tracked_xp_changed):
+			_tracked_hero.xp_changed.disconnect(_on_tracked_xp_changed)
 		if _tracked_hero.level_changed.is_connected(_on_tracked_hero_stats_changed):
 			_tracked_hero.level_changed.disconnect(_on_tracked_hero_stats_changed)
+		if _tracked_hero.level_changed.is_connected(_on_tracked_xp_level_changed):
+			_tracked_hero.level_changed.disconnect(_on_tracked_xp_level_changed)
 		if _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):
 			_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_stats_changed)
 		if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_stats_changed):
