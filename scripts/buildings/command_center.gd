@@ -342,6 +342,7 @@ func _finalize_enemy_worker(worker: Worker) -> void:
 	if not worker.is_in_group(&"enemies"):
 		worker.add_to_group(&"enemies")
 
+	worker.apply_team_visuals()
 	_notify_enemy_worker_spawned(worker)
 
 

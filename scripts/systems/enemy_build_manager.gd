@@ -359,6 +359,8 @@ func _tag_enemy_building(building: Building) -> void:
 	if not building.is_in_group(ENEMY_BUILDING_GROUP):
 		building.add_to_group(ENEMY_BUILDING_GROUP)
 
+	building.apply_team_visuals()
+
 
 func _add_health_component_if_needed(building: Building, building_type: StringName) -> void:
 	if building.get_node_or_null("HealthComponent") != null:

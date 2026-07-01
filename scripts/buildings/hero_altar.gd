@@ -226,6 +226,7 @@ func _spawn_enemy_hero() -> void:
 
 	spawn_parent.add_child(hero)
 	hero.global_position = global_position + HERO_SPAWN_OFFSET
+	hero.apply_team_visuals()
 
 	var collision_shape: CollisionShape3D = hero.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collision_shape != null:

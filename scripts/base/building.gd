@@ -43,6 +43,12 @@ func _ready() -> void:
 	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
 	NavigationObstacleSetup.apply_from_collision_body(self)
 	_apply_building_data()
+	call_deferred("apply_team_visuals")
+
+
+## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
+func apply_team_visuals() -> void:
+	TeamVisuals.apply_to_entity(self, team_id)
 
 
 func set_selected(selected: bool) -> void:
@@ -196,3 +202,5 @@ func _apply_completed_visual() -> void:
 		return
 
 	_mesh_instance.material_override = null
+	_feedback_material_ready = false
+	apply_team_visuals()

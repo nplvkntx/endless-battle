@@ -155,6 +155,8 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")
 
+	unit.apply_team_visuals()
+
 
 func _stop_enemy_auto_production() -> void:
 	_enemy_production_active = false

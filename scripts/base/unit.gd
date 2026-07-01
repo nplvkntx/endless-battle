@@ -48,6 +48,12 @@ func _ready() -> void:
 	if _selection_indicator:
 		_selection_indicator.visible = false
 	_apply_unit_data()
+	call_deferred("apply_team_visuals")
+
+
+## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
+func apply_team_visuals() -> void:
+	TeamVisuals.apply_to_entity(self, team_id)
 
 
 ## Updates selection state and toggles the optional SelectionIndicator child.
