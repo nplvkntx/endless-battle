@@ -110,6 +110,50 @@ static func find_nearest_gather_source(
 	return closest_source
 
 
+static func find_best_wood_tree(
+	from_position: Vector3,
+	scene_root: Node,
+	for_enemy: bool,
+	preferred: WoodTree = null,
+	exclude: GatherableResource = null
+) -> WoodTree:
+	if scene_root == null or not is_instance_valid(scene_root):
+		return null
+
+	var best_tree: WoodTree = null
+	var best_assigned: int = 999999
+	var best_distance_squared: float = INF
+
+	for node: Node in scene_root.get_children():
+		if not _is_matching_gather_source(node, &"wood", for_enemy):
+			continue
+
+		var tree := node as WoodTree
+		if tree == exclude or not _is_usable_gather_source(tree):
+			continue
+
+		var assigned: int = tree.get_assigned_worker_count()
+		var distance_squared: float = from_position.distance_squared_to(tree.global_position)
+		var is_better: bool = false
+
+		if assigned < best_assigned:
+			is_better = true
+		elif assigned == best_assigned:
+			if tree == preferred and best_tree != preferred:
+				is_better = true
+			elif best_tree == preferred and tree != preferred:
+				is_better = false
+			elif distance_squared < best_distance_squared:
+				is_better = true
+
+		if is_better:
+			best_assigned = assigned
+			best_distance_squared = distance_squared
+			best_tree = tree
+
+	return best_tree
+
+
 static func _is_matching_gather_source(
 	node: Node, resource_id: StringName, for_enemy: bool
 ) -> bool:
