@@ -21,6 +21,8 @@ func _ready() -> void:
 
 	selection_manager.selection_changed.connect(_on_selection_changed)
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
+	if selection_manager.has_signal("inspection_changed"):
+		selection_manager.inspection_changed.connect(_on_inspection_changed)
 	_refresh_frame_visibility()
 
 
@@ -44,20 +46,52 @@ func _on_building_selection_changed(_building: Building) -> void:
 	_refresh_frame_visibility()
 
 
+func _on_inspection_changed(_unit: Unit, _building: Building) -> void:
+	_refresh_frame_visibility()
+
+
 func _refresh_frame_visibility() -> void:
+	call_deferred("_apply_frame_visibility")
+
+
+func _apply_frame_visibility() -> void:
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
 		visible = false
 		return
 
-	var has_selection: bool = (
-		not selection_manager.selected_units.is_empty()
-		or selection_manager.selected_building != null
-	)
-	visible = has_selection
+	visible = _selection_has_commands(selection_manager)
 	if visible:
 		_sync_command_grid()
+	else:
+		_command_button_grid.visible = false
+
+
+func _selection_has_commands(selection_manager: Node) -> bool:
+	if selection_manager.inspected_resource != null:
+		return false
+
+	if selection_manager.inspected_unit != null or selection_manager.inspected_building != null:
+		return false
+
+	if not selection_manager.selected_units.is_empty():
+		return true
+
+	var building: Building = selection_manager.selected_building
+	if building == null:
+		return false
+
+	if building is CommandCenter:
+		return true
+
+	if building is Barracks:
+		return (building as Barracks).building_state == Building.STATE_COMPLETED
+
+	if building is HeroAltar:
+		return (building as HeroAltar).building_state == Building.STATE_COMPLETED
+
+	return false
 
 
 func _sync_command_grid() -> void:
-	_command_button_grid.visible = not _legacy_command_panel.visible
+	_command_button_grid.visible = false

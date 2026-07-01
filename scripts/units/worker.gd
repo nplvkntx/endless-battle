@@ -26,6 +26,7 @@ const FOOD_SUPPLY_USED: int = 1
 const CONSTRUCTION_STUCK_RECOVERY_DELAY: float = 2.0
 const CONSTRUCTION_STUCK_RECOVERY_COOLDOWN: float = 0.75
 const CONSTRUCTION_REPATH_COOLDOWN: float = 1.25
+const BUILD_START_RANGE: float = 0.5
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -145,6 +146,9 @@ func _on_health_depleted() -> void:
 
 
 func _cancel_build_trip() -> void:
+	if _building_target != null and is_instance_valid(_building_target):
+		_building_target.unregister_builder(self)
+
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
 	_build_approach_candidate_index = 0
@@ -173,6 +177,14 @@ func _configure_faction_groups() -> void:
 
 func _physics_process(delta: float) -> void:
 	if not _is_alive():
+		return
+
+	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+		velocity = Vector3.ZERO
+		has_move_target = false
+		_disable_task_navigation()
+		if not _validate_construction_session():
+			return
 		return
 
 	if _construction_repath_cooldown > 0.0:
@@ -205,7 +217,10 @@ func _physics_process(delta: float) -> void:
 				has_move_target = false
 			velocity = Vector3.ZERO
 		else:
-			_update_task_corner_stuck_detection(delta, position_before)
+			if _build_trip_state == BuildTripState.TO_BUILDING:
+				_try_commit_construction_if_in_range()
+			else:
+				_update_task_corner_stuck_detection(delta, position_before)
 	elif has_move_target:
 		super._physics_process(delta)
 	else:
@@ -218,9 +233,13 @@ func _physics_process(delta: float) -> void:
 
 
 func set_movement_target(target: Vector3) -> void:
-	if _build_trip_state == BuildTripState.TO_BUILDING:
+	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+		_cancel_build_trip()
+	elif _build_trip_state == BuildTripState.TO_BUILDING:
 		if _try_commit_construction_if_in_range():
 			return
+		if not _is_construction_approach_move_target(target):
+			_cancel_build_trip()
 
 	super.set_movement_target(target)
 	if _is_on_task_movement():
@@ -279,6 +298,8 @@ func _refresh_task_navigation() -> void:
 
 	if not WorkerTaskNavigation.can_use(_navigation_agent):
 		if _build_trip_state == BuildTripState.TO_BUILDING:
+			if _try_commit_construction_if_in_range():
+				return
 			call_deferred("_try_repath_construction_movement")
 		else:
 			call_deferred("_try_repath_task_movement")
@@ -300,6 +321,8 @@ func _check_task_navigation_reachable() -> void:
 	_task_navigation_active = _navigation_agent.is_target_reachable()
 	if not _task_navigation_active:
 		if _build_trip_state == BuildTripState.TO_BUILDING:
+			if _try_commit_construction_if_in_range():
+				return
 			call_deferred("_try_repath_construction_movement")
 		else:
 			call_deferred("_try_repath_task_movement")
@@ -491,6 +514,7 @@ func command_gather_tree(tree: WoodTree) -> void:
 
 
 func _start_gathering(source: GatherableResource) -> void:
+	_cancel_build_trip()
 	cancel_gathering()
 	if source == null or not is_instance_valid(source):
 		return
@@ -527,14 +551,17 @@ func cancel_gathering() -> void:
 	_reset_task_corner_nudge()
 
 
-func command_build(building: Building) -> void:
+func start_construction_order(building: Building) -> void:
 	if not _is_alive():
 		return
+	if building == null or not is_instance_valid(building):
+		return
 
+	_cancel_build_trip()
 	cancel_gathering()
 	_build_trip_state = BuildTripState.TO_BUILDING
 	_building_target = building
-	_build_approach_candidate_index = -1
+	_build_approach_candidate_index = 0
 	_construction_target_point_valid = false
 	_construction_stuck_recovery_cooldown = 0.0
 	_construction_repath_cooldown = 0.0
@@ -543,8 +570,12 @@ func command_build(building: Building) -> void:
 	set_movement_target(_construction_target_point)
 
 
+func command_build(building: Building) -> void:
+	start_construction_order(building)
+
+
 func command_build_farm(farm: Farm) -> void:
-	command_build(farm)
+	start_construction_order(farm)
 
 
 func on_building_construction_finished() -> void:
@@ -605,14 +636,17 @@ func _update_build_trip() -> void:
 			if _try_commit_construction_if_in_range():
 				return
 			if not has_move_target:
-				_try_repath_construction_movement()
+				if _is_in_build_start_range():
+					_commit_to_construction()
+				else:
+					_try_repath_construction_movement()
 
 
 func _try_commit_construction_if_in_range() -> bool:
 	if _build_trip_state != BuildTripState.TO_BUILDING:
 		return false
 
-	if not _is_near_building_target():
+	if not _is_in_build_start_range():
 		return false
 
 	_commit_to_construction()
@@ -635,29 +669,15 @@ func _assign_construction_target_point(advance_to_next: bool = false) -> void:
 		_construction_target_point_valid = false
 		return
 
-	var point_count: int = _building_target.get_construction_points().size()
-	if point_count <= 0:
-		_construction_target_point = _building_target.global_position
-		_construction_target_point_valid = true
-		return
-
 	if advance_to_next:
-		if not _construction_target_point_valid:
-			_build_approach_candidate_index = (
-				_building_target.get_nearest_construction_point_index(global_position)
-			)
-		else:
-			_build_approach_candidate_index = (
-				(_build_approach_candidate_index + 1) % point_count
-			)
-	elif _build_approach_candidate_index < 0 or _build_approach_candidate_index >= point_count:
-		_build_approach_candidate_index = (
-			_building_target.get_nearest_construction_point_index(global_position)
-		)
+		_build_approach_candidate_index += 1
 
-	_construction_target_point = _snap_task_target_to_navigation(
-		_building_target.get_construction_point_by_index(_build_approach_candidate_index)
+	var raw_point: Vector3 = _building_target.get_construction_point_by_rank(
+		global_position,
+		_build_approach_candidate_index
 	)
+	raw_point.y = global_position.y
+	_construction_target_point = _snap_construction_target_to_navigation(raw_point)
 	_construction_target_point_valid = true
 
 
@@ -669,6 +689,10 @@ func _try_repath_construction_movement() -> void:
 		return
 
 	if _try_commit_construction_if_in_range():
+		return
+
+	if _is_in_build_start_range():
+		_commit_to_construction()
 		return
 
 	_assign_construction_target_point(true)
@@ -686,14 +710,120 @@ func _begin_construction_wait() -> void:
 	_building_target.register_builder(self)
 
 
-func _is_near_building_target() -> bool:
+func is_in_build_start_range() -> bool:
+	return _is_in_build_start_range()
+
+
+func _is_in_build_start_range() -> bool:
 	if _building_target == null or not is_instance_valid(_building_target):
 		return false
 
-	return _building_target.is_position_in_construction_range(
-		global_position,
-		Building.BUILD_RANGE
+	var worker_radius: float = _get_collision_xz_radius(self)
+	var effective_range: float = BUILD_START_RANGE + worker_radius
+	var effective_range_sq: float = effective_range * effective_range
+
+	if _construction_target_point_valid:
+		var to_spot: Vector3 = global_position - _construction_target_point
+		to_spot.y = 0.0
+		if to_spot.length_squared() <= effective_range_sq:
+			return true
+
+	var nearest_point: Vector3 = _building_target.get_nearest_construction_point(
+		global_position
 	)
+	var to_point: Vector3 = global_position - nearest_point
+	to_point.y = 0.0
+	return to_point.length_squared() <= effective_range_sq
+
+
+func is_actively_constructing_building(building: Building) -> bool:
+	return (
+		_build_trip_state == BuildTripState.CONSTRUCTION_WAIT
+		and building != null
+		and is_instance_valid(_building_target)
+		and _building_target == building
+		and _is_in_build_start_range()
+	)
+
+
+func _is_construction_approach_move_target(target: Vector3) -> bool:
+	if not _construction_target_point_valid:
+		return false
+
+	var offset: Vector3 = target - _construction_target_point
+	offset.y = 0.0
+	return offset.length_squared() <= 0.25
+
+
+func _validate_construction_session() -> bool:
+	if _building_target == null or not is_instance_valid(_building_target):
+		_cancel_build_trip()
+		return false
+
+	if _building_target.building_state == Building.STATE_COMPLETED:
+		on_building_construction_finished()
+		return false
+
+	if not is_in_build_start_range():
+		_cancel_build_trip()
+		return false
+
+	return true
+
+
+func _is_touching_building_target() -> bool:
+	if _building_target == null or not is_instance_valid(_building_target):
+		return false
+
+	for collision_index: int in get_slide_collision_count():
+		var collider: Object = get_slide_collision(collision_index).get_collider()
+		if collider == _building_target:
+			return true
+		if collider is Node and _building_target.is_ancestor_of(collider as Node):
+			return true
+
+	return false
+
+
+func _compute_building_approach_position(candidate_index: int) -> Vector3:
+	if _building_target == null or not is_instance_valid(_building_target):
+		return global_position
+
+	var target_center: Vector3 = _building_target.global_position
+	var direction: Vector3 = global_position - target_center
+	direction.y = 0.0
+
+	if direction.length_squared() < 0.001:
+		direction = Vector3.FORWARD
+
+	direction = _apply_approach_candidate_offset(direction, candidate_index)
+
+	var ring: int = candidate_index / GatheringConfig.APPROACH_CANDIDATES_PER_RING
+	var stand_off_distance: float = (
+		_get_collision_xz_radius(_building_target)
+		+ _get_collision_xz_radius(self)
+		+ stopping_distance
+		+ Building.CONSTRUCTION_EDGE_STANDOFF
+		+ float(ring) * GatheringConfig.APPROACH_RING_STANDOFF_STEP
+	)
+	var approach_position: Vector3 = (
+		target_center + direction.normalized() * stand_off_distance
+	)
+	approach_position.y = global_position.y
+	return approach_position
+
+
+func _snap_construction_target_to_navigation(target: Vector3) -> Vector3:
+	if _building_target == null or not is_instance_valid(_building_target):
+		return _snap_task_target_to_navigation(target)
+
+	var snapped: Vector3 = _snap_task_target_to_navigation(target)
+	if _building_target.is_position_inside_footprint(
+		snapped, _get_collision_xz_radius(self)
+	):
+		return target
+
+	return snapped
 
 
 func _get_construction_movement_target() -> Vector3:
@@ -722,7 +852,7 @@ func _update_construction_stuck_recovery(delta: float) -> void:
 		_reset_construction_stuck_watch()
 		return
 
-	if _is_near_building_target():
+	if _is_in_build_start_range():
 		_reset_construction_stuck_watch()
 		return
 
@@ -749,6 +879,10 @@ func _attempt_construction_stuck_recovery() -> void:
 		_build_trip_state = BuildTripState.IDLE
 		_building_target = null
 		_construction_target_point_valid = false
+		return
+
+	if _is_in_build_start_range():
+		_commit_to_construction()
 		return
 
 	_try_repath_construction_movement()
@@ -1276,6 +1410,14 @@ func is_available_for_construction_assignment(allow_gather_interrupt: bool = fal
 
 func is_on_construction_trip() -> bool:
 	return _build_trip_state != BuildTripState.IDLE
+
+
+func is_constructing() -> bool:
+	return _build_trip_state == BuildTripState.CONSTRUCTION_WAIT
+
+
+func get_build_target() -> Building:
+	return _building_target
 
 
 func is_carrying_gathered_resources() -> bool:

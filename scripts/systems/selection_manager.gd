@@ -22,6 +22,7 @@ var selected_units: Array[Unit] = []
 var selected_building: Building = null
 var inspected_unit: Unit = null
 var inspected_building: Building = null
+var inspected_resource: GatherableResource = null
 
 
 func get_multi_unit_selection_category() -> StringName:
@@ -191,6 +192,12 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		_reset_click_tracking()
 		return
 
+	var resource: GatherableResource = _raycast_gatherable_resource(camera, screen_position)
+	if resource != null:
+		_set_inspected_resource(resource)
+		_reset_click_tracking()
+		return
+
 	if InputManager.attack_move_armed and not selected_units.is_empty():
 		var attack_move_position: Vector3 = _raycast_ground_plane(camera, screen_position)
 		if attack_move_position.is_finite():
@@ -253,12 +260,19 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		_dispatch_attack_command(clicked_unit)
 		return
 
-	var attack_building: Building = _raycast_building(camera, screen_position)
+	var clicked_building: Building = _raycast_building(camera, screen_position)
 	if (
-		attack_building != null
-		and CombatTargetValidation.is_attackable_enemy_building(attack_building)
+		clicked_building != null
+		and CombatTargetValidation.is_attackable_enemy_building(clicked_building)
 	):
-		_dispatch_attack_command(attack_building)
+		_dispatch_attack_command(clicked_building)
+		return
+
+	if (
+		clicked_building != null
+		and _is_unfinished_player_construction(clicked_building)
+	):
+		_dispatch_construction_command(clicked_building)
 		return
 
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
@@ -340,6 +354,52 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 			unit.set_movement_target(move_targets[index])
 		else:
 			unit.set_movement_target(move_targets[index])
+
+
+func _dispatch_construction_command(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	if not _is_unfinished_player_construction(building):
+		return
+
+	InputManager.disarm_attack_move()
+	_purge_invalid_selected_units()
+	var dispatched_to_worker := false
+	for unit: Unit in selected_units:
+		if not _is_selectable_unit(unit):
+			continue
+		if unit is Worker:
+			(unit as Worker).start_construction_order(building)
+			dispatched_to_worker = true
+		elif unit is Swordsman:
+			(unit as Swordsman).cancel_attack()
+		elif unit is Archer:
+			(unit as Archer).cancel_attack()
+		elif unit is Hero:
+			(unit as Hero).cancel_attack()
+
+	if dispatched_to_worker:
+		_play_construction_target_feedback(building)
+
+
+func _is_unfinished_player_construction(building: Building) -> bool:
+	if not CombatTargetValidation.is_player_selectable_building(building):
+		return false
+
+	return (
+		building.building_state == Building.STATE_UNDER_CONSTRUCTION
+		or building.building_state == Building.STATE_CONSTRUCTING
+	)
+
+
+func _play_construction_target_feedback(building: Building) -> void:
+	if building == null or not is_instance_valid(building):
+		return
+	if not _is_unfinished_player_construction(building):
+		return
+	if not building.has_method("play_target_feedback"):
+		return
+	building.play_target_feedback()
 
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
@@ -541,7 +601,9 @@ func _purge_invalid_selected_building() -> void:
 
 
 func _purge_invalid_inspection() -> void:
-	var had_inspection: bool = inspected_unit != null or inspected_building != null
+	var had_inspection: bool = (
+		inspected_unit != null or inspected_building != null or inspected_resource != null
+	)
 
 	if inspected_unit != null and not _is_inspectable_unit(inspected_unit):
 		_safe_set_unit_inspected(inspected_unit, false)
@@ -551,7 +613,15 @@ func _purge_invalid_inspection() -> void:
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
 
-	if had_inspection and inspected_unit == null and inspected_building == null:
+	if inspected_resource != null and not _is_inspectable_resource(inspected_resource):
+		inspected_resource = null
+
+	if (
+		had_inspection
+		and inspected_unit == null
+		and inspected_building == null
+		and inspected_resource == null
+	):
 		inspection_changed.emit(null, null)
 
 
@@ -569,6 +639,7 @@ func _set_inspected_unit(unit: Unit) -> void:
 	if inspected_building != null:
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
+	inspected_resource = null
 	inspected_unit = unit
 	_safe_set_unit_inspected(unit, true)
 	inspection_changed.emit(inspected_unit, null)
@@ -590,6 +661,7 @@ func _set_inspected_building(building: Building) -> void:
 		inspected_unit = null
 	if inspected_building != null and inspected_building != building:
 		_safe_set_building_inspected(inspected_building, false)
+	inspected_resource = null
 	inspected_building = building
 	_safe_set_building_inspected(building, true)
 	inspection_changed.emit(null, inspected_building)
@@ -597,8 +669,33 @@ func _set_inspected_building(building: Building) -> void:
 	building_selection_changed.emit(null)
 
 
+func _set_inspected_resource(resource: GatherableResource) -> void:
+	if not _is_inspectable_resource(resource):
+		return
+
+	if (
+		inspected_resource == resource
+		and selected_units.is_empty()
+		and selected_building == null
+	):
+		return
+
+	_clear_selection_without_signal()
+	_clear_building_selection_without_signal()
+	if inspected_unit != null:
+		_safe_set_unit_inspected(inspected_unit, false)
+		inspected_unit = null
+	if inspected_building != null:
+		_safe_set_building_inspected(inspected_building, false)
+		inspected_building = null
+	inspected_resource = resource
+	inspection_changed.emit(null, null)
+	selection_changed.emit(selected_units)
+	building_selection_changed.emit(null)
+
+
 func _clear_inspection() -> void:
-	if inspected_unit == null and inspected_building == null:
+	if inspected_unit == null and inspected_building == null and inspected_resource == null:
 		return
 
 	_clear_inspection_without_signal()
@@ -612,6 +709,7 @@ func _clear_inspection_without_signal() -> void:
 		_safe_set_building_inspected(inspected_building, false)
 	inspected_unit = null
 	inspected_building = null
+	inspected_resource = null
 
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
@@ -668,6 +766,16 @@ func _is_inspectable_unit(candidate: Variant) -> bool:
 
 func _is_inspectable_building(candidate: Variant) -> bool:
 	return CombatTargetValidation.is_attackable_enemy_building(candidate)
+
+
+func _is_inspectable_resource(candidate: Variant) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+
+	if not candidate is GatherableResource:
+		return false
+
+	return not (candidate as GatherableResource).is_queued_for_deletion()
 
 
 func _is_selectable_building(candidate: Variant) -> bool:
@@ -744,30 +852,28 @@ func _raycast_unit(camera: Camera3D, screen_position: Vector2) -> Unit:
 
 
 func _raycast_gold_mine(camera: Camera3D, screen_position: Vector2) -> GoldMine:
-	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
-	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
-	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-
-	var result: Dictionary = space_state.intersect_ray(query)
-	if result.is_empty():
-		return null
-
-	return _find_gold_mine_from_collider(result.collider as Node)
-
-
-func _find_gold_mine_from_collider(node: Node) -> GoldMine:
-	var current: Node = node
-	while current:
-		if current is GoldMine:
-			return current as GoldMine
-		current = current.get_parent()
+	var resource := _raycast_gatherable_resource(camera, screen_position)
+	if resource is GoldMine:
+		return resource as GoldMine
 	return null
 
 
 func _raycast_tree(camera: Camera3D, screen_position: Vector2) -> WoodTree:
+	var resource := _raycast_gatherable_resource(camera, screen_position)
+	if resource is WoodTree:
+		return resource as WoodTree
+	return null
+
+
+func _raycast_gatherable_resource(camera: Camera3D, screen_position: Vector2) -> GatherableResource:
+	var result: Dictionary = _raycast_without_mask(camera, screen_position)
+	if result.is_empty():
+		return null
+
+	return _find_gatherable_resource_from_collider(result.collider as Node)
+
+
+func _raycast_without_mask(camera: Camera3D, screen_position: Vector2) -> Dictionary:
 	var space_state: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
 	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
 	var ray_end: Vector3 = ray_origin + camera.project_ray_normal(screen_position) * 1000.0
@@ -775,18 +881,14 @@ func _raycast_tree(camera: Camera3D, screen_position: Vector2) -> WoodTree:
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
 
-	var result: Dictionary = space_state.intersect_ray(query)
-	if result.is_empty():
-		return null
-
-	return _find_tree_from_collider(result.collider as Node)
+	return space_state.intersect_ray(query)
 
 
-func _find_tree_from_collider(node: Node) -> WoodTree:
+func _find_gatherable_resource_from_collider(node: Node) -> GatherableResource:
 	var current: Node = node
 	while current:
-		if current is WoodTree:
-			return current as WoodTree
+		if current is GatherableResource:
+			return current as GatherableResource
 		current = current.get_parent()
 	return null
 

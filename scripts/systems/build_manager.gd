@@ -31,9 +31,9 @@ const COMMAND_CENTER_GROUND_Y: float = 1.25
 const GHOST_ALPHA: float = 0.4
 const GHOST_COLOR_VALID := Color(0.5, 0.85, 0.5, GHOST_ALPHA)
 const GHOST_COLOR_INVALID := Color(0.9, 0.35, 0.35, GHOST_ALPHA)
-const CONSTRUCTION_DURATION_ONE_WORKER: float = 3.0
-const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.0
-const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.5
+const CONSTRUCTION_DURATION_ONE_WORKER: float = 4.0
+const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.5
+const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 2.0
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var buildings_parent_path: NodePath = ".."
@@ -208,7 +208,7 @@ func _place_building() -> void:
 	var workers: Array[Worker] = _get_selected_workers()
 	building.setup_construction(_get_construction_duration(workers.size()))
 	for worker: Worker in workers:
-		worker.command_build(building)
+		worker.start_construction_order(building)
 
 	_cancel_placement()
 

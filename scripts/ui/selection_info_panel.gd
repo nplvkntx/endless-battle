@@ -45,6 +45,8 @@ const PORTRAIT_STYLES: Dictionary = {
 	"hero_altar": {"color": Color(0.55, 0.35, 0.75, 1), "label": "HA"},
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
 	"tower": {"color": Color(0.55, 0.58, 0.62, 1), "label": "T"},
+	"tree": {"color": Color(0.18, 0.58, 0.24, 1), "label": "Tr"},
+	"gold_mine": {"color": Color(0.92, 0.78, 0.14, 1), "label": "Gm"},
 	"multiple": {"color": Color(0.42, 0.44, 0.48, 1), "label": "++"},
 	"mixed": {"color": Color(0.48, 0.4, 0.35, 1), "label": "Mx"},
 }
@@ -91,6 +93,10 @@ func _refresh_panel() -> void:
 
 	if selection_manager.inspected_unit != null:
 		_show_enemy_unit_info(selection_manager.inspected_unit)
+		return
+
+	if selection_manager.inspected_resource != null:
+		_show_resource_info(selection_manager.inspected_resource)
 		return
 
 	var selected_building: Building = selection_manager.selected_building
@@ -190,6 +196,10 @@ func _show_building_info(building: Building) -> void:
 		_hide_panel()
 		return
 
+	if _is_passive_building(building):
+		_show_passive_building_info(info)
+		return
+
 	visible = true
 	_set_portrait(info.portrait_key)
 	_name_label.text = info.name
@@ -236,6 +246,67 @@ func _show_enemy_unit_info(unit: Unit) -> void:
 	_mana_label.visible = false
 	_hide_xp_display()
 	_configure_stats_display(unit)
+
+
+func _show_resource_info(resource: GatherableResource) -> void:
+	if not is_instance_valid(resource) or resource.is_queued_for_deletion():
+		_hide_panel()
+		return
+
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
+	visible = true
+	_level_label.visible = false
+	_hp_bar.visible = false
+	_mana_bar.visible = false
+	_hide_xp_display()
+	_health_label.visible = false
+	_mana_label.visible = false
+	_stats_row.visible = false
+	_hide_production_display()
+
+	if resource is WoodTree:
+		_set_portrait("tree")
+		_name_label.text = "Tree"
+		_type_label.text = "Resource type: Wood"
+		_type_label.visible = true
+		_building_detail_label.text = "Remaining: %d" % (resource as WoodTree).wood_amount
+		_building_detail_label.visible = true
+		return
+
+	if resource is GoldMine:
+		_set_portrait("gold_mine")
+		_name_label.text = "Gold Mine"
+		_type_label.text = "Resource type: Gold"
+		_type_label.visible = true
+		if "gold_amount" in resource:
+			_building_detail_label.text = "Remaining: %d" % int(resource.get("gold_amount"))
+			_building_detail_label.visible = true
+		else:
+			_building_detail_label.visible = false
+		return
+
+	_hide_panel()
+
+
+func _show_passive_building_info(info: Dictionary) -> void:
+	visible = true
+	_set_portrait(info.portrait_key)
+	_name_label.text = info.name
+	_type_label.text = "Type: %s" % info.type
+	_type_label.visible = true
+	_level_label.visible = false
+	_hp_bar.visible = false
+	_mana_bar.visible = false
+	_hide_xp_display()
+	_health_label.visible = false
+	_mana_label.visible = false
+	_stats_row.visible = false
+	_hide_production_display()
+
+
+func _is_passive_building(building: Building) -> bool:
+	return building is Farm or building is Tower
 
 
 func _show_enemy_building_info(building: Building) -> void:

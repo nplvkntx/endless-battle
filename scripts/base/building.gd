@@ -18,6 +18,11 @@ const CONSTRUCTION_PLACEHOLDER_ALPHA: float = 0.4
 const CONSTRUCTION_EDGE_STANDOFF: float = 0.75
 const BUILD_RANGE: float = 2.5
 const FALLBACK_FOOTPRINT_HALF_EXTENT: float = 1.5
+const CONSTRUCTION_PROGRESS_BAR_NAME := &"ConstructionProgressBar"
+const CONSTRUCTION_PROGRESS_BAR_WIDTH := 1.4
+const CONSTRUCTION_PROGRESS_BAR_HEIGHT := 0.08
+const CONSTRUCTION_PROGRESS_BAR_DEPTH := 0.02
+const CONSTRUCTION_PROGRESS_BAR_HUE := 0.12
 
 @export var building_data: Resource
 
@@ -28,8 +33,9 @@ var is_selected: bool = false
 var _current_health: float = 0.0
 var _max_health: float = 0.0
 var _construction_progress: float = 0.0
-var _construction_duration: float = 3.0
+var _construction_duration: float = 4.0
 var _construction_timer_active: bool = false
+var _construction_elapsed: float = 0.0
 var _registered_builders: Array[Worker] = []
 var _mesh_instance: MeshInstance3D
 var _feedback_material_ready: bool = false
@@ -39,6 +45,9 @@ var _base_emission: Color
 var _base_emission_enabled: bool
 var _feedback_tween: Tween
 var _selection_indicator: Node3D
+var _construction_progress_bar: Node3D
+var _construction_progress_fill: MeshInstance3D
+var _construction_progress_fill_material: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -53,7 +62,7 @@ func _ready() -> void:
 	call_deferred("apply_team_visuals")
 
 
-## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
+## Applies a subtle team tint across all building meshes from team_id or faction groups.
 func apply_team_visuals() -> void:
 	TeamVisuals.apply_to_entity(self, team_id)
 
@@ -133,10 +142,35 @@ func destroy_building() -> void:
 
 
 ## Shows an unfinished placeholder until a worker finishes construction.
+func _process(delta: float) -> void:
+	if building_state == STATE_COMPLETED:
+		return
+
+	_prune_invalid_builders()
+	if not _has_active_builder_in_range():
+		_pause_construction_timer()
+		return
+
+	_construction_timer_active = true
+	_construction_elapsed += delta
+	_construction_progress = clampf(
+		_construction_elapsed / maxf(_construction_duration, 0.001),
+		0.0,
+		1.0
+	)
+	construction_progress_changed.emit(_construction_progress)
+	_update_construction_progress_bar()
+
+	if _construction_progress >= 1.0:
+		_on_construction_timer_finished()
+
+
 func start_under_construction() -> void:
 	building_state = STATE_UNDER_CONSTRUCTION
 	_construction_progress = 0.0
+	_construction_elapsed = 0.0
 	_apply_under_construction_visual()
+	_show_construction_progress_bar()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
 
@@ -211,9 +245,15 @@ func get_construction_point_by_rank(from_position: Vector3, rank: int) -> Vector
 
 
 func is_position_in_construction_range(
-	from_position: Vector3, build_range: float = BUILD_RANGE
+	from_position: Vector3,
+	build_range: float = BUILD_RANGE,
+	worker_radius: float = 0.0
 ) -> bool:
-	var range_sq: float = build_range * build_range
+	var effective_range: float = build_range + worker_radius
+	if _is_within_xz_range_of_footprint(from_position, effective_range):
+		return true
+
+	var range_sq: float = effective_range * effective_range
 	for point: Vector3 in get_construction_points():
 		var offset: Vector3 = from_position - point
 		offset.y = 0.0
@@ -221,6 +261,23 @@ func is_position_in_construction_range(
 			return true
 
 	return false
+
+
+func is_position_inside_footprint(from_position: Vector3, padding: float = 0.0) -> bool:
+	var half_extents: Vector2 = _get_footprint_half_extents()
+	var local_position: Vector3 = global_transform.affine_inverse() * from_position
+	return (
+		absf(local_position.x) <= half_extents.x + padding
+		and absf(local_position.z) <= half_extents.y + padding
+	)
+
+
+func _is_within_xz_range_of_footprint(from_position: Vector3, range: float) -> bool:
+	var half_extents: Vector2 = _get_footprint_half_extents()
+	var local_position: Vector3 = global_transform.affine_inverse() * from_position
+	var dx: float = maxf(absf(local_position.x) - half_extents.x, 0.0)
+	var dz: float = maxf(absf(local_position.z) - half_extents.y, 0.0)
+	return dx * dx + dz * dz <= range * range
 
 
 func _get_construction_points_sorted_by_distance(from_position: Vector3) -> Array[Vector3]:
@@ -270,6 +327,17 @@ func _footprint_offset_to_world(local_offset: Vector3) -> Vector3:
 	)
 
 
+func unregister_builder(worker: Worker) -> void:
+	if worker == null:
+		return
+
+	var index: int = _registered_builders.find(worker)
+	if index >= 0:
+		_registered_builders.remove_at(index)
+
+	_sync_construction_timer_state()
+
+
 ## Called when a worker arrives at the build site.
 func register_builder(worker: Worker) -> void:
 	if building_state == STATE_COMPLETED:
@@ -283,12 +351,8 @@ func register_builder(worker: Worker) -> void:
 	if building_state == STATE_UNDER_CONSTRUCTION:
 		begin_construction()
 
-	if _construction_timer_active:
-		return
-
-	_construction_timer_active = true
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(_construction_duration)
-	wait_timer.timeout.connect(_on_construction_timer_finished, CONNECT_ONE_SHOT)
+	_sync_construction_timer_state()
+	_update_construction_progress_bar()
 
 
 ## Called when a worker arrives and begins the build timer.
@@ -339,8 +403,132 @@ func _apply_under_construction_visual() -> void:
 	_mesh_instance.material_override = placeholder_material
 
 
+func _ensure_construction_progress_bar() -> void:
+	if _construction_progress_bar != null:
+		return
+
+	_construction_progress_bar = Node3D.new()
+	_construction_progress_bar.name = CONSTRUCTION_PROGRESS_BAR_NAME
+	add_child(_construction_progress_bar)
+
+	var bar_mesh := BoxMesh.new()
+	bar_mesh.size = Vector3(
+		CONSTRUCTION_PROGRESS_BAR_WIDTH,
+		CONSTRUCTION_PROGRESS_BAR_HEIGHT,
+		CONSTRUCTION_PROGRESS_BAR_DEPTH
+	)
+
+	var background_material := StandardMaterial3D.new()
+	background_material.albedo_color = Color(0.15, 0.15, 0.15, 1.0)
+
+	var background := MeshInstance3D.new()
+	background.name = &"Background"
+	background.mesh = bar_mesh
+	background.set_surface_override_material(0, background_material)
+	_construction_progress_bar.add_child(background)
+
+	_construction_progress_fill = MeshInstance3D.new()
+	_construction_progress_fill.name = &"Fill"
+	_construction_progress_fill.mesh = bar_mesh
+	_construction_progress_fill.position.z = 0.015
+
+	_construction_progress_fill_material = StandardMaterial3D.new()
+	_construction_progress_fill_material.albedo_color = Color(0.55, 0.35, 0.15, 1.0)
+	_construction_progress_fill.set_surface_override_material(
+		0,
+		_construction_progress_fill_material
+	)
+	_construction_progress_bar.add_child(_construction_progress_fill)
+
+	_construction_progress_bar.position.y = _estimate_construction_progress_bar_height()
+
+
+func _estimate_construction_progress_bar_height() -> float:
+	return _collect_mesh_top_local_y(self, 0.75) + 0.25
+
+
+func _collect_mesh_top_local_y(node: Node, top_y: float) -> float:
+	if node.name == CONSTRUCTION_PROGRESS_BAR_NAME or node.name == &"SelectionIndicator":
+		return top_y
+
+	if node is MeshInstance3D:
+		var mesh := node as MeshInstance3D
+		if mesh.mesh != null:
+			var aabb: AABB = mesh.get_aabb()
+			var mesh_top: float = mesh.position.y + aabb.position.y + aabb.size.y
+			top_y = maxf(top_y, mesh_top)
+
+	for child: Node in node.get_children():
+		top_y = _collect_mesh_top_local_y(child, top_y)
+
+	return top_y
+
+
+func _show_construction_progress_bar() -> void:
+	_ensure_construction_progress_bar()
+	if _construction_progress_bar == null:
+		return
+
+	_construction_progress_bar.visible = true
+	_update_construction_progress_bar()
+
+
+func _hide_construction_progress_bar() -> void:
+	if _construction_progress_bar != null:
+		_construction_progress_bar.visible = false
+
+
+func _update_construction_progress_bar() -> void:
+	if _construction_progress_bar == null or _construction_progress_fill == null:
+		return
+
+	HealthBarDisplay.update_fraction_bar(
+		_construction_progress_bar,
+		_construction_progress_fill,
+		_construction_progress_fill_material,
+		_construction_progress,
+		CONSTRUCTION_PROGRESS_BAR_WIDTH,
+		_construction_progress < 1.0,
+		CONSTRUCTION_PROGRESS_BAR_HUE
+	)
+
+
+func _prune_invalid_builders() -> void:
+	for index: int in range(_registered_builders.size() - 1, -1, -1):
+		var builder: Worker = _registered_builders[index]
+		if builder == null or not is_instance_valid(builder):
+			_registered_builders.remove_at(index)
+
+
+func _has_active_builder_in_range() -> bool:
+	for builder: Worker in _registered_builders:
+		if builder == null or not is_instance_valid(builder):
+			continue
+		if builder.is_actively_constructing_building(self):
+			return true
+	return false
+
+
+func _sync_construction_timer_state() -> void:
+	_prune_invalid_builders()
+	if _has_active_builder_in_range():
+		_construction_timer_active = true
+		set_process(true)
+	else:
+		_pause_construction_timer()
+
+
+func _pause_construction_timer() -> void:
+	_construction_timer_active = false
+	set_process(false)
+
+
 func _apply_completed_visual() -> void:
+	_pause_construction_timer()
+	_hide_construction_progress_bar()
+
 	if _mesh_instance == null:
+		apply_team_visuals()
 		return
 
 	_mesh_instance.material_override = null

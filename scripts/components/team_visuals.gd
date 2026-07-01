@@ -47,6 +47,12 @@ static func apply_to_entity(owner: Node3D, team_id: int) -> void:
 		_remove_accent_marker(owner)
 		return
 
+	if owner is Building:
+		_remove_accent_marker(owner)
+		var building_accent: Color = get_accent_color(team)
+		_apply_building_body_accent(owner, building_accent)
+		return
+
 	var accent: Color = get_accent_color(team)
 	_ensure_accent_marker(owner, accent)
 	_apply_body_accent(owner, accent)
@@ -128,6 +134,43 @@ static func _apply_body_accent(owner: Node3D, accent: Color) -> void:
 	if mesh == null:
 		return
 
+	_tint_mesh_instance(mesh, accent)
+
+
+static func _apply_building_body_accent(owner: Node3D, accent: Color) -> void:
+	_tint_mesh_tree(owner, accent, owner)
+
+
+static func _tint_mesh_tree(node: Node, accent: Color, owner: Node3D) -> void:
+	if _should_skip_building_visual_node(node, owner):
+		return
+
+	if node is MeshInstance3D:
+		_tint_mesh_instance(node as MeshInstance3D, accent)
+
+	for child: Node in node.get_children():
+		_tint_mesh_tree(child, accent, owner)
+
+
+static func _should_skip_building_visual_node(node: Node, owner: Node3D) -> bool:
+	if node == owner:
+		return false
+
+	var skip_names: Array[StringName] = [
+		&"SelectionIndicator",
+		&"ConstructionProgressBar",
+		TEAM_ACCENT_MARKER_NAME,
+	]
+	var current: Node = node
+	while current != null and current != owner:
+		if current.name in skip_names:
+			return true
+		current = current.get_parent()
+
+	return false
+
+
+static func _tint_mesh_instance(mesh: MeshInstance3D, accent: Color) -> void:
 	var source_material: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
 	if source_material == null:
 		source_material = mesh.material_override as StandardMaterial3D
