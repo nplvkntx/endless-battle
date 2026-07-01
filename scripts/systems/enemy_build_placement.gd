@@ -1,10 +1,16 @@
 class_name EnemyBuildPlacement
 extends RefCounted
 
-## Finds valid build positions near the enemy base without overlapping structures.
+## Finds valid build positions near the enemy base without blocking resources or paths.
 
 const BUILDING_PADDING: float = 1.25
 const BASE_SEARCH_RADIUS: float = 28.0
+const GOLD_MINE_CLEARANCE: float = 5.0
+const TREE_CLEARANCE: float = 4.0
+const DROPOFF_PATH_WIDTH: float = 3.0
+const MIN_NAV_PATH_POINTS: int = 2
+const WORKER_NAV_TEST_Y: float = 0.5
+const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.5
 
 const FARM_SIZE := Vector2(3.0, 2.0)
 const BARRACKS_SIZE := Vector2(4.0, 3.0)
@@ -18,21 +24,35 @@ const COMMAND_CENTER_GROUND_Y: float = 1.25
 
 const RING_RADII: Array[float] = [6.0, 8.5, 11.0, 14.0, 17.0]
 const EXPANSION_RING_RADII: Array[float] = [16.0, 19.0, 22.0]
+const CANDIDATE_STEPS: int = 12
 
 
 static func find_position(
 	anchor: Vector3,
 	building_type: StringName,
 	existing_buildings: Array[Node3D],
-	prefer_expansion: bool = false
+	prefer_expansion: bool = false,
+	scene_root: Node = null,
+	nav_map: RID = RID()
 ) -> Vector3:
 	var footprint: Vector2 = get_footprint(building_type)
 	var ground_y: float = get_ground_y(building_type)
 	var ring_radii: Array[float] = EXPANSION_RING_RADII if prefer_expansion else RING_RADII
+	var gold_mines: Array[Node3D] = _collect_enemy_gold_mines(anchor, scene_root)
+	var trees: Array[Node3D] = _collect_enemy_trees(anchor, scene_root)
+	var tree_center: Vector2 = _compute_tree_center(trees)
+	var nav_from: Vector3 = Vector3(
+		anchor.x + COMMAND_CENTER_DROP_OFF_OFFSET_X,
+		WORKER_NAV_TEST_Y,
+		anchor.z
+	)
+
+	var best_position: Vector3 = Vector3.INF
+	var best_score: float = -INF
 
 	for radius: float in ring_radii:
-		for step: int in range(8):
-			var angle: float = float(step) * TAU / 8.0
+		for step: int in range(CANDIDATE_STEPS):
+			var angle: float = float(step) * TAU / float(CANDIDATE_STEPS)
 			var offset := Vector2(cos(angle), sin(angle)) * radius
 			var candidate := Vector3(anchor.x + offset.x, ground_y, anchor.z + offset.y)
 
@@ -42,9 +62,22 @@ static func find_position(
 			if not _is_position_clear(candidate, footprint, existing_buildings):
 				continue
 
-			return candidate
+			if _is_too_close_to_resources(candidate, gold_mines, trees):
+				continue
 
-	return Vector3.INF
+			if _blocks_dropoff_path(candidate, anchor, gold_mines, tree_center):
+				continue
+
+			var nav_to: Vector3 = Vector3(candidate.x, WORKER_NAV_TEST_Y, candidate.z)
+			if not _is_nav_reachable(nav_map, nav_from, nav_to):
+				continue
+
+			var score: float = _score_position(candidate, anchor, gold_mines, trees)
+			if score > best_score:
+				best_score = score
+				best_position = candidate
+
+	return best_position
 
 
 static func get_footprint(building_type: StringName) -> Vector2:
@@ -87,12 +120,163 @@ static func collect_nearby_buildings(anchor: Vector3, scene_root: Node) -> Array
 			continue
 
 		var building_3d: Node3D = child as Node3D
-		if building_3d.global_position.distance_squared_to(anchor) > BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS:
+		if (
+			building_3d.global_position.distance_squared_to(anchor)
+			> BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS
+		):
 			continue
 
 		buildings.append(building_3d)
 
 	return buildings
+
+
+static func _collect_enemy_gold_mines(anchor: Vector3, scene_root: Node) -> Array[Node3D]:
+	var mines: Array[Node3D] = []
+	if scene_root == null:
+		return mines
+
+	var radius_sq: float = BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS
+	for child: Node in scene_root.get_children():
+		if not child is GoldMine:
+			continue
+		if child.global_position.distance_squared_to(anchor) > radius_sq:
+			continue
+		if not child.name.begins_with("Enemy"):
+			continue
+
+		mines.append(child as Node3D)
+
+	return mines
+
+
+static func _collect_enemy_trees(anchor: Vector3, scene_root: Node) -> Array[Node3D]:
+	var trees: Array[Node3D] = []
+	if scene_root == null:
+		return trees
+
+	var radius_sq: float = BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS
+	for child: Node in scene_root.get_children():
+		if not child is WoodTree:
+			continue
+		if not child.name.begins_with("EnemyTree"):
+			continue
+		if child.global_position.distance_squared_to(anchor) > radius_sq:
+			continue
+
+		trees.append(child as Node3D)
+
+	return trees
+
+
+static func _compute_tree_center(trees: Array[Node3D]) -> Vector2:
+	if trees.is_empty():
+		return Vector2(INF, INF)
+
+	var sum := Vector2.ZERO
+	for tree: Node3D in trees:
+		sum += Vector2(tree.global_position.x, tree.global_position.z)
+
+	return sum / float(trees.size())
+
+
+static func _is_too_close_to_resources(
+	candidate: Vector3,
+	gold_mines: Array[Node3D],
+	trees: Array[Node3D]
+) -> bool:
+	for mine: Node3D in gold_mines:
+		if mine == null or not is_instance_valid(mine):
+			continue
+
+		var mine_offset: Vector3 = candidate - mine.global_position
+		mine_offset.y = 0.0
+		if mine_offset.length() < GOLD_MINE_CLEARANCE:
+			return true
+
+	for tree: Node3D in trees:
+		if tree == null or not is_instance_valid(tree):
+			continue
+
+		var tree_offset: Vector3 = candidate - tree.global_position
+		tree_offset.y = 0.0
+		if tree_offset.length() < TREE_CLEARANCE:
+			return true
+
+	return false
+
+
+static func _blocks_dropoff_path(
+	candidate: Vector3,
+	anchor: Vector3,
+	gold_mines: Array[Node3D],
+	tree_center: Vector2
+) -> bool:
+	var point := Vector2(candidate.x, candidate.z)
+	var command_center := Vector2(anchor.x, anchor.z)
+
+	for mine: Node3D in gold_mines:
+		if mine == null or not is_instance_valid(mine):
+			continue
+
+		var mine_point := Vector2(mine.global_position.x, mine.global_position.z)
+		if _distance_point_to_segment(point, command_center, mine_point) < DROPOFF_PATH_WIDTH:
+			return true
+
+	if tree_center.is_finite():
+		if _distance_point_to_segment(point, command_center, tree_center) < DROPOFF_PATH_WIDTH:
+			return true
+
+	return false
+
+
+static func _score_position(
+	candidate: Vector3,
+	anchor: Vector3,
+	gold_mines: Array[Node3D],
+	trees: Array[Node3D]
+) -> float:
+	var score: float = 0.0
+
+	for mine: Node3D in gold_mines:
+		if mine == null or not is_instance_valid(mine):
+			continue
+		score += candidate.distance_to(mine.global_position)
+
+	for tree: Node3D in trees:
+		if tree == null or not is_instance_valid(tree):
+			continue
+		score += candidate.distance_to(tree.global_position)
+
+	var anchor_offset: Vector3 = candidate - anchor
+	anchor_offset.y = 0.0
+	score -= anchor_offset.length() * 0.15
+
+	return score
+
+
+static func _is_nav_reachable(nav_map: RID, from: Vector3, to: Vector3) -> bool:
+	if nav_map == RID():
+		return true
+
+	if not NavigationServer3D.map_is_active(nav_map):
+		return true
+
+	var start: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, from)
+	var end: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, to)
+	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, start, end, true)
+	return path.size() >= MIN_NAV_PATH_POINTS
+
+
+static func _distance_point_to_segment(point: Vector2, segment_a: Vector2, segment_b: Vector2) -> float:
+	var segment: Vector2 = segment_b - segment_a
+	var length_sq: float = segment.length_squared()
+	if length_sq < 0.0001:
+		return point.distance_to(segment_a)
+
+	var t: float = clampf((point - segment_a).dot(segment) / length_sq, 0.0, 1.0)
+	var projection: Vector2 = segment_a + segment * t
+	return point.distance_to(projection)
 
 
 static func _is_position_clear(

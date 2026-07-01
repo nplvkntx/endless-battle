@@ -1035,6 +1035,23 @@ func is_busy_with_task() -> bool:
 	return _gather_state != GatherTripState.IDLE
 
 
+func is_assigned_to_build(building: Building) -> bool:
+	if _build_trip_state == BuildTripState.IDLE or building == null:
+		return false
+
+	return is_instance_valid(_building_target) and _building_target == building
+
+
+func is_available_for_construction_assignment(allow_gather_interrupt: bool = false) -> bool:
+	if _build_trip_state != BuildTripState.IDLE:
+		return false
+
+	if _gather_state == GatherTripState.IDLE:
+		return true
+
+	return allow_gather_interrupt
+
+
 func _is_near_command_center_for_deposit(
 	command_center: CommandCenter, use_extended_reach: bool = false
 ) -> bool:

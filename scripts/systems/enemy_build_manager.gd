@@ -272,6 +272,9 @@ func _try_train_military(barracks: Barracks) -> void:
 
 
 func _try_place_building(building_type: StringName, prefer_expansion: bool = false) -> bool:
+	if _has_unfinished_construction():
+		return false
+
 	var gold_cost: int = 0
 	var wood_cost: int = 0
 	match building_type:
@@ -309,7 +312,9 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 		anchor.global_position,
 		building_type,
 		existing_buildings,
-		prefer_expansion
+		prefer_expansion,
+		parent,
+		_get_navigation_map()
 	)
 	if not position.is_finite():
 		return false
@@ -327,7 +332,7 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 	parent.add_child(building)
 	building.start_under_construction()
 	building.setup_construction(CONSTRUCTION_DURATION)
-	_assign_idle_builder(building)
+	_assign_nearest_builder(building)
 	return true
 
 
@@ -377,26 +382,44 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 
 
 func _try_assign_idle_builder_to_construction() -> void:
+	for building: Building in _collect_unfinished_buildings():
+		if not is_instance_valid(building) or not _is_living_building(building):
+			continue
+
+		if _building_has_active_builder(building):
+			continue
+
+		_assign_nearest_builder(building)
+
+
+func _collect_unfinished_buildings() -> Array[Building]:
+	var buildings: Array[Building] = []
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
 		if not node is Building:
 			continue
 
 		var building: Building = node as Building
-		if building.building_state != Building.STATE_UNDER_CONSTRUCTION:
+		if not _is_living_building(building):
 			continue
 
-		_assign_idle_builder(building)
+		var state: StringName = building.building_state
+		if (
+			state == Building.STATE_UNDER_CONSTRUCTION
+			or state == Building.STATE_CONSTRUCTING
+		):
+			buildings.append(building)
+
+	return buildings
 
 
-func _assign_idle_builder(building: Building) -> void:
-	var worker: Worker = _find_idle_enemy_worker()
-	if worker == null:
-		return
-
-	worker.command_build(building)
+func _has_unfinished_construction() -> bool:
+	return not _collect_unfinished_buildings().is_empty()
 
 
-func _find_idle_enemy_worker() -> Worker:
+func _building_has_active_builder(building: Building) -> bool:
+	if building == null or not is_instance_valid(building):
+		return false
+
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
 		if not node is Worker:
 			continue
@@ -405,12 +428,64 @@ func _find_idle_enemy_worker() -> Worker:
 		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
 			continue
 
-		if worker.is_busy_with_task():
+		if worker.is_assigned_to_build(building):
+			return true
+
+	return false
+
+
+func _assign_nearest_builder(building: Building) -> void:
+	var worker: Worker = _find_nearest_available_enemy_worker(building.global_position, false)
+	if (
+		worker == null
+		and building.building_state == Building.STATE_UNDER_CONSTRUCTION
+	):
+		worker = _find_nearest_available_enemy_worker(building.global_position, true)
+	if worker == null:
+		return
+
+	worker.command_build(building)
+
+
+func _find_nearest_available_enemy_worker(
+	near_position: Vector3, allow_gather_interrupt: bool = false
+) -> Worker:
+	var closest_worker: Worker = null
+	var closest_distance_squared: float = INF
+
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not node is Worker:
 			continue
 
-		return worker
+		var worker: Worker = node as Worker
+		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
+			continue
 
-	return null
+		if not worker.is_available_for_construction_assignment(allow_gather_interrupt):
+			continue
+
+		var offset: Vector3 = worker.global_position - near_position
+		offset.y = 0.0
+		var distance_squared: float = offset.length_squared()
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_worker = worker
+
+	return closest_worker
+
+
+func _get_navigation_map() -> RID:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not node is Worker:
+			continue
+
+		var agent: NavigationAgent3D = (
+			node.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
+		)
+		if agent != null and WorkerTaskNavigation.can_use(agent):
+			return agent.get_navigation_map()
+
+	return RID()
 
 
 func _resolve_primary_command_center() -> CommandCenter:
