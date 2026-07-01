@@ -80,7 +80,7 @@ func can_afford_upgrade(upgrade_id: StringName) -> bool:
 	return ResourceManager.can_afford(cost.gold, cost.wood)
 
 
-func try_research(upgrade_id: StringName) -> bool:
+func try_pay_for_research(upgrade_id: StringName) -> bool:
 	if is_max_level(upgrade_id):
 		return false
 
@@ -94,10 +94,24 @@ func try_research(upgrade_id: StringName) -> bool:
 			ResourceManager.show_feedback("Not enough wood")
 		return false
 
+	return true
+
+
+func finish_research(upgrade_id: StringName) -> void:
+	if is_max_level(upgrade_id):
+		return
+
 	_levels[upgrade_id] = get_level(upgrade_id) + 1
 	_refresh_all_player_military_units()
 	upgrade_levels_changed.emit()
 	upgrade_applied.emit(upgrade_id)
+
+
+func try_research(upgrade_id: StringName) -> bool:
+	if not try_pay_for_research(upgrade_id):
+		return false
+
+	finish_research(upgrade_id)
 	return true
 
 

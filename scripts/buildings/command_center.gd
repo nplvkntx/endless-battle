@@ -25,6 +25,7 @@ enum RallyTargetType {
 var _worker_queue_count: int = 0
 var _is_training: bool = false
 var _training_session: int = 0
+var _training_started_at: float = 0.0
 var _repeat_enabled: bool = false
 var _repeat_unit_type: StringName = &""
 var _rally_target_type: RallyTargetType = RallyTargetType.NONE
@@ -123,6 +124,26 @@ func try_train_worker_with_repeat(ctrl_held: bool) -> void:
 
 func is_training_worker() -> bool:
 	return _is_training
+
+
+func has_active_unit_training() -> bool:
+	return _is_training
+
+
+func get_active_unit_training_progress() -> float:
+	if not _is_training:
+		return 0.0
+
+	var elapsed: float = _get_time_seconds() - _training_started_at
+	return clampf(elapsed / TRAIN_SECONDS, 0.0, 1.0)
+
+
+func get_active_unit_training_name() -> String:
+	return "Worker"
+
+
+func _get_time_seconds() -> float:
+	return Time.get_ticks_msec() / 1000.0
 
 
 func cancel_worker_training_at(slot_index: int) -> bool:
@@ -282,6 +303,7 @@ func _start_next_training() -> void:
 	_training_session += 1
 	var session: int = _training_session
 	_is_training = true
+	_training_started_at = _get_time_seconds()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
 	wait_timer.timeout.connect(func() -> void:
 		_on_training_finished(session)

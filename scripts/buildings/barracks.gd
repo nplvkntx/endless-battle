@@ -31,6 +31,8 @@ var _is_training: bool = false
 var _is_training_archer: bool = false
 var _swordsman_training_session: int = 0
 var _archer_training_session: int = 0
+var _swordsman_training_started_at: float = 0.0
+var _archer_training_started_at: float = 0.0
 var _repeat_enabled: bool = false
 var _repeat_unit_type: StringName = &""
 var _last_queued_train_id: StringName = &""
@@ -253,6 +255,32 @@ func is_training_archer() -> bool:
 	return _is_training_archer
 
 
+func has_active_unit_training() -> bool:
+	return _is_training or _is_training_archer
+
+
+func get_active_unit_training_progress() -> float:
+	if _is_training:
+		var swordsman_elapsed: float = _get_time_seconds() - _swordsman_training_started_at
+		return clampf(swordsman_elapsed / TRAIN_SECONDS, 0.0, 1.0)
+	if _is_training_archer:
+		var archer_elapsed: float = _get_time_seconds() - _archer_training_started_at
+		return clampf(archer_elapsed / TRAIN_SECONDS, 0.0, 1.0)
+	return 0.0
+
+
+func get_active_unit_training_name() -> String:
+	if _is_training:
+		return "Swordsman"
+	if _is_training_archer:
+		return "Archer"
+	return ""
+
+
+func _get_time_seconds() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
 func cancel_swordsman_training_at(slot_index: int) -> bool:
 	if _swordsman_queue_count <= 0:
 		return false
@@ -411,6 +439,7 @@ func _start_next_training() -> void:
 	_swordsman_training_session += 1
 	var session: int = _swordsman_training_session
 	_is_training = true
+	_swordsman_training_started_at = _get_time_seconds()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
 	wait_timer.timeout.connect(func() -> void:
 		_on_swordsman_training_finished(session)
@@ -464,6 +493,7 @@ func _start_next_archer_training() -> void:
 	_archer_training_session += 1
 	var session: int = _archer_training_session
 	_is_training_archer = true
+	_archer_training_started_at = _get_time_seconds()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
 	wait_timer.timeout.connect(func() -> void:
 		_on_archer_training_finished(session)

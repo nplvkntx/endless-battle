@@ -15,6 +15,7 @@ extends PanelContainer
 @onready var _mana_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/ManaBar
 @onready var _xp_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/XPBar
 @onready var _xp_label: Label = $MarginContainer/HBoxContainer/InfoVBox/XPBar/XPLabel
+@onready var _build_progress_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/BuildProgressBar
 @onready var _health_label: Label = $MarginContainer/HBoxContainer/InfoVBox/HealthLabel
 @onready var _mana_label: Label = $MarginContainer/HBoxContainer/InfoVBox/ManaLabel
 @onready var _stats_row: HBoxContainer = $MarginContainer/HBoxContainer/InfoVBox/StatsRow
@@ -27,6 +28,8 @@ var _tracked_hero: Hero = null
 var _tracked_command_center: CommandCenter = null
 var _tracked_barracks: Barracks = null
 var _tracked_hero_altar: HeroAltar = null
+var _tracked_blacksmith: Blacksmith = null
+var _tracked_activity_building: Building = null
 var _is_enemy_inspect: bool = false
 
 const ENEMY_NAME_COLOR := Color(0.95, 0.35, 0.35, 1)
@@ -64,6 +67,13 @@ func _ready() -> void:
 	if selection_manager.has_signal("inspection_changed"):
 		selection_manager.inspection_changed.connect(_on_inspection_changed)
 	_refresh_panel()
+
+
+func _process(_delta: float) -> void:
+	if not visible:
+		return
+
+	_update_activity_progress_display()
 
 
 func _on_inspection_changed(_unit: Unit, _building: Building) -> void:
@@ -213,7 +223,9 @@ func _show_building_info(building: Building) -> void:
 	_mana_label.visible = false
 	_hide_xp_display()
 	_configure_stats_display(building)
+	_configure_activity_tracking(building)
 	_configure_production_display(building)
+	_update_activity_progress_display()
 
 
 func _show_enemy_unit_info(unit: Unit) -> void:
@@ -603,6 +615,152 @@ func _hide_panel() -> void:
 func _hide_production_display() -> void:
 	_task_label.visible = false
 	_building_detail_label.visible = false
+	_hide_activity_progress_bar()
+
+
+func _hide_activity_progress_bar() -> void:
+	_build_progress_bar.visible = false
+
+
+func _configure_activity_tracking(building: Building) -> void:
+	_disconnect_activity_building_signals()
+	_tracked_activity_building = building
+
+	if _tracked_activity_building == null:
+		return
+
+	if _tracked_activity_building.has_signal("construction_progress_changed"):
+		_tracked_activity_building.construction_progress_changed.connect(_on_activity_state_changed)
+
+
+func _disconnect_activity_building_signals() -> void:
+	if _tracked_activity_building == null or not is_instance_valid(_tracked_activity_building):
+		_tracked_activity_building = null
+		return
+
+	if (
+		_tracked_activity_building.has_signal("construction_progress_changed")
+		and _tracked_activity_building.construction_progress_changed.is_connected(_on_activity_state_changed)
+	):
+		_tracked_activity_building.construction_progress_changed.disconnect(_on_activity_state_changed)
+
+	_tracked_activity_building = null
+
+
+func _on_activity_state_changed(_progress: float = 0.0) -> void:
+	_update_activity_progress_display()
+
+
+func _update_activity_progress_display() -> void:
+	var activity: Dictionary = _query_active_activity()
+	if activity.get("active", false):
+		_build_progress_bar.visible = true
+		_build_progress_bar.value = float(activity.get("progress", 0.0)) * 100.0
+		_task_label.text = String(activity.get("label", ""))
+		_task_label.visible = true
+
+		var detail: String = String(activity.get("detail", ""))
+		if detail.is_empty():
+			_building_detail_label.visible = false
+		else:
+			_building_detail_label.text = detail
+			_building_detail_label.visible = true
+		return
+
+	_hide_activity_progress_bar()
+	_refresh_idle_production_labels()
+
+
+func _query_active_activity() -> Dictionary:
+	if _tracked_activity_building == null or not is_instance_valid(_tracked_activity_building):
+		return {"active": false}
+
+	var building: Building = _tracked_activity_building
+	if building.is_being_constructed():
+		return {
+			"active": true,
+			"progress": building.get_construction_progress_ratio(),
+			"label": "Constructing: %s" % _name_label.text,
+			"detail": "",
+		}
+
+	if building is Blacksmith:
+		var blacksmith: Blacksmith = building as Blacksmith
+		if blacksmith.is_researching():
+			return {
+				"active": true,
+				"progress": blacksmith.get_research_progress(),
+				"label": "Researching: %s" % blacksmith.get_research_activity_label(),
+				"detail": "",
+			}
+
+	if building is CommandCenter:
+		var command_center: CommandCenter = building as CommandCenter
+		if command_center.has_active_unit_training():
+			return {
+				"active": true,
+				"progress": command_center.get_active_unit_training_progress(),
+				"label": "Training: %s" % command_center.get_active_unit_training_name(),
+				"detail": _get_training_queue_detail(command_center),
+			}
+
+	if building is Barracks:
+		var barracks: Barracks = building as Barracks
+		if barracks.has_active_unit_training():
+			return {
+				"active": true,
+				"progress": barracks.get_active_unit_training_progress(),
+				"label": "Training: %s" % barracks.get_active_unit_training_name(),
+				"detail": _get_training_queue_detail(barracks),
+			}
+
+	if building is HeroAltar:
+		var hero_altar: HeroAltar = building as HeroAltar
+		if hero_altar.has_active_unit_training():
+			return {
+				"active": true,
+				"progress": hero_altar.get_active_unit_training_progress(),
+				"label": "Training: %s" % hero_altar.get_active_unit_training_name(),
+				"detail": "",
+			}
+
+	return {"active": false}
+
+
+func _get_training_queue_detail(building: Node) -> String:
+	if building is CommandCenter:
+		var queue_count: int = (building as CommandCenter).get_worker_queue_count()
+		if queue_count > 1:
+			return "Queue: %d" % queue_count
+		return ""
+
+	if building is Barracks:
+		var barracks: Barracks = building as Barracks
+		var swordsman_count: int = barracks.get_swordsman_queue_count()
+		var archer_count: int = barracks.get_archer_queue_count()
+		var total_count: int = maxi(swordsman_count, 0) + maxi(archer_count, 0)
+		if total_count > 1:
+			return "Queue: %d" % total_count
+		return ""
+
+	return ""
+
+
+func _refresh_idle_production_labels() -> void:
+	if _tracked_command_center != null and is_instance_valid(_tracked_command_center):
+		_update_command_center_production()
+		return
+
+	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
+		_update_barracks_production()
+		return
+
+	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
+		_update_hero_altar_production()
+		return
+
+	if _tracked_blacksmith != null and is_instance_valid(_tracked_blacksmith):
+		_update_blacksmith_production()
 
 
 func _configure_production_display(building: Building) -> void:
@@ -629,10 +787,21 @@ func _configure_production_display(building: Building) -> void:
 		_update_hero_altar_production()
 		return
 
+	if building is Blacksmith:
+		_tracked_blacksmith = building as Blacksmith
+		if _tracked_blacksmith.has_signal("research_state_changed"):
+			_tracked_blacksmith.research_state_changed.connect(_on_production_changed)
+		_update_blacksmith_production()
+		return
+
 	_hide_production_display()
 
 
-func _on_production_changed(_value: int = 0) -> void:
+func _on_production_changed(_value: Variant = null) -> void:
+	_update_activity_progress_display()
+	if _build_progress_bar.visible:
+		return
+
 	if _tracked_command_center != null and is_instance_valid(_tracked_command_center):
 		_update_command_center_production()
 		return
@@ -655,6 +824,8 @@ func _update_command_center_production() -> void:
 		queue_count = _tracked_command_center.get_worker_queue_count()
 
 	if queue_count > 0:
+		if _tracked_command_center.has_active_unit_training():
+			return
 		_task_label.text = "Training: Worker"
 		_task_label.visible = true
 		_building_detail_label.text = "Queue: %d" % queue_count
@@ -694,6 +865,9 @@ func _update_barracks_production() -> void:
 			_hide_production_display()
 		return
 
+	if _tracked_barracks.has_active_unit_training():
+		return
+
 	_task_label.text = "Training: %s" % ", ".join(training_parts)
 	_task_label.visible = true
 
@@ -720,9 +894,22 @@ func _update_hero_altar_production() -> void:
 		is_training = _tracked_hero_altar.is_training_hero()
 
 	if is_training:
-		_task_label.text = "Training: Hero"
-	else:
-		_task_label.text = "Production: Idle"
+		return
+
+	_task_label.text = "Production: Idle"
+	_task_label.visible = true
+	_building_detail_label.visible = false
+
+
+func _update_blacksmith_production() -> void:
+	if _tracked_blacksmith == null or not is_instance_valid(_tracked_blacksmith):
+		_hide_production_display()
+		return
+
+	if _tracked_blacksmith.is_researching():
+		return
+
+	_task_label.text = "Research: Ready"
 	_task_label.visible = true
 	_building_detail_label.visible = false
 
@@ -754,9 +941,18 @@ func _clear_production_tracking() -> void:
 		):
 			_tracked_hero_altar.hero_altar_state_changed.disconnect(_on_production_changed)
 
+	if _tracked_blacksmith != null and is_instance_valid(_tracked_blacksmith):
+		if (
+			_tracked_blacksmith.has_signal("research_state_changed")
+			and _tracked_blacksmith.research_state_changed.is_connected(_on_production_changed)
+		):
+			_tracked_blacksmith.research_state_changed.disconnect(_on_production_changed)
+
+	_disconnect_activity_building_signals()
 	_tracked_command_center = null
 	_tracked_barracks = null
 	_tracked_hero_altar = null
+	_tracked_blacksmith = null
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:

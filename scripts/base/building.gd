@@ -209,6 +209,17 @@ func setup_construction(duration: float) -> void:
 	_construction_duration = duration
 
 
+func get_construction_progress_ratio() -> float:
+	return _construction_progress
+
+
+func is_being_constructed() -> bool:
+	return (
+		building_state == STATE_UNDER_CONSTRUCTION
+		or building_state == STATE_CONSTRUCTING
+	)
+
+
 ## Returns standoff positions around the building footprint for worker construction.
 func get_construction_points() -> Array[Vector3]:
 	var half_extents: Vector2 = _get_footprint_half_extents()

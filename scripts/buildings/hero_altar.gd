@@ -15,6 +15,7 @@ const HERO_GROUP: StringName = &"heroes"
 const ENEMY_TEAM_ID: int = 1
 
 var _is_training: bool = false
+var _training_started_at: float = 0.0
 var _training_for_enemy: bool = false
 var _hero_training_session: int = 0
 var _has_rally_point: bool = false
@@ -24,6 +25,26 @@ var _rally_marker: MeshInstance3D = null
 
 func is_training_hero() -> bool:
 	return _is_training
+
+
+func has_active_unit_training() -> bool:
+	return _is_training
+
+
+func get_active_unit_training_progress() -> float:
+	if not _is_training:
+		return 0.0
+
+	var elapsed: float = _get_time_seconds() - _training_started_at
+	return clampf(elapsed / TRAIN_SECONDS, 0.0, 1.0)
+
+
+func get_active_unit_training_name() -> String:
+	return "Hero"
+
+
+func _get_time_seconds() -> float:
+	return Time.get_ticks_msec() / 1000.0
 
 
 func is_training_hero_for_owner(is_enemy_owned: bool) -> bool:
@@ -149,6 +170,7 @@ func _begin_hero_training() -> void:
 	_hero_training_session += 1
 	var session: int = _hero_training_session
 	_is_training = true
+	_training_started_at = _get_time_seconds()
 	hero_altar_state_changed.emit()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
 	wait_timer.timeout.connect(func() -> void:

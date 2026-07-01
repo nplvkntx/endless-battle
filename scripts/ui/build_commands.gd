@@ -271,6 +271,10 @@ func _on_resources_changed() -> void:
 
 
 func _update_blacksmith_upgrade_ui() -> void:
+	var is_researching: bool = (
+		_selected_blacksmith != null and _selected_blacksmith.is_researching()
+	)
+
 	for index: int in _blacksmith_upgrade_buttons.size():
 		if index >= _blacksmith_upgrade_ids.size():
 			break
@@ -284,6 +288,10 @@ func _update_blacksmith_upgrade_ui() -> void:
 		var level: int = UpgradeManager.get_level(upgrade_id)
 		var display_name: String = UpgradeManager.get_display_name(upgrade_id)
 		info_label.text = "%s\n%d/%d" % [display_name, level, UpgradeManager.MAX_LEVEL]
+
+		if is_researching:
+			button.disabled = true
+			continue
 
 		if UpgradeManager.is_max_level(upgrade_id):
 			info_label.add_theme_color_override("font_color", BLACKSMITH_UPGRADE_MAX_COLOR)
@@ -346,6 +354,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:
 	if _selected_blacksmith == null or not _selected_blacksmith.can_research():
 		return false
+
+	if _selected_blacksmith.is_researching():
+		get_viewport().set_input_as_handled()
+		return true
 
 	var upgrade_id: StringName = &""
 	match key_event.keycode:
@@ -947,6 +959,8 @@ func _on_building_selection_changed(building: Building) -> void:
 	if building is Blacksmith:
 		_tracked_blacksmith = building as Blacksmith
 		_tracked_blacksmith.building_state_changed.connect(_on_blacksmith_state_changed)
+		if not _tracked_blacksmith.research_state_changed.is_connected(_on_blacksmith_research_state_changed):
+			_tracked_blacksmith.research_state_changed.connect(_on_blacksmith_research_state_changed)
 	else:
 		_tracked_blacksmith = null
 
@@ -959,6 +973,10 @@ func _on_barracks_state_changed(_state: StringName) -> void:
 
 func _on_blacksmith_state_changed(_state: StringName) -> void:
 	_refresh_command_visibility()
+	_update_blacksmith_upgrade_ui()
+
+
+func _on_blacksmith_research_state_changed() -> void:
 	_update_blacksmith_upgrade_ui()
 
 
@@ -1300,6 +1318,9 @@ func _disconnect_blacksmith_signals() -> void:
 
 	if _tracked_blacksmith.building_state_changed.is_connected(_on_blacksmith_state_changed):
 		_tracked_blacksmith.building_state_changed.disconnect(_on_blacksmith_state_changed)
+
+	if _tracked_blacksmith.research_state_changed.is_connected(_on_blacksmith_research_state_changed):
+		_tracked_blacksmith.research_state_changed.disconnect(_on_blacksmith_research_state_changed)
 
 	_tracked_blacksmith = null
 
