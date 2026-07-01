@@ -117,8 +117,21 @@ func try_train_worker() -> void:
 		_start_next_training()
 
 
+func can_train_enemy_worker() -> bool:
+	if not is_in_group(&"enemy_command_center"):
+		return false
+
+	if not _is_enemy_worker_training_allowed():
+		return false
+
+	if _is_training or _worker_queue_count > 0:
+		return false
+
+	return EnemyResourceManager.can_afford_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+
+
 func try_train_enemy_worker() -> bool:
-	if building_state != STATE_COMPLETED:
+	if not can_train_enemy_worker():
 		return false
 
 	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
@@ -129,6 +142,19 @@ func try_train_enemy_worker() -> bool:
 
 	if not _is_training:
 		_start_next_training()
+
+	return true
+
+
+func _is_enemy_worker_training_allowed() -> bool:
+	if (
+		building_state == STATE_UNDER_CONSTRUCTION
+		or building_state == STATE_CONSTRUCTING
+	):
+		return false
+
+	if _health_component != null and _health_component.current_health <= 0:
+		return false
 
 	return true
 

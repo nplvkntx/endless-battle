@@ -6,7 +6,7 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 4.0
-const TARGET_WORKERS: int = 7
+const TARGET_WORKERS: int = 8
 const FOOD_RESERVE: int = 2
 const MAX_FARMS: int = 3
 const ENEMY_TEAM_ID: int = 1
@@ -81,6 +81,9 @@ func _on_build_tick() -> void:
 func _run_build_order() -> void:
 	_try_assign_idle_builder_to_construction()
 
+	if _try_train_enemy_workers():
+		return
+
 	var command_center: CommandCenter = _get_training_command_center()
 	if command_center == null:
 		return
@@ -92,9 +95,6 @@ func _run_build_order() -> void:
 		return
 
 	if _needs_farm() and _try_place_building(PLACEMENT_FARM):
-		return
-
-	if _count_enemy_workers() < TARGET_WORKERS and command_center.try_train_enemy_worker():
 		return
 
 	if not _has_completed_building(PLACEMENT_BARRACKS) and not _is_building_type_in_progress(
@@ -160,6 +160,17 @@ func _should_build_expansion_command_center() -> bool:
 		return false
 
 	return EnemyResourceManager.can_afford(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+
+
+func _try_train_enemy_workers() -> bool:
+	if _count_enemy_workers() >= TARGET_WORKERS:
+		return false
+
+	var command_center: CommandCenter = _get_training_command_center()
+	if command_center == null:
+		return false
+
+	return command_center.try_train_enemy_worker()
 
 
 func _try_train_military(barracks: Barracks) -> void:
@@ -489,4 +500,5 @@ func notify_enemy_worker_spawned(worker: Worker) -> void:
 	if gather_manager == null:
 		return
 
-	gather_manager.assign_gather_job(worker)
+	var prefer_gold: bool = (_count_enemy_workers() % 2) == 1
+	gather_manager.assign_gather_job(worker, prefer_gold)
