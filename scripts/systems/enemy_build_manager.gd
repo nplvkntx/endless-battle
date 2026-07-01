@@ -91,9 +91,6 @@ func _run_build_order() -> void:
 	if _needs_barracks() and _try_place_building(PLACEMENT_BARRACKS):
 		return
 
-	if _needs_hero_altar() and _try_place_building(PLACEMENT_HERO_ALTAR):
-		return
-
 	if _needs_farm() and _try_place_building(PLACEMENT_FARM):
 		return
 
@@ -107,13 +104,8 @@ func _run_build_order() -> void:
 	if barracks != null:
 		_try_train_military(barracks)
 
-	if (
-		not _has_completed_building(PLACEMENT_HERO_ALTAR)
-		and not _is_building_type_in_progress(PLACEMENT_HERO_ALTAR)
-		and _has_completed_building(PLACEMENT_BARRACKS)
-	):
-		if _try_place_building(PLACEMENT_HERO_ALTAR):
-			return
+	if _should_build_hero_altar() and _try_place_building(PLACEMENT_HERO_ALTAR):
+		return
 
 	var hero_altar: HeroAltar = _find_enemy_hero_altar()
 	if hero_altar != null and hero_altar.can_train_enemy_hero():
@@ -134,12 +126,20 @@ func _needs_barracks() -> bool:
 	)
 
 
-func _needs_hero_altar() -> bool:
-	return (
-		not _has_completed_building(PLACEMENT_HERO_ALTAR)
-		and not _is_building_type_in_progress(PLACEMENT_HERO_ALTAR)
-		and _enemy_has_hero()
-	)
+func _should_build_hero_altar() -> bool:
+	if _has_completed_building(PLACEMENT_HERO_ALTAR):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_HERO_ALTAR):
+		return false
+
+	if not _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if _count_enemy_workers() < TARGET_WORKERS:
+		return false
+
+	return true
 
 
 func _needs_farm() -> bool:

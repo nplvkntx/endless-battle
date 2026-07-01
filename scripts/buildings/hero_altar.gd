@@ -174,8 +174,6 @@ func _spawn_enemy_hero() -> void:
 	if spawn_parent == null or hero == null:
 		return
 
-	spawn_parent.add_child(hero)
-	hero.global_position = global_position + HERO_SPAWN_OFFSET
 	hero.team_id = ENEMY_TEAM_ID
 	hero.collision_layer = PhysicsLayers.UNITS
 	hero.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
@@ -188,6 +186,9 @@ func _spawn_enemy_hero() -> void:
 
 	if not hero.is_in_group(&"enemies"):
 		hero.add_to_group(&"enemies")
+
+	spawn_parent.add_child(hero)
+	hero.global_position = global_position + HERO_SPAWN_OFFSET
 
 	var collision_shape: CollisionShape3D = hero.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collision_shape != null:

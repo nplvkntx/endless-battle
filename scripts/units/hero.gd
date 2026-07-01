@@ -86,7 +86,10 @@ func _ready() -> void:
 	_body_material = body_material.duplicate() as StandardMaterial3D
 	_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
-	if HeroProgressionStore.has_saved_progression():
+	if CombatTargetValidation.is_enemy_faction(self):
+		current_mana = max_mana
+		mana_changed.emit(current_mana, max_mana)
+	elif HeroProgressionStore.has_saved_progression():
 		HeroProgressionStore.apply_to_hero(self)
 	else:
 		current_mana = max_mana
@@ -860,6 +863,11 @@ func _try_auto_attack() -> void:
 
 
 func _find_closest_attack_target_in_range() -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, attack_range
+		)
+
 	return CombatTargetValidation.find_closest_player_unit_attack_target_in_range(
 		self, attack_range
 	)
@@ -952,7 +960,8 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
-	HeroProgressionStore.save_from_hero(self)
+	if not CombatTargetValidation.is_enemy_faction(self):
+		HeroProgressionStore.save_from_hero(self)
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()

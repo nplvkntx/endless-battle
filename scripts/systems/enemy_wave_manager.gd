@@ -54,6 +54,8 @@ func _send_enemy_combat_units_to_attack(target: CommandCenter) -> void:
 			(node as Swordsman).command_attack_move(destination)
 		elif node is Archer:
 			(node as Archer).command_attack_move(destination)
+		elif node is Hero:
+			(node as Hero).command_attack_move(destination)
 
 
 func _is_valid_enemy_combat_unit(node: Node) -> bool:
@@ -66,7 +68,7 @@ func _is_valid_enemy_combat_unit(node: Node) -> bool:
 	if not node.is_in_group(&"enemies"):
 		return false
 
-	return node is Swordsman or node is Archer
+	return node is Swordsman or node is Archer or node is Hero
 
 
 func _resolve_player_command_center() -> CommandCenter:
