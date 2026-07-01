@@ -214,6 +214,36 @@ func is_divine_protection_active() -> bool:
 	return _divine_protection_timer > 0.0
 
 
+func _should_show_ability_feedback() -> bool:
+	return not CombatTargetValidation.is_enemy_faction(self)
+
+
+func _show_ability_feedback(message: String) -> void:
+	if not _should_show_ability_feedback():
+		return
+
+	if ResourceManager != null:
+		ResourceManager.show_feedback(message)
+
+
+func _require_ability_learned(ability_id: StringName) -> bool:
+	if is_ability_unlocked(ability_id):
+		return true
+
+	_show_ability_feedback("Ability locked")
+	return false
+
+
+func can_use_divine_protection() -> bool:
+	return (
+		is_ability_unlocked(HeroAbilityProgression.ABILITY_W)
+		and _health_component.current_health > 0
+		and not is_divine_protection_active()
+		and _divine_protection_cooldown_timer <= 0.0
+		and current_mana >= divine_protection_mana_cost
+	)
+
+
 func try_divine_protection() -> bool:
 	if _health_component.current_health <= 0:
 		return false
@@ -222,17 +252,17 @@ func try_divine_protection() -> bool:
 		return false
 
 	if is_divine_protection_active():
-		ResourceManager.show_feedback("Divine Protection already active")
+		_show_ability_feedback("Divine Protection already active")
 		return false
 
 	if _divine_protection_cooldown_timer > 0.0:
-		ResourceManager.show_feedback(
+		_show_ability_feedback(
 			"Divine Protection on cooldown (%.0fs)" % ceilf(_divine_protection_cooldown_timer)
 		)
 		return false
 
 	if current_mana < divine_protection_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		return false
 
 	_execute_divine_protection()
@@ -294,6 +324,17 @@ func is_power_strike_pending() -> bool:
 	return _has_power_strike_pending
 
 
+func can_use_power_strike(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> bool:
+	return (
+		is_ability_unlocked(HeroAbilityProgression.ABILITY_E)
+		and _health_component.current_health > 0
+		and not _has_power_strike_pending
+		and _power_strike_cooldown_timer <= 0.0
+		and current_mana >= power_strike_mana_cost
+		and _resolve_power_strike_target(search_range) != null
+	)
+
+
 func try_power_strike() -> bool:
 	if _health_component.current_health <= 0:
 		return false
@@ -302,29 +343,39 @@ func try_power_strike() -> bool:
 		return false
 
 	if _has_power_strike_pending:
-		ResourceManager.show_feedback("Power Strike already in progress")
+		_show_ability_feedback("Power Strike already in progress")
 		return false
 
 	if _power_strike_cooldown_timer > 0.0:
-		ResourceManager.show_feedback(
+		_show_ability_feedback(
 			"Power Strike on cooldown (%.0fs)" % ceilf(_power_strike_cooldown_timer)
 		)
 		return false
 
 	if current_mana < power_strike_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_ability_target()
+	var target: Node3D = _resolve_power_strike_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
 	if target == null:
-		ResourceManager.show_feedback("No valid target")
+		_show_ability_feedback("No valid target")
 		return false
 
 	_begin_power_strike(target)
 	return true
 
 
-func _resolve_power_strike_target() -> Node3D:
+func _resolve_power_strike_target(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		_sanitize_attack_target()
+		if CombatTargetValidation.is_hero_unit_ability_target(self, _attack_target):
+			if _is_in_attack_range(_attack_target):
+				return _attack_target
+
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+
 	return _resolve_ability_target()
 
 
@@ -374,7 +425,7 @@ func _execute_power_strike() -> void:
 		return
 
 	if current_mana < power_strike_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		_cancel_power_strike()
 		return
 
@@ -488,6 +539,25 @@ func is_execute_pending() -> bool:
 	return _has_execute_pending
 
 
+func can_use_execute(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> bool:
+	if not is_ability_unlocked(HeroAbilityProgression.ABILITY_R):
+		return false
+
+	if _health_component.current_health <= 0:
+		return false
+
+	if _has_execute_pending or _has_power_strike_pending:
+		return false
+
+	if _execute_cooldown_timer > 0.0:
+		return false
+
+	if current_mana < execute_mana_cost:
+		return false
+
+	return _resolve_execute_target(search_range) != null
+
+
 func try_execute() -> bool:
 	if _health_component.current_health <= 0:
 		return false
@@ -496,34 +566,89 @@ func try_execute() -> bool:
 		return false
 
 	if _has_execute_pending:
-		ResourceManager.show_feedback("Execute already in progress")
+		_show_ability_feedback("Execute already in progress")
 		return false
 
 	if _has_power_strike_pending:
-		ResourceManager.show_feedback("Another ability is in progress")
+		_show_ability_feedback("Another ability is in progress")
 		return false
 
 	if _execute_cooldown_timer > 0.0:
-		ResourceManager.show_feedback(
+		_show_ability_feedback(
 			"Execute on cooldown (%.0fs)" % ceilf(_execute_cooldown_timer)
 		)
 		return false
 
 	if current_mana < execute_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_execute_target()
+	var target: Node3D = _resolve_execute_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
 	if target == null:
-		ResourceManager.show_feedback("No valid target")
+		_show_ability_feedback("No valid target")
 		return false
 
 	_begin_execute(target)
 	return true
 
 
-func _resolve_execute_target() -> Node3D:
+func _resolve_execute_target(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return find_execute_target(search_range)
+
 	return _resolve_ability_target()
+
+
+func find_execute_target(search_range: float) -> Node3D:
+	if search_range <= 0.0:
+		return null
+
+	var best_hero: Node3D = null
+	var best_hero_distance: float = INF
+	var best_unit: Node3D = null
+	var best_unit_distance: float = INF
+
+	for group_name: StringName in [&"units", &"heroes"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if not _is_player_military_unit(node):
+				continue
+
+			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
+				continue
+
+			var target: Node3D = node as Node3D
+			if not is_instance_valid(target):
+				continue
+
+			var distance: float = _horizontal_distance_to(target)
+			if distance > search_range:
+				continue
+
+			if not _can_execute_target(target):
+				continue
+
+			if node is Hero:
+				if distance < best_hero_distance:
+					best_hero = target
+					best_hero_distance = distance
+			elif distance < best_unit_distance:
+				best_unit = target
+				best_unit_distance = distance
+
+	if best_hero != null:
+		return best_hero
+
+	return best_unit
+
+
+func _is_player_military_unit(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if CombatTargetValidation.is_enemy_faction(node):
+		return false
+
+	return node is Swordsman or node is Archer or node is Hero
 
 
 func _begin_execute(target: Node3D) -> void:
@@ -576,13 +701,13 @@ func _perform_execute() -> void:
 		return
 
 	if current_mana < execute_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		_cancel_execute()
 		return
 
 	var target: Node3D = _execute_target
 	if not _can_execute_target(target):
-		ResourceManager.show_feedback("Target health too high")
+		_show_ability_feedback("Target health too high")
 		_cancel_execute()
 		return
 
@@ -689,13 +814,13 @@ func try_ground_slam() -> bool:
 		return false
 
 	if _ground_slam_cooldown_timer > 0.0:
-		ResourceManager.show_feedback(
+		_show_ability_feedback(
 			"Ground Slam on cooldown (%.0fs)" % ceilf(_ground_slam_cooldown_timer)
 		)
 		return false
 
 	if current_mana < ground_slam_mana_cost:
-		ResourceManager.show_feedback("Not enough mana")
+		_show_ability_feedback("Not enough mana")
 		return false
 
 	_execute_ground_slam()

@@ -77,16 +77,23 @@ func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
 
 	if (
 		health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO
-		and hero.has_method("try_divine_protection")
-		and hero.has_method("is_divine_protection_active")
-		and hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_W)
-		and not hero.call("is_divine_protection_active")
+		and hero.has_method("can_use_divine_protection")
+		and hero.can_use_divine_protection()
 	):
 		hero.try_divine_protection()
 
+	if hero.has_method("can_use_execute") and hero.can_use_execute(
+		EnemyArmyCommand.HERO_EXECUTE_SEARCH_RANGE
+	):
+		hero.try_execute()
+	elif hero.has_method("can_use_power_strike") and hero.can_use_power_strike(
+		EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE
+	):
+		hero.try_power_strike()
+
 	if (
-		hero.has_method("try_ground_slam")
-		and hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_Q)
+		hero.has_method("can_use_ground_slam")
+		and hero.can_use_ground_slam()
 		and _count_player_military_near_hero(hero) >= EnemyArmyCommand.HERO_AOE_PLAYER_COUNT
 	):
 		hero.try_ground_slam()
@@ -101,6 +108,12 @@ func _ensure_enemy_hero_combat_abilities(hero: Hero) -> void:
 
 	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_W):
 		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_W)
+
+	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_E):
+		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_E)
+
+	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_R):
+		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_R)
 
 
 func _count_player_military_near_hero(hero: Hero) -> int:
