@@ -1131,6 +1131,18 @@ func is_available_for_construction_assignment(allow_gather_interrupt: bool = fal
 	return allow_gather_interrupt
 
 
+func is_on_construction_trip() -> bool:
+	return _build_trip_state != BuildTripState.IDLE
+
+
+func is_carrying_gathered_resources() -> bool:
+	return _carried_amount > 0
+
+
+func get_assigned_gather_resource_id() -> StringName:
+	return _get_assigned_resource_id()
+
+
 func _is_near_command_center_for_deposit(
 	command_center: CommandCenter, use_extended_reach: bool = false
 ) -> bool:

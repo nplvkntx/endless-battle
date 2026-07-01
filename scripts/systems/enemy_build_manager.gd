@@ -649,5 +649,4 @@ func notify_enemy_worker_spawned(worker: Worker) -> void:
 	if gather_manager == null:
 		return
 
-	var prefer_gold: bool = (_count_enemy_workers() % 2) == 1
-	gather_manager.assign_gather_job(worker, prefer_gold)
+	gather_manager.assign_worker_adaptively(worker)
