@@ -14,6 +14,8 @@ const HEROES_GROUP := &"heroes"
 const ARMY_RALLY_OFFSET := Vector3(-2.0, -0.5, 3.0)
 const BASE_THREAT_DETECTION_RANGE := 55.0
 const FORMATION_SPACING := 2.0
+const RANGED_ROW_DEPTH_MULTIPLIER := 1.5
+const HERO_ROW_DEPTH_MULTIPLIER := 1.25
 
 const MIN_NON_HERO_FOR_HERO_JOIN := 3
 const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 2
@@ -247,13 +249,20 @@ static func _issue_spaced_group_orders(units: Array, center: Vector3, use_attack
 	if ordered_units.is_empty():
 		return
 
-	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
-		center,
-		ordered_units.size(),
-		FORMATION_SPACING
+	var move_targets: Array[Vector3] = (
+		_compute_attack_formation_targets(ordered_units, center, FORMATION_SPACING)
+		if use_attack_move
+		else GroupMoveSpacing.compute_targets(
+			center,
+			ordered_units.size(),
+			FORMATION_SPACING
+		)
 	)
 	for index: int in ordered_units.size():
 		var unit: Variant = ordered_units[index]
+		if unit == null or not is_instance_valid(unit):
+			continue
+
 		var target: Vector3 = move_targets[index]
 		if use_attack_move:
 			_issue_attack_move(unit, target)
@@ -262,7 +271,8 @@ static func _issue_spaced_group_orders(units: Array, center: Vector3, use_attack
 
 
 static func _order_units_for_formation(units: Array) -> Array:
-	var non_hero_units: Array = []
+	var melee_units: Array = []
+	var ranged_units: Array = []
 	var hero_units: Array = []
 
 	for unit: Variant in units:
@@ -277,11 +287,108 @@ static func _order_units_for_formation(units: Array) -> Array:
 
 		if is_hero_unit(unit as Node):
 			hero_units.append(unit)
+		elif unit is Archer:
+			ranged_units.append(unit)
 		else:
-			non_hero_units.append(unit)
+			melee_units.append(unit)
 
-	non_hero_units.append_array(hero_units)
-	return non_hero_units
+	var ordered_units: Array = []
+	ordered_units.append_array(melee_units)
+	ordered_units.append_array(ranged_units)
+	ordered_units.append_array(hero_units)
+	return ordered_units
+
+
+static func _compute_attack_formation_targets(
+	units: Array,
+	destination: Vector3,
+	spacing: float
+) -> Array[Vector3]:
+	if units.is_empty():
+		return []
+
+	var army_center: Vector3 = compute_army_center(units)
+	var forward: Vector3 = destination - army_center
+	forward.y = 0.0
+	if forward.length_squared() < 0.01:
+		forward = Vector3(0.0, 0.0, 1.0)
+	else:
+		forward = forward.normalized()
+
+	var right: Vector3 = forward.cross(Vector3.UP)
+	if right.length_squared() < 0.01:
+		right = Vector3.RIGHT
+	else:
+		right = right.normalized()
+
+	var melee_count: int = 0
+	var ranged_count: int = 0
+	var hero_count: int = 0
+	for unit: Variant in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+
+		if is_hero_unit(unit as Node):
+			hero_count += 1
+		elif unit is Archer:
+			ranged_count += 1
+		else:
+			melee_count += 1
+
+	var melee_targets: Array[Vector3] = GroupMoveSpacing.compute_line_targets(
+		destination,
+		right,
+		melee_count,
+		spacing
+	)
+	var ranged_row_center: Vector3 = (
+		destination - forward * spacing * RANGED_ROW_DEPTH_MULTIPLIER
+	)
+	var ranged_targets: Array[Vector3] = GroupMoveSpacing.compute_line_targets(
+		ranged_row_center,
+		right,
+		ranged_count,
+		spacing
+	)
+	var hero_row_center: Vector3 = destination - forward * spacing * HERO_ROW_DEPTH_MULTIPLIER
+	var hero_targets: Array[Vector3] = GroupMoveSpacing.compute_line_targets(
+		hero_row_center,
+		right,
+		hero_count,
+		spacing
+	)
+
+	var targets: Array[Vector3] = []
+	var melee_index: int = 0
+	var ranged_index: int = 0
+	var hero_index: int = 0
+
+	for unit: Variant in units:
+		if unit == null or not is_instance_valid(unit):
+			targets.append(destination)
+			continue
+
+		var candidate: Vector3 = destination
+		if is_hero_unit(unit as Node):
+			candidate = hero_targets[hero_index]
+			hero_index += 1
+		elif unit is Archer:
+			candidate = ranged_targets[ranged_index]
+			ranged_index += 1
+		else:
+			candidate = melee_targets[melee_index]
+			melee_index += 1
+
+		targets.append(
+			GroupMoveSpacing.resolve_nearby_walkable_position(
+				candidate,
+				unit as Node3D,
+				destination,
+				spacing
+			)
+		)
+
+	return targets
 
 
 static func compute_army_center(units: Array) -> Vector3:
