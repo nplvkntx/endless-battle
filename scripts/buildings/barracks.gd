@@ -243,13 +243,111 @@ func try_train_archer_with_repeat(ctrl_held: bool) -> void:
 	try_train_archer()
 
 
-func cancel_training() -> bool:
-	if _last_queued_train_id == TRAIN_ID_ARCHER and _archer_queue_count > 0:
-		return _cancel_archer_training()
-	if _swordsman_queue_count > 0:
-		return _cancel_swordsman_training()
-	if _archer_queue_count > 0:
-		return _cancel_archer_training()
+func is_training_swordsman() -> bool:
+	return _is_training
+
+
+func is_training_archer() -> bool:
+	return _is_training_archer
+
+
+func cancel_swordsman_training_at(slot_index: int) -> bool:
+	if _swordsman_queue_count <= 0:
+		return false
+
+	var cancel_indices: Array[int] = []
+	if slot_index >= 0 and slot_index < _swordsman_queue_count:
+		cancel_indices.append(slot_index)
+
+	var last_index: int = _swordsman_queue_count - 1
+	if not cancel_indices.has(last_index):
+		cancel_indices.append(last_index)
+
+	if not cancel_indices.has(0):
+		cancel_indices.append(0)
+
+	for cancel_index: int in cancel_indices:
+		if _cancel_swordsman_training_at_index(cancel_index):
+			return true
+
+	return false
+
+
+func cancel_archer_training_at(slot_index: int) -> bool:
+	if _archer_queue_count <= 0:
+		return false
+
+	var cancel_indices: Array[int] = []
+	if slot_index >= 0 and slot_index < _archer_queue_count:
+		cancel_indices.append(slot_index)
+
+	var last_index: int = _archer_queue_count - 1
+	if not cancel_indices.has(last_index):
+		cancel_indices.append(last_index)
+
+	if not cancel_indices.has(0):
+		cancel_indices.append(0)
+
+	for cancel_index: int in cancel_indices:
+		if _cancel_archer_training_at_index(cancel_index):
+			return true
+
+	return false
+
+
+func _cancel_swordsman_training_at_index(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= _swordsman_queue_count:
+		return false
+
+	if slot_index == 0 and _is_training:
+		if is_repeat_training_enabled(TRAIN_ID_SWORDSMAN):
+			set_repeat_training(false)
+
+		_swordsman_training_session += 1
+		_is_training = false
+		_swordsman_queue_count -= 1
+		swordsman_queue_changed.emit(_swordsman_queue_count)
+		_refund_training_cost()
+
+		if _swordsman_queue_count > 0:
+			_start_next_training()
+
+		return true
+
+	if slot_index == _swordsman_queue_count - 1 and _swordsman_queue_count > 1:
+		_swordsman_queue_count -= 1
+		swordsman_queue_changed.emit(_swordsman_queue_count)
+		_refund_training_cost()
+		return true
+
+	return false
+
+
+func _cancel_archer_training_at_index(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= _archer_queue_count:
+		return false
+
+	if slot_index == 0 and _is_training_archer:
+		if is_repeat_training_enabled(TRAIN_ID_ARCHER):
+			set_repeat_training(false)
+
+		_archer_training_session += 1
+		_is_training_archer = false
+		_archer_queue_count -= 1
+		archer_queue_changed.emit(_archer_queue_count)
+		_refund_training_cost()
+
+		if _archer_queue_count > 0:
+			_start_next_archer_training()
+
+		return true
+
+	if slot_index == _archer_queue_count - 1 and _archer_queue_count > 1:
+		_archer_queue_count -= 1
+		archer_queue_changed.emit(_archer_queue_count)
+		_refund_training_cost()
+		return true
+
 	return false
 
 
@@ -335,20 +433,6 @@ func _on_swordsman_training_finished(session: int) -> void:
 		_try_repeat_training(TRAIN_ID_SWORDSMAN)
 
 
-func _cancel_swordsman_training() -> bool:
-	if _swordsman_queue_count <= 0:
-		return false
-
-	if _swordsman_queue_count == 1 and _is_training:
-		_swordsman_training_session += 1
-		_is_training = false
-
-	_swordsman_queue_count -= 1
-	swordsman_queue_changed.emit(_swordsman_queue_count)
-	_refund_training_cost()
-	return true
-
-
 func _spawn_swordsman() -> void:
 	_spawn_trained_unit(SWORDSMAN_SCENE, swordsman_spawn_offset)
 
@@ -400,20 +484,6 @@ func _on_archer_training_finished(session: int) -> void:
 		_start_next_archer_training()
 	else:
 		_try_repeat_training(TRAIN_ID_ARCHER)
-
-
-func _cancel_archer_training() -> bool:
-	if _archer_queue_count <= 0:
-		return false
-
-	if _archer_queue_count == 1 and _is_training_archer:
-		_archer_training_session += 1
-		_is_training_archer = false
-
-	_archer_queue_count -= 1
-	archer_queue_changed.emit(_archer_queue_count)
-	_refund_training_cost()
-	return true
 
 
 func _try_repeat_training(train_id: StringName) -> void:

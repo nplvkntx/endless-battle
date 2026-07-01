@@ -100,18 +100,58 @@ func try_train_worker_with_repeat(ctrl_held: bool) -> void:
 	try_train_worker()
 
 
-func cancel_worker_training() -> bool:
+func is_training_worker() -> bool:
+	return _is_training
+
+
+func cancel_worker_training_at(slot_index: int) -> bool:
 	if _worker_queue_count <= 0:
 		return false
 
-	if _worker_queue_count == 1 and _is_training:
+	var cancel_indices: Array[int] = []
+	if slot_index >= 0 and slot_index < _worker_queue_count:
+		cancel_indices.append(slot_index)
+
+	var last_index: int = _worker_queue_count - 1
+	if not cancel_indices.has(last_index):
+		cancel_indices.append(last_index)
+
+	if not cancel_indices.has(0):
+		cancel_indices.append(0)
+
+	for cancel_index: int in cancel_indices:
+		if _cancel_worker_training_at_index(cancel_index):
+			return true
+
+	return false
+
+
+func _cancel_worker_training_at_index(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= _worker_queue_count:
+		return false
+
+	if slot_index == 0 and _is_training:
+		if is_repeat_training_enabled(TRAIN_ID_WORKER):
+			set_repeat_training(false)
+
 		_invalidate_training_session()
 		_is_training = false
+		_worker_queue_count -= 1
+		worker_queue_changed.emit(_worker_queue_count)
+		_refund_worker_training_cost()
 
-	_worker_queue_count -= 1
-	worker_queue_changed.emit(_worker_queue_count)
-	_refund_worker_training_cost()
-	return true
+		if _worker_queue_count > 0:
+			_start_next_training()
+
+		return true
+
+	if slot_index == _worker_queue_count - 1 and _worker_queue_count > 1:
+		_worker_queue_count -= 1
+		worker_queue_changed.emit(_worker_queue_count)
+		_refund_worker_training_cost()
+		return true
+
+	return false
 
 
 func set_rally_point(ground_position: Vector3) -> void:

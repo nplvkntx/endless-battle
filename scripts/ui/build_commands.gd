@@ -84,11 +84,19 @@ var _selected_hero_altar: HeroAltar = null
 var _tracked_barracks: Barracks = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
-var _cancel_training_button: Button = null
 var _auto_training_label: Label = null
 var _train_worker_base_label: String = ""
 var _train_swordsman_base_label: String = ""
 var _train_archer_base_label: String = ""
+var _worker_queue_row: HBoxContainer = null
+var _swordsman_queue_row: HBoxContainer = null
+var _archer_queue_row: HBoxContainer = null
+var _hero_queue_row: HBoxContainer = null
+
+const QUEUE_SLOT_SIZE := Vector2(28, 28)
+const QUEUE_SLOT_HINT := "Right-click to cancel"
+const QUEUE_SLOT_COLOR := Color(0.28, 0.32, 0.38, 1)
+const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 
 
 func _ready() -> void:
@@ -107,7 +115,6 @@ func _ready() -> void:
 	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
-	_worker_queue_label.visible = false
 	_setup_production_controls()
 	_set_town_center_button_labels()
 	_set_barracks_button_labels()
@@ -154,11 +161,15 @@ func _setup_production_controls() -> void:
 	_center_panel.add_child(_auto_training_label)
 	_center_panel.move_child(_auto_training_label, 0)
 
-	_cancel_training_button = Button.new()
-	_cancel_training_button.text = "Cancel (C)"
-	_cancel_training_button.visible = false
-	_cancel_training_button.pressed.connect(_on_cancel_training_pressed)
-	_right_panel.add_child(_cancel_training_button)
+	_worker_queue_row = _create_queue_row(_worker_queue_label)
+	_swordsman_queue_row = _create_queue_row(_swordsman_queue_label)
+	_archer_queue_row = _create_queue_row(_archer_queue_label)
+
+	_hero_queue_row = HBoxContainer.new()
+	_hero_queue_row.visible = false
+	_hero_queue_row.add_theme_constant_override("separation", 2)
+	_hero_altar_panel.add_child(_hero_queue_row)
+	_hero_altar_panel.move_child(_hero_queue_row, _hero_status_label.get_index() + 1)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -168,11 +179,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key_event := event as InputEventKey
 	if not key_event.pressed or key_event.echo:
 		return
-
-	if key_event.keycode == KEY_C or key_event.keycode == KEY_ESCAPE:
-		if _try_cancel_production_training():
-			get_viewport().set_input_as_handled()
-			return
 
 	var hero: Hero = _get_tracked_hero_for_input()
 	if hero == null:
@@ -274,41 +280,205 @@ func _update_auto_training_label() -> void:
 		_auto_training_label.text = "Auto-training: %s" % auto_training_name
 
 
-func _update_cancel_button_visibility() -> void:
-	if _cancel_training_button == null:
+func _clear_queue_row(row: HBoxContainer) -> void:
+	if row == null:
 		return
 
-	var can_cancel: bool = false
-	if _selected_command_center != null:
-		can_cancel = _selected_command_center.get_worker_queue_count() > 0
-	elif _selected_barracks != null:
-		can_cancel = _selected_barracks.get_total_queue_count() > 0
-	elif _selected_hero_altar != null:
-		can_cancel = _selected_hero_altar.is_training_hero()
+	for child: Node in row.get_children():
+		child.queue_free()
 
-	_cancel_training_button.visible = can_cancel
+	row.visible = false
 
 
-func _try_cancel_production_training() -> bool:
-	if not _cancel_training_button.visible:
-		return false
+func _create_queue_row(reference_label: Label) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.visible = false
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 2)
 
-	_on_cancel_training_pressed()
-	return true
+	var parent: Node = reference_label.get_parent()
+	var label_index: int = reference_label.get_index()
+	parent.add_child(row)
+	parent.move_child(row, label_index)
+
+	reference_label.visible = false
+	return row
 
 
-func _on_cancel_training_pressed() -> void:
-	if _selected_command_center != null:
-		_selected_command_center.cancel_worker_training()
-	elif _selected_barracks != null:
-		_selected_barracks.cancel_training()
-	elif _selected_hero_altar != null:
-		_selected_hero_altar.cancel_hero_training()
+func _rebuild_worker_queue_slots() -> void:
+	if _worker_queue_row == null or _selected_command_center == null:
+		return
 
-	_update_cancel_button_visibility()
+	var queue_count: int = _selected_command_center.get_worker_queue_count()
+	var in_progress: bool = _selected_command_center.is_training_worker()
+	_rebuild_queue_slots(
+		_worker_queue_row,
+		queue_count,
+		in_progress,
+		CommandCenter.TRAIN_ID_WORKER,
+		"W"
+	)
+
+
+func _rebuild_swordsman_queue_slots() -> void:
+	if _swordsman_queue_row == null or _tracked_barracks == null:
+		return
+
+	var queue_count: int = _tracked_barracks.get_swordsman_queue_count()
+	var in_progress: bool = _tracked_barracks.is_training_swordsman()
+	_rebuild_queue_slots(
+		_swordsman_queue_row,
+		queue_count,
+		in_progress,
+		Barracks.TRAIN_ID_SWORDSMAN,
+		"SW"
+	)
+
+
+func _rebuild_archer_queue_slots() -> void:
+	if _archer_queue_row == null or _tracked_barracks == null:
+		return
+
+	var queue_count: int = _tracked_barracks.get_archer_queue_count()
+	var in_progress: bool = _tracked_barracks.is_training_archer()
+	_rebuild_queue_slots(
+		_archer_queue_row,
+		queue_count,
+		in_progress,
+		Barracks.TRAIN_ID_ARCHER,
+		"AR"
+	)
+
+
+func _rebuild_hero_queue_slots() -> void:
+	if _hero_queue_row == null or _tracked_hero_altar == null:
+		return
+
+	for child: Node in _hero_queue_row.get_children():
+		child.queue_free()
+
+	var is_training: bool = _tracked_hero_altar.is_training_hero()
+	_hero_queue_row.visible = is_training
+
+	if not is_training:
+		return
+
+	var slot: PanelContainer = _create_queue_slot(0, &"hero", true, "H")
+	_hero_queue_row.add_child(slot)
+
+
+func _rebuild_queue_slots(
+	row: HBoxContainer,
+	queue_count: int,
+	in_progress: bool,
+	train_id: StringName,
+	slot_label: String
+) -> void:
+	for child: Node in row.get_children():
+		child.queue_free()
+
+	row.visible = queue_count > 0
+	if queue_count <= 0:
+		return
+
+	for slot_index: int in queue_count:
+		var slot_in_progress: bool = slot_index == 0 and in_progress
+		var slot: PanelContainer = _create_queue_slot(slot_index, train_id, slot_in_progress, slot_label)
+		row.add_child(slot)
+
+
+func _create_queue_slot(
+	slot_index: int,
+	train_id: StringName,
+	in_progress: bool,
+	slot_label: String
+) -> PanelContainer:
+	var slot := PanelContainer.new()
+	slot.custom_minimum_size = QUEUE_SLOT_SIZE
+	slot.tooltip_text = QUEUE_SLOT_HINT
+	slot.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = QUEUE_SLOT_TRAINING_COLOR if in_progress else QUEUE_SLOT_COLOR
+	style.set_corner_radius_all(3)
+	slot.add_theme_stylebox_override("panel", style)
+
+	var label := Label.new()
+	label.text = slot_label
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	label.add_theme_font_size_override("font_size", 9)
+	label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.82, 1))
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slot.add_child(label)
+
+	slot.gui_input.connect(func(event: InputEvent) -> void:
+		_on_queue_slot_gui_input(slot, event, train_id, slot_index)
+	)
+	return slot
+
+
+func _on_queue_slot_gui_input(slot: Control, event: InputEvent, train_id: StringName, slot_index: int) -> void:
+	if not event is InputEventMouseButton:
+		return
+
+	var mouse_event := event as InputEventMouseButton
+	if mouse_event.button_index != MOUSE_BUTTON_RIGHT or not mouse_event.pressed:
+		return
+
+	print("RMB queue cancel pressed")
+	slot.accept_event()
+
+	var cancelled: bool = _try_cancel_production_at_slot(train_id, slot_index)
+	print("Cancel result: %s" % cancelled)
+	if not cancelled:
+		return
+
+	_rebuild_worker_queue_slots()
+	_rebuild_swordsman_queue_slots()
+	_rebuild_archer_queue_slots()
+	_rebuild_hero_queue_slots()
 	_update_auto_training_label()
 	_update_town_center_button_labels()
 	_update_barracks_button_labels()
+
+
+func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bool:
+	if train_id == CommandCenter.TRAIN_ID_WORKER:
+		if _selected_command_center == null:
+			return false
+
+		return _selected_command_center.cancel_worker_training_at(slot_index)
+
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		var barracks: Barracks = _get_barracks_for_queue_cancel()
+		if barracks == null:
+			return false
+
+		return barracks.cancel_swordsman_training_at(slot_index)
+
+	if train_id == Barracks.TRAIN_ID_ARCHER:
+		var barracks: Barracks = _get_barracks_for_queue_cancel()
+		if barracks == null:
+			return false
+
+		return barracks.cancel_archer_training_at(slot_index)
+
+	if train_id == &"hero":
+		if _selected_hero_altar == null or slot_index != 0:
+			return false
+
+		return _selected_hero_altar.cancel_hero_training()
+
+	return false
+
+
+func _get_barracks_for_queue_cancel() -> Barracks:
+	if _selected_barracks != null:
+		return _selected_barracks
+
+	return _tracked_barracks
 
 
 func _on_selection_changed(_units: Array[Unit]) -> void:
@@ -587,7 +757,7 @@ func _on_building_selection_changed(building: Building) -> void:
 		_set_town_center_button_labels()
 		_update_town_center_button_labels()
 	else:
-		_worker_queue_label.text = "Worker Queue: 0"
+		_clear_queue_row(_worker_queue_row)
 
 	if building is Barracks:
 		_tracked_barracks = building as Barracks
@@ -599,8 +769,8 @@ func _on_building_selection_changed(building: Building) -> void:
 		_on_archer_queue_changed(_tracked_barracks.get_archer_queue_count())
 		_update_barracks_button_labels()
 	else:
-		_swordsman_queue_label.text = "Swordsman Queue: 0"
-		_archer_queue_label.text = "Archer Queue: 0"
+		_clear_queue_row(_swordsman_queue_row)
+		_clear_queue_row(_archer_queue_row)
 
 	if building is HeroAltar:
 		_tracked_hero_altar = building as HeroAltar
@@ -609,6 +779,7 @@ func _on_building_selection_changed(building: Building) -> void:
 		_update_hero_altar_status()
 	else:
 		_hero_status_label.text = "Hero: Ready to train"
+		_clear_queue_row(_hero_queue_row)
 
 	_refresh_command_visibility()
 
@@ -634,7 +805,7 @@ func _update_hero_altar_status() -> void:
 		_hero_status_label.text = "Hero: Ready to train"
 
 	_train_hero_button.disabled = not _tracked_hero_altar.can_train_hero()
-	_update_cancel_button_visibility()
+	_rebuild_hero_queue_slots()
 
 
 func _refresh_command_visibility() -> void:
@@ -711,18 +882,35 @@ func _refresh_command_visibility() -> void:
 		_apply_hidden_command_buttons()
 		_set_tracked_hero(null)
 
+	_center_panel.visible = (
+		show_town_center_commands or show_barracks_training or show_hero_altar_training
+	)
 	_barracks_panel.visible = show_barracks_training
 	_barracks_training_row.visible = show_barracks_training
 	_hero_altar_panel.visible = show_hero_altar_training
 	_hero_altar_training_row.visible = show_hero_altar_training
 	_hero_panel.visible = single_hero
-	_worker_queue_label.visible = show_town_center_commands
 
 	if show_hero_altar_training:
 		_update_hero_altar_status()
 
+	if show_town_center_commands:
+		_rebuild_worker_queue_slots()
+	if show_barracks_training:
+		_rebuild_swordsman_queue_slots()
+		_rebuild_archer_queue_slots()
+	if show_hero_altar_training:
+		_rebuild_hero_queue_slots()
+	else:
+		_clear_queue_row(_hero_queue_row)
+
+	if not show_town_center_commands:
+		_clear_queue_row(_worker_queue_row)
+	if not show_barracks_training:
+		_clear_queue_row(_swordsman_queue_row)
+		_clear_queue_row(_archer_queue_row)
+
 	_update_auto_training_label()
-	_update_cancel_button_visibility()
 
 	visible = (
 		single_worker
@@ -746,7 +934,7 @@ func _apply_hero_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
-	_worker_queue_label.visible = false
+	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
 
 
@@ -763,7 +951,7 @@ func _apply_worker_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
-	_worker_queue_label.visible = false
+	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
 
@@ -780,7 +968,7 @@ func _apply_combat_command_visibility() -> void:
 	_barracks_training_row.visible = false
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
-	_worker_queue_label.visible = false
+	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
 
@@ -818,19 +1006,16 @@ func _on_attack_pressed() -> void:
 	InputManager.arm_attack_move()
 
 
-func _on_worker_queue_changed(queue_count: int) -> void:
-	_worker_queue_label.text = "Worker Queue: %d" % queue_count
-	_update_cancel_button_visibility()
+func _on_worker_queue_changed(_queue_count: int) -> void:
+	_rebuild_worker_queue_slots()
 
 
-func _on_swordsman_queue_changed(queue_count: int) -> void:
-	_swordsman_queue_label.text = "Swordsman Queue: %d" % queue_count
-	_update_cancel_button_visibility()
+func _on_swordsman_queue_changed(_queue_count: int) -> void:
+	_rebuild_swordsman_queue_slots()
 
 
-func _on_archer_queue_changed(queue_count: int) -> void:
-	_archer_queue_label.text = "Archer Queue: %d" % queue_count
-	_update_cancel_button_visibility()
+func _on_archer_queue_changed(_queue_count: int) -> void:
+	_rebuild_archer_queue_slots()
 
 
 func _on_production_repeat_state_changed() -> void:
@@ -931,7 +1116,7 @@ func _on_train_worker_pressed() -> void:
 	_selected_command_center.try_train_worker_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_town_center_button_labels()
 	_update_auto_training_label()
-	_update_cancel_button_visibility()
+	_rebuild_worker_queue_slots()
 
 
 func _on_train_swordsman_pressed() -> void:
@@ -941,7 +1126,7 @@ func _on_train_swordsman_pressed() -> void:
 	_selected_barracks.try_train_swordsman_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_barracks_button_labels()
 	_update_auto_training_label()
-	_update_cancel_button_visibility()
+	_rebuild_swordsman_queue_slots()
 
 
 func _on_train_archer_pressed() -> void:
@@ -951,7 +1136,7 @@ func _on_train_archer_pressed() -> void:
 	_selected_barracks.try_train_archer_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_barracks_button_labels()
 	_update_auto_training_label()
-	_update_cancel_button_visibility()
+	_rebuild_archer_queue_slots()
 
 
 func _on_train_hero_pressed() -> void:
