@@ -1,25 +1,35 @@
-[gd_scene format=3 uid="uid://crxg17shkoebg"]
+[gd_scene load_steps=15 format=3 uid="uid://crxg17shkoebg"]
 
 [ext_resource type="Script" path="res://scripts/units/neutral_creep.gd" id="1_neutral_creep"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_creep"]
-albedo_color = Color(0.52, 0.42, 0.18, 1)
+albedo_color = Color(0.48, 0.38, 0.16, 1)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_selection"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
-cull_mode = 2
-albedo_color = Color(0.15, 0.95, 0.2, 1)
+transparency = 1
+albedo_color = Color(0.95, 0.42, 0.12, 0.65)
 emission_enabled = true
-emission = Color(0.1, 0.85, 0.15, 1)
+emission = Color(0.85, 0.3, 0.08, 1)
+cull_mode = 2
 
-[sub_resource type="CylinderMesh" id="CylinderMesh_selection"]
-top_radius = 0.72
-bottom_radius = 0.72
-height = 0.03
+[sub_resource type="TorusMesh" id="TorusMesh_sel_ring"]
+inner_radius = 0.46
+outer_radius = 0.52
+rings = 6
+ring_segments = 22
 
-[sub_resource type="BoxMesh" id="BoxMesh_visual"]
-size = Vector3(1, 1, 1)
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.26
+height = 0.5
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.18
+height = 0.36
+
+[sub_resource type="BoxMesh" id="BoxMesh_horn"]
+size = Vector3(0.08, 0.14, 0.08)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -37,14 +47,33 @@ size = Vector3(1.2, 0.08, 0.02)
 script = ExtResource("1_neutral_creep")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_visual")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.02, 0)
+mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("StandardMaterial3D_creep")
 
-[node name="SelectionIndicator" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.47, 0)
+[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.34, 0.08)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_creep")
+
+[node name="HornL" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0, 1, -0.12, 0.46, 0.1)
+mesh = SubResource("BoxMesh_horn")
+surface_material_override/0 = SubResource("StandardMaterial3D_creep")
+
+[node name="HornR" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0.12, 0.46, 0.1)
+mesh = SubResource("BoxMesh_horn")
+surface_material_override/0 = SubResource("StandardMaterial3D_creep")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
-mesh = SubResource("CylinderMesh_selection")
-surface_material_override/0 = SubResource("StandardMaterial3D_selection")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.44, 0)
+
+[node name="Ring" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0.03, 0)
+mesh = SubResource("TorusMesh_sel_ring")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_ring")
 
 [node name="HealthBar" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)

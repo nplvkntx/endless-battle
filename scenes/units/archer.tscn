@@ -1,42 +1,50 @@
-[gd_scene load_steps=17 format=3 uid="uid://cg7dpeipvxy7a"]
+[gd_scene load_steps=19 format=3 uid="uid://cg7dpeipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/archer.gd" id="1_archer"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_green"]
-albedo_color = Color(0.15, 0.65, 0.25, 1)
+albedo_color = Color(0.14, 0.58, 0.22, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
 albedo_color = Color(0.82, 0.68, 0.52, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bow"]
-albedo_color = Color(0.42, 0.28, 0.14, 1)
+albedo_color = Color(0.4, 0.26, 0.12, 1)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_selection"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_quiver"]
+albedo_color = Color(0.32, 0.2, 0.1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
-cull_mode = 2
-albedo_color = Color(0.15, 0.95, 0.2, 1)
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.6)
 emission_enabled = true
-emission = Color(0.1, 0.85, 0.15, 1)
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
 
-[sub_resource type="CylinderMesh" id="CylinderMesh_selection"]
-top_radius = 0.72
-bottom_radius = 0.72
-height = 0.03
+[sub_resource type="TorusMesh" id="TorusMesh_sel_ring"]
+inner_radius = 0.44
+outer_radius = 0.5
+rings = 6
+ring_segments = 22
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
-radius = 0.22
-height = 0.62
+radius = 0.19
+height = 0.56
 
 [sub_resource type="SphereMesh" id="SphereMesh_head"]
-radius = 0.16
-height = 0.32
+radius = 0.14
+height = 0.28
 
 [sub_resource type="BoxMesh" id="BoxMesh_bow_limb"]
-size = Vector3(0.05, 0.42, 0.08)
+size = Vector3(0.04, 0.36, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_bow_grip"]
-size = Vector3(0.06, 0.12, 0.1)
+size = Vector3(0.05, 0.1, 0.08)
+
+[sub_resource type="BoxMesh" id="BoxMesh_quiver"]
+size = Vector3(0.1, 0.22, 0.08)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -54,38 +62,46 @@ size = Vector3(1.2, 0.08, 0.02)
 script = ExtResource("1_archer")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.03, 0)
 mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("StandardMaterial3D_green")
 
 [node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.36, 0)
 mesh = SubResource("SphereMesh_head")
 surface_material_override/0 = SubResource("StandardMaterial3D_skin")
 
 [node name="BowUpper" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0, 1, 0.26, 0.12, -0.08)
+transform = Transform3D(0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0, 1, 0.22, 0.1, -0.06)
 mesh = SubResource("BoxMesh_bow_limb")
 surface_material_override/0 = SubResource("StandardMaterial3D_bow")
 
 [node name="BowLower" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0.26, -0.08, -0.08)
+transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0.22, -0.06, -0.06)
 mesh = SubResource("BoxMesh_bow_limb")
 surface_material_override/0 = SubResource("StandardMaterial3D_bow")
 
 [node name="BowGrip" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.28, 0.02, -0.08)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.24, 0.02, -0.06)
 mesh = SubResource("BoxMesh_bow_grip")
 surface_material_override/0 = SubResource("StandardMaterial3D_bow")
 
-[node name="SelectionIndicator" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.47, 0)
+[node name="Quiver" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.02, 0.12)
+mesh = SubResource("BoxMesh_quiver")
+surface_material_override/0 = SubResource("StandardMaterial3D_quiver")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
-mesh = SubResource("CylinderMesh_selection")
-surface_material_override/0 = SubResource("StandardMaterial3D_selection")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.44, 0)
+
+[node name="Ring" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0.03, 0)
+mesh = SubResource("TorusMesh_sel_ring")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_ring")
 
 [node name="HealthBar" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
 
 [node name="Background" type="MeshInstance3D" parent="HealthBar"]
 mesh = SubResource("BoxMesh_health_bar")

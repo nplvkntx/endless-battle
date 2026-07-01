@@ -29,7 +29,7 @@ var has_move_target: bool = false
 var _current_health: float = 0.0
 var _max_health: float = 0.0
 
-var _selection_indicator: MeshInstance3D
+var _selection_indicator: Node3D
 var _movement_target: Vector3 = Vector3.ZERO
 var _stuck_time: float = 0.0
 var _detour_active: bool = false
@@ -44,7 +44,7 @@ func _ready() -> void:
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.UNITS
 	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
-	_selection_indicator = get_node_or_null("SelectionIndicator") as MeshInstance3D
+	_selection_indicator = get_node_or_null("SelectionIndicator") as Node3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
 	_apply_unit_data()
@@ -65,6 +65,12 @@ func set_selected(selected: bool) -> void:
 	if _selection_indicator:
 		_selection_indicator.visible = selected
 	selected_changed.emit(is_selected)
+
+
+## Shows or hides the selection ring while inspecting enemy/neutral entities.
+func set_inspected(inspected: bool) -> void:
+	if _selection_indicator:
+		_selection_indicator.visible = inspected
 
 
 ## Sets a single move target. Called only when a move command is issued.

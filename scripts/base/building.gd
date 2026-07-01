@@ -35,12 +35,16 @@ var _base_albedo: Color
 var _base_emission: Color
 var _base_emission_enabled: bool
 var _feedback_tween: Tween
+var _selection_indicator: Node3D
 
 
 func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
 	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
+	_selection_indicator = get_node_or_null("SelectionIndicator") as Node3D
+	if _selection_indicator:
+		_selection_indicator.visible = false
 	NavigationObstacleSetup.apply_from_collision_body(self)
 	_apply_building_data()
 	call_deferred("apply_team_visuals")
@@ -52,7 +56,17 @@ func apply_team_visuals() -> void:
 
 
 func set_selected(selected: bool) -> void:
+	if is_selected == selected:
+		return
+
 	is_selected = selected
+	if _selection_indicator:
+		_selection_indicator.visible = selected
+
+
+func set_inspected(inspected: bool) -> void:
+	if _selection_indicator:
+		_selection_indicator.visible = inspected
 
 
 func play_target_feedback() -> void:

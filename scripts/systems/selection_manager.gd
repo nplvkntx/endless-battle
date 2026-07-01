@@ -544,9 +544,11 @@ func _purge_invalid_inspection() -> void:
 	var had_inspection: bool = inspected_unit != null or inspected_building != null
 
 	if inspected_unit != null and not _is_inspectable_unit(inspected_unit):
+		_safe_set_unit_inspected(inspected_unit, false)
 		inspected_unit = null
 
 	if inspected_building != null and not _is_inspectable_building(inspected_building):
+		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
 
 	if had_inspection and inspected_unit == null and inspected_building == null:
@@ -562,8 +564,13 @@ func _set_inspected_unit(unit: Unit) -> void:
 
 	_clear_selection_without_signal()
 	_clear_building_selection_without_signal()
-	inspected_building = null
+	if inspected_unit != null and inspected_unit != unit:
+		_safe_set_unit_inspected(inspected_unit, false)
+	if inspected_building != null:
+		_safe_set_building_inspected(inspected_building, false)
+		inspected_building = null
 	inspected_unit = unit
+	_safe_set_unit_inspected(unit, true)
 	inspection_changed.emit(inspected_unit, null)
 	selection_changed.emit(selected_units)
 	building_selection_changed.emit(null)
@@ -578,8 +585,13 @@ func _set_inspected_building(building: Building) -> void:
 
 	_clear_selection_without_signal()
 	_clear_building_selection_without_signal()
-	inspected_unit = null
+	if inspected_unit != null:
+		_safe_set_unit_inspected(inspected_unit, false)
+		inspected_unit = null
+	if inspected_building != null and inspected_building != building:
+		_safe_set_building_inspected(inspected_building, false)
 	inspected_building = building
+	_safe_set_building_inspected(building, true)
 	inspection_changed.emit(null, inspected_building)
 	selection_changed.emit(selected_units)
 	building_selection_changed.emit(null)
@@ -594,6 +606,10 @@ func _clear_inspection() -> void:
 
 
 func _clear_inspection_without_signal() -> void:
+	if inspected_unit != null:
+		_safe_set_unit_inspected(inspected_unit, false)
+	if inspected_building != null:
+		_safe_set_building_inspected(inspected_building, false)
 	inspected_unit = null
 	inspected_building = null
 
@@ -679,6 +695,26 @@ func _safe_set_building_selected(candidate: Variant, selected: bool) -> void:
 		return
 
 	(candidate as Building).set_selected(selected)
+
+
+func _safe_set_unit_inspected(candidate: Variant, inspected: bool) -> void:
+	if candidate == null or not is_instance_valid(candidate):
+		return
+
+	if not candidate is Unit:
+		return
+
+	(candidate as Unit).set_inspected(inspected)
+
+
+func _safe_set_building_inspected(candidate: Variant, inspected: bool) -> void:
+	if candidate == null or not is_instance_valid(candidate):
+		return
+
+	if not candidate is Building:
+		return
+
+	(candidate as Building).set_inspected(inspected)
 
 
 func _arrays_match(current: Array[Unit], next: Array[Unit]) -> bool:

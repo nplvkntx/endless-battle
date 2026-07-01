@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="endless battle"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/maps/booty_bay_01.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -26,6 +26,7 @@ FormationManager="*res://autoloads/formation_manager.gd"
 InputManager="*res://autoloads/input_manager.gd"
 FogOfWarManager="*res://autoloads/fog_of_war_manager.gd"
 ProjectileManager="*res://autoloads/projectile_manager.gd"
+MatchSession="*res://autoloads/match_session.gd"
 
 [display]
 

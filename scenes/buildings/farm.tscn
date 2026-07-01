@@ -1,29 +1,43 @@
-[gd_scene load_steps=14 format=3 uid="uid://c8farmplaceholder"]
+[gd_scene load_steps=18 format=3 uid="uid://c8farmplaceholder"]
 
 [ext_resource type="Script" path="res://scripts/buildings/farm.gd" id="1_farm"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_soil"]
-albedo_color = Color(0.42, 0.28, 0.14, 1)
+albedo_color = Color(0.4, 0.26, 0.12, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crop"]
-albedo_color = Color(0.22, 0.72, 0.22, 1)
+albedo_color = Color(0.2, 0.68, 0.2, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_fence"]
-albedo_color = Color(0.52, 0.36, 0.18, 1)
+albedo_color = Color(0.5, 0.34, 0.16, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
 
 [sub_resource type="BoxMesh" id="BoxMesh_plot"]
-size = Vector3(3, 0.12, 2)
+size = Vector3(3, 0.04, 2)
 
 [sub_resource type="BoxMesh" id="BoxMesh_crop_row"]
-size = Vector3(2.4, 0.35, 0.12)
+size = Vector3(2.2, 0.12, 0.08)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_fence_post"]
-top_radius = 0.05
-bottom_radius = 0.05
-height = 0.45
+top_radius = 0.04
+bottom_radius = 0.04
+height = 0.28
 
 [sub_resource type="BoxMesh" id="BoxMesh_fence_rail"]
-size = Vector3(2.6, 0.05, 0.05)
+size = Vector3(2.5, 0.04, 0.04)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(3.12, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 2.12)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_farm"]
 size = Vector3(3, 1.5, 2)
@@ -32,61 +46,85 @@ size = Vector3(3, 1.5, 2)
 script = ExtResource("1_farm")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.69, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.72, 0)
 mesh = SubResource("BoxMesh_plot")
 surface_material_override/0 = SubResource("StandardMaterial3D_soil")
 
 [node name="Visuals" type="Node3D" parent="."]
 
 [node name="CropRow1" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, -0.55)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.66, -0.55)
 mesh = SubResource("BoxMesh_crop_row")
 surface_material_override/0 = SubResource("StandardMaterial3D_crop")
 
 [node name="CropRow2" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, -0.18)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.66, -0.18)
 mesh = SubResource("BoxMesh_crop_row")
 surface_material_override/0 = SubResource("StandardMaterial3D_crop")
 
 [node name="CropRow3" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, 0.18)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.66, 0.18)
 mesh = SubResource("BoxMesh_crop_row")
 surface_material_override/0 = SubResource("StandardMaterial3D_crop")
 
 [node name="CropRow4" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, 0.55)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.66, 0.55)
 mesh = SubResource("BoxMesh_crop_row")
 surface_material_override/0 = SubResource("StandardMaterial3D_crop")
 
 [node name="FencePostFrontLeft" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.35, -0.42, -0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.35, -0.58, -0.85)
 mesh = SubResource("CylinderMesh_fence_post")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
 
 [node name="FencePostFrontRight" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, -0.42, -0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, -0.58, -0.85)
 mesh = SubResource("CylinderMesh_fence_post")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
 
 [node name="FencePostBackLeft" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.35, -0.42, 0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.35, -0.58, 0.85)
 mesh = SubResource("CylinderMesh_fence_post")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
 
 [node name="FencePostBackRight" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, -0.42, 0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.35, -0.58, 0.85)
 mesh = SubResource("CylinderMesh_fence_post")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
 
 [node name="FenceRailFront" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.22, -0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.46, -0.85)
 mesh = SubResource("BoxMesh_fence_rail")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
 
 [node name="FenceRailBack" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.22, 0.85)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.46, 0.85)
 mesh = SubResource("BoxMesh_fence_rail")
 surface_material_override/0 = SubResource("StandardMaterial3D_fence")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.72, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.0)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.0)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_farm")

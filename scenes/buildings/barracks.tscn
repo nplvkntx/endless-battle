@@ -1,12 +1,12 @@
-[gd_scene load_steps=14 format=3 uid="uid://c3tjs5jv1rvr6"]
+[gd_scene load_steps=20 format=3 uid="uid://c3tjs5jv1rvr6"]
 
 [ext_resource type="Script" path="res://scripts/buildings/barracks.gd" id="1_barracks"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_barracks"]
-albedo_color = Color(0.3, 0.3, 0.3, 1)
+albedo_color = Color(0.28, 0.28, 0.3, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_roof"]
-albedo_color = Color(0.38, 0.2, 0.14, 1)
+albedo_color = Color(0.36, 0.18, 0.12, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rack"]
 albedo_color = Color(0.48, 0.32, 0.18, 1)
@@ -14,19 +14,42 @@ albedo_color = Color(0.48, 0.32, 0.18, 1)
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_banner"]
 albedo_color = Color(0.2, 0.45, 0.85, 1)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_door"]
+albedo_color = Color(0.18, 0.12, 0.08, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
+
 [sub_resource type="BoxMesh" id="BoxMesh_hall"]
-size = Vector3(4, 1.5, 3)
+size = Vector3(4, 1.4, 3)
 
 [sub_resource type="BoxMesh" id="BoxMesh_roof_panel"]
-size = Vector3(4.2, 0.12, 1.6)
+size = Vector3(4.2, 0.1, 1.6)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_rack"]
-top_radius = 0.06
-bottom_radius = 0.06
-height = 2.2
+top_radius = 0.05
+bottom_radius = 0.05
+height = 2.0
 
 [sub_resource type="BoxMesh" id="BoxMesh_banner"]
-size = Vector3(0.08, 0.75, 0.5)
+size = Vector3(0.06, 0.7, 0.45)
+
+[sub_resource type="BoxMesh" id="BoxMesh_door"]
+size = Vector3(0.9, 1.2, 0.1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_axe"]
+size = Vector3(0.04, 0.35, 0.12)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(4.12, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 3.12)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_barracks"]
 size = Vector3(4, 2, 3)
@@ -37,31 +60,65 @@ collision_mask = 3
 script = ExtResource("1_barracks")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
 mesh = SubResource("BoxMesh_hall")
 surface_material_override/0 = SubResource("StandardMaterial3D_barracks")
 
 [node name="Visuals" type="Node3D" parent="."]
 
 [node name="RoofLeft" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.85, -0.7)
+transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.78, -0.7)
 mesh = SubResource("BoxMesh_roof_panel")
 surface_material_override/0 = SubResource("StandardMaterial3D_roof")
 
 [node name="RoofRight" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, -0.34202, 0, 0.34202, 0.939693, 0, 0.85, 0.7)
+transform = Transform3D(1, 0, 0, 0, 0.939693, -0.34202, 0, 0.34202, 0.939693, 0, 0.78, 0.7)
 mesh = SubResource("BoxMesh_roof_panel")
 surface_material_override/0 = SubResource("StandardMaterial3D_roof")
 
+[node name="Door" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.28, -1.52)
+mesh = SubResource("BoxMesh_door")
+surface_material_override/0 = SubResource("StandardMaterial3D_door")
+
 [node name="WeaponRack" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.85, 0.1, 0)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.85, 0.05, 0)
 mesh = SubResource("CylinderMesh_rack")
 surface_material_override/0 = SubResource("StandardMaterial3D_rack")
 
+[node name="Axe" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.92, 0.35, 0.15)
+mesh = SubResource("BoxMesh_axe")
+surface_material_override/0 = SubResource("StandardMaterial3D_rack")
+
 [node name="Banner" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, -1.52)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.88, -1.52)
 mesh = SubResource("BoxMesh_banner")
 surface_material_override/0 = SubResource("StandardMaterial3D_banner")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.88, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.5)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.5)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.0, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.0, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_barracks")
