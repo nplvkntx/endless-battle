@@ -44,6 +44,7 @@ const PORTRAIT_STYLES: Dictionary = {
 	"archer": {"color": Color(0.15, 0.65, 0.25, 1), "label": "A"},
 	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
+	"neutral_creep": {"color": Color(0.48, 0.38, 0.16, 1), "label": "Nc"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
 	"barracks": {"color": Color(0.5, 0.32, 0.22, 1), "label": "B"},
 	"blacksmith": {"color": Color(0.58, 0.42, 0.22, 1), "label": "BS"},
@@ -192,7 +193,8 @@ func _show_unit_info(unit: Unit) -> void:
 	_type_label.text = "Type: %s" % info.type
 	_type_label.visible = true
 	_configure_level_display(unit)
-	_configure_health_display(unit)
+	var show_numeric_health: bool = unit is NeutralCreep
+	_configure_health_display(unit, show_numeric_health)
 	_configure_mana_display(unit)
 	if unit is Hero:
 		_configure_xp_display(unit as Hero)
@@ -998,6 +1000,8 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 		return {"name": "Hero", "type": "Unit", "portrait_key": "hero"}
 	if unit is Worker:
 		return {"name": "Worker", "type": "Unit", "portrait_key": "worker"}
+	if unit is NeutralCreep:
+		return {"name": "Neutral Creep", "type": "Neutral", "portrait_key": "neutral_creep"}
 	if unit is EnemyDummy:
 		return {"name": "Enemy Dummy", "type": "Unit", "portrait_key": "enemy_dummy"}
 	return {}

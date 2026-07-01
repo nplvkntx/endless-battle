@@ -75,7 +75,7 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 		return false
 
 	if not selection_manager.selected_units.is_empty():
-		return true
+		return selection_manager.has_commandable_selected_units()
 
 	var building: Building = selection_manager.selected_building
 	if building == null:

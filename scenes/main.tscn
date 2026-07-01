@@ -19,6 +19,7 @@
 [ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
 [ext_resource type="Script" path="res://scripts/systems/enemy_build_manager.gd" id="26_enemy_build_manager"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_creep_manager.gd" id="27_enemy_creep_manager"]
 [ext_resource type="PackedScene" uid="uid://crxg17shkoebg" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
 
@@ -92,6 +93,9 @@ script = ExtResource("26_enemy_build_manager")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 enemy_gather_manager_path = NodePath("../EnemyGatherManager")
 buildings_parent_path = NodePath("..")
+
+[node name="EnemyCreepManager" type="Node" parent="."]
+script = ExtResource("27_enemy_creep_manager")
 
 [node name="SelectionUI" type="CanvasLayer" parent="." unique_id=370040247]
 
@@ -170,16 +174,77 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
 mesh = SubResource("CylinderMesh_creep_placeholder")
 surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
 
-[node name="CreepCamp" type="Node3D" parent="." unique_id=2053903713]
+[node name="EasyCampPlayer" type="Node3D" parent="." unique_id=2053903713]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0, -30)
 
-[node name="Creep1" parent="CreepCamp" unique_id=20762309 instance=ExtResource("24_neutral_creep")]
+[node name="Creep1" parent="EasyCampPlayer" unique_id=20762309 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
+
+[node name="Creep2" parent="EasyCampPlayer" unique_id=430633536 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
+
+[node name="EasyCampEnemy" type="Node3D" parent="." unique_id=1804294728]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 0, 30)
+
+[node name="Creep1" parent="EasyCampEnemy" unique_id=1804294729 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
+
+[node name="Creep2" parent="EasyCampEnemy" unique_id=1804294730 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
+
+[node name="MediumCampPlayer" type="Node3D" parent="." unique_id=1804294731]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0, -12)
+
+[node name="Creep1" parent="MediumCampPlayer" unique_id=1804294732 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+attack_damage = 11
+attack_cooldown = 1.1
 
-[node name="Creep2" parent="CreepCamp" unique_id=430633536 instance=ExtResource("24_neutral_creep")]
+[node name="HealthComponent" parent="MediumCampPlayer/Creep1" index="0"]
+max_health = 110
+
+[node name="Creep2" parent="MediumCampPlayer" unique_id=1804294733 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
 
-[node name="Creep3" parent="CreepCamp" unique_id=1804294728 instance=ExtResource("24_neutral_creep")]
+[node name="HealthComponent" parent="MediumCampPlayer/Creep2" index="0"]
+max_health = 110
+
+[node name="Creep3" parent="MediumCampPlayer" unique_id=1804294734 instance=ExtResource("24_neutral_creep")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="HealthComponent" parent="MediumCampPlayer/Creep3" index="0"]
+max_health = 110
+
+[node name="MediumCampEnemy" type="Node3D" parent="." unique_id=1804294735]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0, 12)
+
+[node name="Creep1" parent="MediumCampEnemy" unique_id=1804294736 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="HealthComponent" parent="MediumCampEnemy/Creep1" index="0"]
+max_health = 110
+
+[node name="Creep2" parent="MediumCampEnemy" unique_id=1804294737 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="HealthComponent" parent="MediumCampEnemy/Creep2" index="0"]
+max_health = 110
+
+[node name="Creep3" parent="MediumCampEnemy" unique_id=1804294738 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="HealthComponent" parent="MediumCampEnemy/Creep3" index="0"]
+max_health = 110
 
 [node name="Worker" parent="." unique_id=1420813028 instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)
@@ -319,3 +384,334 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46, 1.25, -45)
 
 [node name="Tree8" parent="." unique_id=2017030389 instance=ExtResource("9_tree")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 1.25, -47)
+
+[node name="PlayerExpansionGoldMineA" parent="." unique_id=301000001 instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 1, -14)
+
+[node name="PlayerExpansionTreeA1" parent="." unique_id=301000002 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26, 1.25, -16)
+
+[node name="PlayerExpansionTreeA2" parent="." unique_id=301000003 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1.25, -11)
+
+[node name="PlayerExpansionTreeA3" parent="." unique_id=301000004 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32, 1.25, -15)
+
+[node name="PlayerExpansionTreeA4" parent="." unique_id=301000005 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1.25, -12)
+
+[node name="PlayerExpansionTreeA5" parent="." unique_id=301000006 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, -13)
+
+[node name="PlayerExpansionTreeA6" parent="." unique_id=301000007 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33, 1.25, -10)
+
+[node name="PlayerExpansionGoldMineB" parent="." unique_id=301000008 instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 1, -26)
+
+[node name="PlayerExpansionTreeB1" parent="." unique_id=301000009 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1.25, -28)
+
+[node name="PlayerExpansionTreeB2" parent="." unique_id=301000010 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 1.25, -23)
+
+[node name="PlayerExpansionTreeB3" parent="." unique_id=301000011 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 1.25, -27)
+
+[node name="PlayerExpansionTreeB4" parent="." unique_id=301000012 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.25, -24)
+
+[node name="PlayerExpansionTreeB5" parent="." unique_id=301000013 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 1.25, -25)
+
+[node name="PlayerExpansionTreeB6" parent="." unique_id=301000014 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19, 1.25, -22)
+
+[node name="EnemyExpansionGoldMineA" parent="." unique_id=301000015 instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1, 14)
+
+[node name="EnemyExpansionTreeA1" parent="." unique_id=301000016 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 1.25, 16)
+
+[node name="EnemyExpansionTreeA2" parent="." unique_id=301000017 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1.25, 11)
+
+[node name="EnemyExpansionTreeA3" parent="." unique_id=301000018 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32, 1.25, 15)
+
+[node name="EnemyExpansionTreeA4" parent="." unique_id=301000019 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 1.25, 12)
+
+[node name="EnemyExpansionTreeA5" parent="." unique_id=301000020 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 1.25, 13)
+
+[node name="EnemyExpansionTreeA6" parent="." unique_id=301000021 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -33, 1.25, 10)
+
+[node name="EnemyExpansionGoldMineB" parent="." unique_id=301000022 instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1, 26)
+
+[node name="EnemyExpansionTreeB1" parent="." unique_id=301000023 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 28)
+
+[node name="EnemyExpansionTreeB2" parent="." unique_id=301000024 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 23)
+
+[node name="EnemyExpansionTreeB3" parent="." unique_id=301000025 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.25, 27)
+
+[node name="EnemyExpansionTreeB4" parent="." unique_id=301000026 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1.25, 24)
+
+[node name="EnemyExpansionTreeB5" parent="." unique_id=301000027 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.25, 25)
+
+[node name="EnemyExpansionTreeB6" parent="." unique_id=301000028 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19, 1.25, 22)
+
+[node name="ContestedExpansionGoldMineWest" parent="." unique_id=301000029 instance=ExtResource("8_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 1, -5)
+
+[node name="ContestedExpansionTreeW1" parent="." unique_id=301000030 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1.25, -7)
+
+[node name="ContestedExpansionTreeW2" parent="." unique_id=301000031 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 1.25, -2)
+
+[node name="ContestedExpansionTreeW3" parent="." unique_id=301000032 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -22, 1.25, -6)
+
+[node name="ContestedExpansionTreeW4" parent="." unique_id=301000033 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1.25, -3)
+
+[node name="ContestedExpansionTreeW5" parent="." unique_id=301000034 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 1.25, -4)
+
+[node name="ContestedExpansionTreeW6" parent="." unique_id=301000035 instance=ExtResource("9_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -21, 1.25, -1)
+
+[node name="StrongCampPlayerExpansionA" type="Node3D" parent="." unique_id=301000036]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, -14)
+
+[node name="Creep1" parent="StrongCampPlayerExpansionA" unique_id=301000037 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionA/Creep1" index="0"]
+max_health = 140
+
+[node name="Creep2" parent="StrongCampPlayerExpansionA" unique_id=301000038 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionA/Creep2" index="0"]
+max_health = 140
+
+[node name="Creep3" parent="StrongCampPlayerExpansionA" unique_id=301000039 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionA/Creep3" index="0"]
+max_health = 140
+
+[node name="Creep4" parent="StrongCampPlayerExpansionA" unique_id=301000040 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionA/Creep4" index="0"]
+max_health = 140
+
+[node name="StrongCampPlayerExpansionB" type="Node3D" parent="." unique_id=301000041]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0, -26)
+
+[node name="Creep1" parent="StrongCampPlayerExpansionB" unique_id=301000042 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionB/Creep1" index="0"]
+max_health = 140
+
+[node name="Creep2" parent="StrongCampPlayerExpansionB" unique_id=301000043 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionB/Creep2" index="0"]
+max_health = 140
+
+[node name="Creep3" parent="StrongCampPlayerExpansionB" unique_id=301000044 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionB/Creep3" index="0"]
+max_health = 140
+
+[node name="Creep4" parent="StrongCampPlayerExpansionB" unique_id=301000045 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampPlayerExpansionB/Creep4" index="0"]
+max_health = 140
+
+[node name="StrongCampEnemyExpansionA" type="Node3D" parent="." unique_id=301000046]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, 14)
+
+[node name="Creep1" parent="StrongCampEnemyExpansionA" unique_id=301000047 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionA/Creep1" index="0"]
+max_health = 140
+
+[node name="Creep2" parent="StrongCampEnemyExpansionA" unique_id=301000048 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionA/Creep2" index="0"]
+max_health = 140
+
+[node name="Creep3" parent="StrongCampEnemyExpansionA" unique_id=301000049 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionA/Creep3" index="0"]
+max_health = 140
+
+[node name="Creep4" parent="StrongCampEnemyExpansionA" unique_id=301000050 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionA/Creep4" index="0"]
+max_health = 140
+
+[node name="StrongCampEnemyExpansionB" type="Node3D" parent="." unique_id=301000051]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 0, 26)
+
+[node name="Creep1" parent="StrongCampEnemyExpansionB" unique_id=301000052 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionB/Creep1" index="0"]
+max_health = 140
+
+[node name="Creep2" parent="StrongCampEnemyExpansionB" unique_id=301000053 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionB/Creep2" index="0"]
+max_health = 140
+
+[node name="Creep3" parent="StrongCampEnemyExpansionB" unique_id=301000054 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionB/Creep3" index="0"]
+max_health = 140
+
+[node name="Creep4" parent="StrongCampEnemyExpansionB" unique_id=301000055 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="HealthComponent" parent="StrongCampEnemyExpansionB/Creep4" index="0"]
+max_health = 140
+
+[node name="StrongCampContestedExpansionEast" type="Node3D" parent="." unique_id=301000056]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 0, 5)
+
+[node name="Creep1" parent="StrongCampContestedExpansionEast" unique_id=301000057 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0.5, 4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionEast/Creep1" index="0"]
+max_health = 180
+
+[node name="Creep2" parent="StrongCampContestedExpansionEast" unique_id=301000058 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionEast/Creep2" index="0"]
+max_health = 180
+
+[node name="Creep3" parent="StrongCampContestedExpansionEast" unique_id=301000059 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, 6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionEast/Creep3" index="0"]
+max_health = 180
+
+[node name="Creep4" parent="StrongCampContestedExpansionEast" unique_id=301000060 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, -6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionEast/Creep4" index="0"]
+max_health = 180
+
+[node name="Creep5" parent="StrongCampContestedExpansionEast" unique_id=301000061 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -7)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionEast/Creep5" index="0"]
+max_health = 180
+
+[node name="StrongCampContestedExpansionWest" type="Node3D" parent="." unique_id=301000062]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 0, -5)
+
+[node name="Creep1" parent="StrongCampContestedExpansionWest" unique_id=301000063 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0.5, 4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionWest/Creep1" index="0"]
+max_health = 180
+
+[node name="Creep2" parent="StrongCampContestedExpansionWest" unique_id=301000064 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionWest/Creep2" index="0"]
+max_health = 180
+
+[node name="Creep3" parent="StrongCampContestedExpansionWest" unique_id=301000065 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, 6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionWest/Creep3" index="0"]
+max_health = 180
+
+[node name="Creep4" parent="StrongCampContestedExpansionWest" unique_id=301000066 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, -6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionWest/Creep4" index="0"]
+max_health = 180
+
+[node name="Creep5" parent="StrongCampContestedExpansionWest" unique_id=301000067 instance=ExtResource("24_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -7)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="HealthComponent" parent="StrongCampContestedExpansionWest/Creep5" index="0"]
+max_health = 180

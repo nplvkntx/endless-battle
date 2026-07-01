@@ -34,7 +34,7 @@ func get_multi_unit_selection_category() -> StringName:
 	var has_worker: bool = false
 	var has_combat: bool = false
 	for unit: Unit in selected_units:
-		if not _is_selectable_unit(unit):
+		if not _is_commandable_unit(unit):
 			continue
 		if unit is Worker:
 			has_worker = true
@@ -52,10 +52,18 @@ func get_multi_unit_selection_category() -> StringName:
 	return MULTI_SELECTION_OTHER
 
 
+func has_commandable_selected_units() -> bool:
+	_purge_invalid_selected_units()
+	for unit: Unit in selected_units:
+		if _is_commandable_unit(unit):
+			return true
+	return false
+
+
 func get_primary_ui_hero() -> Hero:
 	_purge_invalid_selected_units()
 	for unit: Unit in selected_units:
-		if not _is_selectable_unit(unit):
+		if not _is_commandable_unit(unit):
 			continue
 		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
 			continue
@@ -199,7 +207,7 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		_reset_click_tracking()
 		return
 
-	if InputManager.attack_move_armed and not selected_units.is_empty():
+	if InputManager.attack_move_armed and has_commandable_selected_units():
 		var attack_move_position: Vector3 = _raycast_ground_plane(camera, screen_position)
 		if attack_move_position.is_finite():
 			_dispatch_attack_move_command(attack_move_position)
@@ -291,14 +299,16 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		return
 
 	InputManager.disarm_attack_move()
+	var commandable_units := _get_commandable_selected_units()
+	if commandable_units.is_empty():
+		return
+
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
-		selected_units.size()
+		commandable_units.size()
 	)
-	for index: int in selected_units.size():
-		var unit: Unit = selected_units[index]
-		if not _is_selectable_unit(unit):
-			continue
+	for index: int in commandable_units.size():
+		var unit: Unit = commandable_units[index]
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
 		if unit is Swordsman:
@@ -318,7 +328,7 @@ func _dispatch_attack_command(target: Node3D) -> void:
 	_purge_invalid_selected_units()
 	var dispatched_to_military := false
 	for unit: Unit in selected_units:
-		if not _is_selectable_unit(unit):
+		if not _is_commandable_unit(unit):
 			continue
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack(target)
@@ -336,14 +346,16 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 	_purge_invalid_selected_units()
+	var commandable_units := _get_commandable_selected_units()
+	if commandable_units.is_empty():
+		return
+
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
-		selected_units.size()
+		commandable_units.size()
 	)
-	for index: int in selected_units.size():
-		var unit: Unit = selected_units[index]
-		if not _is_selectable_unit(unit):
-			continue
+	for index: int in commandable_units.size():
+		var unit: Unit = commandable_units[index]
 		if unit is Swordsman:
 			(unit as Swordsman).command_attack_move(move_targets[index])
 		elif unit is Archer:
@@ -367,7 +379,7 @@ func _dispatch_construction_command(building: Building) -> void:
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
 	for unit: Unit in selected_units:
-		if not _is_selectable_unit(unit):
+		if not _is_commandable_unit(unit):
 			continue
 		if unit is Worker:
 			(unit as Worker).start_construction_order(building)
@@ -407,7 +419,7 @@ func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
 	for unit: Unit in selected_units:
-		if not _is_selectable_unit(unit):
+		if not _is_commandable_unit(unit):
 			continue
 		if unit is Worker:
 			(unit as Worker).command_gather_gold_mine(gold_mine)
@@ -765,10 +777,22 @@ func _is_selectable_unit(candidate: Variant) -> bool:
 	if unit.is_in_group(&"enemies"):
 		return false
 
-	if unit.is_in_group(&"neutral_creeps"):
+	return true
+
+
+func _get_commandable_selected_units() -> Array[Unit]:
+	var commandable_units: Array[Unit] = []
+	for unit: Unit in selected_units:
+		if _is_commandable_unit(unit):
+			commandable_units.append(unit)
+	return commandable_units
+
+
+func _is_commandable_unit(candidate: Variant) -> bool:
+	if not _is_selectable_unit(candidate):
 		return false
 
-	return true
+	return not (candidate as Unit).is_in_group(&"neutral_creeps")
 
 
 func _is_inspectable_unit(candidate: Variant) -> bool:

@@ -130,6 +130,43 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 	}
 
 
+static func build_creep_army(tree: SceneTree) -> Dictionary:
+	return build_attack_wave_units(tree, MIN_NON_HERO_FOR_HERO_JOIN)
+
+
+static func is_enemy_base_threatened(tree: SceneTree) -> bool:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	return (
+		_find_player_military_near_position(tree, rally_position, BASE_THREAT_DETECTION_RANGE)
+		!= null
+	)
+
+
+static func is_enemy_army_under_attack(
+	tree: SceneTree,
+	army_units: Array,
+	search_range: float
+) -> bool:
+	var army_center: Vector3 = compute_army_center(army_units)
+	if army_center == Vector3.ZERO:
+		return false
+
+	return (
+		_find_player_military_near_position(tree, army_center, search_range) != null
+	)
+
+
+static func find_living_player_command_center(tree: SceneTree) -> CommandCenter:
+	return _resolve_living_player_command_center(tree)
+
+
+static func horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
+	return _horizontal_distance(from_position, to_position)
+
+
 static func resolve_enemy_rally_position(tree: SceneTree) -> Vector3:
 	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
 		if node is CommandCenter and _is_living_building(node as Building):
