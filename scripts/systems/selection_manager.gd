@@ -4,6 +4,7 @@ extends Node
 
 signal selection_changed(units: Array[Unit])
 signal building_selection_changed(building: Building)
+signal inspection_changed(unit: Unit, building: Building)
 
 const DRAG_THRESHOLD_PIXELS: float = 4.0
 const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
@@ -19,6 +20,8 @@ const MULTI_SELECTION_OTHER: StringName = &"other"
 
 var selected_units: Array[Unit] = []
 var selected_building: Building = null
+var inspected_unit: Unit = null
+var inspected_building: Building = null
 
 
 func get_multi_unit_selection_category() -> StringName:
@@ -146,12 +149,32 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		var building_distance: float = _raycast_hit_distance(
 			camera, screen_position, PhysicsLayers.BUILDINGS
 		)
-		if building_distance < unit_distance and _is_selectable_building(building):
-			_set_selected_building(building)
+		if building_distance < unit_distance:
+			if _is_inspectable_building(building):
+				_set_inspected_building(building)
+				_reset_click_tracking()
+				return
+			if _is_selectable_building(building):
+				_set_selected_building(building)
+				_reset_click_tracking()
+				return
+		elif _is_inspectable_unit(unit):
+			_set_inspected_unit(unit)
 			_reset_click_tracking()
+			return
+		elif _is_selectable_unit(unit):
+			if _is_double_click(unit):
+				_select_all_visible_same_type(unit, camera)
+			else:
+				_set_selected_units([unit])
+			_record_click(unit)
 			return
 
 	if unit:
+		if _is_inspectable_unit(unit):
+			_set_inspected_unit(unit)
+			_reset_click_tracking()
+			return
 		if _is_double_click(unit):
 			_select_all_visible_same_type(unit, camera)
 		else:
@@ -160,6 +183,10 @@ func _handle_left_click(screen_position: Vector2) -> void:
 		return
 
 	if building != null:
+		if _is_inspectable_building(building):
+			_set_inspected_building(building)
+			_reset_click_tracking()
+			return
 		_set_selected_building(building)
 		_reset_click_tracking()
 		return
@@ -173,6 +200,7 @@ func _handle_left_click(screen_position: Vector2) -> void:
 
 	_clear_selection()
 	_clear_building_selection()
+	_clear_inspection()
 	_reset_click_tracking()
 
 
@@ -376,6 +404,7 @@ func _set_selected_units(units: Array[Unit]) -> void:
 	if _arrays_match(selected_units, units):
 		return
 
+	_clear_inspection_without_signal()
 	_clear_building_selection_without_signal()
 	_clear_selection_without_signal()
 	selected_units = _filter_selectable_units(units.duplicate())
@@ -400,6 +429,7 @@ func _set_selected_building(building: Building) -> void:
 	if selected_building == building:
 		return
 
+	_clear_inspection_without_signal()
 	_clear_selection_without_signal()
 	_clear_building_selection_without_signal()
 	selected_building = building
@@ -483,6 +513,7 @@ func _untrack_unit_selection(candidate: Variant) -> void:
 func _purge_invalid_selection() -> void:
 	_purge_invalid_selected_units()
 	_purge_invalid_selected_building()
+	_purge_invalid_inspection()
 
 
 func _purge_invalid_selected_units() -> void:
@@ -507,6 +538,64 @@ func _purge_invalid_selected_building() -> void:
 
 	selected_building = null
 	building_selection_changed.emit(null)
+
+
+func _purge_invalid_inspection() -> void:
+	var had_inspection: bool = inspected_unit != null or inspected_building != null
+
+	if inspected_unit != null and not _is_inspectable_unit(inspected_unit):
+		inspected_unit = null
+
+	if inspected_building != null and not _is_inspectable_building(inspected_building):
+		inspected_building = null
+
+	if had_inspection and inspected_unit == null and inspected_building == null:
+		inspection_changed.emit(null, null)
+
+
+func _set_inspected_unit(unit: Unit) -> void:
+	if not _is_inspectable_unit(unit):
+		return
+
+	if inspected_unit == unit and selected_units.is_empty() and selected_building == null:
+		return
+
+	_clear_selection_without_signal()
+	_clear_building_selection_without_signal()
+	inspected_building = null
+	inspected_unit = unit
+	inspection_changed.emit(inspected_unit, null)
+	selection_changed.emit(selected_units)
+	building_selection_changed.emit(null)
+
+
+func _set_inspected_building(building: Building) -> void:
+	if not _is_inspectable_building(building):
+		return
+
+	if inspected_building == building and selected_units.is_empty() and selected_building == null:
+		return
+
+	_clear_selection_without_signal()
+	_clear_building_selection_without_signal()
+	inspected_unit = null
+	inspected_building = building
+	inspection_changed.emit(null, inspected_building)
+	selection_changed.emit(selected_units)
+	building_selection_changed.emit(null)
+
+
+func _clear_inspection() -> void:
+	if inspected_unit == null and inspected_building == null:
+		return
+
+	_clear_inspection_without_signal()
+	inspection_changed.emit(null, null)
+
+
+func _clear_inspection_without_signal() -> void:
+	inspected_unit = null
+	inspected_building = null
 
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
@@ -542,6 +631,27 @@ func _is_selectable_unit(candidate: Variant) -> bool:
 		return false
 
 	return true
+
+
+func _is_inspectable_unit(candidate: Variant) -> bool:
+	if candidate == null or not is_instance_valid(candidate):
+		return false
+
+	if not candidate is Unit:
+		return false
+
+	var unit: Unit = candidate as Unit
+	if unit.is_queued_for_deletion():
+		return false
+
+	if unit.is_in_group(&"enemies"):
+		return true
+
+	return CombatTargetValidation.is_enemy_faction(unit)
+
+
+func _is_inspectable_building(candidate: Variant) -> bool:
+	return CombatTargetValidation.is_attackable_enemy_building(candidate)
 
 
 func _is_selectable_building(candidate: Variant) -> bool:

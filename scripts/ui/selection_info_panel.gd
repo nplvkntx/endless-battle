@@ -25,6 +25,12 @@ var _tracked_hero: Hero = null
 var _tracked_command_center: CommandCenter = null
 var _tracked_barracks: Barracks = null
 var _tracked_hero_altar: HeroAltar = null
+var _is_enemy_inspect: bool = false
+
+const ENEMY_NAME_COLOR := Color(0.95, 0.35, 0.35, 1)
+const ENEMY_ACCENT_COLOR := Color(0.75, 0.22, 0.22, 1)
+const ENEMY_LEVEL_COLOR := Color(0.9, 0.55, 0.55, 1)
+const ENEMY_STAT_COLOR := Color(0.85, 0.5, 0.5, 1)
 
 const PORTRAIT_STYLES: Dictionary = {
 	"worker": {"color": Color(0.55, 0.35, 0.15, 1), "label": "W"},
@@ -49,6 +55,12 @@ func _ready() -> void:
 
 	selection_manager.selection_changed.connect(_on_selection_changed)
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
+	if selection_manager.has_signal("inspection_changed"):
+		selection_manager.inspection_changed.connect(_on_inspection_changed)
+	_refresh_panel()
+
+
+func _on_inspection_changed(_unit: Unit, _building: Building) -> void:
 	_refresh_panel()
 
 
@@ -70,6 +82,14 @@ func _refresh_panel() -> void:
 		_hide_panel()
 		return
 
+	if selection_manager.inspected_building != null:
+		_show_enemy_building_info(selection_manager.inspected_building)
+		return
+
+	if selection_manager.inspected_unit != null:
+		_show_enemy_unit_info(selection_manager.inspected_unit)
+		return
+
 	var selected_building: Building = selection_manager.selected_building
 	if selected_building != null:
 		_show_building_info(selected_building)
@@ -79,6 +99,9 @@ func _refresh_panel() -> void:
 	if selected_units.is_empty():
 		_hide_panel()
 		return
+
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
 
 	var primary_hero: Hero = selection_manager.get_primary_ui_hero()
 	if primary_hero != null and selected_units.size() > 1:
@@ -94,6 +117,8 @@ func _refresh_panel() -> void:
 
 
 func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
 	visible = true
 	_level_label.visible = false
 	_type_label.visible = true
@@ -128,9 +153,8 @@ func _show_unit_info(unit: Unit) -> void:
 		_hide_panel()
 		return
 
-	if unit.is_in_group(&"enemies"):
-		_hide_panel()
-		return
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
 
 	var info: Dictionary = _get_unit_info(unit)
 	if info.is_empty():
@@ -150,6 +174,9 @@ func _show_unit_info(unit: Unit) -> void:
 
 
 func _show_building_info(building: Building) -> void:
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
+
 	var info: Dictionary = _get_building_info(building)
 	if info.is_empty():
 		_hide_panel()
@@ -168,6 +195,138 @@ func _show_building_info(building: Building) -> void:
 	_configure_production_display(building)
 
 
+func _show_enemy_unit_info(unit: Unit) -> void:
+	if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+		_hide_panel()
+		return
+
+	var info: Dictionary = _get_enemy_unit_info(unit)
+	if info.is_empty():
+		_hide_panel()
+		return
+
+	_is_enemy_inspect = true
+	_apply_enemy_visual_style()
+	visible = true
+	_set_portrait(info.portrait_key)
+	_name_label.text = info.name
+	_type_label.text = "Type: %s" % info.type
+	_type_label.visible = true
+	_hide_production_display()
+
+	if unit is Hero:
+		_configure_enemy_level_display(unit)
+		_configure_health_display(unit, true)
+		_configure_enemy_mana_display(unit as Hero)
+		_configure_stats_display(unit)
+		return
+
+	_level_label.visible = false
+	_configure_health_display(unit, true)
+	_mana_bar.visible = false
+	_mana_label.visible = false
+	_configure_stats_display(unit)
+
+
+func _show_enemy_building_info(building: Building) -> void:
+	if not is_instance_valid(building) or building.is_queued_for_deletion():
+		_hide_panel()
+		return
+
+	var info: Dictionary = _get_enemy_building_info(building)
+	if info.is_empty():
+		_hide_panel()
+		return
+
+	_is_enemy_inspect = true
+	_apply_enemy_visual_style()
+	visible = true
+	_set_portrait(info.portrait_key)
+	_name_label.text = info.name
+	_type_label.text = "Type: %s" % info.type
+	_type_label.visible = true
+	_level_label.visible = false
+	_configure_health_display(building, true)
+	_mana_bar.visible = false
+	_mana_label.visible = false
+	_stats_row.visible = false
+	_hide_production_display()
+
+
+func _apply_enemy_visual_style() -> void:
+	_name_label.add_theme_color_override("font_color", ENEMY_NAME_COLOR)
+	_level_label.add_theme_color_override("font_color", ENEMY_LEVEL_COLOR)
+	_type_label.add_theme_color_override("font_color", ENEMY_LEVEL_COLOR)
+	_health_label.add_theme_color_override("font_color", ENEMY_NAME_COLOR)
+	_damage_label.add_theme_color_override("font_color", ENEMY_STAT_COLOR)
+	_armor_label.add_theme_color_override("font_color", ENEMY_STAT_COLOR)
+	_speed_label.add_theme_color_override("font_color", ENEMY_STAT_COLOR)
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.07, 0.04, 0.04, 0.9)
+	panel_style.border_width_left = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = ENEMY_ACCENT_COLOR
+	panel_style.content_margin_left = 4.0
+	panel_style.content_margin_top = 4.0
+	panel_style.content_margin_right = 4.0
+	panel_style.content_margin_bottom = 4.0
+	add_theme_stylebox_override("panel", panel_style)
+
+
+func _apply_player_visual_style() -> void:
+	_name_label.remove_theme_color_override("font_color")
+	_level_label.remove_theme_color_override("font_color")
+	_type_label.remove_theme_color_override("font_color")
+	_health_label.remove_theme_color_override("font_color")
+	_damage_label.remove_theme_color_override("font_color")
+	_armor_label.remove_theme_color_override("font_color")
+	_speed_label.remove_theme_color_override("font_color")
+	remove_theme_stylebox_override("panel")
+
+
+func _configure_enemy_level_display(unit: Unit) -> void:
+	if unit is Hero:
+		var hero: Hero = unit as Hero
+		_level_label.text = "Level %d" % hero.level
+		_level_label.visible = true
+		return
+
+	_level_label.visible = false
+
+
+func _configure_enemy_mana_display(hero: Hero) -> void:
+	_clear_mana_tracking()
+
+	if hero == null or not is_instance_valid(hero):
+		_mana_bar.visible = false
+		_mana_label.visible = false
+		return
+
+	_tracked_hero = hero
+	if hero.has_signal("mana_changed"):
+		hero.mana_changed.connect(_on_tracked_mana_changed)
+	if hero.has_signal("level_changed"):
+		hero.level_changed.connect(_on_tracked_enemy_hero_level_changed)
+	_update_enemy_hero_mana_display(hero)
+	_mana_bar.visible = true
+	_mana_label.visible = true
+
+
+func _update_enemy_hero_mana_display(hero: Hero) -> void:
+	_level_label.text = "Level %d" % hero.level
+	_level_label.visible = true
+	_update_mana_display(hero.current_mana, hero.max_mana)
+	_mana_label.text = "Mana: %d / %d" % [hero.current_mana, hero.max_mana]
+
+
+func _on_tracked_enemy_hero_level_changed(_new_level: int = 0) -> void:
+	if _tracked_hero != null and is_instance_valid(_tracked_hero) and _is_enemy_inspect:
+		_update_enemy_hero_mana_display(_tracked_hero)
+
+
 func _set_portrait(portrait_key: String) -> void:
 	var style: Dictionary = PORTRAIT_STYLES.get(portrait_key, PORTRAIT_STYLES["multiple"])
 	_portrait_color.color = style.color
@@ -184,7 +343,7 @@ func _configure_level_display(unit: Unit) -> void:
 	_level_label.visible = false
 
 
-func _configure_health_display(node: Node) -> void:
+func _configure_health_display(node: Node, show_numeric: bool = false) -> void:
 	var health_component: HealthComponent = node.get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null:
 		_hp_bar.visible = false
@@ -195,7 +354,7 @@ func _configure_health_display(node: Node) -> void:
 	health_component.health_changed.connect(_on_tracked_health_changed)
 	_update_health_display(health_component.current_health, health_component.max_health)
 	_hp_bar.visible = true
-	_health_label.visible = false
+	_health_label.visible = show_numeric
 
 
 func _configure_mana_display(unit: Unit) -> void:
@@ -260,6 +419,8 @@ func _update_mana_display(current_mana: int, max_mana: int) -> void:
 
 func _on_tracked_mana_changed(current_mana: int, max_mana: int) -> void:
 	_update_mana_display(current_mana, max_mana)
+	if _is_enemy_inspect:
+		_mana_label.text = "Mana: %d / %d" % [current_mana, max_mana]
 
 
 func _clear_mana_tracking() -> void:
@@ -272,6 +433,8 @@ func _clear_mana_tracking() -> void:
 			_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_stats_changed)
 		if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_stats_changed):
 			_tracked_hero.ability_progression_changed.disconnect(_on_tracked_hero_stats_changed)
+		if _tracked_hero.level_changed.is_connected(_on_tracked_enemy_hero_level_changed):
+			_tracked_hero.level_changed.disconnect(_on_tracked_enemy_hero_level_changed)
 	_tracked_hero = null
 
 
@@ -283,6 +446,8 @@ func _update_health_display(current_health: int, max_health: int) -> void:
 
 func _on_tracked_health_changed(current_health: int, max_health: int) -> void:
 	_update_health_display(current_health, max_health)
+	if _health_label.visible:
+		_health_label.text = "Health: %d / %d" % [current_health, max_health]
 
 
 func _clear_health_tracking() -> void:
@@ -295,6 +460,8 @@ func _clear_health_tracking() -> void:
 
 
 func _hide_panel() -> void:
+	_is_enemy_inspect = false
+	_apply_player_visual_style()
 	visible = false
 	_hide_production_display()
 
@@ -470,6 +637,28 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 	if unit is EnemyDummy:
 		return {"name": "Enemy Dummy", "type": "Unit", "portrait_key": "enemy_dummy"}
 	return {}
+
+
+func _get_enemy_unit_info(unit: Unit) -> Dictionary:
+	if unit is Hero:
+		return {"name": "Enemy Hero", "type": "Unit", "portrait_key": "hero"}
+	if unit is Worker:
+		return {"name": "Enemy Worker", "type": "Unit", "portrait_key": "worker"}
+	if unit is Swordsman:
+		return {"name": "Enemy Soldier", "type": "Unit", "portrait_key": "swordsman"}
+	if unit is Archer:
+		return {"name": "Enemy Archer", "type": "Unit", "portrait_key": "archer"}
+	if unit is EnemyDummy:
+		return {"name": "Enemy Dummy", "type": "Unit", "portrait_key": "enemy_dummy"}
+	return {"name": "Enemy Unit", "type": "Unit", "portrait_key": "enemy_dummy"}
+
+
+func _get_enemy_building_info(building: Building) -> Dictionary:
+	var info: Dictionary = _get_building_info(building)
+	if info.is_empty():
+		return {}
+	info.name = "Enemy %s" % info.name
+	return info
 
 
 func _get_building_info(building: Building) -> Dictionary:
