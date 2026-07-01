@@ -5,6 +5,7 @@ extends RefCounted
 
 const NEUTRAL_CREEP_XP: int = 50
 const ENEMY_UNIT_XP: int = 75
+const CREEP_XP_SHARE_RANGE: float = 18.0
 
 
 static func notify_unit_killed(victim: Node) -> void:
@@ -12,12 +13,12 @@ static func notify_unit_killed(victim: Node) -> void:
 
 
 static func grant_for_kill(victim: Node, killer: Node) -> void:
-	var hero: Hero = _resolve_hero_recipient(killer)
-	if hero == null:
-		return
-
 	var xp_amount: int = get_xp_amount_for_victim(victim)
 	if xp_amount <= 0:
+		return
+
+	var hero: Hero = _resolve_hero_recipient(victim, killer)
+	if hero == null:
 		return
 
 	hero.add_xp(float(xp_amount))
@@ -41,8 +42,92 @@ static func get_xp_amount_for_victim(victim: Node) -> int:
 	return 0
 
 
-static func _resolve_hero_recipient(killer: Node) -> Hero:
-	if killer is Hero:
+static func _resolve_hero_recipient(victim: Node, killer: Node) -> Hero:
+	if victim != null and CombatTargetValidation.is_neutral_creep(victim):
+		return _resolve_player_hero_for_creep_kill(victim, killer)
+
+	if _is_player_hero(killer):
 		return killer as Hero
 
 	return null
+
+
+static func _resolve_player_hero_for_creep_kill(victim: Node, killer: Node) -> Hero:
+	var hero: Hero = _find_living_player_hero(victim)
+	if hero == null:
+		return null
+
+	if _is_player_hero(killer):
+		return hero
+
+	if killer != null and CombatTargetValidation.is_enemy_faction(killer):
+		return null
+
+	if not _is_within_creep_xp_range(hero, victim):
+		return null
+
+	if _is_player_controlled_unit(killer):
+		return hero
+
+	return hero
+
+
+static func _find_living_player_hero(context: Node) -> Hero:
+	if context == null or not is_instance_valid(context):
+		return null
+
+	var tree: SceneTree = context.get_tree()
+	if tree == null:
+		return null
+
+	for node: Node in tree.get_nodes_in_group(&"heroes"):
+		if not _is_player_hero(node):
+			continue
+		if CombatTargetValidation.get_target_current_health(node) <= 0:
+			continue
+		return node as Hero
+
+	return null
+
+
+static func _is_player_hero(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if not node is Hero:
+		return false
+
+	return (node as Node).is_in_group(&"heroes")
+
+
+static func _is_player_controlled_unit(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if CombatTargetValidation.is_enemy_faction(node):
+		return false
+
+	if node is Hero:
+		return _is_player_hero(node)
+
+	if node is Swordsman or node is Archer or node is Worker:
+		return (node as Node).is_in_group(&"units")
+
+	return false
+
+
+static func _is_within_creep_xp_range(hero: Node3D, victim: Node) -> bool:
+	if hero == null or victim == null:
+		return false
+
+	if not is_instance_valid(hero) or not is_instance_valid(victim):
+		return false
+
+	var hero_position: Vector3 = hero.global_position
+	var victim_position: Vector3 = victim.global_position
+	if victim is Node3D:
+		victim_position = (victim as Node3D).global_position
+
+	var offset: Vector3 = hero_position - victim_position
+	offset.y = 0.0
+	return offset.length_squared() <= CREEP_XP_SHARE_RANGE * CREEP_XP_SHARE_RANGE
