@@ -1368,6 +1368,9 @@ func _try_reassign_gather_source() -> bool:
 	if resource_id.is_empty():
 		return false
 
+	if resource_id == &"gold":
+		return false
+
 	if resource_id == &"wood":
 		_unlock_wood_tree()
 		var scene_root: Node = get_tree().current_scene
@@ -1389,23 +1392,7 @@ func _try_reassign_gather_source() -> bool:
 		_set_movement_to_gather_source(replacement)
 		return true
 
-	var scene_root: Node = get_tree().current_scene
-	var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
-		resource_id,
-		global_position,
-		scene_root,
-		_is_enemy_worker(),
-		_gather_source if _is_valid_gather_source(_gather_source) else null
-	)
-	if replacement == null:
-		return false
-
-	_gather_source = replacement
-	_assigned_resource_id = replacement.get_resource_id()
-	_source_approach_candidate_index = 0
-	_gather_state = GatherTripState.TO_SOURCE
-	_set_movement_to_gather_source(replacement)
-	return true
+	return false
 
 
 func _get_assigned_resource_id() -> StringName:
