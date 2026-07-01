@@ -143,6 +143,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	unit.global_position = global_position + swordsman_spawn_offset
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
+	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
 	unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
 
 
@@ -561,6 +562,7 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
+		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
 		unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)

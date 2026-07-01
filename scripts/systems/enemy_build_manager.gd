@@ -26,11 +26,13 @@ const ENEMY_TEAM_ID: int = 1
 
 const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
+const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
+const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
@@ -39,6 +41,8 @@ const FARM_GOLD_COST: int = 80
 const FARM_WOOD_COST: int = 20
 const BARRACKS_GOLD_COST: int = 150
 const BARRACKS_WOOD_COST: int = 100
+const BLACKSMITH_GOLD_COST: int = 100
+const BLACKSMITH_WOOD_COST: int = 150
 const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const COMMAND_CENTER_GOLD_COST: int = 200
@@ -128,6 +132,12 @@ func _run_build_order() -> void:
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
+	if _should_build_blacksmith():
+		if _try_place_building(PLACEMENT_BLACKSMITH):
+			return
+
+	_try_sustain_blacksmith_research()
+
 	if not defer_military and _can_train_military_units():
 		_try_sustain_military_production()
 
@@ -191,6 +201,53 @@ func _should_build_expansion_barracks() -> bool:
 		return false
 
 	return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
+
+
+func _should_build_blacksmith() -> bool:
+	if _has_completed_building(PLACEMENT_BLACKSMITH):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_BLACKSMITH):
+		return false
+
+	if not _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+		return false
+
+	return EnemyResourceManager.can_afford(BLACKSMITH_GOLD_COST, BLACKSMITH_WOOD_COST)
+
+
+func _try_sustain_blacksmith_research() -> void:
+	var blacksmith: Blacksmith = _find_completed_enemy_blacksmith()
+	if blacksmith == null:
+		return
+
+	if blacksmith.is_researching():
+		return
+
+	for upgrade_id: StringName in UpgradeManager.BLACKSMITH_UPGRADE_ORDER:
+		if UpgradeManager.is_enemy_max_level(upgrade_id):
+			continue
+
+		if not UpgradeManager.can_enemy_afford_upgrade(upgrade_id):
+			return
+
+		blacksmith.try_research_upgrade(upgrade_id)
+		return
+
+
+func _find_completed_enemy_blacksmith() -> Blacksmith:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is Blacksmith or not _is_living_building(node as Building):
+			continue
+
+		var blacksmith: Blacksmith = node as Blacksmith
+		if blacksmith.building_state == Building.STATE_COMPLETED:
+			return blacksmith
+
+	return null
 
 
 func _needs_farm() -> bool:
@@ -351,6 +408,9 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 		PLACEMENT_BARRACKS:
 			gold_cost = BARRACKS_GOLD_COST
 			wood_cost = BARRACKS_WOOD_COST
+		PLACEMENT_BLACKSMITH:
+			gold_cost = BLACKSMITH_GOLD_COST
+			wood_cost = BLACKSMITH_WOOD_COST
 		PLACEMENT_HERO_ALTAR:
 			gold_cost = HERO_ALTAR_GOLD_COST
 			wood_cost = HERO_ALTAR_WOOD_COST
@@ -409,6 +469,8 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return FARM_SCENE.instantiate() as Building
 		PLACEMENT_BARRACKS:
 			return BARRACKS_SCENE.instantiate() as Building
+		PLACEMENT_BLACKSMITH:
+			return BLACKSMITH_SCENE.instantiate() as Building
 		PLACEMENT_HERO_ALTAR:
 			return HERO_ALTAR_SCENE.instantiate() as Building
 		PLACEMENT_COMMAND_CENTER:
@@ -624,6 +686,8 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 			return node is Farm
 		PLACEMENT_BARRACKS:
 			return node is Barracks
+		PLACEMENT_BLACKSMITH:
+			return node is Blacksmith
 		PLACEMENT_HERO_ALTAR:
 			return node is HeroAltar
 		PLACEMENT_COMMAND_CENTER:

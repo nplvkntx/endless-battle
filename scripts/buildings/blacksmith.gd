@@ -33,6 +33,13 @@ func can_research() -> bool:
 	return TeamVisuals.resolve_team(self, team_id) == TeamVisuals.PLAYER_TEAM_ID
 
 
+func can_enemy_research() -> bool:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+
+
 func is_researching() -> bool:
 	return _is_researching
 
@@ -49,7 +56,7 @@ func get_research_activity_label() -> String:
 	if not _is_researching:
 		return ""
 
-	var next_level: int = UpgradeManager.get_level(_research_upgrade_id) + 1
+	var next_level: int = _get_upgrade_level(_research_upgrade_id) + 1
 	return "%s %d/%d" % [
 		UpgradeManager.get_display_name(_research_upgrade_id),
 		next_level,
@@ -58,11 +65,19 @@ func get_research_activity_label() -> String:
 
 
 func try_research_upgrade(upgrade_id: StringName) -> bool:
-	if not can_research() or _is_researching:
+	if _is_researching:
 		return false
 
-	if not UpgradeManager.try_pay_for_research(upgrade_id):
-		return false
+	if _is_enemy_owned():
+		if not can_enemy_research():
+			return false
+		if not UpgradeManager.try_pay_for_enemy_research(upgrade_id):
+			return false
+	else:
+		if not can_research():
+			return false
+		if not UpgradeManager.try_pay_for_research(upgrade_id):
+			return false
 
 	_begin_research(upgrade_id)
 	return true
@@ -99,7 +114,10 @@ func _on_research_finished(session: int) -> void:
 	var completed_upgrade_id: StringName = _research_upgrade_id
 	_is_researching = false
 	_research_upgrade_id = &""
-	UpgradeManager.finish_research(completed_upgrade_id)
+	if _is_enemy_owned():
+		UpgradeManager.finish_enemy_research(completed_upgrade_id)
+	else:
+		UpgradeManager.finish_research(completed_upgrade_id)
 	research_state_changed.emit()
 
 
@@ -112,6 +130,17 @@ func _invalidate_research() -> void:
 
 func _get_time_seconds() -> float:
 	return Time.get_ticks_msec() / 1000.0
+
+
+func _is_enemy_owned() -> bool:
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+
+
+func _get_upgrade_level(upgrade_id: StringName) -> int:
+	if _is_enemy_owned():
+		return UpgradeManager.get_enemy_level(upgrade_id)
+
+	return UpgradeManager.get_level(upgrade_id)
 
 
 func _on_health_depleted() -> void:

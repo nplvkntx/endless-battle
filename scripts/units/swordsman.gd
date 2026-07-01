@@ -41,14 +41,20 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
-	if not UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
-		UpgradeManager.upgrade_applied.connect(_on_blacksmith_upgrade_applied)
+	if CombatTargetValidation.is_enemy_faction(self):
+		if not UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+			UpgradeManager.enemy_upgrade_applied.connect(_on_blacksmith_upgrade_applied)
+	else:
+		if not UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+			UpgradeManager.upgrade_applied.connect(_on_blacksmith_upgrade_applied)
 	call_deferred("_try_apply_blacksmith_upgrades")
 
 
 func _exit_tree() -> void:
 	if UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
 		UpgradeManager.upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
+	if UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+		UpgradeManager.enemy_upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -258,10 +264,17 @@ func _play_attack_animation() -> void:
 
 func apply_blacksmith_upgrades() -> void:
 	_cache_base_stats()
-	var attack_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_SWORDSMAN_ATTACK)
-	var armor_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_SWORDSMAN_ARMOR)
+	var attack_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_SWORDSMAN_ATTACK)
+	var armor_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_SWORDSMAN_ARMOR)
 	attack_damage = _base_attack_damage + attack_level * 2
 	armor = armor_level
+
+
+func _get_blacksmith_upgrade_level(upgrade_id: StringName) -> int:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return UpgradeManager.get_enemy_level(upgrade_id)
+
+	return UpgradeManager.get_level(upgrade_id)
 
 
 func _cache_base_stats() -> void:
@@ -270,11 +283,14 @@ func _cache_base_stats() -> void:
 
 
 func _try_apply_blacksmith_upgrades() -> void:
-	UpgradeManager.apply_player_upgrades_to_unit(self)
+	if CombatTargetValidation.is_enemy_faction(self):
+		UpgradeManager.apply_enemy_upgrades_to_unit(self)
+	else:
+		UpgradeManager.apply_player_upgrades_to_unit(self)
 
 
 func _on_blacksmith_upgrade_applied(_upgrade_id: StringName) -> void:
-	UpgradeManager.apply_player_upgrades_to_unit(self)
+	_try_apply_blacksmith_upgrades()
 
 
 func take_damage(amount: float, attacker = null) -> void:

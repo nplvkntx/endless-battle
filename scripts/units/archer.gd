@@ -38,14 +38,20 @@ func _ready() -> void:
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
-	if not UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
-		UpgradeManager.upgrade_applied.connect(_on_blacksmith_upgrade_applied)
+	if CombatTargetValidation.is_enemy_faction(self):
+		if not UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+			UpgradeManager.enemy_upgrade_applied.connect(_on_blacksmith_upgrade_applied)
+	else:
+		if not UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+			UpgradeManager.upgrade_applied.connect(_on_blacksmith_upgrade_applied)
 	call_deferred("_try_apply_blacksmith_upgrades")
 
 
 func _exit_tree() -> void:
 	if UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
 		UpgradeManager.upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
+	if UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+		UpgradeManager.enemy_upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -225,12 +231,19 @@ func _fire_arrow() -> void:
 
 func apply_blacksmith_upgrades() -> void:
 	_cache_base_stats()
-	var attack_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_ATTACK)
-	var speed_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED)
-	var range_level: int = UpgradeManager.get_level(UpgradeManager.UPGRADE_ARCHER_RANGE)
+	var attack_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK)
+	var speed_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED)
+	var range_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_RANGE)
 	attack_damage = _base_attack_damage + attack_level * 2
 	attack_cooldown = _base_attack_cooldown * (1.0 - 0.05 * float(speed_level))
 	attack_range = _base_attack_range + float(range_level) * 8.0
+
+
+func _get_blacksmith_upgrade_level(upgrade_id: StringName) -> int:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return UpgradeManager.get_enemy_level(upgrade_id)
+
+	return UpgradeManager.get_level(upgrade_id)
 
 
 func _cache_base_stats() -> void:
@@ -243,11 +256,14 @@ func _cache_base_stats() -> void:
 
 
 func _try_apply_blacksmith_upgrades() -> void:
-	UpgradeManager.apply_player_upgrades_to_unit(self)
+	if CombatTargetValidation.is_enemy_faction(self):
+		UpgradeManager.apply_enemy_upgrades_to_unit(self)
+	else:
+		UpgradeManager.apply_player_upgrades_to_unit(self)
 
 
 func _on_blacksmith_upgrade_applied(_upgrade_id: StringName) -> void:
-	UpgradeManager.apply_player_upgrades_to_unit(self)
+	_try_apply_blacksmith_upgrades()
 
 
 func take_damage(amount: float, attacker = null) -> void:
