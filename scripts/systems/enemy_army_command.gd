@@ -13,6 +13,16 @@ const HEROES_GROUP := &"heroes"
 
 const ARMY_RALLY_OFFSET := Vector3(-2.0, -0.5, 3.0)
 const BASE_THREAT_DETECTION_RANGE := 55.0
+const FORMATION_SPACING := 2.0
+
+const MIN_NON_HERO_FOR_HERO_JOIN := 3
+const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 2
+const HERO_MAX_DISTANCE_FROM_ARMY := 16.0
+const HERO_RETREAT_HP_RATIO := 0.30
+const HERO_WAVE_JOIN_HP_RATIO := 0.60
+const HERO_DEFENSIVE_ABILITY_HP_RATIO := 0.40
+const HERO_AOE_PLAYER_COUNT := 3
+const HERO_AOE_CHECK_RANGE := 10.0
 
 const WAVE_1_MIN_NON_HERO_UNITS := 3
 const WAVE_2_MIN_NON_HERO_UNITS := 5
@@ -102,7 +112,11 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 
 	if can_launch:
 		var hero: Hero = find_living_enemy_hero(tree)
-		if hero != null:
+		if (
+			hero != null
+			and non_hero_units.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+			and is_hero_healthy_enough_for_wave(hero)
+		):
 			wave_units.append(hero)
 
 	return {
@@ -167,9 +181,38 @@ static func resolve_wave_attack_destination(tree: SceneTree, enemy_base_position
 	return enemy_base_position
 
 
+static func is_hero_healthy_enough_for_wave(hero: Hero) -> bool:
+	if hero == null or not is_instance_valid(hero):
+		return false
+
+	return get_health_ratio(hero) >= HERO_WAVE_JOIN_HP_RATIO
+
+
+static func get_health_ratio(node: Node) -> float:
+	if node == null or not is_instance_valid(node):
+		return 0.0
+
+	var health_component: HealthComponent = node.get_node_or_null(
+		"HealthComponent"
+	) as HealthComponent
+	if health_component == null or health_component.max_health <= 0:
+		return 1.0
+
+	return float(health_component.current_health) / float(health_component.max_health)
+
+
+static func command_retreat_hero(hero: Hero, rally_position: Vector3) -> void:
+	if hero == null or not is_instance_valid(hero):
+		return
+
+	if not is_living_combat_unit(hero):
+		return
+
+	_issue_hold_at_rally(hero, rally_position)
+
+
 static func command_attack_move(units: Array, destination: Vector3) -> void:
-	for unit in units:
-		_issue_attack_move(unit, destination)
+	_issue_spaced_group_orders(units, destination, true)
 
 
 static func command_defend_position(units: Array, position: Vector3) -> void:
@@ -177,12 +220,11 @@ static func command_defend_position(units: Array, position: Vector3) -> void:
 
 
 static func command_retreat_to(units: Array, position: Vector3) -> void:
-	command_attack_move(units, position)
+	_issue_spaced_group_orders(units, position, false)
 
 
 static func command_hold_at_rally(units: Array, rally_position: Vector3) -> void:
-	for unit in units:
-		_issue_hold_at_rally(unit, rally_position)
+	_issue_spaced_group_orders(units, rally_position, false)
 
 
 static func _issue_attack_move(unit: Variant, destination: Vector3) -> void:
@@ -196,6 +238,74 @@ static func _issue_attack_move(unit: Variant, destination: Vector3) -> void:
 		return
 
 	(unit as Object).call("command_attack_move", destination)
+
+
+static func _issue_spaced_group_orders(units: Array, center: Vector3, use_attack_move: bool) -> void:
+	var ordered_units: Array = _order_units_for_formation(units)
+	if ordered_units.is_empty():
+		return
+
+	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+		center,
+		ordered_units.size(),
+		FORMATION_SPACING
+	)
+	for index: int in ordered_units.size():
+		var unit: Variant = ordered_units[index]
+		var target: Vector3 = move_targets[index]
+		if use_attack_move:
+			_issue_attack_move(unit, target)
+		else:
+			_issue_hold_at_rally(unit, target)
+
+
+static func _order_units_for_formation(units: Array) -> Array:
+	var non_hero_units: Array = []
+	var hero_units: Array = []
+
+	for unit: Variant in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+
+		if unit is Worker:
+			continue
+
+		if not is_living_combat_unit(unit as Node):
+			continue
+
+		if is_hero_unit(unit as Node):
+			hero_units.append(unit)
+		else:
+			non_hero_units.append(unit)
+
+	non_hero_units.append_array(hero_units)
+	return non_hero_units
+
+
+static func compute_army_center(units: Array) -> Vector3:
+	if units.is_empty():
+		return Vector3.ZERO
+
+	var position_sum: Vector3 = Vector3.ZERO
+	var count: int = 0
+
+	for unit: Variant in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+
+		if not unit is Node3D:
+			continue
+
+		if not is_living_combat_unit(unit as Node):
+			continue
+
+		position_sum += (unit as Node3D).global_position
+		count += 1
+
+	if count == 0:
+		return Vector3.ZERO
+
+	return position_sum / float(count)
 
 
 static func _issue_hold_at_rally(unit: Variant, rally_position: Vector3) -> void:
