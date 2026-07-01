@@ -5,6 +5,10 @@ extends Building
 
 signal swordsman_queue_changed(queue_count: int)
 signal archer_queue_changed(queue_count: int)
+signal repeat_state_changed()
+
+const TRAIN_ID_SWORDSMAN: StringName = &"swordsman"
+const TRAIN_ID_ARCHER: StringName = &"archer"
 
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
@@ -25,6 +29,11 @@ var _swordsman_queue_count: int = 0
 var _archer_queue_count: int = 0
 var _is_training: bool = false
 var _is_training_archer: bool = false
+var _swordsman_training_session: int = 0
+var _archer_training_session: int = 0
+var _repeat_enabled: bool = false
+var _repeat_unit_type: StringName = &""
+var _last_queued_train_id: StringName = &""
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
@@ -163,6 +172,11 @@ func take_damage(amount: float, _attacker = null) -> void:
 
 func _on_health_depleted() -> void:
 	_stop_enemy_auto_production()
+	_repeat_enabled = false
+	_swordsman_training_session += 1
+	_archer_training_session += 1
+	_is_training = false
+	_is_training_archer = false
 
 	if _rally_marker != null and is_instance_valid(_rally_marker):
 		_rally_marker.queue_free()
@@ -178,6 +192,65 @@ func get_swordsman_queue_count() -> int:
 
 func get_archer_queue_count() -> int:
 	return _archer_queue_count
+
+
+func get_total_queue_count() -> int:
+	return _swordsman_queue_count + _archer_queue_count
+
+
+func is_repeat_training_enabled(train_id: StringName) -> bool:
+	return _repeat_enabled and _repeat_unit_type == train_id
+
+
+func get_repeat_unit_display_name() -> String:
+	if not _repeat_enabled:
+		return ""
+
+	match _repeat_unit_type:
+		TRAIN_ID_SWORDSMAN:
+			return "Swordsman"
+		TRAIN_ID_ARCHER:
+			return "Archer"
+		_:
+			return ""
+
+
+func set_repeat_training(enabled: bool, train_id: StringName = &"") -> void:
+	_repeat_enabled = enabled
+	_repeat_unit_type = train_id if enabled else &""
+	repeat_state_changed.emit()
+
+
+func try_train_swordsman_with_repeat(ctrl_held: bool) -> void:
+	if ctrl_held:
+		if is_repeat_training_enabled(TRAIN_ID_SWORDSMAN):
+			set_repeat_training(false)
+			return
+
+		set_repeat_training(true, TRAIN_ID_SWORDSMAN)
+
+	try_train_swordsman()
+
+
+func try_train_archer_with_repeat(ctrl_held: bool) -> void:
+	if ctrl_held:
+		if is_repeat_training_enabled(TRAIN_ID_ARCHER):
+			set_repeat_training(false)
+			return
+
+		set_repeat_training(true, TRAIN_ID_ARCHER)
+
+	try_train_archer()
+
+
+func cancel_training() -> bool:
+	if _last_queued_train_id == TRAIN_ID_ARCHER and _archer_queue_count > 0:
+		return _cancel_archer_training()
+	if _swordsman_queue_count > 0:
+		return _cancel_swordsman_training()
+	if _archer_queue_count > 0:
+		return _cancel_archer_training()
+	return false
 
 
 func set_rally_point(ground_position: Vector3) -> void:
@@ -224,6 +297,7 @@ func try_train_swordsman() -> void:
 		return
 
 	_swordsman_queue_count += 1
+	_last_queued_train_id = TRAIN_ID_SWORDSMAN
 	swordsman_queue_changed.emit(_swordsman_queue_count)
 
 	if not _is_training:
@@ -234,12 +308,19 @@ func _start_next_training() -> void:
 	if _swordsman_queue_count <= 0:
 		return
 
+	_swordsman_training_session += 1
+	var session: int = _swordsman_training_session
 	_is_training = true
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(_on_swordsman_training_finished, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(func() -> void:
+		_on_swordsman_training_finished(session)
+	, CONNECT_ONE_SHOT)
 
 
-func _on_swordsman_training_finished() -> void:
+func _on_swordsman_training_finished(session: int) -> void:
+	if session != _swordsman_training_session:
+		return
+
 	_is_training = false
 	if _swordsman_queue_count <= 0:
 		return
@@ -250,6 +331,22 @@ func _on_swordsman_training_finished() -> void:
 
 	if _swordsman_queue_count > 0:
 		_start_next_training()
+	else:
+		_try_repeat_training(TRAIN_ID_SWORDSMAN)
+
+
+func _cancel_swordsman_training() -> bool:
+	if _swordsman_queue_count <= 0:
+		return false
+
+	if _swordsman_queue_count == 1 and _is_training:
+		_swordsman_training_session += 1
+		_is_training = false
+
+	_swordsman_queue_count -= 1
+	swordsman_queue_changed.emit(_swordsman_queue_count)
+	_refund_training_cost()
+	return true
 
 
 func _spawn_swordsman() -> void:
@@ -267,6 +364,7 @@ func try_train_archer() -> void:
 		return
 
 	_archer_queue_count += 1
+	_last_queued_train_id = TRAIN_ID_ARCHER
 	archer_queue_changed.emit(_archer_queue_count)
 
 	if not _is_training_archer:
@@ -277,12 +375,19 @@ func _start_next_archer_training() -> void:
 	if _archer_queue_count <= 0:
 		return
 
+	_archer_training_session += 1
+	var session: int = _archer_training_session
 	_is_training_archer = true
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(_on_archer_training_finished, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(func() -> void:
+		_on_archer_training_finished(session)
+	, CONNECT_ONE_SHOT)
 
 
-func _on_archer_training_finished() -> void:
+func _on_archer_training_finished(session: int) -> void:
+	if session != _archer_training_session:
+		return
+
 	_is_training_archer = false
 	if _archer_queue_count <= 0:
 		return
@@ -293,6 +398,50 @@ func _on_archer_training_finished() -> void:
 
 	if _archer_queue_count > 0:
 		_start_next_archer_training()
+	else:
+		_try_repeat_training(TRAIN_ID_ARCHER)
+
+
+func _cancel_archer_training() -> bool:
+	if _archer_queue_count <= 0:
+		return false
+
+	if _archer_queue_count == 1 and _is_training_archer:
+		_archer_training_session += 1
+		_is_training_archer = false
+
+	_archer_queue_count -= 1
+	archer_queue_changed.emit(_archer_queue_count)
+	_refund_training_cost()
+	return true
+
+
+func _try_repeat_training(train_id: StringName) -> void:
+	if not is_repeat_training_enabled(train_id):
+		return
+
+	if not is_instance_valid(self) or is_queued_for_deletion() or building_state != STATE_COMPLETED:
+		set_repeat_training(false)
+		return
+
+	if not ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		set_repeat_training(false)
+		return
+
+	match train_id:
+		TRAIN_ID_SWORDSMAN:
+			if _swordsman_queue_count > 0:
+				return
+			try_train_swordsman()
+		TRAIN_ID_ARCHER:
+			if _archer_queue_count > 0:
+				return
+			try_train_archer()
+
+
+func _refund_training_cost() -> void:
+	ResourceManager.add_gold(TRAIN_GOLD_COST)
+	ResourceManager.release_food_used(TRAIN_FOOD_COST)
 
 
 func _spawn_archer() -> void:

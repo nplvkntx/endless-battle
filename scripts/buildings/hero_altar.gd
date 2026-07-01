@@ -16,6 +16,7 @@ const ENEMY_TEAM_ID: int = 1
 
 var _is_training: bool = false
 var _training_for_enemy: bool = false
+var _hero_training_session: int = 0
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
@@ -61,6 +62,18 @@ func can_begin_hero_training(is_enemy_owned: bool) -> bool:
 		and not _is_training
 		and not has_living_owner_hero(is_enemy_owned)
 	)
+
+
+func cancel_hero_training() -> bool:
+	if not _is_training or _training_for_enemy:
+		return false
+
+	_hero_training_session += 1
+	_is_training = false
+	hero_altar_state_changed.emit()
+	ResourceManager.add_gold(TRAIN_GOLD_COST)
+	ResourceManager.release_food_used(TRAIN_FOOD_COST)
+	return true
 
 
 func set_rally_point(ground_position: Vector3) -> void:
@@ -133,13 +146,20 @@ func try_begin_hero_training(is_enemy_owned: bool) -> bool:
 
 
 func _begin_hero_training() -> void:
+	_hero_training_session += 1
+	var session: int = _hero_training_session
 	_is_training = true
 	hero_altar_state_changed.emit()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(_on_hero_training_finished, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(func() -> void:
+		_on_hero_training_finished(session)
+	, CONNECT_ONE_SHOT)
 
 
-func _on_hero_training_finished() -> void:
+func _on_hero_training_finished(session: int) -> void:
+	if session != _hero_training_session:
+		return
+
 	var training_was_for_enemy: bool = _training_for_enemy
 	_is_training = false
 	_training_for_enemy = false

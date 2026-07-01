@@ -4,7 +4,9 @@ extends Building
 ## Placeholder command center used for early 3D scene testing.
 
 signal worker_queue_changed(queue_count: int)
+signal repeat_state_changed()
 
+const TRAIN_ID_WORKER: StringName = &"worker"
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
@@ -22,6 +24,9 @@ enum RallyTargetType {
 
 var _worker_queue_count: int = 0
 var _is_training: bool = false
+var _training_session: int = 0
+var _repeat_enabled: bool = false
+var _repeat_unit_type: StringName = &""
 var _rally_target_type: RallyTargetType = RallyTargetType.NONE
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_resource: GatherableResource = null
@@ -47,6 +52,10 @@ func take_damage(amount: float, _attacker = null) -> void:
 
 
 func _on_health_depleted() -> void:
+	_repeat_enabled = false
+	_invalidate_training_session()
+	_is_training = false
+
 	if _rally_marker != null and is_instance_valid(_rally_marker):
 		_rally_marker.queue_free()
 		_rally_marker = null
@@ -57,6 +66,52 @@ func _on_health_depleted() -> void:
 
 func get_worker_queue_count() -> int:
 	return _worker_queue_count
+
+
+func is_repeat_training_enabled(train_id: StringName = TRAIN_ID_WORKER) -> bool:
+	return _repeat_enabled and _repeat_unit_type == train_id
+
+
+func get_repeat_unit_display_name() -> String:
+	if not _repeat_enabled:
+		return ""
+
+	match _repeat_unit_type:
+		TRAIN_ID_WORKER:
+			return "Worker"
+		_:
+			return ""
+
+
+func set_repeat_training(enabled: bool, train_id: StringName = TRAIN_ID_WORKER) -> void:
+	_repeat_enabled = enabled
+	_repeat_unit_type = train_id if enabled else &""
+	repeat_state_changed.emit()
+
+
+func try_train_worker_with_repeat(ctrl_held: bool) -> void:
+	if ctrl_held:
+		if is_repeat_training_enabled(TRAIN_ID_WORKER):
+			set_repeat_training(false)
+			return
+
+		set_repeat_training(true, TRAIN_ID_WORKER)
+
+	try_train_worker()
+
+
+func cancel_worker_training() -> bool:
+	if _worker_queue_count <= 0:
+		return false
+
+	if _worker_queue_count == 1 and _is_training:
+		_invalidate_training_session()
+		_is_training = false
+
+	_worker_queue_count -= 1
+	worker_queue_changed.emit(_worker_queue_count)
+	_refund_worker_training_cost()
+	return true
 
 
 func set_rally_point(ground_position: Vector3) -> void:
@@ -163,12 +218,19 @@ func _start_next_training() -> void:
 	if _worker_queue_count <= 0:
 		return
 
+	_training_session += 1
+	var session: int = _training_session
 	_is_training = true
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(_on_training_finished, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(func() -> void:
+		_on_training_finished(session)
+	, CONNECT_ONE_SHOT)
 
 
-func _on_training_finished() -> void:
+func _on_training_finished(session: int) -> void:
+	if session != _training_session:
+		return
+
 	_is_training = false
 	if _worker_queue_count <= 0:
 		return
@@ -179,6 +241,32 @@ func _on_training_finished() -> void:
 
 	if _worker_queue_count > 0:
 		_start_next_training()
+	else:
+		_try_repeat_worker_training()
+
+
+func _try_repeat_worker_training() -> void:
+	if not is_repeat_training_enabled(TRAIN_ID_WORKER):
+		return
+
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		set_repeat_training(false)
+		return
+
+	if not ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		set_repeat_training(false)
+		return
+
+	try_train_worker()
+
+
+func _invalidate_training_session() -> void:
+	_training_session += 1
+
+
+func _refund_worker_training_cost() -> void:
+	ResourceManager.add_gold(TRAIN_GOLD_COST)
+	ResourceManager.release_food_used(TRAIN_FOOD_COST)
 
 
 func _spawn_worker() -> void:
