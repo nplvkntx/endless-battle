@@ -29,6 +29,8 @@ const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.25
 const COMMAND_CENTER_GROUND_Y: float = 1.25
 const GHOST_ALPHA: float = 0.4
+const GHOST_COLOR_VALID := Color(0.5, 0.85, 0.5, GHOST_ALPHA)
+const GHOST_COLOR_INVALID := Color(0.9, 0.35, 0.35, GHOST_ALPHA)
 const CONSTRUCTION_DURATION_ONE_WORKER: float = 3.0
 const CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.0
 const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.5
@@ -39,6 +41,7 @@ const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.5
 
 var _active_placement: StringName = &""
 var _placement_ghost: Node3D = null
+var _ghost_material: StandardMaterial3D = null
 
 
 func _process(_delta: float) -> void:
@@ -57,7 +60,10 @@ func _process(_delta: float) -> void:
 		return
 
 	var ground_y: float = _get_ground_y(_active_placement)
-	_placement_ghost.global_position = Vector3(ground_position.x, ground_y, ground_position.z)
+	var snapped_position: Vector3 = EnemyBuildPlacement.snap_to_grid(ground_position)
+	snapped_position.y = ground_y
+	_placement_ghost.global_position = snapped_position
+	_update_ghost_validity(snapped_position)
 
 
 func _input(event: InputEvent) -> void:
@@ -147,6 +153,7 @@ func _start_placement(placement_type: StringName) -> void:
 
 func _cancel_placement() -> void:
 	_active_placement = &""
+	_ghost_material = null
 	if _placement_ghost != null:
 		_placement_ghost.queue_free()
 		_placement_ghost = null
@@ -154,6 +161,10 @@ func _cancel_placement() -> void:
 
 func _place_building() -> void:
 	if _placement_ghost == null or _active_placement.is_empty():
+		return
+
+	if not _is_current_placement_valid():
+		print("Invalid placement")
 		return
 
 	var gold_cost: int = 0
@@ -298,10 +309,45 @@ func _apply_ghost_material(ghost: Node3D) -> void:
 	if mesh_instance == null:
 		return
 
-	var ghost_material := StandardMaterial3D.new()
-	ghost_material.albedo_color = Color(0.6, 0.6, 0.6, GHOST_ALPHA)
-	ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mesh_instance.material_override = ghost_material
+	_ghost_material = StandardMaterial3D.new()
+	_ghost_material.albedo_color = GHOST_COLOR_VALID
+	_ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh_instance.material_override = _ghost_material
+
+
+func _update_ghost_validity(position: Vector3) -> void:
+	if _ghost_material == null:
+		return
+
+	var is_valid: bool = _is_placement_valid_at(position)
+	_ghost_material.albedo_color = GHOST_COLOR_VALID if is_valid else GHOST_COLOR_INVALID
+
+
+func _is_current_placement_valid() -> bool:
+	if _placement_ghost == null or _active_placement.is_empty():
+		return false
+
+	return _is_placement_valid_at(_placement_ghost.global_position)
+
+
+func _is_placement_valid_at(position: Vector3) -> bool:
+	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
+	if buildings_parent == null:
+		return false
+
+	return EnemyBuildPlacement.is_position_valid(
+		position,
+		_active_placement,
+		_collect_placement_obstacles(buildings_parent)
+	)
+
+
+func _collect_placement_obstacles(buildings_parent: Node) -> Array[Node3D]:
+	var buildings: Array[Node3D] = EnemyBuildPlacement.collect_all_buildings(buildings_parent)
+	if _placement_ghost != null:
+		buildings.erase(_placement_ghost)
+
+	return buildings
 
 
 func _raycast_ground_plane(camera: Camera3D, screen_position: Vector2) -> Vector3:

@@ -1,7 +1,13 @@
 class_name EnemyBuildPlacement
 extends RefCounted
 
-## Finds valid build positions near the enemy base without blocking resources or paths.
+## Shared building placement rules: grid snap, map bounds, footprints, and AI position search.
+
+const GRID_SIZE: float = 2.0
+const MAP_MIN_X: float = -50.0
+const MAP_MAX_X: float = 50.0
+const MAP_MIN_Z: float = -50.0
+const MAP_MAX_Z: float = 50.0
 
 const BUILDING_PADDING: float = 1.25
 const BASE_SEARCH_RADIUS: float = 28.0
@@ -14,11 +20,14 @@ const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.5
 
 const FARM_SIZE := Vector2(3.0, 2.0)
 const BARRACKS_SIZE := Vector2(4.0, 3.0)
+const TOWER_SIZE := Vector2(2.0, 2.0)
 const HERO_ALTAR_SIZE := Vector2(3.5, 3.5)
 const COMMAND_CENTER_SIZE := Vector2(4.0, 4.0)
+const DEFAULT_FOOTPRINT := Vector2(3.0, 3.0)
 
 const FARM_GROUND_Y: float = 0.75
 const BARRACKS_GROUND_Y: float = 1.0
+const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.25
 const COMMAND_CENTER_GROUND_Y: float = 1.25
 
@@ -55,8 +64,13 @@ static func find_position(
 			var angle: float = float(step) * TAU / float(CANDIDATE_STEPS)
 			var offset := Vector2(cos(angle), sin(angle)) * radius
 			var candidate := Vector3(anchor.x + offset.x, ground_y, anchor.z + offset.y)
+			candidate = snap_to_grid(candidate)
+			candidate.y = ground_y
 
 			if anchor.distance_squared_to(candidate) > BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS:
+				continue
+
+			if not is_footprint_within_bounds(candidate, footprint):
 				continue
 
 			if not _is_position_clear(candidate, footprint, existing_buildings):
@@ -80,18 +94,54 @@ static func find_position(
 	return best_position
 
 
+static func snap_to_grid(position: Vector3) -> Vector3:
+	if GRID_SIZE <= 0.0:
+		return position
+
+	return Vector3(
+		snapped(position.x, GRID_SIZE),
+		position.y,
+		snapped(position.z, GRID_SIZE)
+	)
+
+
+static func is_footprint_within_bounds(center: Vector3, footprint: Vector2) -> bool:
+	var half_x: float = footprint.x * 0.5
+	var half_z: float = footprint.y * 0.5
+	return (
+		center.x - half_x >= MAP_MIN_X
+		and center.x + half_x <= MAP_MAX_X
+		and center.z - half_z >= MAP_MIN_Z
+		and center.z + half_z <= MAP_MAX_Z
+	)
+
+
+static func is_position_valid(
+	candidate: Vector3,
+	building_type: StringName,
+	existing_buildings: Array[Node3D]
+) -> bool:
+	var footprint: Vector2 = get_footprint(building_type)
+	if not is_footprint_within_bounds(candidate, footprint):
+		return false
+
+	return _is_position_clear(candidate, footprint, existing_buildings)
+
+
 static func get_footprint(building_type: StringName) -> Vector2:
 	match building_type:
 		&"farm":
 			return FARM_SIZE
 		&"barracks":
 			return BARRACKS_SIZE
+		&"tower":
+			return TOWER_SIZE
 		&"hero_altar":
 			return HERO_ALTAR_SIZE
 		&"command_center":
 			return COMMAND_CENTER_SIZE
 		_:
-			return Vector2(3.0, 3.0)
+			return DEFAULT_FOOTPRINT
 
 
 static func get_ground_y(building_type: StringName) -> float:
@@ -100,12 +150,26 @@ static func get_ground_y(building_type: StringName) -> float:
 			return FARM_GROUND_Y
 		&"barracks":
 			return BARRACKS_GROUND_Y
+		&"tower":
+			return TOWER_GROUND_Y
 		&"hero_altar":
 			return HERO_ALTAR_GROUND_Y
 		&"command_center":
 			return COMMAND_CENTER_GROUND_Y
 		_:
 			return 0.0
+
+
+static func collect_all_buildings(scene_root: Node) -> Array[Node3D]:
+	var buildings: Array[Node3D] = []
+	if scene_root == null:
+		return buildings
+
+	for child: Node in scene_root.get_children():
+		if child is Building:
+			buildings.append(child as Node3D)
+
+	return buildings
 
 
 static func collect_nearby_buildings(anchor: Vector3, scene_root: Node) -> Array[Node3D]:
@@ -300,12 +364,14 @@ static func _resolve_footprint(building: Node3D) -> Vector2:
 		return FARM_SIZE
 	if building is Barracks:
 		return BARRACKS_SIZE
+	if building is Tower:
+		return TOWER_SIZE
 	if building is HeroAltar:
 		return HERO_ALTAR_SIZE
 	if building is CommandCenter:
 		return COMMAND_CENTER_SIZE
 
-	return Vector2(3.0, 3.0)
+	return DEFAULT_FOOTPRINT
 
 
 static func _overlaps(
