@@ -211,14 +211,16 @@ static func _is_living_hero(hero: Hero) -> bool:
 
 
 static func _get_shop_range_limit(shop: Node3D) -> float:
-	if shop.get_viewport().get_camera_3d() != null:
+	var viewport: Viewport = shop.get_viewport()
+	if viewport != null and viewport.get_camera_3d() != null:
 		return SHOP_PURCHASE_RANGE_PIXELS
 
 	return SHOP_PURCHASE_RANGE_WORLD_FALLBACK
 
 
 static func _get_shop_range_distance(shop: Node3D, hero: Node3D) -> float:
-	var camera: Camera3D = shop.get_viewport().get_camera_3d()
+	var viewport: Viewport = shop.get_viewport()
+	var camera: Camera3D = viewport.get_camera_3d() if viewport != null else null
 	if camera != null:
 		var shop_screen: Vector2 = camera.unproject_position(shop.global_position)
 		var hero_screen: Vector2 = camera.unproject_position(hero.global_position)

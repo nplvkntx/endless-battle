@@ -11,6 +11,7 @@ const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
+const MAX_ENEMY_WORKER_QUEUE: int = 3
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_TEAM_ID: int = 1
 
@@ -261,7 +262,7 @@ func can_train_enemy_worker() -> bool:
 	if not _is_enemy_worker_training_allowed():
 		return false
 
-	if _is_training or _worker_queue_count > 0:
+	if _worker_queue_count >= MAX_ENEMY_WORKER_QUEUE:
 		return false
 
 	return EnemyResourceManager.can_afford_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)

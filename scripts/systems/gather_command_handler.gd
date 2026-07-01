@@ -27,11 +27,13 @@ func _input(event: InputEvent) -> void:
 		return
 
 	var tree: WoodTree = _raycast_tree(camera, mouse_button.position)
-	if tree == null:
+	if tree == null or not is_instance_valid(tree) or tree.is_queued_for_deletion():
 		return
 
 	var dispatched_to_worker := false
 	for unit: Node in selected_units:
+		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+			continue
 		if unit is Worker:
 			(unit as Worker).command_gather_tree(tree)
 			dispatched_to_worker = true

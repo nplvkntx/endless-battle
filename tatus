@@ -1,0 +1,30 @@
+[33m99c1892[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Improve hero inventory item interactions
+[33mee9a27a[m Add hero inventory and shop items
+[33mb0a4882[m Add hero inventory slots
+[33m797f79e[m Add research and training progress bars
+[33md323ca4[m Show Blacksmith upgrade buttons
+[33m13bd47f[m Remove depleted resource nodes
+[33mbc23c34[m Simplify locked wood gathering
+[33m5c9b32f[m Add building selection pulse
+[33md7f4113[m Fix construction resume orders
+[33m7135058[m[33m ([m[1;33mtag: [m[1;33mstable-pre-ui[m[33m)[m Revert "Duplicate playable map into Booty Bay layout"
+[33m07d3a2c[m Revert "Rebuild Booty Bay map from final blueprint"
+[33m8d6f73a[m Show hero XP progress bar
+[33m110403a[m Fix worker construction pathfinding
+[33m41640fc[m Polish placeholder visuals and selection rings
+[33m86c41c3[m Fix Hero Altar preload path
+[33m14451b6[m Rebuild Booty Bay map from final blueprint
+[33m4f67b68[m Duplicate playable map into Booty Bay layout
+[33m3886db0[m Polish AI army anti-clumping movement
+[33m670cd13[m Fix worker nearest dropoff selection
+[33ma8573a1[m Improve enemy hero ability usage
+[33m405db65[m Add minimap click camera movement
+[33m9c8bd80[m Improve AI hero behavior and army spacing
+[33m33b14b2[m Polish building placement collision validation
+[33mafff0fd[m Add grid placement and map bounds validation
+[33m791d239[m Fix team visual NodePath lookup crash
+[33m8580489[m Add inspect-only HUD for enemy selections
+[33m9deed2a[m Add adaptive enemy worker resource balance
+[33m5c17c4e[m Fix worker woodline clustering
+[33mc3b65d6[m Update project AI and HUD context
+[33m2157404[m Improve AI construction stability

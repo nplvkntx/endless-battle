@@ -408,7 +408,7 @@ func _configure_enemy_mana_display(hero: Hero) -> void:
 		return
 
 	_tracked_hero = hero
-	if hero.has_signal("mana_changed"):
+	if hero.has_signal("mana_changed") and not hero.mana_changed.is_connected(_on_tracked_mana_changed):
 		hero.mana_changed.connect(_on_tracked_mana_changed)
 	if hero.has_signal("level_changed"):
 		hero.level_changed.connect(_on_tracked_enemy_hero_level_changed)
@@ -446,6 +446,11 @@ func _configure_level_display(unit: Unit) -> void:
 
 
 func _configure_health_display(node: Node, show_numeric: bool = false) -> void:
+	if node == null or not is_instance_valid(node) or node.is_queued_for_deletion():
+		_hp_bar.visible = false
+		_health_label.visible = false
+		return
+
 	var health_component: HealthComponent = node.get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null:
 		_hp_bar.visible = false
@@ -527,8 +532,14 @@ func _configure_mana_display(unit: Unit) -> void:
 		_mana_label.visible = false
 		return
 
+	if not is_instance_valid(unit):
+		_mana_bar.visible = false
+		_mana_label.visible = false
+		return
+
 	_tracked_hero = unit as Hero
-	_tracked_hero.mana_changed.connect(_on_tracked_mana_changed)
+	if not _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed):
+		_tracked_hero.mana_changed.connect(_on_tracked_mana_changed)
 	if not _tracked_hero.level_changed.is_connected(_on_tracked_hero_stats_changed):
 		_tracked_hero.level_changed.connect(_on_tracked_hero_stats_changed)
 	if not _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_stats_changed):

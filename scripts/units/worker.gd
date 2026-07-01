@@ -1208,13 +1208,16 @@ func _should_return_to_command_center_from_source() -> bool:
 	if _carried_amount <= 0:
 		return false
 
+	if not _is_valid_gather_source(_gather_source):
+		return true
+
+	if not _gather_source.can_gather():
+		return true
+
 	if not _gather_source.gathers_until_carry_full():
 		return true
 
-	return (
-		_carried_amount >= GatheringConfig.WORKER_CARRY_CAPACITY
-		or not _gather_source.can_gather()
-	)
+	return _carried_amount >= GatheringConfig.WORKER_CARRY_CAPACITY
 
 
 func _begin_gather_wait() -> void:

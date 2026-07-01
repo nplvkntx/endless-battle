@@ -6,7 +6,8 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 4.0
-const TARGET_WORKERS: int = 8
+const TARGET_WORKERS: int = 10
+const MIN_WORKERS_BEFORE_MILITARY: int = 8
 const FOOD_RESERVE: int = 2
 const MAX_FARMS: int = 3
 const DEFAULT_MAX_BARRACKS: int = 2
@@ -92,6 +93,12 @@ func _run_build_order() -> void:
 	if _try_train_enemy_workers():
 		return
 
+	if _should_grow_worker_economy():
+		if _needs_farm() and _try_place_building(PLACEMENT_FARM):
+			return
+		if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+			return
+
 	var defer_military: bool = _update_enemy_hero_restoration()
 
 	var command_center: CommandCenter = _get_training_command_center()
@@ -114,7 +121,7 @@ func _run_build_order() -> void:
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
-	if not defer_military:
+	if not defer_military and _can_train_military_units():
 		_try_sustain_military_production()
 
 	if _should_build_expansion_command_center():
@@ -200,7 +207,7 @@ func _should_build_expansion_command_center() -> bool:
 
 
 func _try_train_enemy_workers() -> bool:
-	if _count_enemy_workers() >= TARGET_WORKERS:
+	if _get_effective_worker_count() >= TARGET_WORKERS:
 		return false
 
 	var command_center: CommandCenter = _get_training_command_center()
@@ -210,7 +217,33 @@ func _try_train_enemy_workers() -> bool:
 	return command_center.try_train_enemy_worker()
 
 
+func _should_grow_worker_economy() -> bool:
+	return _get_effective_worker_count() < TARGET_WORKERS
+
+
+func _can_train_military_units() -> bool:
+	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+		return false
+
+	return not _should_grow_worker_economy()
+
+
+func _get_effective_worker_count() -> int:
+	return _count_enemy_workers() + _get_pending_worker_count()
+
+
+func _get_pending_worker_count() -> int:
+	var command_center: CommandCenter = _get_training_command_center()
+	if command_center == null:
+		return 0
+
+	return command_center.get_worker_queue_count()
+
+
 func _try_sustain_military_production() -> void:
+	if not _can_train_military_units():
+		return
+
 	if not _needs_more_military_units():
 		return
 
@@ -297,11 +330,11 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 		return false
 
 	var anchor: CommandCenter = _resolve_primary_command_center()
-	if anchor == null:
+	if anchor == null or not is_instance_valid(anchor) or not anchor.is_inside_tree():
 		return false
 
 	var parent: Node = get_node_or_null(buildings_parent_path)
-	if parent == null:
+	if parent == null or not parent.is_inside_tree():
 		return false
 
 	var existing_buildings: Array[Node3D] = EnemyBuildPlacement.collect_nearby_buildings(
@@ -326,10 +359,10 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 	if building == null:
 		return false
 
-	building.global_position = position
 	_tag_enemy_building(building)
 	_add_health_component_if_needed(building, building_type)
 	parent.add_child(building)
+	building.global_position = position
 	building.start_under_construction()
 	building.setup_construction(CONSTRUCTION_DURATION)
 	_assign_nearest_builder(building)

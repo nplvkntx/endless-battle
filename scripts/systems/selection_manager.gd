@@ -23,6 +23,7 @@ var selected_building: Building = null
 var inspected_unit: Unit = null
 var inspected_building: Building = null
 var inspected_resource: GatherableResource = null
+var _unit_tree_exiting_handlers: Dictionary = {}
 
 
 func get_multi_unit_selection_category() -> StringName:
@@ -530,6 +531,8 @@ func _on_unit_died(unit: Unit) -> void:
 
 
 func _on_selected_unit_tree_exiting(unit: Unit) -> void:
+	_clear_unit_tree_exiting_handler(unit)
+
 	if not selected_units.has(unit):
 		return
 
@@ -551,9 +554,14 @@ func _track_unit_selection(unit: Unit) -> void:
 	if not unit.died.is_connected(_on_unit_died):
 		unit.died.connect(_on_unit_died)
 
-	var tree_exiting_callable := _on_selected_unit_tree_exiting.bind(unit)
-	if not unit.tree_exiting.is_connected(tree_exiting_callable):
-		unit.tree_exiting.connect(tree_exiting_callable, CONNECT_ONE_SHOT)
+	var unit_id: int = unit.get_instance_id()
+	if _unit_tree_exiting_handlers.has(unit_id):
+		return
+
+	var handler := func() -> void:
+		_on_selected_unit_tree_exiting(unit)
+	_unit_tree_exiting_handlers[unit_id] = handler
+	unit.tree_exiting.connect(handler, CONNECT_ONE_SHOT)
 
 
 func _untrack_unit_selection(candidate: Variant) -> void:
@@ -568,6 +576,22 @@ func _untrack_unit_selection(candidate: Variant) -> void:
 
 	if unit.died.is_connected(_on_unit_died):
 		unit.died.disconnect(_on_unit_died)
+
+	_clear_unit_tree_exiting_handler(unit)
+
+
+func _clear_unit_tree_exiting_handler(unit: Unit) -> void:
+	if unit == null:
+		return
+
+	var unit_id: int = unit.get_instance_id()
+	if not _unit_tree_exiting_handlers.has(unit_id):
+		return
+
+	var handler: Callable = _unit_tree_exiting_handlers[unit_id]
+	if is_instance_valid(unit) and unit.tree_exiting.is_connected(handler):
+		unit.tree_exiting.disconnect(handler)
+	_unit_tree_exiting_handlers.erase(unit_id)
 
 
 func _purge_invalid_selection() -> void:

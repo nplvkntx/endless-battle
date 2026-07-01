@@ -292,7 +292,7 @@ func _pick_tree_for_worker(worker: Worker, trees: Array[WoodTree]) -> WoodTree:
 			closest_distance_squared = distance_squared
 			closest_tree = tree
 
-	return closest_tree if closest_tree != null else trees[0]
+	return closest_tree
 
 
 func _resolve_enemy_command_center() -> CommandCenter:

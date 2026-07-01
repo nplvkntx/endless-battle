@@ -79,12 +79,15 @@ func _create_slot_panel(slot_index: int) -> PanelContainer:
 	slot.add_child(icon)
 
 	slot.set_drag_forwarding(
-		_slot_get_drag_data.bind(slot_index),
-		_slot_can_drop_data.bind(slot_index),
-		_slot_drop_data.bind(slot_index)
+		func(at_position: Vector2): return _slot_get_drag_data(at_position, slot_index),
+		func(at_position: Vector2, data: Variant): return _slot_can_drop_data(
+			at_position, data, slot_index
+		),
+		func(at_position: Vector2, data: Variant): _slot_drop_data(
+			at_position, data, slot_index
+		)
 	)
-	if not slot.gui_input.is_connected(_on_slot_gui_input.bind(slot_index)):
-		slot.gui_input.connect(_on_slot_gui_input.bind(slot_index))
+	slot.gui_input.connect(func(event: InputEvent): _on_slot_gui_input(event, slot_index))
 
 	return slot
 
@@ -155,7 +158,7 @@ func _can_modify_inventory() -> bool:
 	return HeroItemService.can_modify_player_inventory(_tracked_hero)
 
 
-func _slot_get_drag_data(slot_index: int, _at_position: Vector2) -> Variant:
+func _slot_get_drag_data(_at_position: Vector2, slot_index: int) -> Variant:
 	if not _can_modify_inventory():
 		return null
 
@@ -181,7 +184,7 @@ func _slot_get_drag_data(slot_index: int, _at_position: Vector2) -> Variant:
 	}
 
 
-func _slot_can_drop_data(slot_index: int, _at_position: Vector2, data: Variant) -> bool:
+func _slot_can_drop_data(_at_position: Vector2, data: Variant, slot_index: int) -> bool:
 	if not _is_valid_drag_data(data):
 		return false
 
@@ -192,7 +195,7 @@ func _slot_can_drop_data(slot_index: int, _at_position: Vector2, data: Variant) 
 	return source_slot != slot_index
 
 
-func _slot_drop_data(slot_index: int, _at_position: Vector2, data: Variant) -> void:
+func _slot_drop_data(_at_position: Vector2, data: Variant, slot_index: int) -> void:
 	if not _is_valid_drag_data(data):
 		return
 
@@ -217,7 +220,7 @@ func _is_valid_drag_data(data: Variant) -> bool:
 	return drag_data.get("type", "") == DRAG_DATA_TYPE and drag_data.has("source_slot")
 
 
-func _on_slot_gui_input(slot_index: int, event: InputEvent) -> void:
+func _on_slot_gui_input(event: InputEvent, slot_index: int) -> void:
 	if not _can_modify_inventory():
 		return
 
@@ -235,7 +238,7 @@ func _on_slot_gui_input(slot_index: int, event: InputEvent) -> void:
 		return
 
 	if HeroItemService.try_sell_inventory_item(_tracked_hero, slot_index):
-		mouse_event.accept_event()
+		_slot_panels[slot_index].accept_event()
 
 
 func _on_inventory_changed() -> void:

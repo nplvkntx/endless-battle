@@ -169,6 +169,8 @@ var _blacksmith_upgrade_ids: Array[StringName] = []
 var _shop_item_buttons: Array[Button] = []
 var _shop_item_info_labels: Array[Label] = []
 var _shop_item_ids: Array[StringName] = []
+var _shop_item_button_handlers: Array[Callable] = []
+var _blacksmith_upgrade_button_handlers: Array[Callable] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 
 
@@ -303,13 +305,19 @@ func _connect_shop_item_buttons() -> void:
 		var button: Button = _shop_item_buttons[index]
 		if button == null:
 			continue
+		if index < _shop_item_button_handlers.size():
+			continue
+
 		var item_id: StringName = _shop_item_ids[index]
-		if not button.pressed.is_connected(_on_shop_item_button_pressed.bind(item_id)):
-			button.pressed.connect(_on_shop_item_button_pressed.bind(item_id))
+		var handler := func() -> void:
+			_on_shop_item_button_pressed(item_id)
+		_shop_item_button_handlers.append(handler)
+		button.pressed.connect(handler)
 
 
 func _on_shop_item_button_pressed(item_id: StringName) -> void:
-	if _selected_shop == null:
+	if _selected_shop == null or not is_instance_valid(_selected_shop):
+		_selected_shop = null
 		return
 
 	if _selected_shop.try_purchase_item(item_id):
@@ -317,7 +325,8 @@ func _on_shop_item_button_pressed(item_id: StringName) -> void:
 
 
 func _update_shop_item_ui() -> void:
-	if _selected_shop == null:
+	if _selected_shop == null or not is_instance_valid(_selected_shop):
+		_selected_shop = null
 		_shop_status_label.visible = false
 		return
 
@@ -364,13 +373,19 @@ func _connect_blacksmith_upgrade_buttons() -> void:
 		var button: Button = _blacksmith_upgrade_buttons[index]
 		if button == null:
 			continue
+		if index < _blacksmith_upgrade_button_handlers.size():
+			continue
+
 		var upgrade_id: StringName = _blacksmith_upgrade_ids[index]
-		if not button.pressed.is_connected(_on_blacksmith_upgrade_button_pressed.bind(upgrade_id)):
-			button.pressed.connect(_on_blacksmith_upgrade_button_pressed.bind(upgrade_id))
+		var handler := func() -> void:
+			_on_blacksmith_upgrade_button_pressed(upgrade_id)
+		_blacksmith_upgrade_button_handlers.append(handler)
+		button.pressed.connect(handler)
 
 
 func _on_blacksmith_upgrade_button_pressed(upgrade_id: StringName) -> void:
-	if _selected_blacksmith == null:
+	if _selected_blacksmith == null or not is_instance_valid(_selected_blacksmith):
+		_selected_blacksmith = null
 		return
 
 	if _selected_blacksmith.try_research_upgrade(upgrade_id):
@@ -389,9 +404,11 @@ func _on_resources_changed() -> void:
 
 
 func _update_blacksmith_upgrade_ui() -> void:
-	var is_researching: bool = (
-		_selected_blacksmith != null and _selected_blacksmith.is_researching()
-	)
+	if _selected_blacksmith == null or not is_instance_valid(_selected_blacksmith):
+		_selected_blacksmith = null
+		return
+
+	var is_researching: bool = _selected_blacksmith.is_researching()
 
 	for index: int in _blacksmith_upgrade_buttons.size():
 		if index >= _blacksmith_upgrade_ids.size():
@@ -473,7 +490,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
-	if _selected_shop == null or not _selected_shop.can_sell_items():
+	if _selected_shop == null or not is_instance_valid(_selected_shop):
+		_selected_shop = null
+		return false
+
+	if not _selected_shop.can_sell_items():
 		return false
 
 	var item_id: StringName = &""
@@ -497,7 +518,11 @@ func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
 
 
 func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:
-	if _selected_blacksmith == null or not _selected_blacksmith.can_research():
+	if _selected_blacksmith == null or not is_instance_valid(_selected_blacksmith):
+		_selected_blacksmith = null
+		return false
+
+	if not _selected_blacksmith.can_research():
 		return false
 
 	if _selected_blacksmith.is_researching():
