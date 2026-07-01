@@ -52,6 +52,9 @@ var _task_nudge_start_position: Vector3 = Vector3.ZERO
 var _task_nudge_side_sign: float = 1.0
 var _task_nudge_side_attempts: int = 0
 var _task_navigation_active: bool = false
+var _gather_stuck_watch_position: Vector3 = Vector3.ZERO
+var _gather_stuck_watch_time: float = 0.0
+var _gather_stuck_recovery_cooldown: float = 0.0
 
 
 func _ready() -> void:
@@ -184,6 +187,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity = Vector3.ZERO
 
+	_update_gather_stuck_recovery(delta)
 	_update_gather_trip()
 	_update_build_trip()
 
@@ -212,6 +216,12 @@ func _reset_task_corner_nudge() -> void:
 	_task_repath_stuck_time = 0.0
 	_task_nudge_side_attempts = 0
 	_task_nudge_side_sign = 1.0
+	_reset_gather_stuck_watch()
+
+
+func _reset_gather_stuck_watch() -> void:
+	_gather_stuck_watch_position = global_position
+	_gather_stuck_watch_time = 0.0
 
 
 func _configure_task_navigation_agent() -> void:
@@ -435,11 +445,16 @@ func command_gather_tree(tree: WoodTree) -> void:
 
 func _start_gathering(source: GatherableResource) -> void:
 	cancel_gathering()
+	if source == null or not is_instance_valid(source):
+		return
+
 	_gather_source = source
 	_assigned_resource_id = source.get_resource_id()
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
+	_gather_stuck_recovery_cooldown = 0.0
+	_reset_gather_stuck_watch()
 	_gather_state = GatherTripState.TO_SOURCE
 	set_movement_target(_compute_resource_approach_position(source))
 
@@ -451,6 +466,7 @@ func cancel_gathering() -> void:
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
+	_gather_stuck_recovery_cooldown = 0.0
 	_task_has_saved_destination = false
 	_disable_task_navigation()
 	_reset_task_corner_nudge()
@@ -599,6 +615,69 @@ func _attempt_task_proximity_resolve() -> bool:
 		return true
 
 	return false
+
+
+func _update_gather_stuck_recovery(delta: float) -> void:
+	if _gather_stuck_recovery_cooldown > 0.0:
+		_gather_stuck_recovery_cooldown = maxf(0.0, _gather_stuck_recovery_cooldown - delta)
+
+	if (
+		_gather_state != GatherTripState.TO_SOURCE
+		and _gather_state != GatherTripState.TO_COMMAND_CENTER
+	):
+		_reset_gather_stuck_watch()
+		return
+
+	if _task_nudge_active or not has_move_target:
+		_reset_gather_stuck_watch()
+		return
+
+	var moved: Vector3 = global_position - _gather_stuck_watch_position
+	moved.y = 0.0
+	if moved.length() >= GatheringConfig.GATHER_STUCK_MIN_MOVE_DISTANCE:
+		_reset_gather_stuck_watch()
+		return
+
+	_gather_stuck_watch_time += delta
+	if _gather_stuck_watch_time < GatheringConfig.GATHER_STUCK_RECOVERY_DELAY:
+		return
+
+	if _gather_stuck_recovery_cooldown > 0.0:
+		return
+
+	_attempt_gather_stuck_recovery()
+	_gather_stuck_recovery_cooldown = GatheringConfig.GATHER_STUCK_RECOVERY_COOLDOWN
+	_reset_gather_stuck_watch()
+
+
+func _attempt_gather_stuck_recovery() -> void:
+	if _gather_state == GatherTripState.TO_SOURCE:
+		if not _is_valid_gather_source(_gather_source):
+			_handle_gather_source_lost()
+			return
+
+		if _advance_task_approach_candidate():
+			_apply_current_task_movement_target()
+			return
+
+		if _get_assigned_resource_id() == &"wood" and _try_reassign_gather_source():
+			return
+
+		_source_approach_candidate_index = 0
+		_apply_current_task_movement_target()
+		return
+
+	if _gather_state == GatherTripState.TO_COMMAND_CENTER:
+		if not _has_valid_dropoff_target():
+			if _carried_amount <= 0:
+				_finish_gathering_idle()
+			return
+
+		if _advance_task_approach_candidate():
+			_apply_current_task_movement_target()
+			return
+
+		_retry_return_to_command_center()
 
 
 func _try_repath_task_movement() -> void:
@@ -1073,22 +1152,35 @@ func _is_near_command_center_for_deposit(
 	return offset.length_squared() <= reach_distance * reach_distance
 
 
-func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
-	if source == null:
-		return global_position
+func _get_gather_approach_base_slot() -> int:
+	return absi(get_instance_id()) % GatheringConfig.GATHER_APPROACH_BASE_SLOT_COUNT
 
+
+func _compute_resource_approach_direction(source: CollisionObject3D, candidate_index: int) -> Vector3:
 	var target_center: Vector3 = source.global_position
 	var direction: Vector3 = global_position - target_center
 	direction.y = 0.0
 
 	if direction.length_squared() < 0.001:
 		direction = Vector3.FORWARD
+	else:
+		direction = direction.normalized()
 
-	direction = _apply_approach_candidate_offset(direction, _source_approach_candidate_index)
-
-	var ring: int = (
-		_source_approach_candidate_index / GatheringConfig.APPROACH_CANDIDATES_PER_RING
+	var slot_in_ring: int = (
+		_get_gather_approach_base_slot() + candidate_index
+	) % GatheringConfig.APPROACH_CANDIDATES_PER_RING
+	var angle: float = deg_to_rad(
+		float(slot_in_ring) * GatheringConfig.GATHER_APPROACH_BASE_ANGLE_STEP
 	)
+	return direction.rotated(Vector3.UP, angle)
+
+
+func _compute_resource_approach_position_for_candidate(
+	source: CollisionObject3D, candidate_index: int
+) -> Vector3:
+	var target_center: Vector3 = source.global_position
+	var direction: Vector3 = _compute_resource_approach_direction(source, candidate_index)
+	var ring: int = candidate_index / GatheringConfig.APPROACH_CANDIDATES_PER_RING
 	var stand_off_distance: float = (
 		_get_collision_xz_radius(source)
 		+ _get_collision_xz_radius(self)
@@ -1098,6 +1190,60 @@ func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 	var approach_position: Vector3 = target_center + direction.normalized() * stand_off_distance
 	approach_position.y = global_position.y
 	return _snap_task_target_to_navigation(approach_position)
+
+
+func _is_approach_position_occupied(approach_position: Vector3) -> bool:
+	var occupied_radius_sq: float = (
+		GatheringConfig.APPROACH_OCCUPIED_RADIUS * GatheringConfig.APPROACH_OCCUPIED_RADIUS
+	)
+	var destination_radius_sq: float = (
+		GatheringConfig.APPROACH_OCCUPIED_DESTINATION_RADIUS
+		* GatheringConfig.APPROACH_OCCUPIED_DESTINATION_RADIUS
+	)
+
+	for group_name: StringName in [&"workers", &"enemy_workers"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if node == self or not node is Worker:
+				continue
+
+			var other_worker: Worker = node as Worker
+			if not is_instance_valid(other_worker):
+				continue
+
+			var to_other: Vector3 = other_worker.global_position - approach_position
+			to_other.y = 0.0
+			if to_other.length_squared() <= occupied_radius_sq:
+				return true
+
+			if other_worker._is_on_task_movement() and other_worker._task_has_saved_destination:
+				var to_destination: Vector3 = (
+					other_worker._task_movement_destination - approach_position
+				)
+				to_destination.y = 0.0
+				if to_destination.length_squared() <= destination_radius_sq:
+					return true
+
+	return false
+
+
+func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
+	if source == null or not is_instance_valid(source):
+		return global_position
+
+	var fallback_position: Vector3 = global_position
+	var attempt_limit: int = mini(
+		GatheringConfig.APPROACH_OCCUPIED_MAX_ATTEMPTS,
+		GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES - _source_approach_candidate_index
+	)
+	for attempt_offset: int in attempt_limit:
+		var candidate_index: int = _source_approach_candidate_index + attempt_offset
+		fallback_position = _compute_resource_approach_position_for_candidate(
+			source, candidate_index
+		)
+		if not _is_approach_position_occupied(fallback_position):
+			return fallback_position
+
+	return fallback_position
 
 
 func _compute_command_center_dropoff_position(command_center: CommandCenter) -> Vector3:
