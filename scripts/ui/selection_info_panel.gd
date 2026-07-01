@@ -9,6 +9,8 @@ extends PanelContainer
 @onready var _name_label: Label = $MarginContainer/HBoxContainer/InfoVBox/NameLabel
 @onready var _level_label: Label = $MarginContainer/HBoxContainer/InfoVBox/LevelLabel
 @onready var _type_label: Label = $MarginContainer/HBoxContainer/InfoVBox/TypeLabel
+@onready var _task_label: Label = $MarginContainer/HBoxContainer/InfoVBox/TaskLabel
+@onready var _building_detail_label: Label = $MarginContainer/HBoxContainer/InfoVBox/BuildingDetailLabel
 @onready var _hp_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/HPBar
 @onready var _mana_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/ManaBar
 @onready var _health_label: Label = $MarginContainer/HBoxContainer/InfoVBox/HealthLabel
@@ -20,6 +22,9 @@ extends PanelContainer
 
 var _tracked_health_component: HealthComponent = null
 var _tracked_hero: Hero = null
+var _tracked_command_center: CommandCenter = null
+var _tracked_barracks: Barracks = null
+var _tracked_hero_altar: HeroAltar = null
 
 const PORTRAIT_STYLES: Dictionary = {
 	"worker": {"color": Color(0.55, 0.35, 0.15, 1), "label": "W"},
@@ -58,6 +63,7 @@ func _on_building_selection_changed(_building: Building) -> void:
 func _refresh_panel() -> void:
 	_clear_health_tracking()
 	_clear_mana_tracking()
+	_clear_production_tracking()
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -96,6 +102,7 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	_health_label.visible = false
 	_mana_label.visible = false
 	_stats_row.visible = false
+	_hide_production_display()
 
 	match category:
 		&"workers":
@@ -139,6 +146,7 @@ func _show_unit_info(unit: Unit) -> void:
 	_configure_health_display(unit)
 	_configure_mana_display(unit)
 	_configure_stats_display(unit)
+	_hide_production_display()
 
 
 func _show_building_info(building: Building) -> void:
@@ -157,6 +165,7 @@ func _show_building_info(building: Building) -> void:
 	_mana_bar.visible = false
 	_mana_label.visible = false
 	_configure_stats_display(building)
+	_configure_production_display(building)
 
 
 func _set_portrait(portrait_key: String) -> void:
@@ -287,6 +296,166 @@ func _clear_health_tracking() -> void:
 
 func _hide_panel() -> void:
 	visible = false
+	_hide_production_display()
+
+
+func _hide_production_display() -> void:
+	_task_label.visible = false
+	_building_detail_label.visible = false
+
+
+func _configure_production_display(building: Building) -> void:
+	if building is CommandCenter:
+		_tracked_command_center = building as CommandCenter
+		if _tracked_command_center.has_signal("worker_queue_changed"):
+			_tracked_command_center.worker_queue_changed.connect(_on_production_changed)
+		_update_command_center_production()
+		return
+
+	if building is Barracks:
+		_tracked_barracks = building as Barracks
+		if _tracked_barracks.has_signal("swordsman_queue_changed"):
+			_tracked_barracks.swordsman_queue_changed.connect(_on_production_changed)
+		if _tracked_barracks.has_signal("archer_queue_changed"):
+			_tracked_barracks.archer_queue_changed.connect(_on_production_changed)
+		_update_barracks_production()
+		return
+
+	if building is HeroAltar:
+		_tracked_hero_altar = building as HeroAltar
+		if _tracked_hero_altar.has_signal("hero_altar_state_changed"):
+			_tracked_hero_altar.hero_altar_state_changed.connect(_on_production_changed)
+		_update_hero_altar_production()
+		return
+
+	_hide_production_display()
+
+
+func _on_production_changed(_value: int = 0) -> void:
+	if _tracked_command_center != null and is_instance_valid(_tracked_command_center):
+		_update_command_center_production()
+		return
+
+	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
+		_update_barracks_production()
+		return
+
+	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
+		_update_hero_altar_production()
+
+
+func _update_command_center_production() -> void:
+	if _tracked_command_center == null or not is_instance_valid(_tracked_command_center):
+		_hide_production_display()
+		return
+
+	var queue_count: int = -1
+	if _tracked_command_center.has_method("get_worker_queue_count"):
+		queue_count = _tracked_command_center.get_worker_queue_count()
+
+	if queue_count > 0:
+		_task_label.text = "Training: Worker"
+		_task_label.visible = true
+		_building_detail_label.text = "Queue: %d" % queue_count
+		_building_detail_label.visible = true
+	elif queue_count == 0:
+		_task_label.text = "Production: Idle"
+		_task_label.visible = true
+		_building_detail_label.visible = false
+	else:
+		_hide_production_display()
+
+
+func _update_barracks_production() -> void:
+	if _tracked_barracks == null or not is_instance_valid(_tracked_barracks):
+		_hide_production_display()
+		return
+
+	var swordsman_count: int = -1
+	var archer_count: int = -1
+	if _tracked_barracks.has_method("get_swordsman_queue_count"):
+		swordsman_count = _tracked_barracks.get_swordsman_queue_count()
+	if _tracked_barracks.has_method("get_archer_queue_count"):
+		archer_count = _tracked_barracks.get_archer_queue_count()
+
+	var training_parts: PackedStringArray = []
+	if swordsman_count > 0:
+		training_parts.append("Swordsman")
+	if archer_count > 0:
+		training_parts.append("Archer")
+
+	if training_parts.is_empty():
+		if swordsman_count == 0 and archer_count == 0:
+			_task_label.text = "Production: Idle"
+			_task_label.visible = true
+			_building_detail_label.visible = false
+		else:
+			_hide_production_display()
+		return
+
+	_task_label.text = "Training: %s" % ", ".join(training_parts)
+	_task_label.visible = true
+
+	var queue_parts: PackedStringArray = []
+	if swordsman_count >= 0:
+		queue_parts.append("SW %d" % swordsman_count)
+	if archer_count >= 0:
+		queue_parts.append("AR %d" % archer_count)
+
+	if queue_parts.is_empty():
+		_building_detail_label.visible = false
+	else:
+		_building_detail_label.text = "Queue: %s" % " | ".join(queue_parts)
+		_building_detail_label.visible = true
+
+
+func _update_hero_altar_production() -> void:
+	if _tracked_hero_altar == null or not is_instance_valid(_tracked_hero_altar):
+		_hide_production_display()
+		return
+
+	var is_training: bool = false
+	if _tracked_hero_altar.has_method("is_training_hero"):
+		is_training = _tracked_hero_altar.is_training_hero()
+
+	if is_training:
+		_task_label.text = "Training: Hero"
+	else:
+		_task_label.text = "Production: Idle"
+	_task_label.visible = true
+	_building_detail_label.visible = false
+
+
+func _clear_production_tracking() -> void:
+	if _tracked_command_center != null and is_instance_valid(_tracked_command_center):
+		if (
+			_tracked_command_center.has_signal("worker_queue_changed")
+			and _tracked_command_center.worker_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_command_center.worker_queue_changed.disconnect(_on_production_changed)
+
+	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
+		if (
+			_tracked_barracks.has_signal("swordsman_queue_changed")
+			and _tracked_barracks.swordsman_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_barracks.swordsman_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_barracks.has_signal("archer_queue_changed")
+			and _tracked_barracks.archer_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_barracks.archer_queue_changed.disconnect(_on_production_changed)
+
+	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
+		if (
+			_tracked_hero_altar.has_signal("hero_altar_state_changed")
+			and _tracked_hero_altar.hero_altar_state_changed.is_connected(_on_production_changed)
+		):
+			_tracked_hero_altar.hero_altar_state_changed.disconnect(_on_production_changed)
+
+	_tracked_command_center = null
+	_tracked_barracks = null
+	_tracked_hero_altar = null
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:
