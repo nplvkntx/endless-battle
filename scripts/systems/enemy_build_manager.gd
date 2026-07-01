@@ -27,12 +27,14 @@ const ENEMY_TEAM_ID: int = 1
 const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
 const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
+const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
+const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
@@ -43,6 +45,11 @@ const BARRACKS_GOLD_COST: int = 150
 const BARRACKS_WOOD_COST: int = 100
 const BLACKSMITH_GOLD_COST: int = 100
 const BLACKSMITH_WOOD_COST: int = 150
+const SHOP_GOLD_COST: int = 80
+const SHOP_WOOD_COST: int = 120
+const SHOP_STABLE_GOLD_BUFFER: int = 350
+const SHOP_PURCHASE_COOLDOWN_TICKS: int = 7
+const SHOP_HERO_RALLY_DISTANCE: float = 18.0
 const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const COMMAND_CENTER_GOLD_COST: int = 200
@@ -61,6 +68,7 @@ const COMMAND_CENTER_MAX_HEALTH: int = 500
 var _primary_command_center: CommandCenter = null
 var _train_swordsman_next: bool = true
 var _tick_active: bool = true
+var _shop_purchase_cooldown_ticks: int = 0
 
 
 func _ready() -> void:
@@ -137,6 +145,12 @@ func _run_build_order() -> void:
 			return
 
 	_try_sustain_blacksmith_research()
+
+	if _should_build_shop():
+		if _try_place_building(PLACEMENT_SHOP):
+			return
+
+	_try_sustain_shop_purchases()
 
 	if not defer_military and _can_train_military_units():
 		_try_sustain_military_production()
@@ -246,6 +260,106 @@ func _find_completed_enemy_blacksmith() -> Blacksmith:
 		var blacksmith: Blacksmith = node as Blacksmith
 		if blacksmith.building_state == Building.STATE_COMPLETED:
 			return blacksmith
+
+	return null
+
+
+func _should_build_shop() -> bool:
+	if _has_completed_building(PLACEMENT_SHOP):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_SHOP):
+		return false
+
+	if not _has_living_enemy_hero():
+		return false
+
+	if not _has_stable_enemy_economy_for_shop():
+		return false
+
+	return EnemyResourceManager.can_afford(SHOP_GOLD_COST, SHOP_WOOD_COST)
+
+
+func _has_stable_enemy_economy_for_shop() -> bool:
+	return (
+		_count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
+		and EnemyResourceManager.gold >= SHOP_GOLD_COST + SHOP_STABLE_GOLD_BUFFER
+		and EnemyResourceManager.wood >= SHOP_WOOD_COST
+	)
+
+
+func _try_sustain_shop_purchases() -> void:
+	if _shop_purchase_cooldown_ticks > 0:
+		_shop_purchase_cooldown_ticks -= 1
+		return
+
+	var shop: Shop = _find_completed_enemy_shop()
+	if shop == null:
+		return
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero == null or hero.is_inventory_full():
+		return
+
+	if not HeroItemService.is_hero_in_shop_range(shop, hero):
+		if _should_send_hero_to_shop(hero):
+			_command_hero_to_shop(hero, shop)
+		return
+
+	if _try_buy_next_useful_shop_item(shop):
+		_shop_purchase_cooldown_ticks = SHOP_PURCHASE_COOLDOWN_TICKS
+
+
+func _try_buy_next_useful_shop_item(shop: Shop) -> bool:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero == null:
+		return false
+
+	for item_id: StringName in HeroItemCatalog.SHOP_ITEM_ORDER:
+		if _hero_already_owns_item(hero, item_id):
+			continue
+
+		if not HeroItemService.can_purchase_from_shop(shop, item_id):
+			continue
+
+		return shop.try_purchase_item(item_id)
+
+	return false
+
+
+func _hero_already_owns_item(hero: Hero, item_id: StringName) -> bool:
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if item is HeroItemDefinition and (item as HeroItemDefinition).item_id == item_id:
+			return true
+
+	return false
+
+
+func _should_send_hero_to_shop(hero: Hero) -> bool:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	var offset: Vector3 = hero.global_position - rally_position
+	offset.y = 0.0
+	if offset.length() > SHOP_HERO_RALLY_DISTANCE:
+		return false
+
+	return EnemyArmyCommand.get_health_ratio(hero) >= EnemyArmyCommand.HERO_RETREAT_HP_RATIO
+
+
+func _command_hero_to_shop(hero: Hero, shop: Shop) -> void:
+	var target: Vector3 = shop.global_position
+	target.y = hero.global_position.y
+	hero.set_movement_target(target)
+
+
+func _find_completed_enemy_shop() -> Shop:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is Shop or not _is_living_building(node as Building):
+			continue
+
+		var shop: Shop = node as Shop
+		if shop.building_state == Building.STATE_COMPLETED:
+			return shop
 
 	return null
 
@@ -411,6 +525,9 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 		PLACEMENT_BLACKSMITH:
 			gold_cost = BLACKSMITH_GOLD_COST
 			wood_cost = BLACKSMITH_WOOD_COST
+		PLACEMENT_SHOP:
+			gold_cost = SHOP_GOLD_COST
+			wood_cost = SHOP_WOOD_COST
 		PLACEMENT_HERO_ALTAR:
 			gold_cost = HERO_ALTAR_GOLD_COST
 			wood_cost = HERO_ALTAR_WOOD_COST
@@ -471,6 +588,8 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return BARRACKS_SCENE.instantiate() as Building
 		PLACEMENT_BLACKSMITH:
 			return BLACKSMITH_SCENE.instantiate() as Building
+		PLACEMENT_SHOP:
+			return SHOP_SCENE.instantiate() as Building
 		PLACEMENT_HERO_ALTAR:
 			return HERO_ALTAR_SCENE.instantiate() as Building
 		PLACEMENT_COMMAND_CENTER:
@@ -688,6 +807,8 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 			return node is Barracks
 		PLACEMENT_BLACKSMITH:
 			return node is Blacksmith
+		PLACEMENT_SHOP:
+			return node is Shop
 		PLACEMENT_HERO_ALTAR:
 			return node is HeroAltar
 		PLACEMENT_COMMAND_CENTER:

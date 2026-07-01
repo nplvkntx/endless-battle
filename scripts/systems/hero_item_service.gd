@@ -20,21 +20,21 @@ static func try_purchase_from_shop(shop: Shop, item_id: StringName) -> bool:
 
 	var failure_reason: String = get_purchase_failure_reason(shop, item)
 	if not failure_reason.is_empty():
-		_show_feedback(failure_reason)
+		_show_feedback(failure_reason, shop)
 		return false
 
 	var hero: Hero = find_closest_shop_hero(shop)
 	if hero == null:
-		_show_feedback(MSG_NO_NEARBY_HERO)
+		_show_feedback(MSG_NO_NEARBY_HERO, shop)
 		return false
 
 	if not _try_pay_for_item(shop, item.gold_cost):
-		_show_feedback(MSG_NOT_ENOUGH_GOLD)
+		_show_feedback(MSG_NOT_ENOUGH_GOLD, shop)
 		return false
 
 	var slot_index: int = hero.find_first_empty_inventory_slot()
 	if slot_index < 0:
-		_show_feedback(MSG_INVENTORY_FULL)
+		_show_feedback(MSG_INVENTORY_FULL, shop)
 		return false
 
 	hero.set_item_at_slot(slot_index, item)
@@ -46,7 +46,7 @@ static func get_purchase_failure_reason(shop: Shop, item: HeroItemDefinition) ->
 	if shop == null or item == null:
 		return MSG_SHOP_UNAVAILABLE
 
-	if not shop.can_sell_items():
+	if shop.building_state != Building.STATE_COMPLETED:
 		return MSG_SHOP_UNAVAILABLE
 
 	var hero: Hero = find_closest_shop_hero(shop)
@@ -102,6 +102,14 @@ static func find_closest_shop_hero(shop: Shop) -> Hero:
 				closest_hero = candidate
 
 	return closest_hero
+
+
+static func is_hero_in_shop_range(shop: Shop, hero: Hero) -> bool:
+	if shop == null or hero == null or not is_instance_valid(shop) or not is_instance_valid(hero):
+		return false
+
+	var distance: float = _get_shop_range_distance(shop, hero)
+	return distance <= _get_shop_range_limit(shop)
 
 
 static func apply_item_to_hero(
@@ -351,7 +359,10 @@ static func _remove_mana_bonus(hero: Hero, item: HeroItemDefinition) -> void:
 		hero.mana_changed.emit(current_mana, max_mana)
 
 
-static func _show_feedback(message: String) -> void:
+static func _show_feedback(message: String, shop: Shop = null) -> void:
+	if shop != null and TeamVisuals.resolve_team(shop, shop.team_id) != TeamVisuals.PLAYER_TEAM_ID:
+		return
+
 	if ResourceManager != null:
 		ResourceManager.show_feedback(message)
 	else:
