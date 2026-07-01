@@ -72,12 +72,50 @@ func _on_enemy_production_tick() -> void:
 		return
 
 	if _enemy_production_spawn_swordsman_next:
-		_spawn_enemy_unit(SWORDSMAN_SCENE)
+		if not try_train_enemy_swordsman():
+			try_train_enemy_archer()
 	else:
-		_spawn_enemy_unit(ARCHER_SCENE)
+		if not try_train_enemy_archer():
+			try_train_enemy_swordsman()
 
 	_enemy_production_spawn_swordsman_next = not _enemy_production_spawn_swordsman_next
 	_schedule_enemy_production_tick()
+
+
+func is_enemy_training_busy() -> bool:
+	return _is_training or _is_training_archer
+
+
+func try_train_enemy_swordsman() -> bool:
+	if building_state != STATE_COMPLETED or _is_training:
+		return false
+
+	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		return false
+
+	_swordsman_queue_count += 1
+	swordsman_queue_changed.emit(_swordsman_queue_count)
+
+	if not _is_training:
+		_start_next_training()
+
+	return true
+
+
+func try_train_enemy_archer() -> bool:
+	if building_state != STATE_COMPLETED or _is_training_archer:
+		return false
+
+	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		return false
+
+	_archer_queue_count += 1
+	archer_queue_changed.emit(_archer_queue_count)
+
+	if not _is_training_archer:
+		_start_next_archer_training()
+
+	return true
 
 
 func _spawn_enemy_unit(scene: PackedScene) -> void:
@@ -263,10 +301,15 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 
 	spawn_parent.add_child(unit)
 	unit.global_position = global_position + spawn_offset
-	_finalize_spawned_unit(unit)
 
-	if _has_rally_point:
+	if is_in_group(&"enemy_command_center"):
+		_finalize_enemy_unit(unit)
+		unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
+	elif _has_rally_point:
+		_finalize_spawned_unit(unit)
 		unit.set_movement_target(_rally_point)
+	else:
+		_finalize_spawned_unit(unit)
 
 
 func _finalize_spawned_unit(unit: Unit) -> void:

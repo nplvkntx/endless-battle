@@ -21,6 +21,7 @@
 [ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
 [ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_build_manager.gd" id="26_enemy_build_manager"]
 [ext_resource type="PackedScene" uid="uid://crxg17shkoebg" path="res://scenes/units/neutral_creep.tscn" id="24_neutral_creep"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
 
@@ -128,6 +129,12 @@ player_command_center_path = NodePath("../CommandCenter")
 script = ExtResource("23_enemy_gather_manager")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 enemy_gold_mine_path = NodePath("../EnemyGoldMine")
+
+[node name="EnemyBuildManager" type="Node" parent="." groups=["enemy_build_manager"]]
+script = ExtResource("26_enemy_build_manager")
+enemy_command_center_path = NodePath("../EnemyCommandCenter")
+enemy_gather_manager_path = NodePath("../EnemyGatherManager")
+buildings_parent_path = NodePath("..")
 
 [node name="SelectionUI" type="CanvasLayer" parent="." unique_id=370040247]
 
@@ -611,14 +618,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 0.5, 34.5)
 
 [node name="EnemyWorker4" parent="." unique_id=1562796510 groups=["enemies", "enemy_workers"] instance=ExtResource("4_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39, 0.5, 35)
-
-[node name="EnemyBarracks" parent="." unique_id=881263699 groups=["enemy_command_center"] instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 1, 38)
-enable_enemy_auto_production = true
-
-[node name="HealthComponent" type="Node" parent="EnemyBarracks" unique_id=1939655637]
-script = ExtResource("19_health_component")
-max_health = 300
 
 [node name="EnemyGoldMine" parent="." unique_id=1569590764 instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1, 28)

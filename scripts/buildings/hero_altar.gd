@@ -12,6 +12,7 @@ const TRAIN_SECONDS: float = 6.0
 const HERO_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
 const RALLY_MARKER_Y: float = 0.05
 const HERO_GROUP: StringName = &"heroes"
+const ENEMY_TEAM_ID: int = 1
 
 var _is_training: bool = false
 var _has_rally_point: bool = false
@@ -35,6 +36,22 @@ func can_train_hero() -> bool:
 		building_state == STATE_COMPLETED
 		and not _is_training
 		and not player_has_hero()
+	)
+
+
+func enemy_has_hero() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(&"enemies"):
+		if node is Hero and is_instance_valid(node) and not node.is_queued_for_deletion():
+			return true
+
+	return false
+
+
+func can_train_enemy_hero() -> bool:
+	return (
+		building_state == STATE_COMPLETED
+		and not _is_training
+		and not enemy_has_hero()
 	)
 
 
@@ -88,6 +105,21 @@ func try_train_hero() -> void:
 		)
 		return
 
+	_begin_hero_training()
+
+
+func try_train_enemy_hero() -> bool:
+	if not can_train_enemy_hero():
+		return false
+
+	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		return false
+
+	_begin_hero_training()
+	return true
+
+
+func _begin_hero_training() -> void:
 	_is_training = true
 	hero_altar_state_changed.emit()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
@@ -96,6 +128,15 @@ func try_train_hero() -> void:
 
 func _on_hero_training_finished() -> void:
 	_is_training = false
+
+	if is_in_group(&"enemy_command_center"):
+		if enemy_has_hero():
+			hero_altar_state_changed.emit()
+			return
+
+		_spawn_enemy_hero()
+		hero_altar_state_changed.emit()
+		return
 
 	if player_has_hero():
 		hero_altar_state_changed.emit()
@@ -125,3 +166,29 @@ func _spawn_hero() -> void:
 
 	if _has_rally_point:
 		hero.set_movement_target(_rally_point)
+
+
+func _spawn_enemy_hero() -> void:
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	var spawn_parent: Node = get_parent()
+	if spawn_parent == null or hero == null:
+		return
+
+	spawn_parent.add_child(hero)
+	hero.global_position = global_position + HERO_SPAWN_OFFSET
+	hero.team_id = ENEMY_TEAM_ID
+	hero.collision_layer = PhysicsLayers.UNITS
+	hero.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
+
+	if hero.is_in_group(&"units"):
+		hero.remove_from_group(&"units")
+
+	if hero.is_in_group(&"heroes"):
+		hero.remove_from_group(&"heroes")
+
+	if not hero.is_in_group(&"enemies"):
+		hero.add_to_group(&"enemies")
+
+	var collision_shape: CollisionShape3D = hero.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision_shape != null:
+		collision_shape.disabled = false

@@ -13,17 +13,10 @@ const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
 func _ready() -> void:
 	call_deferred("_assign_gather_jobs")
 
-
 func _assign_gather_jobs() -> void:
 	var command_center: CommandCenter = _resolve_enemy_command_center()
 	if command_center == null:
 		push_warning("EnemyGatherManager: enemy Command Center not found")
-		return
-
-	var gold_mine: GoldMine = _resolve_gold_mine()
-	var trees: Array[WoodTree] = _resolve_trees()
-	if gold_mine == null and trees.is_empty():
-		push_warning("EnemyGatherManager: no enemy gather targets found")
 		return
 
 	var workers: Array[Worker] = _find_enemy_workers(command_center.global_position)
@@ -31,27 +24,56 @@ func _assign_gather_jobs() -> void:
 		push_warning("EnemyGatherManager: no enemy workers found near Command Center")
 		return
 
-	var tree_index: int = 0
 	for worker_index: int in workers.size():
-		var worker: Worker = workers[worker_index]
-		if worker == null or not is_instance_valid(worker):
-			continue
+		assign_gather_job(workers[worker_index], worker_index == 0)
 
-		if worker_index == 0 and _is_valid_gold_mine(gold_mine):
+
+func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> void:
+	if worker == null or not is_instance_valid(worker):
+		return
+
+	var command_center: CommandCenter = _resolve_enemy_command_center()
+	if command_center == null:
+		return
+
+	var gold_mine: GoldMine = _resolve_gold_mine()
+	var trees: Array[WoodTree] = _resolve_trees()
+	if gold_mine == null and trees.is_empty():
+		return
+
+	if prefer_gold and _is_valid_gold_mine(gold_mine):
+		worker.command_gather_gold_mine(gold_mine)
+		return
+
+	if trees.is_empty():
+		if _is_valid_gold_mine(gold_mine):
 			worker.command_gather_gold_mine(gold_mine)
+		return
+
+	var tree: WoodTree = _pick_tree_for_worker(worker, trees)
+	if tree != null and tree.can_gather():
+		worker.command_gather_tree(tree)
+	elif _is_valid_gold_mine(gold_mine):
+		worker.command_gather_gold_mine(gold_mine)
+
+
+
+func _pick_tree_for_worker(worker: Worker, trees: Array[WoodTree]) -> WoodTree:
+	if trees.is_empty():
+		return null
+
+	var closest_tree: WoodTree = null
+	var closest_distance_squared: float = INF
+	for tree: WoodTree in trees:
+		if tree == null or not tree.can_gather():
 			continue
 
-		if trees.is_empty():
-			if _is_valid_gold_mine(gold_mine):
-				worker.command_gather_gold_mine(gold_mine)
-			continue
+		var distance_squared: float = worker.global_position.distance_squared_to(tree.global_position)
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_tree = tree
 
-		var tree: WoodTree = trees[tree_index % trees.size()]
-		tree_index += 1
-		if tree.can_gather():
-			worker.command_gather_tree(tree)
-		elif _is_valid_gold_mine(gold_mine):
-			worker.command_gather_gold_mine(gold_mine)
+	return closest_tree if closest_tree != null else trees[0]
 
 
 func _resolve_enemy_command_center() -> CommandCenter:

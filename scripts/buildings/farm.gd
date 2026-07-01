@@ -11,7 +11,10 @@ func complete_construction() -> void:
 		return
 
 	super.complete_construction()
-	ResourceManager.add_food_max(FOOD_CAP_BONUS)
+	if is_in_group(&"enemy_command_center"):
+		EnemyResourceManager.add_food_max(FOOD_CAP_BONUS)
+	else:
+		ResourceManager.add_food_max(FOOD_CAP_BONUS)
 
 
 func _ready() -> void:

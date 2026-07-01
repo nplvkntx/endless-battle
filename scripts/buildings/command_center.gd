@@ -10,6 +10,7 @@ const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
 const RALLY_MARKER_Y: float = 0.05
+const ENEMY_TEAM_ID: int = 1
 
 @export var worker_spawn_offset: Vector3 = Vector3(3.5, -0.75, 0.0)
 
@@ -116,6 +117,22 @@ func try_train_worker() -> void:
 		_start_next_training()
 
 
+func try_train_enemy_worker() -> bool:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+		return false
+
+	_worker_queue_count += 1
+	worker_queue_changed.emit(_worker_queue_count)
+
+	if not _is_training:
+		_start_next_training()
+
+	return true
+
+
 func _start_next_training() -> void:
 	if _worker_queue_count <= 0:
 		return
@@ -147,7 +164,38 @@ func _spawn_worker() -> void:
 	spawn_parent.add_child(worker)
 	worker.global_position = global_position + worker_spawn_offset
 
-	_apply_worker_rally(worker)
+	if is_in_group(&"enemy_command_center"):
+		_finalize_enemy_worker(worker)
+	else:
+		_apply_worker_rally(worker)
+
+
+func _finalize_enemy_worker(worker: Worker) -> void:
+	if worker == null:
+		return
+
+	worker.team_id = ENEMY_TEAM_ID
+
+	if not worker.is_in_group(&"enemy_workers"):
+		worker.add_to_group(&"enemy_workers")
+
+	if worker.is_in_group(&"workers"):
+		worker.remove_from_group(&"workers")
+
+	if worker.is_in_group(&"units"):
+		worker.remove_from_group(&"units")
+
+	if not worker.is_in_group(&"enemies"):
+		worker.add_to_group(&"enemies")
+
+	_notify_enemy_worker_spawned(worker)
+
+
+func _notify_enemy_worker_spawned(worker: Worker) -> void:
+	for node: Node in get_tree().get_nodes_in_group(&"enemy_build_manager"):
+		if node is EnemyBuildManager:
+			(node as EnemyBuildManager).notify_enemy_worker_spawned(worker)
+			return
 
 
 func _apply_worker_rally(worker: Worker) -> void:

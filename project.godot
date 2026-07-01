@@ -32,15 +32,15 @@ ProjectileManager="*res://autoloads/projectile_manager.gd"
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[physics]
-
-3d/physics_engine="Jolt Physics"
-
 [layer_names]
 
 3d_physics/layer_1="world"
 3d_physics/layer_2="units"
 3d_physics/layer_3="buildings"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
 
 [rendering]
 
