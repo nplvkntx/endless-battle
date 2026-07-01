@@ -1,10 +1,16 @@
-[gd_scene load_steps=10 format=3 uid="uid://cg7dpeipvxy7a"]
+[gd_scene load_steps=17 format=3 uid="uid://cg7dpeipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/archer.gd" id="1_archer"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_green"]
 albedo_color = Color(0.15, 0.65, 0.25, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
+albedo_color = Color(0.82, 0.68, 0.52, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bow"]
+albedo_color = Color(0.42, 0.28, 0.14, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_selection"]
 shading_mode = 0
@@ -18,8 +24,19 @@ top_radius = 0.72
 bottom_radius = 0.72
 height = 0.03
 
-[sub_resource type="BoxMesh" id="BoxMesh_visual"]
-size = Vector3(1, 1, 1)
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.22
+height = 0.62
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.16
+height = 0.32
+
+[sub_resource type="BoxMesh" id="BoxMesh_bow_limb"]
+size = Vector3(0.05, 0.42, 0.08)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bow_grip"]
+size = Vector3(0.06, 0.12, 0.1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -37,8 +54,29 @@ size = Vector3(1.2, 0.08, 0.02)
 script = ExtResource("1_archer")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_visual")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
+mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("StandardMaterial3D_green")
+
+[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_skin")
+
+[node name="BowUpper" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0, 1, 0.26, 0.12, -0.08)
+mesh = SubResource("BoxMesh_bow_limb")
+surface_material_override/0 = SubResource("StandardMaterial3D_bow")
+
+[node name="BowLower" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0.26, -0.08, -0.08)
+mesh = SubResource("BoxMesh_bow_limb")
+surface_material_override/0 = SubResource("StandardMaterial3D_bow")
+
+[node name="BowGrip" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.28, 0.02, -0.08)
+mesh = SubResource("BoxMesh_bow_grip")
+surface_material_override/0 = SubResource("StandardMaterial3D_bow")
 
 [node name="SelectionIndicator" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.47, 0)

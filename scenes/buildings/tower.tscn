@@ -1,12 +1,26 @@
-[gd_scene format=3 uid="uid://bxwg81vxxo5na"]
+[gd_scene load_steps=13 format=3 uid="uid://bxwg81vxxo5na"]
 
 [ext_resource type="Script" path="res://scripts/buildings/tower.gd" id="1_tower"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tower"]
 albedo_color = Color(0.45, 0.45, 0.5, 1)
 
-[sub_resource type="BoxMesh" id="BoxMesh_tower"]
-size = Vector3(2, 3, 2)
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_platform"]
+albedo_color = Color(0.52, 0.52, 0.58, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crenellation"]
+albedo_color = Color(0.38, 0.38, 0.42, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_shaft"]
+top_radius = 0.75
+bottom_radius = 0.9
+height = 2.4
+
+[sub_resource type="BoxMesh" id="BoxMesh_platform"]
+size = Vector3(2, 0.25, 2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_crenellation"]
+size = Vector3(0.35, 0.3, 0.35)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_tower"]
 size = Vector3(2, 3, 2)
@@ -15,8 +29,36 @@ size = Vector3(2, 3, 2)
 script = ExtResource("1_tower")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_tower")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.3, 0)
+mesh = SubResource("CylinderMesh_shaft")
 surface_material_override/0 = SubResource("StandardMaterial3D_tower")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="Platform" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.12, 0)
+mesh = SubResource("BoxMesh_platform")
+surface_material_override/0 = SubResource("StandardMaterial3D_platform")
+
+[node name="CrenellationNE" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.72, 1.38, -0.72)
+mesh = SubResource("BoxMesh_crenellation")
+surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
+
+[node name="CrenellationNW" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.72, 1.38, -0.72)
+mesh = SubResource("BoxMesh_crenellation")
+surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
+
+[node name="CrenellationSE" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.72, 1.38, 0.72)
+mesh = SubResource("BoxMesh_crenellation")
+surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
+
+[node name="CrenellationSW" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.72, 1.38, 0.72)
+mesh = SubResource("BoxMesh_crenellation")
+surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_tower")

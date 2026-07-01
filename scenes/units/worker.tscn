@@ -1,10 +1,16 @@
-[gd_scene load_steps=10 format=3 uid="uid://c34sseipvxy7a"]
+[gd_scene load_steps=16 format=3 uid="uid://c34sseipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_brown"]
 albedo_color = Color(0.55, 0.35, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
+albedo_color = Color(0.82, 0.68, 0.52, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tool"]
+albedo_color = Color(0.45, 0.45, 0.48, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_selection"]
 shading_mode = 0
@@ -18,8 +24,16 @@ top_radius = 0.72
 bottom_radius = 0.72
 height = 0.03
 
-[sub_resource type="BoxMesh" id="BoxMesh_visual"]
-size = Vector3(1, 1, 1)
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.18
+height = 0.36
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.13
+height = 0.26
+
+[sub_resource type="BoxMesh" id="BoxMesh_pick"]
+size = Vector3(0.08, 0.28, 0.14)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -37,8 +51,19 @@ size = Vector3(1.0, 0.08, 0.02)
 script = ExtResource("1_worker")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_visual")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.08, 0)
+mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("StandardMaterial3D_brown")
+
+[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.28, 0)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_skin")
+
+[node name="Pick" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.866025, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866025, 0.22, 0.02, 0.12)
+mesh = SubResource("BoxMesh_pick")
+surface_material_override/0 = SubResource("StandardMaterial3D_tool")
 
 [node name="SelectionIndicator" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.47, 0)

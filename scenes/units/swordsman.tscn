@@ -1,10 +1,21 @@
-[gd_scene load_steps=10 format=3 uid="uid://c6j7ryh4ug3lh"]
+[gd_scene load_steps=18 format=3 uid="uid://c6j7ryh4ug3lh"]
 
 [ext_resource type="Script" path="res://scripts/units/swordsman.gd" id="1_swordsman"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_red"]
 albedo_color = Color(0.85, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
+albedo_color = Color(0.82, 0.68, 0.52, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_metal"]
+albedo_color = Color(0.72, 0.74, 0.78, 1)
+metallic = 0.4
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_shield"]
+albedo_color = Color(0.55, 0.55, 0.62, 1)
+metallic = 0.3
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_selection"]
 shading_mode = 0
@@ -18,8 +29,19 @@ top_radius = 0.72
 bottom_radius = 0.72
 height = 0.03
 
-[sub_resource type="BoxMesh" id="BoxMesh_visual"]
-size = Vector3(1, 1, 1)
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.26
+height = 0.58
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.18
+height = 0.36
+
+[sub_resource type="BoxMesh" id="BoxMesh_sword"]
+size = Vector3(0.06, 0.55, 0.12)
+
+[sub_resource type="BoxMesh" id="BoxMesh_shield"]
+size = Vector3(0.08, 0.38, 0.28)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -37,8 +59,24 @@ size = Vector3(1.2, 0.08, 0.02)
 script = ExtResource("1_swordsman")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_visual")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
+mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("StandardMaterial3D_red")
+
+[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.38, 0)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_skin")
+
+[node name="Sword" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 0, 0, 1, 0.32, 0.05, 0)
+mesh = SubResource("BoxMesh_sword")
+surface_material_override/0 = SubResource("StandardMaterial3D_metal")
+
+[node name="Shield" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.28, 0.02, 0.05)
+mesh = SubResource("BoxMesh_shield")
+surface_material_override/0 = SubResource("StandardMaterial3D_shield")
 
 [node name="SelectionIndicator" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.47, 0)
