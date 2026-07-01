@@ -11,11 +11,15 @@ const MIN_WOOD_WORKERS: int = 2
 const FOOD_RESERVE: int = 2
 const WOOD_STOCK_COMFORT: int = 120
 const GOLD_STOCK_COMFORT: int = 150
+const RESOURCE_HIGH_THRESHOLD: int = 350
+const RESOURCE_CRITICAL_THRESHOLD: int = 100
+const TARGET_GOLD_SHIFT_THRESHOLD: int = 2
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gold_mine_path: NodePath
 
 var _reassign_active: bool = true
+var _cached_target_gold: int = -1
 
 
 func _ready() -> void:
@@ -62,7 +66,10 @@ func assign_worker_adaptively(worker: Worker) -> void:
 		if pool_worker.get_assigned_gather_resource_id() == &"gold":
 			gold_count += 1
 
-	var target_gold: int = _compute_target_gold_workers(gather_pool.size())
+	var target_gold: int = _apply_target_hysteresis(
+		_compute_target_gold_workers(gather_pool.size()),
+		gather_pool.size()
+	)
 	assign_gather_job(worker, gold_count < target_gold)
 
 
@@ -119,7 +126,7 @@ func _rebalance_gather_workers() -> void:
 				unassigned_workers.append(worker)
 
 	var total: int = gather_pool.size()
-	var target_gold: int = _compute_target_gold_workers(total)
+	var target_gold: int = _apply_target_hysteresis(_compute_target_gold_workers(total), total)
 	var target_wood: int = total - target_gold
 
 	for worker: Worker in unassigned_workers:
@@ -156,13 +163,22 @@ func _compute_target_gold_workers(total_gather_workers: int) -> int:
 	if total_gather_workers == 1:
 		return 1
 
-	var gold_target: int = mini(MIN_GOLD_WORKERS, total_gather_workers)
-	var wood_target: int = mini(MIN_WOOD_WORKERS, total_gather_workers - gold_target)
+	var min_gold: int = MIN_GOLD_WORKERS
+	var min_wood: int = MIN_WOOD_WORKERS
+	if _is_wood_heavy_imbalance():
+		min_wood = 1
+		min_gold = maxi(min_gold, 2)
+	elif _is_gold_heavy_imbalance():
+		min_gold = 1
+		min_wood = maxi(min_wood, 2)
+
+	var gold_target: int = mini(min_gold, total_gather_workers)
+	var wood_target: int = mini(min_wood, total_gather_workers - gold_target)
 	var remaining: int = total_gather_workers - gold_target - wood_target
 
 	if remaining > 0:
 		var bias: float = _compute_gather_bias()
-		var gold_share: float = clampf(0.4 + bias * 0.35, 0.25, 0.75)
+		var gold_share: float = clampf(0.5 + bias * 0.4, 0.2, 0.8)
 		var extra_gold: int = int(round(float(remaining) * gold_share))
 		gold_target += extra_gold
 		wood_target += remaining - extra_gold
@@ -173,27 +189,68 @@ func _compute_target_gold_workers(total_gather_workers: int) -> int:
 	return gold_target
 
 
-func _compute_gather_bias() -> float:
-	var bias: float = 0.0
+func _apply_target_hysteresis(computed_target: int, total_gather_workers: int) -> int:
+	if _cached_target_gold < 0:
+		_cached_target_gold = computed_target
+		return computed_target
 
-	var wood_surplus: float = (
-		float(EnemyResourceManager.wood - WOOD_STOCK_COMFORT) / float(WOOD_STOCK_COMFORT)
-	)
-	var gold_surplus: float = (
-		float(EnemyResourceManager.gold - GOLD_STOCK_COMFORT) / float(GOLD_STOCK_COMFORT)
-	)
-	bias += clampf(gold_surplus - wood_surplus, -0.5, 0.5) * 0.6
+	if _is_resource_critically_imbalanced():
+		_cached_target_gold = computed_target
+		return computed_target
+
+	if abs(computed_target - _cached_target_gold) >= TARGET_GOLD_SHIFT_THRESHOLD:
+		_cached_target_gold = computed_target
+		return computed_target
+
+	return clampi(_cached_target_gold, 1, maxi(1, total_gather_workers - 1))
+
+
+func _compute_gather_bias() -> float:
+	var wood: int = EnemyResourceManager.wood
+	var gold: int = EnemyResourceManager.gold
+
+	if wood >= RESOURCE_HIGH_THRESHOLD and gold <= RESOURCE_CRITICAL_THRESHOLD:
+		return 1.0
+	if gold >= RESOURCE_HIGH_THRESHOLD and wood <= RESOURCE_CRITICAL_THRESHOLD:
+		return -1.0
+	if wood <= RESOURCE_CRITICAL_THRESHOLD and gold <= RESOURCE_CRITICAL_THRESHOLD:
+		return 0.0
+
+	var wood_surplus: float = float(wood - WOOD_STOCK_COMFORT) / float(WOOD_STOCK_COMFORT)
+	var gold_surplus: float = float(gold - GOLD_STOCK_COMFORT) / float(GOLD_STOCK_COMFORT)
+	var bias: float = clampf(wood_surplus - gold_surplus, -1.0, 1.0) * 0.75
 
 	if _enemy_needs_wood_for_buildings():
-		bias -= 0.35
+		bias -= 0.25
 
 	if _enemy_needs_gold_for_training():
-		bias += 0.35
+		bias += 0.25
 
 	return clampf(bias, -1.0, 1.0)
 
 
+func _is_wood_heavy_imbalance() -> bool:
+	return (
+		EnemyResourceManager.wood >= RESOURCE_HIGH_THRESHOLD
+		and EnemyResourceManager.gold <= RESOURCE_CRITICAL_THRESHOLD
+	)
+
+
+func _is_gold_heavy_imbalance() -> bool:
+	return (
+		EnemyResourceManager.gold >= RESOURCE_HIGH_THRESHOLD
+		and EnemyResourceManager.wood <= RESOURCE_CRITICAL_THRESHOLD
+	)
+
+
+func _is_resource_critically_imbalanced() -> bool:
+	return _is_wood_heavy_imbalance() or _is_gold_heavy_imbalance()
+
+
 func _enemy_needs_wood_for_buildings() -> bool:
+	if EnemyResourceManager.wood >= WOOD_STOCK_COMFORT * 2:
+		return false
+
 	if EnemyResourceManager.food_max - EnemyResourceManager.food_current <= FOOD_RESERVE:
 		return true
 

@@ -6,8 +6,13 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 4.0
-const TARGET_WORKERS: int = 10
+const TARGET_WORKERS_EARLY: int = 8
+const TARGET_WORKERS_MID: int = 10
+const TARGET_WORKERS_LATE: int = 12
 const MIN_WORKERS_BEFORE_MILITARY: int = 8
+const WORKER_PHASE_MID_SECONDS: float = 300.0
+const WORKER_PHASE_LATE_SECONDS: float = 600.0
+const WORKER_TRAIN_GOLD_COST: int = 50
 const FOOD_RESERVE: int = 2
 const MAX_FARMS: int = 3
 const DEFAULT_MAX_BARRACKS: int = 2
@@ -94,8 +99,9 @@ func _run_build_order() -> void:
 		return
 
 	if _should_grow_worker_economy():
-		if _needs_farm() and _try_place_building(PLACEMENT_FARM):
-			return
+		if _needs_farm() and not _should_defer_gold_spending_for_workers():
+			if _try_place_building(PLACEMENT_FARM):
+				return
 		if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
 			return
 
@@ -108,8 +114,9 @@ func _run_build_order() -> void:
 	if _needs_barracks() and _try_place_building(PLACEMENT_BARRACKS):
 		return
 
-	if _needs_farm() and _try_place_building(PLACEMENT_FARM):
-		return
+	if _needs_farm() and not _should_defer_gold_spending_for_workers():
+		if _try_place_building(PLACEMENT_FARM):
+			return
 
 	if not _has_completed_building(PLACEMENT_BARRACKS) and not _is_building_type_in_progress(
 		PLACEMENT_BARRACKS
@@ -167,7 +174,7 @@ func _should_build_hero_altar() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
-	if _count_enemy_workers() < TARGET_WORKERS:
+	if _count_enemy_workers() < _get_target_worker_count():
 		return false
 
 	return true
@@ -180,7 +187,7 @@ func _should_build_expansion_barracks() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
-	if _count_enemy_workers() < TARGET_WORKERS:
+	if _count_enemy_workers() < _get_target_worker_count():
 		return false
 
 	return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
@@ -207,18 +214,45 @@ func _should_build_expansion_command_center() -> bool:
 
 
 func _try_train_enemy_workers() -> bool:
-	if _get_effective_worker_count() >= TARGET_WORKERS:
+	var target_workers: int = _get_target_worker_count()
+	if _get_effective_worker_count() >= target_workers:
 		return false
 
 	var command_center: CommandCenter = _get_training_command_center()
 	if command_center == null:
 		return false
 
-	return command_center.try_train_enemy_worker()
+	var trained_any: bool = false
+	while _get_effective_worker_count() < target_workers:
+		if not command_center.try_train_enemy_worker():
+			break
+		trained_any = true
+
+	return trained_any
+
+
+func _get_target_worker_count() -> int:
+	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	if elapsed_seconds < WORKER_PHASE_MID_SECONDS:
+		return TARGET_WORKERS_EARLY
+	if elapsed_seconds < WORKER_PHASE_LATE_SECONDS:
+		return TARGET_WORKERS_MID
+
+	return TARGET_WORKERS_LATE
 
 
 func _should_grow_worker_economy() -> bool:
-	return _get_effective_worker_count() < TARGET_WORKERS
+	return _get_effective_worker_count() < _get_target_worker_count()
+
+
+func _should_defer_gold_spending_for_workers() -> bool:
+	if not _should_grow_worker_economy():
+		return false
+
+	if not EnemyResourceManager.has_food_supply(1):
+		return false
+
+	return EnemyResourceManager.gold < WORKER_TRAIN_GOLD_COST * 2
 
 
 func _can_train_military_units() -> bool:

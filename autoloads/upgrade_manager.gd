@@ -102,9 +102,9 @@ func finish_research(upgrade_id: StringName) -> void:
 		return
 
 	_levels[upgrade_id] = get_level(upgrade_id) + 1
-	_refresh_all_player_military_units()
 	upgrade_levels_changed.emit()
 	upgrade_applied.emit(upgrade_id)
+	call_deferred("_refresh_all_player_military_units")
 
 
 func try_research(upgrade_id: StringName) -> bool:
@@ -138,8 +138,6 @@ func _refresh_all_player_military_units() -> void:
 func _is_player_military_unit(unit: Unit) -> bool:
 	if not (unit is Swordsman or unit is Archer):
 		return false
-	if unit.team_id >= CombatTargetValidation.ENEMY_TEAM_ID:
-		return false
-	if unit.is_in_group(&"enemies"):
+	if TeamVisuals.resolve_team(unit, unit.team_id) != TeamVisuals.PLAYER_TEAM_ID:
 		return false
 	return true

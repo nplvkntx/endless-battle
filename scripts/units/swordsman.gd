@@ -33,6 +33,7 @@ var _has_attack_move_destination: bool = false
 
 func _ready() -> void:
 	super._ready()
+	_cache_base_stats()
 	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
 	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
@@ -40,7 +41,14 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_body_mesh_rest_position = _body_mesh.position
+	if not UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+		UpgradeManager.upgrade_applied.connect(_on_blacksmith_upgrade_applied)
 	call_deferred("_try_apply_blacksmith_upgrades")
+
+
+func _exit_tree() -> void:
+	if UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
+		UpgradeManager.upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -262,6 +270,10 @@ func _cache_base_stats() -> void:
 
 
 func _try_apply_blacksmith_upgrades() -> void:
+	UpgradeManager.apply_player_upgrades_to_unit(self)
+
+
+func _on_blacksmith_upgrade_applied(_upgrade_id: StringName) -> void:
 	UpgradeManager.apply_player_upgrades_to_unit(self)
 
 
