@@ -23,6 +23,8 @@ const CONSTRUCTION_PROGRESS_BAR_WIDTH := 1.4
 const CONSTRUCTION_PROGRESS_BAR_HEIGHT := 0.08
 const CONSTRUCTION_PROGRESS_BAR_DEPTH := 0.02
 const CONSTRUCTION_PROGRESS_BAR_HUE := 0.12
+const SELECTION_PULSE_SCALE := 1.04
+const SELECTION_PULSE_HALF_DURATION := 0.1
 
 @export var building_data: Resource
 
@@ -44,6 +46,7 @@ var _base_albedo: Color
 var _base_emission: Color
 var _base_emission_enabled: bool
 var _feedback_tween: Tween
+var _selection_pulse_tween: Tween
 var _selection_indicator: Node3D
 var _construction_progress_bar: Node3D
 var _construction_progress_fill: MeshInstance3D
@@ -74,6 +77,32 @@ func set_selected(selected: bool) -> void:
 	is_selected = selected
 	if _selection_indicator:
 		_selection_indicator.visible = selected
+	if selected:
+		play_selection_pulse()
+
+
+func play_selection_pulse() -> void:
+	if _mesh_instance == null:
+		return
+
+	if _selection_pulse_tween != null and _selection_pulse_tween.is_valid():
+		_selection_pulse_tween.kill()
+
+	_mesh_instance.scale = Vector3.ONE
+
+	_selection_pulse_tween = create_tween()
+	_selection_pulse_tween.tween_property(
+		_mesh_instance,
+		"scale",
+		Vector3.ONE * SELECTION_PULSE_SCALE,
+		SELECTION_PULSE_HALF_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_selection_pulse_tween.tween_property(
+		_mesh_instance,
+		"scale",
+		Vector3.ONE,
+		SELECTION_PULSE_HALF_DURATION
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
 func set_inspected(inspected: bool) -> void:
@@ -173,6 +202,7 @@ func start_under_construction() -> void:
 	_show_construction_progress_bar()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
+	play_selection_pulse()
 
 
 func setup_construction(duration: float) -> void:
