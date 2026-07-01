@@ -17,11 +17,15 @@ const COLOR_ENEMY := Color(0.9, 0.25, 0.25, 1.0)
 const COLOR_NEUTRAL_RESOURCE := Color(0.85, 0.75, 0.2, 1.0)
 const COLOR_NEUTRAL_CREEP := Color(0.55, 0.55, 0.6, 1.0)
 const COLOR_CAMERA_RECT := Color(1.0, 1.0, 1.0, 0.85)
+const COLOR_DEBUG_BOUNDS := Color(0.45, 0.48, 0.55, 0.75)
 
 @export var world_min_x: float = -50.0
 @export var world_max_x: float = 50.0
 @export var world_min_z: float = -50.0
 @export var world_max_z: float = 50.0
+@export var flip_x: bool = false
+@export var flip_z: bool = false
+@export var swap_axes: bool = false
 @export var camera_path: NodePath
 @export var update_interval: float = 0.1
 
@@ -58,6 +62,7 @@ func _on_resized() -> void:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_BACKGROUND)
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_BORDER, false, 1.0)
+	_draw_debug_bounds()
 
 	if _has_camera_rect:
 		draw_rect(_camera_rect, COLOR_CAMERA_RECT, false, 1.0)
@@ -199,12 +204,42 @@ func _update_camera_rect() -> void:
 	_has_camera_rect = true
 
 
+func _draw_debug_bounds() -> void:
+	var center: Vector2 = size * 0.5
+	draw_line(Vector2(0.0, center.y), Vector2(size.x, center.y), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(center.x, 0.0), Vector2(center.x, size.y), COLOR_DEBUG_BOUNDS, 1.0)
+
+	var tick: float = 6.0
+	draw_line(Vector2(0.0, 0.0), Vector2(tick, 0.0), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(0.0, 0.0), Vector2(0.0, tick), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(size.x, 0.0), Vector2(size.x - tick, 0.0), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(size.x, 0.0), Vector2(size.x, tick), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(0.0, size.y), Vector2(tick, size.y), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(0.0, size.y), Vector2(0.0, size.y - tick), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(Vector2(size.x, size.y), Vector2(size.x - tick, size.y), COLOR_DEBUG_BOUNDS, 1.0)
+	draw_line(
+		Vector2(size.x, size.y), Vector2(size.x, size.y - tick), COLOR_DEBUG_BOUNDS, 1.0
+	)
+
+
 func _world_to_minimap(world_x: float, world_z: float) -> Vector2:
 	var span_x: float = world_max_x - world_min_x
 	var span_z: float = world_max_z - world_min_z
-	if span_x <= 0.0 or span_z <= 0.0:
+	if span_x <= 0.0 or span_z <= 0.0 or size.x <= 0.0 or size.y <= 0.0:
 		return Vector2.ZERO
 
-	var normalized_x: float = (world_x - world_min_x) / span_x
-	var normalized_z: float = (world_z - world_min_z) / span_z
-	return Vector2(normalized_x * size.x, (1.0 - normalized_z) * size.y)
+	var normalized := Vector2(
+		(world_x - world_min_x) / span_x,
+		(world_z - world_min_z) / span_z
+	)
+
+	if swap_axes:
+		normalized = Vector2(normalized.y, normalized.x)
+
+	if flip_x:
+		normalized.x = 1.0 - normalized.x
+
+	if flip_z:
+		normalized.y = 1.0 - normalized.y
+
+	return Vector2(normalized.x * size.x, normalized.y * size.y)
