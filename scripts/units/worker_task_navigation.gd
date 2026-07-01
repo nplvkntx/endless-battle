@@ -41,29 +41,49 @@ static func process_movement(
 ) -> bool:
 	var offset: Vector3 = destination - worker.global_position
 	offset.y = 0.0
-	var distance: float = offset.length()
-	var finish_tolerance: float = stopping_distance + GatheringConfig.TASK_NAV_FINISH_TOLERANCE
-	if distance <= finish_tolerance:
+	if _has_reached_task_destination(offset, stopping_distance):
 		return true
 
 	if agent.is_navigation_finished():
-		if distance <= finish_tolerance + 0.5:
-			return true
-
-		_move_direct(worker, offset, move_speed)
-		return false
+		process_direct_movement(worker, destination, move_speed, stopping_distance)
+		return _has_reached_task_destination(
+			destination - worker.global_position, stopping_distance
+		)
 
 	var next_position: Vector3 = agent.get_next_path_position()
 	var direction: Vector3 = next_position - worker.global_position
 	direction.y = 0.0
 	if direction.length_squared() < 0.0001:
-		_move_direct(worker, offset, move_speed)
+		process_direct_movement(worker, destination, move_speed, stopping_distance)
 	else:
 		worker.velocity = direction.normalized() * move_speed
+		worker.velocity.y = 0.0
+		worker.move_and_slide()
 
-	worker.velocity.y = 0.0
-	worker.move_and_slide()
 	return false
+
+
+static func process_direct_movement(
+	worker: CharacterBody3D,
+	destination: Vector3,
+	move_speed: float,
+	stopping_distance: float
+) -> bool:
+	var offset: Vector3 = destination - worker.global_position
+	offset.y = 0.0
+	if _has_reached_task_destination(offset, stopping_distance):
+		worker.velocity = Vector3.ZERO
+		return true
+
+	_move_direct(worker, offset, move_speed)
+	return false
+
+
+static func _has_reached_task_destination(offset: Vector3, stopping_distance: float) -> bool:
+	var flat_offset: Vector3 = offset
+	flat_offset.y = 0.0
+	var finish_tolerance: float = stopping_distance + GatheringConfig.TASK_NAV_FINISH_TOLERANCE
+	return flat_offset.length() <= finish_tolerance
 
 
 static func _move_direct(

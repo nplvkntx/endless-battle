@@ -34,6 +34,7 @@ const FOOD_SUPPLY_USED: int = 1
 var _health_bar_fill_material: StandardMaterial3D
 var _gather_state: GatherTripState = GatherTripState.IDLE
 var _gather_source: GatherableResource = null
+var _assigned_resource_id: StringName = &""
 var _carried_amount: int = 0
 var _source_approach_candidate_index: int = 0
 var _dropoff_candidate_index: int = 0
@@ -159,16 +160,28 @@ func _physics_process(delta: float) -> void:
 
 	if _task_nudge_active:
 		_process_task_corner_nudge(delta)
-	elif _task_navigation_active and _is_on_task_movement() and has_move_target:
-		if _process_task_navigation_movement():
-			has_move_target = false
+	elif _is_on_task_movement() and has_move_target:
+		var arrived: bool = false
+		if _task_navigation_active:
+			arrived = _process_task_navigation_movement()
+		else:
+			arrived = WorkerTaskNavigation.process_direct_movement(
+				self,
+				_task_movement_destination,
+				move_speed,
+				stopping_distance
+			)
+
+		if arrived:
+			if not _attempt_task_proximity_resolve():
+				has_move_target = false
 			velocity = Vector3.ZERO
 		else:
 			_update_task_corner_stuck_detection(delta, position_before)
-	else:
+	elif has_move_target:
 		super._physics_process(delta)
-		if _is_on_task_movement() and has_move_target:
-			_update_task_corner_stuck_detection(delta, position_before)
+	else:
+		velocity = Vector3.ZERO
 
 	_update_gather_trip()
 	_update_build_trip()
@@ -221,6 +234,7 @@ func _refresh_task_navigation() -> void:
 		return
 
 	if not WorkerTaskNavigation.can_use(_navigation_agent):
+		call_deferred("_try_repath_task_movement")
 		return
 
 	_navigation_agent.target_position = _task_movement_destination
@@ -389,6 +403,15 @@ func _finish_task_corner_nudge() -> void:
 		_apply_current_task_movement_target()
 		return
 
+	if (
+		_gather_state == GatherTripState.TO_COMMAND_CENTER
+		and _carried_amount > 0
+	):
+		var command_center: CommandCenter = _find_command_center()
+		if command_center != null and _can_use_command_center_for_deposit(command_center):
+			_move_toward_command_center_for_deposit(command_center)
+			return
+
 	if _task_has_saved_destination:
 		super.set_movement_target(_task_movement_destination)
 
@@ -412,6 +435,7 @@ func command_gather_tree(tree: WoodTree) -> void:
 func _start_gathering(source: GatherableResource) -> void:
 	cancel_gathering()
 	_gather_source = source
+	_assigned_resource_id = source.get_resource_id()
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
@@ -422,6 +446,7 @@ func _start_gathering(source: GatherableResource) -> void:
 func cancel_gathering() -> void:
 	_gather_state = GatherTripState.IDLE
 	_gather_source = null
+	_assigned_resource_id = &""
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
@@ -481,7 +506,12 @@ func _update_gather_trip() -> void:
 			if _attempt_dropoff_proximity_resolve():
 				return
 			if not has_move_target:
+				if _carried_amount > 0 and not _has_valid_dropoff_target():
+					_retry_return_to_command_center()
+					return
 				_handle_command_center_arrival()
+		GatherTripState.DONE:
+			_recover_done_gather_state()
 
 
 func _update_build_trip() -> void:
@@ -527,7 +557,7 @@ func _is_near_building_target() -> bool:
 
 func _attempt_source_proximity_resolve() -> bool:
 	if not _is_valid_gather_source(_gather_source):
-		_finish_gathering_idle()
+		_handle_gather_source_lost()
 		return true
 
 	if not _is_near_resource_for_gather(_gather_source):
@@ -540,13 +570,14 @@ func _attempt_source_proximity_resolve() -> bool:
 
 
 func _attempt_dropoff_proximity_resolve() -> bool:
+	if _carried_amount <= 0:
+		return false
+
 	var command_center: CommandCenter = _find_command_center()
 	if command_center == null or not _can_use_command_center_for_deposit(command_center):
-		_finish_gathering_idle()
-		return true
+		return false
 
-	var use_extended_reach: bool = _carried_amount > 0
-	if not _is_near_command_center_for_deposit(command_center, use_extended_reach):
+	if not _is_near_command_center_for_deposit(command_center, true):
 		return false
 
 	has_move_target = false
@@ -580,6 +611,15 @@ func _try_repath_task_movement() -> void:
 		_apply_current_task_movement_target()
 		return
 
+	if (
+		_gather_state == GatherTripState.TO_COMMAND_CENTER
+		and _carried_amount > 0
+	):
+		var command_center: CommandCenter = _find_command_center()
+		if command_center != null and _can_use_command_center_for_deposit(command_center):
+			_move_toward_command_center_for_deposit(command_center)
+			return
+
 	_attempt_task_proximity_resolve()
 
 
@@ -611,13 +651,12 @@ func _apply_current_task_movement_target() -> void:
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
 			if not _is_valid_gather_source(_gather_source):
-				_finish_gathering_idle()
+				_handle_gather_source_lost()
 				return
 			set_movement_target(_compute_resource_approach_position(_gather_source))
 		GatherTripState.TO_COMMAND_CENTER:
 			var command_center: CommandCenter = _find_command_center()
 			if command_center == null or not _can_use_command_center_for_deposit(command_center):
-				_finish_gathering_idle()
 				return
 			set_movement_target(_compute_command_center_dropoff_position(command_center))
 		_:
@@ -665,7 +704,7 @@ func _is_near_collision_target(
 
 func _handle_arrived_at_source() -> void:
 	if not _is_valid_gather_source(_gather_source):
-		_finish_gathering_idle()
+		_handle_gather_source_lost()
 		return
 
 	if not _is_near_resource_for_gather(_gather_source):
@@ -673,13 +712,19 @@ func _handle_arrived_at_source() -> void:
 			_apply_current_task_movement_target()
 			return
 
-		_finish_gathering_idle()
-		return
+		if not _is_near_collision_target(
+			_gather_source, GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS
+		):
+			_handle_gather_source_lost()
+			return
 
 	_source_approach_candidate_index = 0
 
 	if not _gather_source.can_gather():
-		_finish_gathering_idle()
+		if _carried_amount > 0:
+			_begin_return_to_command_center()
+		elif not _try_reassign_gather_source():
+			_finish_gathering_idle()
 		return
 
 	if _should_return_to_command_center_from_source():
@@ -691,33 +736,26 @@ func _handle_arrived_at_source() -> void:
 func _handle_command_center_arrival() -> void:
 	var command_center: CommandCenter = _find_command_center()
 	if command_center == null or not _can_use_command_center_for_deposit(command_center):
+		if _carried_amount > 0:
+			return
 		_finish_gathering_idle()
 		return
 
-	if _is_near_command_center_for_deposit(command_center, _carried_amount > 0):
-		if _carried_amount > 0:
-			_deposit_carried()
-
-		if _carried_amount > 0:
+	if _carried_amount > 0:
+		if _try_deposit_at_command_center(command_center):
+			_dropoff_candidate_index = 0
+			_continue_gather_cycle()
 			return
 
-		_dropoff_candidate_index = 0
-		_continue_gather_cycle()
-		return
-
-	if not has_move_target:
 		if _advance_task_approach_candidate():
 			_apply_current_task_movement_target()
 			return
 
-		if _carried_amount > 0 and _is_near_command_center_for_deposit(command_center, true):
-			_deposit_carried()
-			if _carried_amount <= 0:
-				_dropoff_candidate_index = 0
-				_continue_gather_cycle()
-			return
+		_move_toward_command_center_for_deposit(command_center)
+		return
 
-		_finish_gathering_idle()
+	_dropoff_candidate_index = 0
+	_continue_gather_cycle()
 
 
 
@@ -744,19 +782,19 @@ func _on_gather_wait_finished() -> void:
 	if not _is_alive() or _gather_state != GatherTripState.GATHER_WAIT:
 		return
 
-	if _gather_source == null or not is_instance_valid(_gather_source):
-		_gather_state = GatherTripState.DONE
-		return
-
 	if not _is_valid_gather_source(_gather_source):
-		_finish_gathering_idle()
+		if _carried_amount > 0:
+			_begin_return_to_command_center()
+		elif not _try_reassign_gather_source():
+			_finish_gathering_idle()
 		return
 
 	var gathered: int = _gather_source.gather(_gather_source.get_gather_chunk_size())
 	_carried_amount += gathered
 
 	if _carried_amount <= 0 and not _gather_source.can_gather():
-		_finish_gathering_idle()
+		if not _try_reassign_gather_source():
+			_finish_gathering_idle()
 		return
 
 	if _should_return_to_command_center_from_source():
@@ -766,38 +804,76 @@ func _on_gather_wait_finished() -> void:
 	elif _carried_amount > 0:
 		_begin_return_to_command_center()
 	else:
-		_finish_gathering_idle()
+		if not _try_reassign_gather_source():
+			_finish_gathering_idle()
 
 
 func _begin_return_to_command_center() -> void:
-	var command_center: CommandCenter = _find_command_center()
-	if command_center == null or not _can_use_command_center_for_deposit(command_center):
-		_gather_state = GatherTripState.DONE
-		return
-
 	_dropoff_candidate_index = 0
 	_gather_state = GatherTripState.TO_COMMAND_CENTER
+	_retry_return_to_command_center()
+
+
+func _retry_return_to_command_center() -> void:
+	var command_center: CommandCenter = _find_command_center()
+	if command_center == null or not _can_use_command_center_for_deposit(command_center):
+		return
+
 	set_movement_target(_compute_command_center_dropoff_position(command_center))
 
 
+func _has_valid_dropoff_target() -> bool:
+	var command_center: CommandCenter = _find_command_center()
+	return command_center != null and _can_use_command_center_for_deposit(command_center)
+
+
 func _deposit_carried() -> void:
-	if _gather_source == null:
+	if _carried_amount <= 0:
 		return
 
-	WorkerGathering.deposit(
-		_gather_source.get_resource_id(),
-		_carried_amount,
-		_is_enemy_worker()
-	)
+	var resource_id: StringName = _get_carried_resource_id()
+	if resource_id.is_empty():
+		return
+
+	WorkerGathering.deposit(resource_id, _carried_amount, _is_enemy_worker())
 	_carried_amount = 0
 
 
-func _continue_gather_cycle() -> void:
-	if not _is_valid_gather_source(_gather_source):
-		_finish_gathering_idle()
+func _get_carried_resource_id() -> StringName:
+	if not _assigned_resource_id.is_empty():
+		return _assigned_resource_id
+
+	if _is_valid_gather_source(_gather_source):
+		return _gather_source.get_resource_id()
+
+	return &""
+
+
+func _try_deposit_at_command_center(command_center: CommandCenter) -> bool:
+	if _carried_amount <= 0:
+		return true
+
+	if not _is_near_command_center_for_deposit(command_center, true):
+		return false
+
+	_deposit_carried()
+	return _carried_amount <= 0
+
+
+func _move_toward_command_center_for_deposit(command_center: CommandCenter) -> void:
+	if command_center == null or not is_instance_valid(command_center):
 		return
 
-	if not _gather_source.can_gather():
+	var target: Vector3 = command_center.global_position
+	target.y = global_position.y
+	_dropoff_candidate_index = 0
+	set_movement_target(_snap_task_target_to_navigation(target))
+
+
+func _continue_gather_cycle() -> void:
+	if not _is_valid_gather_source(_gather_source) or not _gather_source.can_gather():
+		if _try_reassign_gather_source():
+			return
 		_finish_gathering_idle()
 		return
 
@@ -806,9 +882,71 @@ func _continue_gather_cycle() -> void:
 	set_movement_target(_compute_resource_approach_position(_gather_source))
 
 
+func _handle_gather_source_lost() -> void:
+	if _carried_amount > 0:
+		_begin_return_to_command_center()
+		return
+
+	if not _try_reassign_gather_source():
+		_finish_gathering_idle()
+
+
+func _try_reassign_gather_source() -> bool:
+	var resource_id: StringName = _get_assigned_resource_id()
+	if resource_id.is_empty():
+		return false
+
+	var scene_root: Node = get_tree().current_scene
+	var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
+		resource_id,
+		global_position,
+		scene_root,
+		_is_enemy_worker(),
+		_gather_source if _is_valid_gather_source(_gather_source) else null
+	)
+	if replacement == null:
+		return false
+
+	_gather_source = replacement
+	_assigned_resource_id = replacement.get_resource_id()
+	_source_approach_candidate_index = 0
+	_gather_state = GatherTripState.TO_SOURCE
+	set_movement_target(_compute_resource_approach_position(replacement))
+	return true
+
+
+func _get_assigned_resource_id() -> StringName:
+	if not _assigned_resource_id.is_empty():
+		return _assigned_resource_id
+
+	if _is_valid_gather_source(_gather_source):
+		return _gather_source.get_resource_id()
+
+	return &""
+
+
+func _recover_done_gather_state() -> void:
+	if _carried_amount > 0:
+		_begin_return_to_command_center()
+		return
+
+	if _try_reassign_gather_source():
+		return
+
+	_finish_gathering_idle()
+
+
 func _finish_gathering_idle() -> void:
+	if _carried_amount > 0:
+		var command_center: CommandCenter = _find_command_center()
+		if command_center != null and _try_deposit_at_command_center(command_center):
+			pass
+		if _carried_amount > 0:
+			return
+
 	_gather_state = GatherTripState.IDLE
 	_gather_source = null
+	_assigned_resource_id = &""
 	_carried_amount = 0
 
 
