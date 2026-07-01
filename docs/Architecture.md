@@ -56,7 +56,7 @@ Godot scene files.
 Gameplay data resources.
 
 /docs
-Design and planning documents.
+Design and planning documents (including ROADMAP.md for milestone priorities).
 
 ## Autoload Managers
 
@@ -194,6 +194,8 @@ If a script becomes too large, split it into components.
 13. Heroes
 14. AI
 15. UI polish
+
+See `/docs/ROADMAP.md` for current milestone status and active priorities beyond this initial order.
 
 ## Definition of Done
 

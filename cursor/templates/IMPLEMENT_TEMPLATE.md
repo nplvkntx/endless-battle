@@ -8,6 +8,7 @@ Before writing any code:
 
    * AI_CONTEXT.md
    * RULES.md
+   * /docs/ROADMAP.md (current priorities and known issues)
    * Relevant documentation from /docs
 
 2. Only implement the requested task.
@@ -27,6 +28,8 @@ Before writing any code:
    * No duplicated code
    * No hardcoded gameplay values
    * Use Resources (.tres)
+   * One small task — no whole-project scan, no big refactors, no new helpers unless requested
+   * UI/production: RMB cancel uses `Control.accept_event()`, not `event.accept_event()`
 
 After implementation provide:
 
@@ -34,4 +37,4 @@ After implementation provide:
 * Files modified
 * Explanation of every change
 * Possible edge cases
-* Manual testing instructions
+* Manual F5 testing instructions (user tests before commit)

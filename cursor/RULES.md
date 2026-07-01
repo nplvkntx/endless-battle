@@ -52,6 +52,20 @@ resources/
 Documentation:
 docs/
 
+## UI Rules
+
+* For production queue UI, RMB cancel/dequeue must use `Control.accept_event()` — not `event.accept_event()` (causes crashes).
+* Avoid creating parser-risk helper classes for UI tasks unless explicitly requested.
+* Victory/defeat and other modal UI must not break input handling — defer if unstable.
+
+## Cursor Workflow
+
+* One small task at a time — no big refactors.
+* Read only files needed for the task — do not scan the whole project.
+* No new helper scripts unless the task explicitly requests them.
+* Manual F5 test before commit; provide exact test steps after changes.
+* See `AI_CONTEXT.md` and `/docs/ROADMAP.md` for current project state and priorities.
+
 ## AI Behavior
 
 If something is unclear:
