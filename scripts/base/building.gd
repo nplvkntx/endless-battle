@@ -15,6 +15,9 @@ const STATE_CONSTRUCTING: StringName = &"constructing"
 const STATE_COMPLETED: StringName = &"completed"
 
 const CONSTRUCTION_PLACEHOLDER_ALPHA: float = 0.4
+const CONSTRUCTION_EDGE_STANDOFF: float = 0.75
+const BUILD_RANGE: float = 2.5
+const FALLBACK_FOOTPRINT_HALF_EXTENT: float = 1.5
 
 @export var building_data: Resource
 
@@ -140,6 +143,131 @@ func start_under_construction() -> void:
 
 func setup_construction(duration: float) -> void:
 	_construction_duration = duration
+
+
+## Returns standoff positions around the building footprint for worker construction.
+func get_construction_points() -> Array[Vector3]:
+	var half_extents: Vector2 = _get_footprint_half_extents()
+	var edge_x: float = half_extents.x + CONSTRUCTION_EDGE_STANDOFF
+	var edge_z: float = half_extents.y + CONSTRUCTION_EDGE_STANDOFF
+	var local_offsets: Array[Vector3] = [
+		Vector3(edge_x, 0.0, edge_z),
+		Vector3(0.0, 0.0, edge_z),
+		Vector3(-edge_x, 0.0, edge_z),
+		Vector3(-edge_x, 0.0, 0.0),
+		Vector3(-edge_x, 0.0, -edge_z),
+		Vector3(0.0, 0.0, -edge_z),
+		Vector3(edge_x, 0.0, -edge_z),
+		Vector3(edge_x, 0.0, 0.0),
+	]
+
+	var points: Array[Vector3] = []
+	for local_offset: Vector3 in local_offsets:
+		points.append(_footprint_offset_to_world(local_offset))
+
+	return points
+
+
+func get_nearest_construction_point(from_position: Vector3) -> Vector3:
+	return get_construction_point_by_index(
+		get_nearest_construction_point_index(from_position)
+	)
+
+
+func get_construction_point_by_index(point_index: int) -> Vector3:
+	var points: Array[Vector3] = get_construction_points()
+	if points.is_empty():
+		return global_position
+
+	var safe_index: int = posmod(point_index, points.size())
+	return points[safe_index]
+
+
+func get_nearest_construction_point_index(from_position: Vector3) -> int:
+	var points: Array[Vector3] = get_construction_points()
+	if points.is_empty():
+		return 0
+
+	var best_index: int = 0
+	var best_distance_sq: float = INF
+	for point_index: int in points.size():
+		var offset: Vector3 = from_position - points[point_index]
+		offset.y = 0.0
+		var distance_sq: float = offset.length_squared()
+		if distance_sq < best_distance_sq:
+			best_distance_sq = distance_sq
+			best_index = point_index
+
+	return best_index
+
+
+func get_construction_point_by_rank(from_position: Vector3, rank: int) -> Vector3:
+	var ranked_points: Array[Vector3] = _get_construction_points_sorted_by_distance(from_position)
+	if ranked_points.is_empty():
+		return global_position
+
+	var safe_rank: int = posmod(rank, ranked_points.size())
+	return ranked_points[safe_rank]
+
+
+func is_position_in_construction_range(
+	from_position: Vector3, build_range: float = BUILD_RANGE
+) -> bool:
+	var range_sq: float = build_range * build_range
+	for point: Vector3 in get_construction_points():
+		var offset: Vector3 = from_position - point
+		offset.y = 0.0
+		if offset.length_squared() <= range_sq:
+			return true
+
+	return false
+
+
+func _get_construction_points_sorted_by_distance(from_position: Vector3) -> Array[Vector3]:
+	var points: Array[Vector3] = get_construction_points()
+	points.sort_custom(
+		func(a: Vector3, b: Vector3) -> bool:
+			var offset_a: Vector3 = a - from_position
+			offset_a.y = 0.0
+			var offset_b: Vector3 = b - from_position
+			offset_b.y = 0.0
+			return offset_a.length_squared() < offset_b.length_squared()
+	)
+	return points
+
+
+func _get_footprint_half_extents() -> Vector2:
+	var collision_shape: CollisionShape3D = (
+		get_node_or_null("CollisionShape3D") as CollisionShape3D
+	)
+	if collision_shape == null or collision_shape.shape == null:
+		return Vector2(FALLBACK_FOOTPRINT_HALF_EXTENT, FALLBACK_FOOTPRINT_HALF_EXTENT)
+
+	var basis_scale: Vector3 = collision_shape.transform.basis.get_scale()
+	if collision_shape.shape is BoxShape3D:
+		var box_shape := collision_shape.shape as BoxShape3D
+		return Vector2(
+			absf(box_shape.size.x * basis_scale.x) * 0.5,
+			absf(box_shape.size.z * basis_scale.z) * 0.5
+		)
+
+	if collision_shape.shape is CylinderShape3D:
+		var cylinder_shape := collision_shape.shape as CylinderShape3D
+		var radius: float = absf(
+			cylinder_shape.radius * maxf(basis_scale.x, basis_scale.z)
+		)
+		return Vector2(radius, radius)
+
+	return Vector2(FALLBACK_FOOTPRINT_HALF_EXTENT, FALLBACK_FOOTPRINT_HALF_EXTENT)
+
+
+func _footprint_offset_to_world(local_offset: Vector3) -> Vector3:
+	var world_offset: Vector3 = global_transform.basis * local_offset
+	return Vector3(
+		global_position.x + world_offset.x,
+		global_position.y,
+		global_position.z + world_offset.z
+	)
 
 
 ## Called when a worker arrives at the build site.
