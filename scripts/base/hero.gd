@@ -84,6 +84,36 @@ func clear_item_at_slot(slot_index: int) -> bool:
 	return set_item_at_slot(slot_index, null)
 
 
+func remove_item_at_slot(slot_index: int) -> bool:
+	if not _is_valid_inventory_slot(slot_index):
+		return false
+
+	if inventory[slot_index] == null:
+		return false
+
+	inventory[slot_index] = null
+	inventory_changed.emit()
+	return true
+
+
+func reorder_inventory_slot(from_index: int, to_index: int) -> bool:
+	if from_index == to_index:
+		return false
+
+	if not _is_valid_inventory_slot(from_index) or not _is_valid_inventory_slot(to_index):
+		return false
+
+	if inventory[from_index] == null:
+		return false
+
+	var from_item = inventory[from_index]
+	var to_item = inventory[to_index]
+	inventory[from_index] = to_item
+	inventory[to_index] = from_item
+	inventory_changed.emit()
+	return true
+
+
 func _is_valid_inventory_slot(slot_index: int) -> bool:
 	return slot_index >= 0 and slot_index < inventory.size()
 

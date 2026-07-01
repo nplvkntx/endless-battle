@@ -340,6 +340,8 @@ func _update_shop_item_ui() -> void:
 			continue
 
 		info_label.text = "%s\n%s" % [item.display_name, _get_shop_item_effect_label(item)]
+		button.icon = HeroItemIcons.get_icon_texture(item_id)
+		button.expand_icon = true
 		button.text = "%s\n%dG" % [HeroItemCatalog.get_hotkey_label(item_id), item.gold_cost]
 		button.disabled = not HeroItemService.can_purchase_from_shop(_selected_shop, item_id)
 

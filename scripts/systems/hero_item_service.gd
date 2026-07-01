@@ -10,6 +10,7 @@ const MSG_NO_NEARBY_HERO := "Move a hero near the shop"
 const MSG_INVENTORY_FULL := "Hero inventory is full"
 const MSG_NOT_ENOUGH_GOLD := "Not enough gold"
 const MSG_SHOP_UNAVAILABLE := "Shop cannot sell items"
+const SELL_REFUND_RATIO := 0.5
 
 
 static func try_purchase_from_shop(shop: Shop, item_id: StringName) -> bool:
@@ -119,6 +120,56 @@ static func apply_item_to_hero(
 
 	_apply_health_bonus(hero, item, grant_immediate_bonuses)
 	_apply_mana_bonus(hero, item, grant_immediate_bonuses)
+
+
+static func can_modify_player_inventory(hero: Hero) -> bool:
+	if hero == null or not is_instance_valid(hero) or hero.is_queued_for_deletion():
+		return false
+
+	return TeamVisuals.resolve_team(hero, hero.team_id) == TeamVisuals.PLAYER_TEAM_ID
+
+
+static func try_reorder_inventory_slot(hero: Hero, from_index: int, to_index: int) -> bool:
+	if not can_modify_player_inventory(hero):
+		return false
+
+	return hero.reorder_inventory_slot(from_index, to_index)
+
+
+static func try_sell_inventory_item(hero: Hero, slot_index: int) -> bool:
+	if not can_modify_player_inventory(hero):
+		return false
+
+	var item = hero.get_item_at_slot(slot_index)
+	if not item is HeroItemDefinition:
+		return false
+
+	var definition: HeroItemDefinition = item as HeroItemDefinition
+	remove_item_from_hero(hero, definition)
+	hero.remove_item_at_slot(slot_index)
+
+	var refund: int = int(definition.gold_cost * SELL_REFUND_RATIO)
+	if refund > 0:
+		ResourceManager.add_gold(refund)
+
+	return true
+
+
+static func remove_item_from_hero(hero: Hero, item: HeroItemDefinition) -> void:
+	if hero == null or item == null:
+		return
+
+	if item.bonus_attack_damage != 0 and "attack_damage" in hero:
+		hero.set(
+			"attack_damage",
+			maxi(0, int(hero.get("attack_damage")) - item.bonus_attack_damage)
+		)
+
+	if item.bonus_move_speed != 0.0:
+		hero.move_speed = maxf(0.0, hero.move_speed - item.bonus_move_speed)
+
+	_remove_health_bonus(hero, item)
+	_remove_mana_bonus(hero, item)
 
 
 static func restore_inventory_items(hero: Hero) -> void:
@@ -257,6 +308,44 @@ static func _apply_mana_bonus(
 	if restore_amount > 0 and hero.has_signal("mana_changed"):
 		var current_mana: int = mini(int(hero.get("current_mana")) + restore_amount, max_mana)
 		hero.set("current_mana", current_mana)
+		hero.mana_changed.emit(current_mana, max_mana)
+
+
+static func _remove_health_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_max_health == 0:
+		return
+
+	var health_component: HealthComponent = hero.get_node_or_null(
+		"HealthComponent"
+	) as HealthComponent
+	if health_component == null:
+		return
+
+	health_component.max_health = maxi(1, health_component.max_health - item.bonus_max_health)
+	health_component.current_health = maxi(
+		1,
+		mini(health_component.current_health, health_component.max_health)
+	)
+	health_component.health_changed.emit(
+		health_component.current_health,
+		health_component.max_health
+	)
+
+
+static func _remove_mana_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_max_mana == 0:
+		return
+
+	if not ("max_mana" in hero) or not ("current_mana" in hero):
+		return
+
+	var max_mana: int = maxi(0, int(hero.get("max_mana")) - item.bonus_max_mana)
+	hero.set("max_mana", max_mana)
+
+	var current_mana: int = mini(int(hero.get("current_mana")), max_mana)
+	hero.set("current_mana", current_mana)
+
+	if hero.has_signal("mana_changed"):
 		hero.mana_changed.emit(current_mana, max_mana)
 
 
