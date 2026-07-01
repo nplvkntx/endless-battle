@@ -2,7 +2,9 @@ extends PanelContainer
 
 ## Top HUD bar showing current player resources from ResourceManager.
 
-@onready var _resource_label: Label = $MarginContainer/ResourceLabel
+@onready var _gold_label: Label = $MarginContainer/HBoxContainer/GoldLabel
+@onready var _wood_label: Label = $MarginContainer/HBoxContainer/WoodLabel
+@onready var _food_label: Label = $MarginContainer/HBoxContainer/FoodLabel
 
 
 func _ready() -> void:
@@ -16,9 +18,6 @@ func _on_food_changed(_current: int, _maximum: int) -> void:
 
 
 func _refresh_display() -> void:
-	_resource_label.text = "Gold: %d | Wood: %d | Food: %d/%d" % [
-		ResourceManager.gold,
-		ResourceManager.wood,
-		ResourceManager.food_current,
-		ResourceManager.food_max,
-	]
+	_gold_label.text = "Gold: %d" % ResourceManager.gold
+	_wood_label.text = "Wood: %d" % ResourceManager.wood
+	_food_label.text = "Food: %d/%d" % [ResourceManager.food_current, ResourceManager.food_max]

@@ -2,7 +2,7 @@ extends PanelContainer
 
 ## Shows basic name, type, health, and portrait placeholder for the current selection.
 
-@export var selection_manager_path: NodePath = "../../../../SelectionManager"
+@export var selection_manager_path: NodePath = "../../../../../../SelectionManager"
 
 @onready var _portrait_color: ColorRect = $MarginContainer/HBoxContainer/PortraitFrame/PortraitColor
 @onready var _portrait_label: Label = $MarginContainer/HBoxContainer/PortraitFrame/PortraitLabel
@@ -31,8 +31,6 @@ const PORTRAIT_STYLES: Dictionary = {
 
 
 func _ready() -> void:
-	visible = false
-
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
 		return
@@ -227,7 +225,12 @@ func _clear_health_tracking() -> void:
 
 
 func _hide_panel() -> void:
-	visible = false
+	_set_portrait("multiple")
+	_name_label.text = ""
+	_type_label.visible = false
+	_health_label.visible = false
+	_mana_label.visible = false
+	visible = true
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:

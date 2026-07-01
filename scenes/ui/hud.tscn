@@ -1,0 +1,591 @@
+[gd_scene format=3 uid="uid://gjpafcmsoh1y"]
+
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
+[ext_resource type="Script" uid="uid://dtd2gbjgk187t" path="res://scripts/ui/resource_bar.gd" id="2_resource_bar"]
+[ext_resource type="Script" uid="uid://cyivqjvoaqcya" path="res://scripts/ui/command_bar.gd" id="3_command_bar"]
+[ext_resource type="Script" uid="uid://btxpb4kfi7pea" path="res://scripts/ui/selection_info_panel.gd" id="4_selection_info_panel"]
+[ext_resource type="Script" uid="uid://cbvwh14g2aijb" path="res://scripts/ui/build_commands.gd" id="5_build_commands"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_resource_bar"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bottom_panel"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.06, 0.06, 0.08, 0.94)
+border_width_top = 2
+border_color = Color(0.28, 0.3, 0.34, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_unit_panel"]
+content_margin_left = 8.0
+content_margin_top = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.05, 0.05, 0.07, 0.6)
+border_width_right = 1
+border_color = Color(0.22, 0.24, 0.28, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_portrait_frame"]
+bg_color = Color(0.04, 0.04, 0.06, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.35, 0.38, 0.42, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_panel"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0, 0, 0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_minimap_panel"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.04, 0.04, 0.06, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.24, 0.28, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_button"]
+bg_color = Color(0.1, 0.1, 0.12, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.28, 0.3, 0.34, 1)
+
+[node name="Hud" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+[node name="TopBar" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 40.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_resource_bar")
+script = ExtResource("2_resource_bar")
+
+[node name="MarginContainer" type="MarginContainer" parent="TopBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="TopBar/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 32
+
+[node name="GoldLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.85, 0.35, 1)
+theme_override_font_sizes/font_size = 14
+text = "Gold: 0"
+
+[node name="WoodLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.8, 0.4, 1)
+theme_override_font_sizes/font_size = 14
+text = "Wood: 0"
+
+[node name="FoodLabel" type="Label" parent="TopBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 14
+text = "Food: 0/0"
+
+[node name="BottomPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -180.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bottom_panel")
+script = ExtResource("3_command_bar")
+
+[node name="MarginContainer" type="MarginContainer" parent="BottomPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="BottomPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="UnitPanel" type="PanelContainer" parent="BottomPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(280, 220)
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_unit_panel")
+script = ExtResource("4_selection_info_panel")
+selection_manager_path = NodePath("../../../../../../SelectionManager")
+
+[node name="MarginContainer" type="MarginContainer" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel"]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PortraitFrame" type="PanelContainer" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_portrait_frame")
+
+[node name="PortraitColor" type="ColorRect" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+layout_mode = 2
+color = Color(0.5, 0.5, 0.55, 1)
+
+[node name="PortraitLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/PortraitFrame"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 16
+text = "?"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="InfoVBox" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="NameLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 14
+text = "Unit Name"
+
+[node name="TypeLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Type: Unit"
+
+[node name="HPBar" type="ProgressBar" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="ManaBar" type="ProgressBar" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="HealthLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Health: 100 / 100"
+
+[node name="ManaLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "Mana: 100 / 100"
+
+[node name="CommandPanel" type="PanelContainer" parent="BottomPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_command_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="SelectionCommandPanel" type="PanelContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_command_panel")
+script = ExtResource("5_build_commands")
+selection_manager_path = NodePath("../../../../../../../../../SelectionManager")
+build_manager_path = NodePath("../../../../../../../../../BuildManager")
+
+[node name="MarginContainer" type="MarginContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel"]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CenterPanel" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 4
+
+[node name="WorkerQueueLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 13
+text = "Worker Queue: 0"
+
+[node name="BarracksPanel" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="BarracksQueuesRow" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SwordsmanQueueLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Swordsman Queue: 0"
+
+[node name="ArcherQueueLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Archer Queue: 0"
+
+[node name="RallyPointHintLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 11
+text = "Right-click ground to set rally point"
+
+[node name="HeroAltarPanel" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="HeroStatusLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 13
+text = "Hero: Ready to train"
+
+[node name="HeroAltarRallyHintLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 11
+text = "Right-click ground to set rally point for Hero"
+
+[node name="RightPanel" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 6
+
+[node name="ButtonsRow" type="GridContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
+columns = 3
+
+[node name="BuildFarmButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Farm"
+
+[node name="BuildBarracksButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Barracks"
+
+[node name="BuildTowerButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Tower"
+
+[node name="BuildHeroAltarButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Hero Altar"
+
+[node name="BuildCommandCenterButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Build Town Center"
+
+[node name="TrainWorkerButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Train Worker"
+
+[node name="AttackButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+text = "Attack"
+
+[node name="BarracksTrainingRow" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TrainSwordsmanButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Swordsman"
+
+[node name="TrainArcherButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Archer"
+
+[node name="HeroAltarTrainingRow" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+
+[node name="TrainHeroButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow"]
+custom_minimum_size = Vector2(140, 28)
+layout_mode = 2
+text = "Train Hero"
+
+[node name="HeroPanel" type="HBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GroundSlamColumn" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="GroundSlamCooldownLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "Q: Ready"
+horizontal_alignment = 1
+
+[node name="GroundSlamUpgradeButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade Q"
+text = "▲"
+
+[node name="GroundSlamButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Ground Slam"
+
+[node name="DivineProtectionColumn" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="DivineProtectionCooldownLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "W: Ready"
+horizontal_alignment = 1
+
+[node name="DivineProtectionUpgradeButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade W"
+text = "▲"
+
+[node name="DivineProtectionButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/DivineProtectionColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Divine Prot."
+
+[node name="PowerStrikeColumn" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="PowerStrikeCooldownLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "E: Ready"
+horizontal_alignment = 1
+
+[node name="PowerStrikeUpgradeButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade E"
+text = "▲"
+
+[node name="PowerStrikeButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/PowerStrikeColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Power Strike"
+
+[node name="ExecuteColumn" type="VBoxContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ExecuteCooldownLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "R: Ready"
+horizontal_alignment = 1
+
+[node name="ExecuteUpgradeButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+visible = false
+custom_minimum_size = Vector2(72, 18)
+layout_mode = 2
+tooltip_text = "Upgrade R"
+text = "▲"
+
+[node name="ExecuteButton" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/HeroPanel/ExecuteColumn"]
+custom_minimum_size = Vector2(72, 28)
+layout_mode = 2
+text = "Execute"
+
+[node name="CommandButtonGrid" type="GridContainer" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 3
+
+[node name="CommandButton01" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton02" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton03" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton04" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton05" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton06" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton07" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton08" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton09" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton10" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton11" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="CommandButton12" type="Button" parent="BottomPanel/MarginContainer/HBoxContainer/CommandPanel/MarginContainer/VBoxContainer/CommandButtonGrid"]
+custom_minimum_size = Vector2(64, 48)
+layout_mode = 2
+disabled = true
+theme_override_styles/disabled = SubResource("StyleBoxFlat_command_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_command_button")
+
+[node name="MinimapPanel" type="PanelContainer" parent="BottomPanel/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(220, 220)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_minimap_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="BottomPanel/MarginContainer/HBoxContainer/MinimapPanel"]
+layout_mode = 2
+
+[node name="MinimapPlaceholder" type="ColorRect" parent="BottomPanel/MarginContainer/HBoxContainer/MinimapPanel/MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+color = Color(0.08, 0.1, 0.12, 1)
+
+[node name="MinimapLabel" type="Label" parent="BottomPanel/MarginContainer/HBoxContainer/MinimapPanel/MarginContainer/MinimapPlaceholder"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.45, 0.48, 0.52, 1)
+theme_override_font_sizes/font_size = 12
+text = "Minimap"
+horizontal_alignment = 1
+vertical_alignment = 1
