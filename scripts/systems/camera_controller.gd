@@ -92,3 +92,10 @@ func _clamp_position(position: Vector3) -> Vector3:
 	position.x = clampf(position.x, min_x, max_x)
 	position.z = clampf(position.z, min_z, max_z)
 	return position
+
+
+func focus_on_world_position(world_position: Vector3) -> void:
+	var new_position := global_position
+	new_position.x = world_position.x
+	new_position.z = world_position.z
+	global_position = _clamp_position(new_position)

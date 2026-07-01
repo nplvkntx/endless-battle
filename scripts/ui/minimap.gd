@@ -37,7 +37,7 @@ var _update_timer: float = 0.0
 
 
 func _ready() -> void:
-	mouse_filter = MOUSE_FILTER_IGNORE
+	mouse_filter = MOUSE_FILTER_STOP
 	resized.connect(_on_resized)
 	_camera = _resolve_camera()
 	_refresh_entities()
@@ -57,6 +57,23 @@ func _process(delta: float) -> void:
 func _on_resized() -> void:
 	_refresh_entities()
 	queue_redraw()
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mouse_button := event as InputEventMouseButton
+		if mouse_button.button_index != MOUSE_BUTTON_LEFT or not mouse_button.pressed:
+			return
+		_move_camera_to_minimap_position(mouse_button.position)
+		accept_event()
+		return
+
+	if event is InputEventMouseMotion:
+		var motion := event as InputEventMouseMotion
+		if (motion.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+			return
+		_move_camera_to_minimap_position(motion.position)
+		accept_event()
 
 
 func _draw() -> void:
@@ -243,3 +260,39 @@ func _world_to_minimap(world_x: float, world_z: float) -> Vector2:
 		normalized.y = 1.0 - normalized.y
 
 	return Vector2(normalized.x * size.x, normalized.y * size.y)
+
+
+func _minimap_to_world(minimap_position: Vector2) -> Vector3:
+	var span_x: float = world_max_x - world_min_x
+	var span_z: float = world_max_z - world_min_z
+	if span_x <= 0.0 or span_z <= 0.0 or size.x <= 0.0 or size.y <= 0.0:
+		return Vector3.ZERO
+
+	var normalized := Vector2(
+		minimap_position.x / size.x,
+		minimap_position.y / size.y
+	)
+
+	if flip_z:
+		normalized.y = 1.0 - normalized.y
+
+	if flip_x:
+		normalized.x = 1.0 - normalized.x
+
+	if swap_axes:
+		normalized = Vector2(normalized.y, normalized.x)
+
+	return Vector3(
+		world_min_x + normalized.x * span_x,
+		0.0,
+		world_min_z + normalized.y * span_z
+	)
+
+
+func _move_camera_to_minimap_position(local_position: Vector2) -> void:
+	_camera = _resolve_camera()
+	if _camera == null:
+		return
+
+	var world_position: Vector3 = _minimap_to_world(local_position)
+	_camera.focus_on_world_position(world_position)
