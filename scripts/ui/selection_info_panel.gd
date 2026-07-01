@@ -22,6 +22,7 @@ extends PanelContainer
 @onready var _damage_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/DamageLabel
 @onready var _armor_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/ArmorLabel
 @onready var _speed_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/SpeedLabel
+@onready var _inventory_slots: HeroInventorySlots = $MarginContainer/HBoxContainer/InfoVBox/InventorySlots
 
 var _tracked_health_component: HealthComponent = null
 var _tracked_hero: Hero = null
@@ -92,6 +93,7 @@ func _refresh_panel() -> void:
 	_clear_health_tracking()
 	_clear_mana_tracking()
 	_hide_xp_display()
+	_hide_inventory_display()
 	_clear_production_tracking()
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
@@ -149,6 +151,7 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	_health_label.visible = false
 	_mana_label.visible = false
 	_stats_row.visible = false
+	_hide_inventory_display()
 	_hide_production_display()
 
 	match category:
@@ -193,8 +196,10 @@ func _show_unit_info(unit: Unit) -> void:
 	_configure_mana_display(unit)
 	if unit is Hero:
 		_configure_xp_display(unit as Hero)
+		_configure_inventory_display(unit as Hero)
 	else:
 		_hide_xp_display()
+		_hide_inventory_display()
 	_configure_stats_display(unit)
 	_hide_production_display()
 
@@ -252,6 +257,7 @@ func _show_enemy_unit_info(unit: Unit) -> void:
 		_configure_health_display(unit, true)
 		_configure_enemy_mana_display(unit as Hero)
 		_configure_stats_display(unit)
+		_hide_inventory_display()
 		return
 
 	_level_label.visible = false
@@ -470,6 +476,23 @@ func _configure_xp_display(hero: Hero) -> void:
 func _hide_xp_display() -> void:
 	_xp_bar.visible = false
 	_xp_label.visible = false
+
+
+func _configure_inventory_display(hero: Hero) -> void:
+	if hero == null or not is_instance_valid(hero):
+		_hide_inventory_display()
+		return
+
+	_inventory_slots.visible = true
+	_inventory_slots.bind_hero(hero)
+
+
+func _hide_inventory_display() -> void:
+	if _inventory_slots == null:
+		return
+
+	_inventory_slots.visible = false
+	_inventory_slots.unbind()
 
 
 func _update_xp_display(hero: Hero) -> void:

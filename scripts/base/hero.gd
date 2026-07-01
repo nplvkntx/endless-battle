@@ -19,16 +19,19 @@ const HEALTH_PER_LEVEL: int = 25
 const MANA_PER_LEVEL: int = 10
 const ATTACK_DAMAGE_PER_LEVEL: int = 2
 const BASE_MAX_HEALTH: int = 200
+const INVENTORY_SLOT_COUNT: int = 6
 
 @export var hero_data: Resource
 
 var level: int = 1
 var ability_points: int = 1
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
+var inventory: Array = []
 var _current_xp: float = 0.0
 
 
 func _ready() -> void:
+	_init_inventory()
 	super._ready()
 	if level < 1:
 		level = 1
@@ -36,6 +39,41 @@ func _ready() -> void:
 		ability_progression = HeroAbilityProgression.new()
 	_apply_hero_data()
 	_emit_xp_state()
+
+
+func _init_inventory() -> void:
+	inventory.clear()
+	inventory.resize(INVENTORY_SLOT_COUNT)
+	for slot_index: int in INVENTORY_SLOT_COUNT:
+		inventory[slot_index] = null
+
+
+func get_inventory_slot_count() -> int:
+	return INVENTORY_SLOT_COUNT
+
+
+func get_item_at_slot(slot_index: int):
+	if not _is_valid_inventory_slot(slot_index):
+		return null
+
+	return inventory[slot_index]
+
+
+func set_item_at_slot(slot_index: int, item) -> bool:
+	if not _is_valid_inventory_slot(slot_index):
+		return false
+
+	inventory[slot_index] = item
+	inventory_changed.emit()
+	return true
+
+
+func clear_item_at_slot(slot_index: int) -> bool:
+	return set_item_at_slot(slot_index, null)
+
+
+func _is_valid_inventory_slot(slot_index: int) -> bool:
+	return slot_index >= 0 and slot_index < inventory.size()
 
 
 func get_current_xp() -> float:

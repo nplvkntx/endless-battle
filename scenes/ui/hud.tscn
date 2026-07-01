@@ -4,6 +4,7 @@
 [ext_resource type="Script" uid="uid://dtd2gbjgk187t" path="res://scripts/ui/resource_bar.gd" id="2_resource_bar"]
 [ext_resource type="Script" uid="uid://cyivqjvoaqcya" path="res://scripts/ui/command_bar.gd" id="3_command_bar"]
 [ext_resource type="Script" uid="uid://btxpb4kfi7pea" path="res://scripts/ui/selection_info_panel.gd" id="4_selection_info_panel"]
+[ext_resource type="Script" path="res://scripts/ui/hero_inventory_slots.gd" id="4_hero_inventory_slots"]
 [ext_resource type="Script" uid="uid://cbvwh14g2aijb" path="res://scripts/ui/build_commands.gd" id="5_build_commands"]
 [ext_resource type="Script" path="res://scripts/ui/minimap.gd" id="6_minimap"]
 
@@ -174,11 +175,11 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 8.0
-offset_top = -144.0
+offset_top = -168.0
 offset_right = 236.0
 offset_bottom = -8.0
 grow_vertical = 0
-custom_minimum_size = Vector2(228, 136)
+custom_minimum_size = Vector2(228, 160)
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_unit_panel")
 script = ExtResource("4_selection_info_panel")
@@ -356,6 +357,12 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
 theme_override_font_sizes/font_size = 9
 text = "SPD: —"
+
+[node name="InventorySlots" type="HBoxContainer" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 2
+script = ExtResource("4_hero_inventory_slots")
 
 [node name="CommandBar" type="PanelContainer" parent="."]
 visible = false
