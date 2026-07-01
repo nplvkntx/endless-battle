@@ -137,6 +137,8 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	if not unit.is_in_group(&"enemies"):
 		unit.add_to_group(&"enemies")
 
+	EnemyArmyCommand.register_combat_unit(unit)
+
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")
 

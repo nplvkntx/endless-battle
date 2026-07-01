@@ -187,6 +187,8 @@ func _spawn_enemy_hero() -> void:
 	if not hero.is_in_group(&"enemies"):
 		hero.add_to_group(&"enemies")
 
+	EnemyArmyCommand.register_combat_unit(hero)
+
 	spawn_parent.add_child(hero)
 	hero.global_position = global_position + HERO_SPAWN_OFFSET
 

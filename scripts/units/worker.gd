@@ -94,10 +94,11 @@ func _is_alive() -> bool:
 	)
 
 
-func take_damage(amount: float, attacker: Node = null) -> void:
+func take_damage(amount: float, attacker = null) -> void:
 	if not _is_alive():
 		return
 
+	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
 	CombatKillTracker.record_attacker(self, attacker)
 
 	var damage_amount := int(amount)

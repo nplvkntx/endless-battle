@@ -40,6 +40,7 @@ const EXECUTE_COOLDOWN := 45.0
 const EXECUTE_LUNGE_DISTANCE := 0.5
 const BASE_ATTACK_DAMAGE := 18
 const BASE_MAX_MANA := 100
+const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -943,12 +944,16 @@ func _play_attack_animation() -> void:
 	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
-func take_damage(amount: float, _attacker: Node = null) -> void:
+func take_damage(amount: float, attacker = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 
+	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
+
 	if is_divine_protection_active():
 		return
+
+	CombatKillTracker.record_attacker(self, attacker)
 
 	var damage_amount := int(amount)
 	_health_component.take_damage(damage_amount)
@@ -983,7 +988,14 @@ func _begin_chase() -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	var closest_target: Node3D = null
+	if CombatTargetValidation.is_enemy_faction(self):
+		closest_target = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+		)
+	else:
+		closest_target = _find_closest_attack_target_in_range()
+
 	if closest_target != null:
 		command_attack(closest_target)
 

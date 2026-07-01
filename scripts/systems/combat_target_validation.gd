@@ -93,7 +93,7 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 		return true
 
 	if target is Node and (target as Node).is_in_group(&"enemies"):
-		if target is Swordsman or target is Archer or target is Worker:
+		if target is Swordsman or target is Archer or target is Worker or target is Hero:
 			return true
 
 	return is_attackable_enemy_building(target)
@@ -117,7 +117,10 @@ static func is_enemy_faction(node: Variant) -> bool:
 
 
 static func are_hostile(attacker: Node, target: Variant) -> bool:
-	if attacker == null or not is_valid_combat_target(target):
+	if attacker == null or not is_instance_valid(attacker):
+		return false
+
+	if not is_valid_combat_target(target):
 		return false
 
 	if is_neutral_creep(target) and not is_neutral_creep(attacker):
@@ -247,17 +250,35 @@ static func get_target_current_health(target: Variant) -> int:
 	return 0
 
 
+static func sanitize_damage_attacker(attacker: Variant) -> Node:
+	if attacker == null:
+		return null
+
+	if not is_instance_valid(attacker):
+		return null
+
+	if not attacker is Node:
+		return null
+
+	var node: Node = attacker as Node
+	if node.is_queued_for_deletion():
+		return null
+
+	return node
+
+
 static func apply_damage_to_target(target: Variant, amount: float, attacker = null) -> bool:
 	if not is_valid_combat_target(target):
 		return false
 
-	if attacker != null and not are_hostile(attacker as Node, target):
+	var safe_attacker: Node = sanitize_damage_attacker(attacker)
+	if safe_attacker != null and not are_hostile(safe_attacker, target):
 		return false
 
 	if not target is Object or not (target as Object).has_method("take_damage"):
 		return false
 
-	(target as Object).call("take_damage", amount, attacker)
+	(target as Object).call("take_damage", amount, safe_attacker)
 	return true
 
 

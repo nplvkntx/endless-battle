@@ -82,7 +82,8 @@ func _apply_hit() -> void:
 	if not _is_target_alive():
 		return
 
-	if not CombatTargetValidation.apply_damage_to_target(_target, _damage, _attacker):
+	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(_attacker)
+	if not CombatTargetValidation.apply_damage_to_target(_target, _damage, safe_attacker):
 		return
 
 	MeleeHitSound.play_at(self, _target.global_position)

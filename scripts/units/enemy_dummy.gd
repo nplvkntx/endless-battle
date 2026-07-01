@@ -71,10 +71,11 @@ func _on_health_depleted() -> void:
 	queue_free()
 
 
-func take_damage(amount: float, attacker: Node = null) -> void:
+func take_damage(amount: float, attacker = null) -> void:
 	if _health_component.current_health <= 0:
 		return
 
+	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
 	CombatKillTracker.record_attacker(self, attacker)
 
 	var damage_amount := int(amount)
