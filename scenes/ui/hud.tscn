@@ -86,6 +86,18 @@ bg_color = Color(0.12, 0.12, 0.14, 1)
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_mana_fill"]
 bg_color = Color(0.25, 0.45, 0.95, 1)
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_xp_bg"]
+bg_color = Color(0.12, 0.12, 0.14, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_xp_fill"]
+bg_color = Color(0.82, 0.68, 0.18, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_build_bg"]
+bg_color = Color(0.12, 0.12, 0.14, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_build_fill"]
+bg_color = Color(0.72, 0.58, 0.22, 1)
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_command_button"]
 bg_color = Color(0.1, 0.1, 0.12, 1)
 border_width_left = 1
@@ -162,11 +174,11 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 8.0
-offset_top = -128.0
-offset_right = 228.0
+offset_top = -144.0
+offset_right = 236.0
 offset_bottom = -8.0
 grow_vertical = 0
-custom_minimum_size = Vector2(220, 120)
+custom_minimum_size = Vector2(228, 136)
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_unit_panel")
 script = ExtResource("4_selection_info_panel")
@@ -201,6 +213,15 @@ text = "?"
 horizontal_alignment = 1
 vertical_alignment = 1
 
+[node name="MultiPortraitGrid" type="GridContainer" parent="UnitPanel/MarginContainer/HBoxContainer"]
+visible = false
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/h_separation = 2
+theme_override_constants/v_separation = 2
+columns = 4
+
 [node name="InfoVBox" type="VBoxContainer" parent="UnitPanel/MarginContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
@@ -224,6 +245,20 @@ theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
 theme_override_font_sizes/font_size = 10
 text = "Type: Unit"
 
+[node name="TaskLabel" type="Label" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 10
+text = "Task: Idle"
+
+[node name="CarryLabel" type="Label" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.78, 0.45, 1)
+theme_override_font_sizes/font_size = 10
+text = "Carrying: 0 Gold"
+
 [node name="HPBar" type="ProgressBar" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
 custom_minimum_size = Vector2(0, 8)
 layout_mode = 2
@@ -242,6 +277,26 @@ show_percentage = false
 theme_override_styles/background = SubResource("StyleBoxFlat_mana_bg")
 theme_override_styles/fill = SubResource("StyleBoxFlat_mana_fill")
 
+[node name="XPBar" type="ProgressBar" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+max_value = 100.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_xp_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_xp_fill")
+
+[node name="BuildProgressBar" type="ProgressBar" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+max_value = 100.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_build_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_build_fill")
+
 [node name="HealthLabel" type="Label" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
 visible = false
 layout_mode = 2
@@ -255,6 +310,13 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
 theme_override_font_sizes/font_size = 10
 text = "Mana: 100 / 100"
+
+[node name="BuildingDetailLabel" type="Label" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.78, 0.82, 1)
+theme_override_font_sizes/font_size = 9
+text = "Rally: Set"
 
 [node name="StatsRow" type="HBoxContainer" parent="UnitPanel/MarginContainer/HBoxContainer/InfoVBox"]
 layout_mode = 2
