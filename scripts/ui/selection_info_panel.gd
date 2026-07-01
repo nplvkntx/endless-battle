@@ -1,15 +1,22 @@
 extends PanelContainer
 
-## Shows basic name, type, health, and portrait placeholder for the current selection.
+## Compact bottom-left panel for the current selection (portrait, bars, stats).
 
-@export var selection_manager_path: NodePath = "../../../../../../SelectionManager"
+@export var selection_manager_path: NodePath = "../../../SelectionManager"
 
 @onready var _portrait_color: ColorRect = $MarginContainer/HBoxContainer/PortraitFrame/PortraitColor
 @onready var _portrait_label: Label = $MarginContainer/HBoxContainer/PortraitFrame/PortraitLabel
 @onready var _name_label: Label = $MarginContainer/HBoxContainer/InfoVBox/NameLabel
+@onready var _level_label: Label = $MarginContainer/HBoxContainer/InfoVBox/LevelLabel
 @onready var _type_label: Label = $MarginContainer/HBoxContainer/InfoVBox/TypeLabel
+@onready var _hp_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/HPBar
+@onready var _mana_bar: ProgressBar = $MarginContainer/HBoxContainer/InfoVBox/ManaBar
 @onready var _health_label: Label = $MarginContainer/HBoxContainer/InfoVBox/HealthLabel
 @onready var _mana_label: Label = $MarginContainer/HBoxContainer/InfoVBox/ManaLabel
+@onready var _stats_row: HBoxContainer = $MarginContainer/HBoxContainer/InfoVBox/StatsRow
+@onready var _damage_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/DamageLabel
+@onready var _armor_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/ArmorLabel
+@onready var _speed_label: Label = $MarginContainer/HBoxContainer/InfoVBox/StatsRow/SpeedLabel
 
 var _tracked_health_component: HealthComponent = null
 var _tracked_hero: Hero = null
@@ -82,23 +89,31 @@ func _refresh_panel() -> void:
 
 func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 	visible = true
-	_type_label.visible = false
+	_level_label.visible = false
+	_type_label.visible = true
+	_hp_bar.visible = false
+	_mana_bar.visible = false
 	_health_label.visible = false
 	_mana_label.visible = false
+	_stats_row.visible = false
 
 	match category:
 		&"workers":
 			_set_portrait("worker")
-			_name_label.text = "%d Workers selected" % units.size()
+			_name_label.text = "Multiple Units"
+			_type_label.text = "%d Workers selected" % units.size()
 		&"combat":
 			_set_portrait("multiple")
-			_name_label.text = "%d combat units selected" % units.size()
+			_name_label.text = "Multiple Units"
+			_type_label.text = "%d units selected" % units.size()
 		&"mixed":
 			_set_portrait("mixed")
-			_name_label.text = "Mixed Selection"
+			_name_label.text = "Multiple Units"
+			_type_label.text = "%d units selected" % units.size()
 		_:
 			_set_portrait("multiple")
-			_name_label.text = "Multiple units selected"
+			_name_label.text = "Multiple Units"
+			_type_label.text = "%d units selected" % units.size()
 
 
 func _show_unit_info(unit: Unit) -> void:
@@ -120,8 +135,10 @@ func _show_unit_info(unit: Unit) -> void:
 	_name_label.text = info.name
 	_type_label.text = "Type: %s" % info.type
 	_type_label.visible = true
+	_configure_level_display(unit)
 	_configure_health_display(unit)
 	_configure_mana_display(unit)
+	_configure_stats_display(unit)
 
 
 func _show_building_info(building: Building) -> void:
@@ -135,8 +152,11 @@ func _show_building_info(building: Building) -> void:
 	_name_label.text = info.name
 	_type_label.text = "Type: %s" % info.type
 	_type_label.visible = true
+	_level_label.visible = false
 	_configure_health_display(building)
+	_mana_bar.visible = false
 	_mana_label.visible = false
+	_configure_stats_display(building)
 
 
 func _set_portrait(portrait_key: String) -> void:
@@ -145,22 +165,35 @@ func _set_portrait(portrait_key: String) -> void:
 	_portrait_label.text = style.label
 
 
+func _configure_level_display(unit: Unit) -> void:
+	if unit is Hero:
+		var hero: Hero = unit as Hero
+		_level_label.text = "Level %d" % hero.level
+		_level_label.visible = true
+		return
+
+	_level_label.visible = false
+
+
 func _configure_health_display(node: Node) -> void:
 	var health_component: HealthComponent = node.get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null:
+		_hp_bar.visible = false
 		_health_label.visible = false
 		return
 
 	_tracked_health_component = health_component
 	health_component.health_changed.connect(_on_tracked_health_changed)
-	_update_health_label(health_component.current_health, health_component.max_health)
-	_health_label.visible = true
+	_update_health_display(health_component.current_health, health_component.max_health)
+	_hp_bar.visible = true
+	_health_label.visible = false
 
 
 func _configure_mana_display(unit: Unit) -> void:
 	_clear_mana_tracking()
 
 	if not unit is Hero:
+		_mana_bar.visible = false
 		_mana_label.visible = false
 		return
 
@@ -173,12 +206,37 @@ func _configure_mana_display(unit: Unit) -> void:
 	if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_stats_changed):
 		_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_stats_changed)
 	_update_hero_details(_tracked_hero)
-	_mana_label.visible = true
+	_mana_bar.visible = true
+	_mana_label.visible = false
+
+
+func _configure_stats_display(node: Node) -> void:
+	var stats: Dictionary = _get_display_stats(node)
+	_damage_label.text = "DMG: %s" % stats.damage
+	_armor_label.text = "ARM: %s" % stats.armor
+	_speed_label.text = "SPD: %s" % stats.speed
+	_stats_row.visible = true
+
+
+func _get_display_stats(node: Node) -> Dictionary:
+	var damage: String = "—"
+	var armor: String = "0"
+	var speed: String = "—"
+
+	if "attack_damage" in node:
+		damage = str(node.get("attack_damage"))
+
+	if node is Unit:
+		var unit: Unit = node as Unit
+		speed = str(snapped(unit.move_speed, 0.1))
+
+	return {"damage": damage, "armor": armor, "speed": speed}
 
 
 func _update_hero_details(hero: Hero) -> void:
-	_type_label.text = "Type: Hero | Level %d | AP: %d" % [hero.level, hero.ability_points]
-	_update_mana_label(hero.current_mana, hero.max_mana)
+	_level_label.text = "Level %d | AP: %d" % [hero.level, hero.ability_points]
+	_level_label.visible = true
+	_update_mana_display(hero.current_mana, hero.max_mana)
 
 
 func _on_tracked_hero_stats_changed(_value: int = 0) -> void:
@@ -186,12 +244,13 @@ func _on_tracked_hero_stats_changed(_value: int = 0) -> void:
 		_update_hero_details(_tracked_hero)
 
 
-func _update_mana_label(current_mana: int, max_mana: int) -> void:
-	_mana_label.text = "Mana: %d / %d" % [current_mana, max_mana]
+func _update_mana_display(current_mana: int, max_mana: int) -> void:
+	_mana_bar.max_value = max(max_mana, 1)
+	_mana_bar.value = current_mana
 
 
 func _on_tracked_mana_changed(current_mana: int, max_mana: int) -> void:
-	_update_mana_label(current_mana, max_mana)
+	_update_mana_display(current_mana, max_mana)
 
 
 func _clear_mana_tracking() -> void:
@@ -207,12 +266,14 @@ func _clear_mana_tracking() -> void:
 	_tracked_hero = null
 
 
-func _update_health_label(current_health: int, max_health: int) -> void:
+func _update_health_display(current_health: int, max_health: int) -> void:
+	_hp_bar.max_value = max(max_health, 1)
+	_hp_bar.value = current_health
 	_health_label.text = "Health: %d / %d" % [current_health, max_health]
 
 
 func _on_tracked_health_changed(current_health: int, max_health: int) -> void:
-	_update_health_label(current_health, max_health)
+	_update_health_display(current_health, max_health)
 
 
 func _clear_health_tracking() -> void:

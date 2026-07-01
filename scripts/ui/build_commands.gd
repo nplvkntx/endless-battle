@@ -2,8 +2,8 @@ extends PanelContainer
 
 ## Context-sensitive command panel for the current selection (build, train, attack).
 
-@export var selection_manager_path: NodePath = "../../../../../../../../../SelectionManager"
-@export var build_manager_path: NodePath = "../../../../../../../../../BuildManager"
+@export var selection_manager_path: NodePath = "../../../../../../SelectionManager"
+@export var build_manager_path: NodePath = "../../../../../../BuildManager"
 
 @onready var _barracks_panel: VBoxContainer = $MarginContainer/HBoxContainer/CenterPanel/BarracksPanel
 @onready var _hero_altar_panel: VBoxContainer = $MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel

@@ -1,3 +1,3 @@
 extends Control
 
-## Permanent RTS HUD root layout shell (TopBar + BottomPanel).
+## MOBA-style HUD root: top-right resources, bottom-left unit panel, bottom-center commands, bottom-right minimap.
