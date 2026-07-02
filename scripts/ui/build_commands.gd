@@ -864,13 +864,82 @@ func _update_hero_abilities_ui() -> void:
 	_update_power_strike_ui()
 	_update_execute_ui()
 	_update_all_hero_upgrade_arrows()
+	_update_hero_ability_tooltips()
+
+
+func _update_hero_ability_tooltips() -> void:
+	_set_ability_button_tooltip(
+		_ground_slam_button,
+		_ground_slam_upgrade_button,
+		HeroAbilityProgression.ABILITY_Q
+	)
+	_set_ability_button_tooltip(
+		_divine_protection_button,
+		_divine_protection_upgrade_button,
+		HeroAbilityProgression.ABILITY_W
+	)
+	_set_ability_button_tooltip(
+		_power_strike_button,
+		_power_strike_upgrade_button,
+		HeroAbilityProgression.ABILITY_E
+	)
+	_set_ability_button_tooltip(
+		_execute_button,
+		_execute_upgrade_button,
+		HeroAbilityProgression.ABILITY_R
+	)
+
+
+func _set_ability_button_tooltip(
+	cast_button: Button, upgrade_button: Button, ability_id: StringName
+) -> void:
+	if cast_button == null:
+		return
+
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		cast_button.tooltip_text = HeroAbilityStats.get_display_name(ability_id)
+		if upgrade_button != null:
+			upgrade_button.tooltip_text = "Upgrade %s" % _get_ability_slot_label(ability_id)
+		return
+
+	cast_button.tooltip_text = _tracked_hero.get_ability_tooltip(ability_id)
+
+	if upgrade_button == null:
+		return
+
+	var current_rank: int = _tracked_hero.get_ability_rank(ability_id)
+	var max_rank: int = _tracked_hero.get_ability_max_rank(ability_id)
+	if current_rank >= max_rank:
+		upgrade_button.tooltip_text = "%s — Max rank" % HeroAbilityStats.get_display_name(ability_id)
+		return
+
+	var next_rank: int = maxi(current_rank, 0) + 1
+	var overrides: Dictionary = _tracked_hero.get_ability_base_overrides(ability_id)
+	upgrade_button.tooltip_text = (
+		"Upgrade to rank %d\n%s"
+		% [next_rank, HeroAbilityStats.format_tooltip(ability_id, next_rank, overrides)]
+	)
+
+
+func _get_ability_slot_label(ability_id: StringName) -> String:
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			return "Q"
+		HeroAbilityProgression.ABILITY_W:
+			return "W"
+		HeroAbilityProgression.ABILITY_E:
+			return "E"
+		HeroAbilityProgression.ABILITY_R:
+			return "R"
+		_:
+			return String(ability_id)
 
 
 func _hide_all_hero_upgrade_buttons() -> void:
-	_update_upgrade_arrow(_ground_slam_upgrade_button, HeroAbilityProgression.ABILITY_Q, false)
-	_update_upgrade_arrow(_divine_protection_upgrade_button, HeroAbilityProgression.ABILITY_W, false)
-	_update_upgrade_arrow(_power_strike_upgrade_button, HeroAbilityProgression.ABILITY_E, false)
-	_update_upgrade_arrow(_execute_upgrade_button, HeroAbilityProgression.ABILITY_R, false)
+	_update_upgrade_arrow(_ground_slam_upgrade_button, HeroAbilityProgression.ABILITY_Q, null)
+	_update_upgrade_arrow(_divine_protection_upgrade_button, HeroAbilityProgression.ABILITY_W, null)
+	_update_upgrade_arrow(_power_strike_upgrade_button, HeroAbilityProgression.ABILITY_E, null)
+	_update_upgrade_arrow(_execute_upgrade_button, HeroAbilityProgression.ABILITY_R, null)
 
 
 func _update_all_hero_upgrade_arrows() -> void:
@@ -881,31 +950,56 @@ func _update_all_hero_upgrade_arrows() -> void:
 	_update_upgrade_arrow(
 		_ground_slam_upgrade_button,
 		HeroAbilityProgression.ABILITY_Q,
-		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_Q)
+		_tracked_hero
 	)
 	_update_upgrade_arrow(
 		_divine_protection_upgrade_button,
 		HeroAbilityProgression.ABILITY_W,
-		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_W)
+		_tracked_hero
 	)
 	_update_upgrade_arrow(
 		_power_strike_upgrade_button,
 		HeroAbilityProgression.ABILITY_E,
-		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_E)
+		_tracked_hero
 	)
 	_update_upgrade_arrow(
 		_execute_upgrade_button,
 		HeroAbilityProgression.ABILITY_R,
-		_tracked_hero.can_show_ability_upgrade(HeroAbilityProgression.ABILITY_R)
+		_tracked_hero
 	)
 
 
-func _update_upgrade_arrow(upgrade_button: Button, _ability_id: StringName, show_upgrade: bool) -> void:
+func _update_upgrade_arrow(upgrade_button: Button, ability_id: StringName, hero: Hero) -> void:
 	if upgrade_button == null:
 		return
 
-	upgrade_button.visible = show_upgrade
-	upgrade_button.disabled = not show_upgrade
+	if hero == null or not is_instance_valid(hero):
+		upgrade_button.visible = false
+		upgrade_button.disabled = true
+		return
+
+	var current_rank: int = hero.get_ability_rank(ability_id)
+	var max_rank: int = hero.get_ability_max_rank(ability_id)
+	var can_upgrade: bool = hero.can_learn_ability(ability_id)
+	var show_button: bool = current_rank < max_rank
+
+	upgrade_button.visible = show_button
+	upgrade_button.disabled = not can_upgrade
+
+
+func _format_ability_label(
+	slot_label: String, hero: Hero, ability_id: StringName, status_text: String
+) -> String:
+	var rank: int = hero.get_ability_rank(ability_id)
+	var max_rank: int = hero.get_ability_max_rank(ability_id)
+	if rank <= 0:
+		if status_text.is_empty():
+			return "%s: Locked (%d/%d)" % [slot_label, rank, max_rank]
+		return "%s: Locked (%d/%d) — %s" % [slot_label, rank, max_rank, status_text]
+
+	if status_text.is_empty():
+		return "%s: Rank %d/%d" % [slot_label, rank, max_rank]
+	return "%s: %s (%d/%d)" % [slot_label, status_text, rank, max_rank]
 
 
 func _try_learn_ability_from_ui(ability_id: StringName) -> void:
@@ -925,18 +1019,23 @@ func _update_ground_slam_ui() -> void:
 		_ground_slam_cooldown_label.text = "Q: Locked"
 		return
 
-	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_Q):
+	var ability_id: StringName = HeroAbilityProgression.ABILITY_Q
+	if not _tracked_hero.is_ability_unlocked(ability_id):
 		_ground_slam_button.disabled = true
-		_ground_slam_cooldown_label.text = "Q: Locked"
+		_ground_slam_cooldown_label.text = _format_ability_label("Q", _tracked_hero, ability_id, "")
 		return
 
 	var remaining: float = _tracked_hero.get_ground_slam_cooldown_remaining()
 	if remaining > 0.0:
 		_ground_slam_button.disabled = true
-		_ground_slam_cooldown_label.text = "Q: %.1fs" % remaining
+		_ground_slam_cooldown_label.text = _format_ability_label(
+			"Q", _tracked_hero, ability_id, "%.1fs" % remaining
+		)
 	else:
 		_ground_slam_button.disabled = false
-		_ground_slam_cooldown_label.text = "Q: Ready"
+		_ground_slam_cooldown_label.text = _format_ability_label(
+			"Q", _tracked_hero, ability_id, "Ready"
+		)
 
 
 func _on_ground_slam_pressed() -> void:
@@ -960,27 +1059,35 @@ func _update_divine_protection_ui() -> void:
 		_divine_protection_cooldown_label.text = "W: Locked"
 		return
 
-	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_W):
+	var ability_id: StringName = HeroAbilityProgression.ABILITY_W
+	if not _tracked_hero.is_ability_unlocked(ability_id):
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = "W: Locked"
+		_divine_protection_cooldown_label.text = _format_ability_label("W", _tracked_hero, ability_id, "")
 		return
 
 	if _tracked_hero.is_divine_protection_active():
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = (
-			"W: Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
+		_divine_protection_cooldown_label.text = _format_ability_label(
+			"W",
+			_tracked_hero,
+			ability_id,
+			"Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
 		)
 		return
 
 	var cooldown_remaining: float = _tracked_hero.get_divine_protection_cooldown_remaining()
 	if cooldown_remaining > 0.0:
 		_divine_protection_button.disabled = true
-		_divine_protection_cooldown_label.text = "W: %.1fs" % cooldown_remaining
+		_divine_protection_cooldown_label.text = _format_ability_label(
+			"W", _tracked_hero, ability_id, "%.1fs" % cooldown_remaining
+		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.divine_protection_mana_cost
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_divine_protection_mana_cost()
 	_divine_protection_button.disabled = not has_mana
-	_divine_protection_cooldown_label.text = "W: Ready"
+	_divine_protection_cooldown_label.text = _format_ability_label(
+		"W", _tracked_hero, ability_id, "Ready"
+	)
 
 
 func _on_divine_protection_pressed() -> void:
@@ -1004,25 +1111,32 @@ func _update_power_strike_ui() -> void:
 		_power_strike_cooldown_label.text = "E: Locked"
 		return
 
-	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_E):
+	var ability_id: StringName = HeroAbilityProgression.ABILITY_E
+	if not _tracked_hero.is_ability_unlocked(ability_id):
 		_power_strike_button.disabled = true
-		_power_strike_cooldown_label.text = "E: Locked"
+		_power_strike_cooldown_label.text = _format_ability_label("E", _tracked_hero, ability_id, "")
 		return
 
 	if _tracked_hero.is_power_strike_pending():
 		_power_strike_button.disabled = true
-		_power_strike_cooldown_label.text = "E: Moving..."
+		_power_strike_cooldown_label.text = _format_ability_label(
+			"E", _tracked_hero, ability_id, "Moving..."
+		)
 		return
 
 	var cooldown_remaining: float = _tracked_hero.get_power_strike_cooldown_remaining()
 	if cooldown_remaining > 0.0:
 		_power_strike_button.disabled = true
-		_power_strike_cooldown_label.text = "E: %.1fs" % cooldown_remaining
+		_power_strike_cooldown_label.text = _format_ability_label(
+			"E", _tracked_hero, ability_id, "%.1fs" % cooldown_remaining
+		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.power_strike_mana_cost
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_power_strike_mana_cost()
 	_power_strike_button.disabled = not has_mana
-	_power_strike_cooldown_label.text = "E: Ready"
+	_power_strike_cooldown_label.text = _format_ability_label(
+		"E", _tracked_hero, ability_id, "Ready"
+	)
 
 
 func _on_power_strike_pressed() -> void:
@@ -1046,33 +1160,40 @@ func _update_execute_ui() -> void:
 		_execute_cooldown_label.text = "R: Locked"
 		return
 
-	if not _tracked_hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_R):
+	var ability_id: StringName = HeroAbilityProgression.ABILITY_R
+	if not _tracked_hero.is_ability_unlocked(ability_id):
 		_execute_button.disabled = true
 		var required_level: int = HeroAbilityProgression.R_FIRST_RANK_LEVEL
 		if _tracked_hero.level < required_level:
-			_execute_cooldown_label.text = "R: Locked (Lv %d)" % required_level
+			_execute_cooldown_label.text = _format_ability_label(
+				"R", _tracked_hero, ability_id, "Lv %d" % required_level
+			)
 		else:
-			_execute_cooldown_label.text = "R: Locked"
+			_execute_cooldown_label.text = _format_ability_label(
+				"R", _tracked_hero, ability_id, ""
+			)
 		return
 
-	var ultimate_rank: int = _tracked_hero.get_ability_rank(HeroAbilityProgression.ABILITY_R)
 	if _tracked_hero.is_execute_pending():
 		_execute_button.disabled = true
-		_execute_cooldown_label.text = "R: Moving..."
+		_execute_cooldown_label.text = _format_ability_label(
+			"R", _tracked_hero, ability_id, "Moving..."
+		)
 		return
 
 	var cooldown_remaining: float = _tracked_hero.get_execute_cooldown_remaining()
 	if cooldown_remaining > 0.0:
 		_execute_button.disabled = true
-		_execute_cooldown_label.text = "R: %.1fs" % cooldown_remaining
+		_execute_cooldown_label.text = _format_ability_label(
+			"R", _tracked_hero, ability_id, "%.1fs" % cooldown_remaining
+		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.execute_mana_cost
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_execute_mana_cost()
 	_execute_button.disabled = not has_mana
-	if ultimate_rank > 0:
-		_execute_cooldown_label.text = "R: Ready (Rank %d)" % ultimate_rank
-	else:
-		_execute_cooldown_label.text = "R: Ready"
+	_execute_cooldown_label.text = _format_ability_label(
+		"R", _tracked_hero, ability_id, "Ready"
+	)
 
 
 func _on_execute_pressed() -> void:

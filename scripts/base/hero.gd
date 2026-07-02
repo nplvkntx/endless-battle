@@ -12,8 +12,9 @@ signal ability_ready(ability_id: StringName)
 signal inventory_changed()
 signal respawn_requested(hero: Hero)
 
-const MAX_LEVEL: int = 24
+const MAX_LEVEL: int = 30
 const XP_PER_LEVEL_MULTIPLIER: int = 100
+const MIN_ABILITY_POINT_LEVEL: int = 2
 const MAX_ABILITY_POINT_LEVEL: int = 18
 const HEALTH_PER_LEVEL: int = 25
 const MANA_PER_LEVEL: int = 10
@@ -24,7 +25,7 @@ const INVENTORY_SLOT_COUNT: int = 6
 @export var hero_data: Resource
 
 var level: int = 1
-var ability_points: int = 1
+var ability_points: int = 0
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var inventory: Array = []
 var _current_xp: float = 0.0
@@ -156,6 +157,45 @@ func get_ability_rank(ability_id: StringName) -> int:
 	return ability_progression.get_ability_rank(ability_id)
 
 
+func get_ability_max_rank(ability_id: StringName) -> int:
+	if ability_progression == null:
+		return 0
+
+	return ability_progression.get_max_rank(ability_id)
+
+
+func get_scaled_ability_stat(ability_id: StringName, stat: StringName) -> Variant:
+	return HeroAbilityStats.get_stat(
+		ability_id, stat, get_ability_rank(ability_id), _get_ability_base_overrides(ability_id)
+	)
+
+
+func get_ability_mana_cost(ability_id: StringName) -> int:
+	return int(
+		get_scaled_ability_stat(ability_id, HeroAbilityStats.STAT_MANA)
+	)
+
+
+func get_ability_cooldown(ability_id: StringName) -> float:
+	return float(
+		get_scaled_ability_stat(ability_id, HeroAbilityStats.STAT_COOLDOWN)
+	)
+
+
+func get_ability_tooltip(ability_id: StringName) -> String:
+	return HeroAbilityStats.format_tooltip(
+		ability_id, get_ability_rank(ability_id), _get_ability_base_overrides(ability_id)
+	)
+
+
+func get_ability_base_overrides(ability_id: StringName) -> Dictionary:
+	return _get_ability_base_overrides(ability_id)
+
+
+func _get_ability_base_overrides(_ability_id: StringName) -> Dictionary:
+	return {}
+
+
 func can_learn_ability(ability_id: StringName) -> bool:
 	if ability_progression == null:
 		return false
@@ -208,7 +248,7 @@ func _require_ability_learned(ability_id: StringName) -> bool:
 
 
 func _on_level_up() -> void:
-	if level <= MAX_ABILITY_POINT_LEVEL:
+	if level >= MIN_ABILITY_POINT_LEVEL and level <= MAX_ABILITY_POINT_LEVEL:
 		ability_points += 1
 		ability_points_changed.emit(ability_points)
 
@@ -223,6 +263,8 @@ func _apply_level_stat_gains() -> void:
 	_apply_level_health_gain()
 	_apply_level_mana_gain()
 	_apply_level_attack_damage_gain()
+	if level > MAX_ABILITY_POINT_LEVEL:
+		_apply_level_move_speed_gain()
 
 
 func _apply_level_health_gain() -> void:
@@ -243,6 +285,10 @@ func _apply_level_mana_gain() -> void:
 
 
 func _apply_level_attack_damage_gain() -> void:
+	pass
+
+
+func _apply_level_move_speed_gain() -> void:
 	pass
 
 
@@ -314,9 +360,14 @@ func _reapply_all_level_stat_scaling() -> void:
 		)
 
 	_apply_accumulated_level_combat_stats(maxi(0, level - 1))
+	_apply_accumulated_level_move_speed_bonus()
 
 
 func _apply_accumulated_level_combat_stats(_levels_gained: int) -> void:
+	pass
+
+
+func _apply_accumulated_level_move_speed_bonus() -> void:
 	pass
 
 

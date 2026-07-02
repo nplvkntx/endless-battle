@@ -157,7 +157,11 @@ func _process_counter_attack(delta: float) -> void:
 		_clear_invalid_attack_target()
 		return
 
-	_attack_target.take_damage(float(attack_damage))
+	if not CombatTargetValidation.apply_damage_to_target(
+		_attack_target, float(attack_damage), self
+	):
+		_clear_invalid_attack_target()
+		return
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
 	print(

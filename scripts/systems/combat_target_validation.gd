@@ -268,6 +268,9 @@ static func sanitize_damage_attacker(attacker: Variant) -> Node:
 
 
 static func apply_damage_to_target(target: Variant, amount: float, attacker = null) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+
 	if not is_valid_combat_target(target):
 		return false
 
@@ -275,10 +278,29 @@ static func apply_damage_to_target(target: Variant, amount: float, attacker = nu
 	if safe_attacker != null and not are_hostile(safe_attacker, target):
 		return false
 
-	if not target is Object or not (target as Object).has_method("take_damage"):
+	if not target is Object:
 		return false
 
-	(target as Object).call("take_damage", amount, safe_attacker)
+	var target_object: Object = target as Object
+	if not target_object.has_method("take_damage"):
+		return false
+
+	return _call_take_damage(target_object, amount, safe_attacker)
+
+
+static func _call_take_damage(target: Object, amount: float, attacker = null) -> bool:
+	for method: Dictionary in target.get_method_list():
+		if method.get("name") != "take_damage":
+			continue
+
+		var args: Array = method.get("args", [])
+		if args.size() >= 2:
+			target.call("take_damage", amount, attacker)
+		else:
+			target.call("take_damage", amount)
+		return true
+
+	target.call("take_damage", amount)
 	return true
 
 

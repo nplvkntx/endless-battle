@@ -1,7 +1,7 @@
 class_name HeroAbilityProgression
 extends RefCounted
 
-## League-style ability unlock rules for heroes. Reusable for player and future AI heroes.
+## Warcraft III-style ability rank rules for heroes. Reusable for player and AI heroes.
 
 const ABILITY_Q := &"q"
 const ABILITY_W := &"w"
@@ -29,6 +29,13 @@ func get_ability_rank(ability_id: StringName) -> int:
 	return int(_ranks.get(ability_id, 0))
 
 
+func get_max_rank(ability_id: StringName) -> int:
+	if ability_id == ABILITY_R:
+		return MAX_ULTIMATE_RANK
+
+	return MAX_BASIC_RANK
+
+
 func is_ability_learned(ability_id: StringName) -> bool:
 	return get_ability_rank(ability_id) > 0
 
@@ -44,24 +51,14 @@ func can_learn_ability(hero_level: int, ability_points: int, ability_id: StringN
 	if ability_id == ABILITY_R:
 		return _can_learn_ultimate_rank(hero_level, current_rank)
 
-	if current_rank >= 1:
+	if current_rank >= MAX_BASIC_RANK:
 		return false
 
 	return hero_level >= 1
 
 
 func can_show_upgrade_arrow(hero_level: int, ability_points: int, ability_id: StringName) -> bool:
-	if not can_learn_ability(hero_level, ability_points, ability_id):
-		return false
-
-	if ability_id != ABILITY_R:
-		return true
-
-	var target_rank: int = get_ability_rank(ABILITY_R) + 1
-	if target_rank > MAX_ULTIMATE_RANK:
-		return false
-
-	return hero_level == get_ultimate_rank_unlock_level(target_rank)
+	return can_learn_ability(hero_level, ability_points, ability_id)
 
 
 func get_learn_blocked_reason(hero_level: int, ability_points: int, ability_id: StringName) -> String:
@@ -75,8 +72,8 @@ func get_learn_blocked_reason(hero_level: int, ability_points: int, ability_id: 
 	if ability_id == ABILITY_R:
 		return _get_ultimate_learn_blocked_reason(hero_level, current_rank)
 
-	if current_rank >= 1:
-		return "Ability already learned"
+	if current_rank >= MAX_BASIC_RANK:
+		return "Ability is max rank"
 
 	return "Cannot learn ability"
 

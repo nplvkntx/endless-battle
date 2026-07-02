@@ -24,22 +24,15 @@ const POWER_STRIKE_HIT_EFFECT_SCENE: PackedScene = preload(
 	"res://scenes/effects/power_strike_hit_effect.tscn"
 )
 const EXECUTE_HIT_EFFECT_SCENE: PackedScene = preload("res://scenes/effects/execute_hit_effect.tscn")
-const GROUND_SLAM_COOLDOWN := 9.0
-const GROUND_SLAM_RADIUS := 3.5
-const GROUND_SLAM_DAMAGE := 35
 const GROUND_SLAM_BODY_PULSE_DURATION := 0.18
-const DIVINE_PROTECTION_DURATION := 4.0
-const DIVINE_PROTECTION_COOLDOWN := 20.0
 const DIVINE_PROTECTION_GLOW_PULSE_DURATION := 0.6
-const POWER_STRIKE_DAMAGE := 45
-const POWER_STRIKE_COOLDOWN := 10.0
 const POWER_STRIKE_LUNGE_DISTANCE := 0.55
 const POWER_STRIKE_FLASH_DURATION := 0.15
-const EXECUTE_HEALTH_THRESHOLD := 0.4
-const EXECUTE_COOLDOWN := 45.0
 const EXECUTE_LUNGE_DISTANCE := 0.5
 const BASE_ATTACK_DAMAGE := 18
 const BASE_MAX_MANA := 100
+const BASE_MOVE_SPEED := 5.5
+const MOVE_SPEED_PER_LEVEL_AFTER_18 := 0.05
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
@@ -99,6 +92,82 @@ func _ready() -> void:
 	died.connect(_notify_hero_altars_of_death)
 
 
+func _get_ability_base_overrides(ability_id: StringName) -> Dictionary:
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			return {HeroAbilityStats.STAT_MANA: ground_slam_mana_cost}
+		HeroAbilityProgression.ABILITY_W:
+			return {HeroAbilityStats.STAT_MANA: divine_protection_mana_cost}
+		HeroAbilityProgression.ABILITY_E:
+			return {HeroAbilityStats.STAT_MANA: power_strike_mana_cost}
+		HeroAbilityProgression.ABILITY_R:
+			return {HeroAbilityStats.STAT_MANA: execute_mana_cost}
+		_:
+			return {}
+
+
+func get_ground_slam_damage() -> int:
+	return int(
+		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_Q, HeroAbilityStats.STAT_DAMAGE)
+	)
+
+
+func get_ground_slam_radius() -> float:
+	return float(
+		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_Q, HeroAbilityStats.STAT_SPLASH)
+	)
+
+
+func get_ground_slam_cooldown() -> float:
+	return get_ability_cooldown(HeroAbilityProgression.ABILITY_Q)
+
+
+func get_ground_slam_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_Q)
+
+
+func get_divine_protection_duration() -> float:
+	return float(
+		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_W, HeroAbilityStats.STAT_EFFECT)
+	)
+
+
+func get_divine_protection_cooldown() -> float:
+	return get_ability_cooldown(HeroAbilityProgression.ABILITY_W)
+
+
+func get_divine_protection_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_W)
+
+
+func get_power_strike_damage() -> int:
+	return int(
+		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_E, HeroAbilityStats.STAT_DAMAGE)
+	)
+
+
+func get_power_strike_cooldown() -> float:
+	return get_ability_cooldown(HeroAbilityProgression.ABILITY_E)
+
+
+func get_power_strike_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_E)
+
+
+func get_execute_health_threshold() -> float:
+	return float(
+		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_R, HeroAbilityStats.STAT_EFFECT)
+	)
+
+
+func get_execute_cooldown() -> float:
+	return get_ability_cooldown(HeroAbilityProgression.ABILITY_R)
+
+
+func get_execute_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_R)
+
+
 func _notify_hero_altars_of_death(_unit: Unit) -> void:
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
 		if node is HeroAltar:
@@ -115,11 +184,20 @@ func _apply_level_attack_damage_gain() -> void:
 	attack_damage += ATTACK_DAMAGE_PER_LEVEL
 
 
+func _apply_level_move_speed_gain() -> void:
+	move_speed += MOVE_SPEED_PER_LEVEL_AFTER_18
+
+
 func _apply_accumulated_level_combat_stats(levels_gained: int) -> void:
 	attack_damage = BASE_ATTACK_DAMAGE + levels_gained * ATTACK_DAMAGE_PER_LEVEL
 	max_mana = BASE_MAX_MANA + levels_gained * MANA_PER_LEVEL
 	current_mana = max_mana
 	mana_changed.emit(current_mana, max_mana)
+
+
+func _apply_accumulated_level_move_speed_bonus() -> void:
+	var levels_after_18: int = maxi(0, level - MAX_ABILITY_POINT_LEVEL)
+	move_speed = BASE_MOVE_SPEED + float(levels_after_18) * MOVE_SPEED_PER_LEVEL_AFTER_18
 
 
 func _on_progression_restored() -> void:
@@ -240,7 +318,7 @@ func can_use_divine_protection() -> bool:
 		and _health_component.current_health > 0
 		and not is_divine_protection_active()
 		and _divine_protection_cooldown_timer <= 0.0
-		and current_mana >= divine_protection_mana_cost
+		and current_mana >= get_divine_protection_mana_cost()
 	)
 
 
@@ -261,7 +339,7 @@ func try_divine_protection() -> bool:
 		)
 		return false
 
-	if current_mana < divine_protection_mana_cost:
+	if current_mana < get_divine_protection_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		return false
 
@@ -270,9 +348,9 @@ func try_divine_protection() -> bool:
 
 
 func _execute_divine_protection() -> void:
-	current_mana = maxi(0, current_mana - divine_protection_mana_cost)
+	current_mana = maxi(0, current_mana - get_divine_protection_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
-	_divine_protection_timer = DIVINE_PROTECTION_DURATION
+	_divine_protection_timer = get_divine_protection_duration()
 	_apply_divine_protection_visual()
 	divine_protection_state_changed.emit(true)
 
@@ -280,7 +358,7 @@ func _execute_divine_protection() -> void:
 func _deactivate_divine_protection() -> void:
 	_divine_protection_timer = 0.0
 	_clear_divine_protection_visual()
-	_divine_protection_cooldown_timer = DIVINE_PROTECTION_COOLDOWN
+	_divine_protection_cooldown_timer = get_divine_protection_cooldown()
 	divine_protection_state_changed.emit(false)
 
 
@@ -330,7 +408,7 @@ func can_use_power_strike(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) ->
 		and _health_component.current_health > 0
 		and not _has_power_strike_pending
 		and _power_strike_cooldown_timer <= 0.0
-		and current_mana >= power_strike_mana_cost
+		and current_mana >= get_power_strike_mana_cost()
 		and _resolve_power_strike_target(search_range) != null
 	)
 
@@ -352,7 +430,7 @@ func try_power_strike() -> bool:
 		)
 		return false
 
-	if current_mana < power_strike_mana_cost:
+	if current_mana < get_power_strike_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		return false
 
@@ -424,7 +502,7 @@ func _execute_power_strike() -> void:
 	if not _is_in_attack_range(_power_strike_target):
 		return
 
-	if current_mana < power_strike_mana_cost:
+	if current_mana < get_power_strike_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		_cancel_power_strike()
 		return
@@ -432,17 +510,18 @@ func _execute_power_strike() -> void:
 	var target: Node3D = _power_strike_target
 	has_move_target = false
 	velocity = Vector3.ZERO
-	current_mana = maxi(0, current_mana - power_strike_mana_cost)
+	current_mana = maxi(0, current_mana - get_power_strike_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
-	_power_strike_cooldown_timer = POWER_STRIKE_COOLDOWN
+	_power_strike_cooldown_timer = get_power_strike_cooldown()
 	_cancel_power_strike()
 
+	var strike_damage: int = get_power_strike_damage()
 	if not CombatTargetValidation.apply_damage_to_target(
-		target, float(POWER_STRIKE_DAMAGE), self
+		target, float(strike_damage), self
 	):
 		return
 
-	FloatingDamageNumber.spawn(target, POWER_STRIKE_DAMAGE, true)
+	FloatingDamageNumber.spawn(target, strike_damage, true)
 	MeleeHitSound.play_at(self, target.global_position)
 	_play_power_strike_lunge(target)
 	_play_power_strike_flash()
@@ -552,7 +631,7 @@ func can_use_execute(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> bool
 	if _execute_cooldown_timer > 0.0:
 		return false
 
-	if current_mana < execute_mana_cost:
+	if current_mana < get_execute_mana_cost():
 		return false
 
 	return _resolve_execute_target(search_range) != null
@@ -579,7 +658,7 @@ func try_execute() -> bool:
 		)
 		return false
 
-	if current_mana < execute_mana_cost:
+	if current_mana < get_execute_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		return false
 
@@ -689,7 +768,7 @@ func _get_target_health_ratio(target: Node3D) -> float:
 
 
 func _can_execute_target(target: Node3D) -> bool:
-	return _get_target_health_ratio(target) < EXECUTE_HEALTH_THRESHOLD
+	return _get_target_health_ratio(target) < get_execute_health_threshold()
 
 
 func _perform_execute() -> void:
@@ -700,7 +779,7 @@ func _perform_execute() -> void:
 	if not _is_in_attack_range(_execute_target):
 		return
 
-	if current_mana < execute_mana_cost:
+	if current_mana < get_execute_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		_cancel_execute()
 		return
@@ -713,9 +792,9 @@ func _perform_execute() -> void:
 
 	has_move_target = false
 	velocity = Vector3.ZERO
-	current_mana = maxi(0, current_mana - execute_mana_cost)
+	current_mana = maxi(0, current_mana - get_execute_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
-	_execute_cooldown_timer = EXECUTE_COOLDOWN
+	_execute_cooldown_timer = get_execute_cooldown()
 	_cancel_execute()
 
 	_kill_execute_target(target)
@@ -802,7 +881,7 @@ func can_use_ground_slam() -> bool:
 		is_ability_unlocked(HeroAbilityProgression.ABILITY_Q)
 		and _health_component.current_health > 0
 		and _ground_slam_cooldown_timer <= 0.0
-		and current_mana >= ground_slam_mana_cost
+		and current_mana >= get_ground_slam_mana_cost()
 	)
 
 
@@ -819,7 +898,7 @@ func try_ground_slam() -> bool:
 		)
 		return false
 
-	if current_mana < ground_slam_mana_cost:
+	if current_mana < get_ground_slam_mana_cost():
 		_show_ability_feedback("Not enough mana")
 		return false
 
@@ -828,9 +907,9 @@ func try_ground_slam() -> bool:
 
 
 func _execute_ground_slam() -> void:
-	current_mana = maxi(0, current_mana - ground_slam_mana_cost)
+	current_mana = maxi(0, current_mana - get_ground_slam_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
-	_ground_slam_cooldown_timer = GROUND_SLAM_COOLDOWN
+	_ground_slam_cooldown_timer = get_ground_slam_cooldown()
 	_damage_enemies_in_ground_slam_radius()
 	_spawn_ground_slam_effect()
 	_play_ground_slam_pulse()
@@ -838,6 +917,9 @@ func _execute_ground_slam() -> void:
 
 
 func _damage_enemies_in_ground_slam_radius() -> void:
+	var slam_radius: float = get_ground_slam_radius()
+	var slam_damage: int = get_ground_slam_damage()
+
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if not node is Node3D:
@@ -846,11 +928,11 @@ func _damage_enemies_in_ground_slam_radius() -> void:
 				continue
 
 			var target: Node3D = node as Node3D
-			if _horizontal_distance_to(target) > GROUND_SLAM_RADIUS:
+			if _horizontal_distance_to(target) > slam_radius:
 				continue
 
 			CombatTargetValidation.apply_damage_to_target(
-				target, float(GROUND_SLAM_DAMAGE), self
+				target, float(slam_damage), self
 			)
 
 
@@ -859,7 +941,7 @@ func _spawn_ground_slam_effect() -> void:
 	if effect == null:
 		return
 
-	effect.radius = GROUND_SLAM_RADIUS
+	effect.radius = get_ground_slam_radius()
 
 	var spawn_parent: Node = get_parent()
 	if spawn_parent == null:

@@ -160,7 +160,7 @@ func _apply_building_data() -> void:
 
 
 ## Applies damage using values derived from building_data.
-func take_damage(_amount: float) -> void:
+func take_damage(_amount: float, _attacker = null) -> void:
 	# TODO: Implement damage handling.
 	pass
 

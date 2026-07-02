@@ -103,16 +103,11 @@ func _ensure_enemy_hero_combat_abilities(hero: Hero) -> void:
 	if hero.ability_progression == null:
 		return
 
-	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_Q):
-		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_Q)
+	for ability_id: StringName in HeroAbilityProgression.BASIC_ABILITIES:
+		while hero.get_ability_rank(ability_id) < HeroAbilityProgression.MAX_BASIC_RANK:
+			hero.ability_progression.learn_ability(ability_id)
 
-	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_W):
-		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_W)
-
-	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_E):
-		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_E)
-
-	if not hero.is_ability_unlocked(HeroAbilityProgression.ABILITY_R):
+	while hero.get_ability_rank(HeroAbilityProgression.ABILITY_R) < HeroAbilityProgression.MAX_ULTIMATE_RANK:
 		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_R)
 
 
