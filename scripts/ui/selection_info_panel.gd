@@ -60,6 +60,8 @@ const PORTRAIT_STYLES: Dictionary = {
 
 
 func _ready() -> void:
+	TooltipManager.bind_control(self, _get_selection_tooltip)
+
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
 		return
@@ -1045,3 +1047,28 @@ func _get_building_info(building: Building) -> Dictionary:
 	if building is Tower:
 		return {"name": "Tower", "type": "Building", "portrait_key": "tower"}
 	return {}
+
+
+func _get_selection_tooltip() -> String:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return ""
+
+	if selection_manager.inspected_unit != null:
+		return TooltipFormatter.format_unit(selection_manager.inspected_unit)
+
+	if selection_manager.inspected_building != null:
+		return TooltipFormatter.format_unit(selection_manager.inspected_building)
+
+	var selected_building: Building = selection_manager.selected_building
+	if selected_building != null:
+		return TooltipFormatter.format_unit(selected_building)
+
+	var selected_units: Array[Unit] = selection_manager.selected_units
+	if selected_units.is_empty():
+		return ""
+
+	if selected_units.size() > 1:
+		return "Multiple units selected"
+
+	return TooltipFormatter.format_unit(selected_units[0])

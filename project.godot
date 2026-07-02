@@ -27,6 +27,7 @@ InputManager="*res://autoloads/input_manager.gd"
 FogOfWarManager="*res://autoloads/fog_of_war_manager.gd"
 ProjectileManager="*res://autoloads/projectile_manager.gd"
 MatchSession="*res://autoloads/match_session.gd"
+TooltipManager="*res://scripts/ui/tooltip_manager.gd"
 
 [display]
 

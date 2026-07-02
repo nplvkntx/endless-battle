@@ -1074,3 +1074,39 @@ func _find_building_from_collider(node: Node) -> Building:
 			return current as Building
 		current = current.get_parent()
 	return null
+
+
+func _ready() -> void:
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	_update_world_tooltip()
+
+
+func _update_world_tooltip() -> void:
+	var viewport: Viewport = get_viewport()
+	if viewport == null:
+		return
+
+	if viewport.gui_get_hovered_control() != null:
+		TooltipManager.hide_world_tooltip()
+		return
+
+	var camera: Camera3D = get_node_or_null(camera_path) as Camera3D
+	if camera == null:
+		TooltipManager.hide_world_tooltip()
+		return
+
+	var mouse_position: Vector2 = viewport.get_mouse_position()
+	var unit: Unit = _raycast_unit(camera, mouse_position)
+	if unit != null:
+		TooltipManager.show_tooltip(TooltipFormatter.format_unit(unit))
+		return
+
+	var building: Building = _raycast_building(camera, mouse_position)
+	if building != null:
+		TooltipManager.show_tooltip(TooltipFormatter.format_unit(building))
+		return
+
+	TooltipManager.hide_world_tooltip()

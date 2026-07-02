@@ -53,7 +53,8 @@ func _create_slot_panel(slot_index: int) -> PanelContainer:
 	var slot := PanelContainer.new()
 	slot.custom_minimum_size = SLOT_SIZE
 	slot.mouse_filter = Control.MOUSE_FILTER_STOP
-	slot.tooltip_text = "Inventory slot %d" % (slot_index + 1)
+	slot.tooltip_text = ""
+	TooltipManager.bind_control(slot, func() -> String: return _get_slot_tooltip(slot_index))
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = EMPTY_SLOT_COLOR
@@ -131,7 +132,6 @@ func _set_slot_item(slot: PanelContainer, item: HeroItemDefinition) -> void:
 
 	style.bg_color = EMPTY_SLOT_COLOR
 	style.border_color = FILLED_SLOT_BORDER_COLOR
-	slot.tooltip_text = "%s (Right-click to sell)" % item.display_name
 
 	var icon: TextureRect = slot.get_node_or_null("Icon") as TextureRect
 	if icon != null:
@@ -146,7 +146,6 @@ func _set_slot_empty(slot: PanelContainer) -> void:
 
 	style.bg_color = EMPTY_SLOT_COLOR
 	style.border_color = EMPTY_SLOT_BORDER_COLOR
-	slot.tooltip_text = "Empty inventory slot"
 
 	var icon: TextureRect = slot.get_node_or_null("Icon") as TextureRect
 	if icon != null:
@@ -156,6 +155,17 @@ func _set_slot_empty(slot: PanelContainer) -> void:
 
 func _can_modify_inventory() -> bool:
 	return HeroItemService.can_modify_player_inventory(_tracked_hero)
+
+
+func _get_slot_tooltip(slot_index: int) -> String:
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		return "Empty inventory slot"
+
+	var item = _tracked_hero.get_item_at_slot(slot_index)
+	if item is HeroItemDefinition:
+		return TooltipFormatter.format_inventory_item(item as HeroItemDefinition)
+
+	return "Empty inventory slot"
 
 
 func _slot_get_drag_data(_at_position: Vector2, slot_index: int) -> Variant:

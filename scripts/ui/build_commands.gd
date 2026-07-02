@@ -222,6 +222,7 @@ func _ready() -> void:
 	_execute_upgrade_button.pressed.connect(_on_execute_upgrade_pressed)
 	_connect_blacksmith_upgrade_buttons()
 	_connect_shop_item_buttons()
+	_setup_command_tooltips()
 	_hide_all_hero_upgrade_buttons()
 
 	if not UpgradeManager.upgrade_levels_changed.is_connected(_on_upgrade_levels_changed):
@@ -739,7 +740,8 @@ func _create_queue_slot(
 ) -> PanelContainer:
 	var slot := PanelContainer.new()
 	slot.custom_minimum_size = QUEUE_SLOT_SIZE
-	slot.tooltip_text = QUEUE_SLOT_HINT
+	slot.tooltip_text = ""
+	TooltipManager.bind_static_tooltip(slot, QUEUE_SLOT_HINT)
 	slot.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var style := StyleBoxFlat.new()
@@ -864,61 +866,6 @@ func _update_hero_abilities_ui() -> void:
 	_update_power_strike_ui()
 	_update_execute_ui()
 	_update_all_hero_upgrade_arrows()
-	_update_hero_ability_tooltips()
-
-
-func _update_hero_ability_tooltips() -> void:
-	_set_ability_button_tooltip(
-		_ground_slam_button,
-		_ground_slam_upgrade_button,
-		HeroAbilityProgression.ABILITY_Q
-	)
-	_set_ability_button_tooltip(
-		_divine_protection_button,
-		_divine_protection_upgrade_button,
-		HeroAbilityProgression.ABILITY_W
-	)
-	_set_ability_button_tooltip(
-		_power_strike_button,
-		_power_strike_upgrade_button,
-		HeroAbilityProgression.ABILITY_E
-	)
-	_set_ability_button_tooltip(
-		_execute_button,
-		_execute_upgrade_button,
-		HeroAbilityProgression.ABILITY_R
-	)
-
-
-func _set_ability_button_tooltip(
-	cast_button: Button, upgrade_button: Button, ability_id: StringName
-) -> void:
-	if cast_button == null:
-		return
-
-	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
-		cast_button.tooltip_text = HeroAbilityStats.get_display_name(ability_id)
-		if upgrade_button != null:
-			upgrade_button.tooltip_text = "Upgrade %s" % _get_ability_slot_label(ability_id)
-		return
-
-	cast_button.tooltip_text = _tracked_hero.get_ability_tooltip(ability_id)
-
-	if upgrade_button == null:
-		return
-
-	var current_rank: int = _tracked_hero.get_ability_rank(ability_id)
-	var max_rank: int = _tracked_hero.get_ability_max_rank(ability_id)
-	if current_rank >= max_rank:
-		upgrade_button.tooltip_text = "%s — Max rank" % HeroAbilityStats.get_display_name(ability_id)
-		return
-
-	var next_rank: int = maxi(current_rank, 0) + 1
-	var overrides: Dictionary = _tracked_hero.get_ability_base_overrides(ability_id)
-	upgrade_button.tooltip_text = (
-		"Upgrade to rank %d\n%s"
-		% [next_rank, HeroAbilityStats.format_tooltip(ability_id, next_rank, overrides)]
-	)
 
 
 func _get_ability_slot_label(ability_id: StringName) -> String:
@@ -1772,3 +1719,243 @@ func _on_train_hero_pressed() -> void:
 		return
 
 	_selected_hero_altar.try_train_hero()
+
+
+func _setup_command_tooltips() -> void:
+	const BUILD_MANAGER := preload("res://scripts/systems/build_manager.gd")
+
+	_clear_control_tooltip(_build_farm_button)
+	_clear_control_tooltip(_build_barracks_button)
+	_clear_control_tooltip(_build_blacksmith_button)
+	_clear_control_tooltip(_build_shop_button)
+	_clear_control_tooltip(_build_tower_button)
+	_clear_control_tooltip(_build_hero_altar_button)
+	_clear_control_tooltip(_build_command_center_button)
+	_clear_control_tooltip(_train_worker_button)
+	_clear_control_tooltip(_train_swordsman_button)
+	_clear_control_tooltip(_train_archer_button)
+	_clear_control_tooltip(_train_hero_button)
+	_clear_control_tooltip(_attack_button)
+	_clear_control_tooltip(_ground_slam_button)
+	_clear_control_tooltip(_ground_slam_upgrade_button)
+	_clear_control_tooltip(_divine_protection_button)
+	_clear_control_tooltip(_divine_protection_upgrade_button)
+	_clear_control_tooltip(_power_strike_button)
+	_clear_control_tooltip(_power_strike_upgrade_button)
+	_clear_control_tooltip(_execute_button)
+	_clear_control_tooltip(_execute_upgrade_button)
+
+	TooltipManager.bind_control(
+		_build_farm_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_FARM,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_FARM)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_barracks_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_BARRACKS,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_BARRACKS)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_blacksmith_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_BLACKSMITH,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_BLACKSMITH)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_shop_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_SHOP,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_SHOP)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_tower_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_TOWER,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_TOWER)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_hero_altar_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_HERO_ALTAR,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_HERO_ALTAR)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_command_center_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_COMMAND_CENTER,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_COMMAND_CENTER)
+			)
+	)
+
+	TooltipManager.bind_control(_train_worker_button, _get_train_worker_tooltip)
+	TooltipManager.bind_control(_train_swordsman_button, _get_train_swordsman_tooltip)
+	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
+	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
+	TooltipManager.bind_static_tooltip(_attack_button, "Attack-move\nMove while engaging enemies.")
+
+	TooltipManager.bind_control(
+		_ground_slam_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_cast(
+				_tracked_hero, HeroAbilityProgression.ABILITY_Q, "Q"
+			)
+	)
+	TooltipManager.bind_control(
+		_ground_slam_upgrade_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_upgrade(
+				_tracked_hero, HeroAbilityProgression.ABILITY_Q, "Q"
+			)
+	)
+	TooltipManager.bind_control(
+		_divine_protection_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_cast(
+				_tracked_hero, HeroAbilityProgression.ABILITY_W, "W"
+			)
+	)
+	TooltipManager.bind_control(
+		_divine_protection_upgrade_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_upgrade(
+				_tracked_hero, HeroAbilityProgression.ABILITY_W, "W"
+			)
+	)
+	TooltipManager.bind_control(
+		_power_strike_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_cast(
+				_tracked_hero, HeroAbilityProgression.ABILITY_E, "E"
+			)
+	)
+	TooltipManager.bind_control(
+		_power_strike_upgrade_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_upgrade(
+				_tracked_hero, HeroAbilityProgression.ABILITY_E, "E"
+			)
+	)
+	TooltipManager.bind_control(
+		_execute_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_cast(
+				_tracked_hero, HeroAbilityProgression.ABILITY_R, "R"
+			)
+	)
+	TooltipManager.bind_control(
+		_execute_upgrade_button,
+		func() -> String:
+			return TooltipFormatter.format_ability_upgrade(
+				_tracked_hero, HeroAbilityProgression.ABILITY_R, "R"
+			)
+	)
+
+	for index: int in _blacksmith_upgrade_buttons.size():
+		if index >= _blacksmith_upgrade_ids.size():
+			break
+
+		var upgrade_id: StringName = _blacksmith_upgrade_ids[index]
+		var button: Button = _blacksmith_upgrade_buttons[index]
+		_clear_control_tooltip(button)
+		TooltipManager.bind_control(button, func() -> String: return _get_blacksmith_upgrade_tooltip(upgrade_id))
+
+	for index: int in _shop_item_buttons.size():
+		if index >= _shop_item_ids.size():
+			break
+
+		var item_id: StringName = _shop_item_ids[index]
+		var button: Button = _shop_item_buttons[index]
+		_clear_control_tooltip(button)
+		TooltipManager.bind_control(button, func() -> String: return _get_shop_item_tooltip(item_id))
+
+
+func _clear_control_tooltip(control: Control) -> void:
+	if control == null:
+		return
+
+	control.tooltip_text = ""
+
+
+func _get_train_worker_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Worker",
+		CommandCenter.TRAIN_GOLD_COST,
+		0,
+		CommandCenter.TRAIN_FOOD_COST,
+		CommandCenter.TRAIN_SECONDS,
+		CommandCenter.TRAIN_ID_WORKER,
+		TooltipFormatter.get_train_blocked_reason(
+			CommandCenter.TRAIN_GOLD_COST, CommandCenter.TRAIN_FOOD_COST
+		)
+	)
+
+
+func _get_train_swordsman_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Swordsman",
+		Barracks.TRAIN_GOLD_COST,
+		0,
+		Barracks.TRAIN_FOOD_COST,
+		Barracks.TRAIN_SECONDS,
+		Barracks.TRAIN_ID_SWORDSMAN,
+		TooltipFormatter.get_train_blocked_reason(Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST)
+	)
+
+
+func _get_train_archer_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Archer",
+		Barracks.TRAIN_GOLD_COST,
+		0,
+		Barracks.TRAIN_FOOD_COST,
+		Barracks.TRAIN_SECONDS,
+		Barracks.TRAIN_ID_ARCHER,
+		TooltipFormatter.get_train_blocked_reason(Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST)
+	)
+
+
+func _get_train_hero_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Hero",
+		HeroAltar.TRAIN_GOLD_COST,
+		0,
+		HeroAltar.TRAIN_FOOD_COST,
+		HeroAltar.TRAIN_SECONDS,
+		&"hero",
+		TooltipFormatter.get_hero_train_blocked_reason(_selected_hero_altar)
+	)
+
+
+func _get_blacksmith_upgrade_tooltip(upgrade_id: StringName) -> String:
+	var is_researching: bool = (
+		_selected_blacksmith != null
+		and is_instance_valid(_selected_blacksmith)
+		and _selected_blacksmith.is_researching()
+	)
+	return TooltipFormatter.format_upgrade_research(
+		upgrade_id,
+		TooltipFormatter.get_upgrade_blocked_reason(upgrade_id, is_researching),
+		is_researching
+	)
+
+
+func _get_shop_item_tooltip(item_id: StringName) -> String:
+	return TooltipFormatter.format_shop_item(
+		item_id,
+		TooltipFormatter.get_shop_item_blocked_reason(_selected_shop, item_id)
+	)
