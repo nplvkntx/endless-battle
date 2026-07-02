@@ -220,7 +220,7 @@ static func format_ability_cast(hero: Hero, ability_id: StringName, slot_label: 
 		return "\n".join(lines)
 
 	var overrides: Dictionary = hero.get_ability_base_overrides(ability_id)
-	_append_ability_stat_lines(lines, ability_id, rank, overrides)
+	_append_ability_stat_lines(lines, ability_id, rank, overrides, hero)
 
 	var mana: int = hero.get_ability_mana_cost(ability_id)
 	lines.append("Mana: %d" % mana)
@@ -251,16 +251,12 @@ static func format_ability_upgrade(hero: Hero, ability_id: StringName, slot_labe
 	var lines: PackedStringArray = PackedStringArray()
 	lines.append("Upgrade %s (%s)" % [display_name, slot_label])
 	lines.append("Next rank: %d/%d" % [next_rank, max_rank])
-	_append_ability_stat_lines(lines, ability_id, next_rank, overrides)
+	_append_ability_stat_lines(lines, ability_id, next_rank, overrides, hero)
 
-	var mana: int = int(
-		HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_MANA, next_rank, overrides)
-	)
+	var mana: int = hero.get_ability_mana_cost_at_rank(ability_id, next_rank)
 	lines.append("Mana: %d" % mana)
 
-	var cooldown: float = float(
-		HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_COOLDOWN, next_rank, overrides)
-	)
+	var cooldown: float = hero.get_ability_cooldown_at_rank(ability_id, next_rank)
 	lines.append("Cooldown: %s" % _format_seconds(cooldown))
 
 	if not hero.can_learn_ability(ability_id) and hero.ability_progression != null:
@@ -554,49 +550,42 @@ static func _append_ability_stat_lines(
 	lines: PackedStringArray,
 	ability_id: StringName,
 	rank: int,
-	overrides: Dictionary
+	overrides: Dictionary,
+	hero: Hero = null
 ) -> void:
 	match ability_id:
 		HeroAbilityProgression.ABILITY_Q:
-			lines.append(
-				"Damage: %d" % int(
-					HeroAbilityStats.get_stat(
-						ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides
-					)
-				)
+			var damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides))
 			)
-			lines.append(
-				"Splash Radius: %s" % _format_number(
-					float(
-						HeroAbilityStats.get_stat(
-							ability_id, HeroAbilityStats.STAT_SPLASH, rank, overrides
-						)
-					)
-				)
+			var radius: float = (
+				hero.get_ability_splash_radius_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_SPLASH, rank, overrides))
 			)
+			lines.append("Damage: %d" % damage)
+			lines.append("Splash Radius: %s" % _format_number(radius))
 		HeroAbilityProgression.ABILITY_W:
-			lines.append(
-				"Duration: %s" % _format_seconds(
-					float(
-						HeroAbilityStats.get_stat(
-							ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides
-						)
-					)
-				)
+			var duration: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides))
 			)
+			lines.append("Duration: %s" % _format_seconds(duration))
 		HeroAbilityProgression.ABILITY_E:
-			lines.append(
-				"Damage: %d" % int(
-					HeroAbilityStats.get_stat(
-						ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides
-					)
-				)
+			var strike_damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides))
 			)
+			lines.append("Damage: %d" % strike_damage)
 		HeroAbilityProgression.ABILITY_R:
-			var threshold: float = float(
-				HeroAbilityStats.get_stat(
-					ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides
-				)
+			var threshold: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides))
 			)
 			lines.append("Execute Threshold: %d%% HP" % int(round(threshold * 100.0)))
 
@@ -606,15 +595,30 @@ static func _get_ability_description(ability_id: StringName) -> String:
 
 
 static func _get_shop_item_effect_text(item: HeroItemDefinition) -> String:
+	var lines: PackedStringArray = PackedStringArray()
+
 	if item.bonus_attack_damage > 0:
-		return "+%d Attack Damage" % item.bonus_attack_damage
+		lines.append("+%d Attack Damage" % item.bonus_attack_damage)
 	if item.bonus_max_health > 0:
-		return "+%d Max Health" % item.bonus_max_health
+		lines.append("+%d Max Health" % item.bonus_max_health)
+	if item.heal_on_purchase > 0:
+		lines.append("+%d Health on Purchase" % item.heal_on_purchase)
 	if item.bonus_move_speed > 0.0:
-		return "+%d Move Speed" % int(item.bonus_move_speed)
+		lines.append("+%d Move Speed" % int(item.bonus_move_speed))
 	if item.bonus_max_mana > 0:
-		return "+%d Max Mana" % item.bonus_max_mana
-	return ""
+		lines.append("+%d Max Mana" % item.bonus_max_mana)
+	if item.restore_mana_on_purchase > 0:
+		lines.append("+%d Mana on Purchase" % item.restore_mana_on_purchase)
+	if item.bonus_ability_power > 0:
+		lines.append("+%d Ability Power" % item.bonus_ability_power)
+	if item.bonus_cooldown_reduction > 0.0:
+		lines.append("+%d%% Cooldown Reduction" % int(round(item.bonus_cooldown_reduction * 100.0)))
+	if item.bonus_mana_cost_reduction > 0.0:
+		lines.append("+%d%% Mana Cost Reduction" % int(round(item.bonus_mana_cost_reduction * 100.0)))
+	if item.bonus_spell_radius > 0.0:
+		lines.append("+%s Spell Radius" % _format_number(item.bonus_spell_radius))
+
+	return "\n".join(lines)
 
 
 static func _format_seconds(value: float) -> String:

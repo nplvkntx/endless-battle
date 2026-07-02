@@ -24,6 +24,16 @@ static func get_icon_texture(item_id: StringName) -> Texture2D:
 			_draw_boots(image)
 		HeroItemCatalog.ITEM_WIZARD_ORB:
 			_draw_orb(image)
+		HeroItemCatalog.ITEM_MAGE_RING:
+			_draw_ring(image)
+		HeroItemCatalog.ITEM_MANA_CRYSTAL:
+			_draw_mana_crystal(image)
+		HeroItemCatalog.ITEM_SORCERER_STAFF:
+			_draw_staff(image)
+		HeroItemCatalog.ITEM_ARCANE_BOOTS:
+			_draw_arcane_boots(image)
+		HeroItemCatalog.ITEM_ARCHMAGE_ORB:
+			_draw_archmage_orb(image)
 		_:
 			image.fill(Color(0.5, 0.52, 0.58, 1))
 
@@ -80,6 +90,60 @@ static func _draw_orb(image: Image) -> void:
 			if dist > radius:
 				continue
 			var color: Color = highlight if dist <= 3.0 else core
+			if dist > radius - 1.5:
+				color = glow
+			image.set_pixel(x, y, color)
+
+
+static func _draw_ring(image: Image) -> void:
+	var band := Color(0.72, 0.55, 0.95, 1)
+	var gem := Color(0.45, 0.25, 0.85, 1)
+	var center := Vector2(7.5, 7.5)
+	for y: int in ICON_SIZE:
+		for x: int in ICON_SIZE:
+			var dist: float = Vector2(float(x), float(y)).distance_to(center)
+			if dist >= 4.0 and dist <= 6.0:
+				image.set_pixel(x, y, band)
+			elif dist <= 2.0:
+				image.set_pixel(x, y, gem)
+
+
+static func _draw_mana_crystal(image: Image) -> void:
+	var blue := Color(0.25, 0.55, 0.95, 1)
+	var highlight := Color(0.55, 0.8, 1.0, 1)
+	_fill_rect(image, Rect2i(6, 2, 4, 3), highlight)
+	_fill_rect(image, Rect2i(5, 5, 6, 3), blue)
+	_fill_rect(image, Rect2i(6, 8, 4, 4), blue)
+	_fill_rect(image, Rect2i(7, 12, 2, 2), highlight)
+
+
+static func _draw_staff(image: Image) -> void:
+	var wood := Color(0.45, 0.28, 0.12, 1)
+	var crystal := Color(0.75, 0.45, 0.95, 1)
+	_fill_rect(image, Rect2i(7, 3, 2, 10), wood)
+	_fill_rect(image, Rect2i(5, 1, 6, 3), crystal)
+
+
+static func _draw_arcane_boots(image: Image) -> void:
+	var blue := Color(0.28, 0.42, 0.72, 1)
+	var glow := Color(0.45, 0.7, 1.0, 1)
+	_fill_rect(image, Rect2i(3, 4, 5, 6), blue)
+	_fill_rect(image, Rect2i(3, 10, 10, 3), glow)
+	_fill_rect(image, Rect2i(3, 7, 3, 6), blue)
+
+
+static func _draw_archmage_orb(image: Image) -> void:
+	var core := Color(0.55, 0.2, 0.9, 1)
+	var glow := Color(0.85, 0.45, 1.0, 1)
+	var highlight := Color(0.95, 0.75, 1.0, 1)
+	var center := Vector2(7.5, 7.5)
+	var radius := 6.5
+	for y: int in ICON_SIZE:
+		for x: int in ICON_SIZE:
+			var dist: float = Vector2(float(x), float(y)).distance_to(center)
+			if dist > radius:
+				continue
+			var color: Color = highlight if dist <= 2.5 else core
 			if dist > radius - 1.5:
 				color = glow
 			image.set_pixel(x, y, color)

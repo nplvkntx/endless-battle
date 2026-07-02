@@ -357,16 +357,26 @@ func _update_shop_item_ui() -> void:
 
 
 func _get_shop_item_effect_label(item: HeroItemDefinition) -> String:
-	if item.bonus_attack_damage > 0:
-		return "+%d AD" % item.bonus_attack_damage
-	if item.bonus_max_health > 0:
-		return "+%d HP" % item.bonus_max_health
-	if item.bonus_move_speed > 0.0:
-		return "+%d MS" % int(item.bonus_move_speed)
-	if item.bonus_max_mana > 0:
-		return "+%d Mana" % item.bonus_max_mana
+	var parts: PackedStringArray = PackedStringArray()
 
-	return ""
+	if item.bonus_attack_damage > 0:
+		parts.append("+%d AD" % item.bonus_attack_damage)
+	if item.bonus_max_health > 0:
+		parts.append("+%d HP" % item.bonus_max_health)
+	if item.bonus_move_speed > 0.0:
+		parts.append("+%d MS" % int(item.bonus_move_speed))
+	if item.bonus_max_mana > 0:
+		parts.append("+%d Mana" % item.bonus_max_mana)
+	if item.bonus_ability_power > 0:
+		parts.append("+%d AP" % item.bonus_ability_power)
+	if item.bonus_cooldown_reduction > 0.0:
+		parts.append("+%d%% CDR" % int(round(item.bonus_cooldown_reduction * 100.0)))
+	if item.bonus_mana_cost_reduction > 0.0:
+		parts.append("+%d%% MCR" % int(round(item.bonus_mana_cost_reduction * 100.0)))
+	if item.bonus_spell_radius > 0.0:
+		parts.append("+%s Radius" % TooltipFormatter._format_number(item.bonus_spell_radius))
+
+	return ", ".join(parts)
 
 
 func _connect_blacksmith_upgrade_buttons() -> void:
@@ -499,17 +509,25 @@ func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
 		return false
 
 	var item_id: StringName = &""
+	var shop_items: Array[StringName] = HeroItemCatalog.SHOP_ITEM_ORDER
 	match key_event.keycode:
 		KEY_Q:
-			item_id = HeroItemCatalog.ITEM_LONG_SWORD
+			if shop_items.size() > 0:
+				item_id = shop_items[0]
 		KEY_W:
-			item_id = HeroItemCatalog.ITEM_RUBY_CRYSTAL
+			if shop_items.size() > 1:
+				item_id = shop_items[1]
 		KEY_E:
-			item_id = HeroItemCatalog.ITEM_BOOTS
+			if shop_items.size() > 2:
+				item_id = shop_items[2]
 		KEY_R:
-			item_id = HeroItemCatalog.ITEM_WIZARD_ORB
+			if shop_items.size() > 3:
+				item_id = shop_items[3]
 		_:
 			return false
+
+	if item_id.is_empty():
+		return false
 
 	if _selected_shop.try_purchase_item(item_id):
 		_update_shop_item_ui()

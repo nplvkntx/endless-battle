@@ -21,10 +21,18 @@ const MANA_PER_LEVEL: int = 10
 const ATTACK_DAMAGE_PER_LEVEL: int = 2
 const BASE_MAX_HEALTH: int = 200
 const INVENTORY_SLOT_COUNT: int = 6
+const MAX_COOLDOWN_REDUCTION: float = 0.4
+const MAX_MANA_COST_REDUCTION: float = 0.4
+const ABILITY_POWER_EFFECT_SECONDS_PER_POINT: float = 0.01
+const ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT: float = 0.001
 
 @export var hero_data: Resource
 
 var level: int = 1
+var item_ability_power: int = 0
+var item_cooldown_reduction: float = 0.0
+var item_mana_cost_reduction: float = 0.0
+var item_spell_radius_bonus: float = 0.0
 var ability_points: int = 0
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var inventory: Array = []
@@ -170,16 +178,100 @@ func get_scaled_ability_stat(ability_id: StringName, stat: StringName) -> Varian
 	)
 
 
-func get_ability_mana_cost(ability_id: StringName) -> int:
-	return int(
-		get_scaled_ability_stat(ability_id, HeroAbilityStats.STAT_MANA)
+func get_effective_cooldown_reduction() -> float:
+	return minf(item_cooldown_reduction, MAX_COOLDOWN_REDUCTION)
+
+
+func get_effective_mana_cost_reduction() -> float:
+	return minf(item_mana_cost_reduction, MAX_MANA_COST_REDUCTION)
+
+
+func get_ability_damage_at_rank(ability_id: StringName, rank: int) -> int:
+	var base_damage: int = int(
+		HeroAbilityStats.get_stat(
+			ability_id, HeroAbilityStats.STAT_DAMAGE, rank, _get_ability_base_overrides(ability_id)
+		)
 	)
+	if base_damage <= 0:
+		return 0
+
+	return maxi(1, base_damage + item_ability_power)
+
+
+func get_ability_damage(ability_id: StringName) -> int:
+	return get_ability_damage_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func get_ability_splash_radius_at_rank(ability_id: StringName, rank: int) -> float:
+	var base_radius: float = float(
+		HeroAbilityStats.get_stat(
+			ability_id, HeroAbilityStats.STAT_SPLASH, rank, _get_ability_base_overrides(ability_id)
+		)
+	)
+	if base_radius <= 0.0:
+		return 0.0
+
+	return maxf(0.1, base_radius + item_spell_radius_bonus)
+
+
+func get_ability_splash_radius(ability_id: StringName) -> float:
+	return get_ability_splash_radius_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func get_ability_effect_strength_at_rank(ability_id: StringName, rank: int) -> float:
+	var base_effect: float = float(
+		HeroAbilityStats.get_stat(
+			ability_id, HeroAbilityStats.STAT_EFFECT, rank, _get_ability_base_overrides(ability_id)
+		)
+	)
+	if base_effect <= 0.0:
+		return 0.0
+
+	var bonus: float = float(item_ability_power) * _get_ability_power_effect_scale(ability_id)
+	if ability_id == HeroAbilityProgression.ABILITY_R:
+		return clampf(base_effect + bonus, 0.0, 0.75)
+
+	return base_effect + bonus
+
+
+func get_ability_effect_strength(ability_id: StringName) -> float:
+	return get_ability_effect_strength_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func get_ability_mana_cost_at_rank(ability_id: StringName, rank: int) -> int:
+	var base_mana: int = int(
+		HeroAbilityStats.get_stat(
+			ability_id, HeroAbilityStats.STAT_MANA, rank, _get_ability_base_overrides(ability_id)
+		)
+	)
+	return maxi(1, int(round(float(base_mana) * (1.0 - get_effective_mana_cost_reduction()))))
+
+
+func get_ability_mana_cost(ability_id: StringName) -> int:
+	return get_ability_mana_cost_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func get_ability_cooldown_at_rank(ability_id: StringName, rank: int) -> float:
+	var base_cooldown: float = float(
+		HeroAbilityStats.get_stat(
+			ability_id, HeroAbilityStats.STAT_COOLDOWN, rank, _get_ability_base_overrides(ability_id)
+		)
+	)
+	return maxf(0.1, base_cooldown * (1.0 - get_effective_cooldown_reduction()))
 
 
 func get_ability_cooldown(ability_id: StringName) -> float:
-	return float(
-		get_scaled_ability_stat(ability_id, HeroAbilityStats.STAT_COOLDOWN)
-	)
+	return get_ability_cooldown_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func _get_ability_power_effect_scale(ability_id: StringName) -> float:
+	match ability_id:
+		HeroAbilityProgression.ABILITY_W:
+			return ABILITY_POWER_EFFECT_SECONDS_PER_POINT
+		HeroAbilityProgression.ABILITY_R:
+			return ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT
+		_:
+			return 0.0
 
 
 func get_ability_tooltip(ability_id: StringName) -> String:
@@ -392,7 +484,15 @@ func _restore_inventory_from_snapshot(item_ids: Array) -> void:
 
 		inventory[slot_index] = item
 
+	_reset_item_spell_stats()
 	HeroItemService.restore_inventory_items(self)
+
+
+func _reset_item_spell_stats() -> void:
+	item_ability_power = 0
+	item_cooldown_reduction = 0.0
+	item_mana_cost_reduction = 0.0
+	item_spell_radius_bonus = 0.0
 
 
 ## Loads hero-specific runtime state from hero_data when the data pipeline is available.

@@ -126,6 +126,8 @@ static func apply_item_to_hero(
 	if item.bonus_move_speed != 0.0:
 		hero.move_speed += item.bonus_move_speed
 
+	_apply_spell_stat_bonus(hero, item)
+
 	_apply_health_bonus(hero, item, grant_immediate_bonuses)
 	_apply_mana_bonus(hero, item, grant_immediate_bonuses)
 
@@ -175,6 +177,8 @@ static func remove_item_from_hero(hero: Hero, item: HeroItemDefinition) -> void:
 
 	if item.bonus_move_speed != 0.0:
 		hero.move_speed = maxf(0.0, hero.move_speed - item.bonus_move_speed)
+
+	_remove_spell_stat_bonus(hero, item)
 
 	_remove_health_bonus(hero, item)
 	_remove_mana_bonus(hero, item)
@@ -257,6 +261,40 @@ static func _try_pay_for_item(shop: Shop, gold_cost: int) -> bool:
 		return ResourceManager.try_spend_gold(gold_cost)
 
 	return EnemyResourceManager.try_spend(gold_cost, 0)
+
+
+static func _apply_spell_stat_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_ability_power != 0:
+		hero.item_ability_power += item.bonus_ability_power
+
+	if item.bonus_cooldown_reduction != 0.0:
+		hero.item_cooldown_reduction += item.bonus_cooldown_reduction
+
+	if item.bonus_mana_cost_reduction != 0.0:
+		hero.item_mana_cost_reduction += item.bonus_mana_cost_reduction
+
+	if item.bonus_spell_radius != 0.0:
+		hero.item_spell_radius_bonus += item.bonus_spell_radius
+
+
+static func _remove_spell_stat_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_ability_power != 0:
+		hero.item_ability_power = maxi(0, hero.item_ability_power - item.bonus_ability_power)
+
+	if item.bonus_cooldown_reduction != 0.0:
+		hero.item_cooldown_reduction = maxf(
+			0.0, hero.item_cooldown_reduction - item.bonus_cooldown_reduction
+		)
+
+	if item.bonus_mana_cost_reduction != 0.0:
+		hero.item_mana_cost_reduction = maxf(
+			0.0, hero.item_mana_cost_reduction - item.bonus_mana_cost_reduction
+		)
+
+	if item.bonus_spell_radius != 0.0:
+		hero.item_spell_radius_bonus = maxf(
+			0.0, hero.item_spell_radius_bonus - item.bonus_spell_radius
+		)
 
 
 static func _apply_health_bonus(

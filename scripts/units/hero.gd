@@ -107,15 +107,11 @@ func _get_ability_base_overrides(ability_id: StringName) -> Dictionary:
 
 
 func get_ground_slam_damage() -> int:
-	return int(
-		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_Q, HeroAbilityStats.STAT_DAMAGE)
-	)
+	return get_ability_damage(HeroAbilityProgression.ABILITY_Q)
 
 
 func get_ground_slam_radius() -> float:
-	return float(
-		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_Q, HeroAbilityStats.STAT_SPLASH)
-	)
+	return get_ability_splash_radius(HeroAbilityProgression.ABILITY_Q)
 
 
 func get_ground_slam_cooldown() -> float:
@@ -127,9 +123,7 @@ func get_ground_slam_mana_cost() -> int:
 
 
 func get_divine_protection_duration() -> float:
-	return float(
-		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_W, HeroAbilityStats.STAT_EFFECT)
-	)
+	return get_ability_effect_strength(HeroAbilityProgression.ABILITY_W)
 
 
 func get_divine_protection_cooldown() -> float:
@@ -141,9 +135,7 @@ func get_divine_protection_mana_cost() -> int:
 
 
 func get_power_strike_damage() -> int:
-	return int(
-		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_E, HeroAbilityStats.STAT_DAMAGE)
-	)
+	return get_ability_damage(HeroAbilityProgression.ABILITY_E)
 
 
 func get_power_strike_cooldown() -> float:
@@ -155,9 +147,7 @@ func get_power_strike_mana_cost() -> int:
 
 
 func get_execute_health_threshold() -> float:
-	return float(
-		get_scaled_ability_stat(HeroAbilityProgression.ABILITY_R, HeroAbilityStats.STAT_EFFECT)
-	)
+	return get_ability_effect_strength(HeroAbilityProgression.ABILITY_R)
 
 
 func get_execute_cooldown() -> float:
