@@ -514,30 +514,36 @@ func _finish_task_corner_nudge() -> void:
 		super.set_movement_target(_task_movement_destination)
 
 
-func command_gather_gold_mine(gold_mine: GoldMine) -> void:
+func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) -> void:
 	if not _is_alive():
 		return
 
 	print(GOLD_MINE_COMMAND_MESSAGE)
-	_start_gathering(gold_mine)
+	_start_gathering(gold_mine, player_ordered)
 
 
-func command_gather_tree(tree: WoodTree) -> void:
+func command_gather_tree(tree: WoodTree, player_ordered: bool = true) -> void:
 	if not _is_alive():
 		return
 
 	print(TREE_COMMAND_MESSAGE)
-	_start_gathering(tree)
+	_start_gathering(tree, player_ordered)
 
 
-func _start_gathering(source: GatherableResource) -> void:
+func _start_gathering(source: GatherableResource, player_ordered: bool = true) -> void:
 	_cancel_build_trip()
 	cancel_gathering()
 	if source == null or not is_instance_valid(source):
 		return
 
+	if (
+		not player_ordered
+		and CreepCampSafety.is_resource_guarded_by_active_camp(source, get_tree())
+	):
+		return
+
 	if source is WoodTree:
-		var wood_tree: WoodTree = _select_wood_tree(source as WoodTree)
+		var wood_tree: WoodTree = _select_wood_tree(source as WoodTree, player_ordered)
 		if wood_tree == null or not is_instance_valid(wood_tree) or not wood_tree.can_gather():
 			return
 		source = wood_tree
@@ -1415,7 +1421,8 @@ func _try_reassign_gather_source() -> bool:
 			scene_root,
 			_is_enemy_worker(),
 			null,
-			_get_valid_gather_source()
+			_get_valid_gather_source(),
+			false
 		)
 		if replacement == null:
 			return false
@@ -1618,18 +1625,24 @@ func _unlock_wood_tree() -> void:
 	_locked_wood_tree = null
 
 
-func _select_wood_tree(preferred: WoodTree) -> WoodTree:
+func _select_wood_tree(preferred: WoodTree, player_ordered: bool = true) -> WoodTree:
+	if (
+		player_ordered
+		and preferred != null
+		and is_instance_valid(preferred)
+		and preferred.can_gather()
+	):
+		return preferred
+
 	var scene_root: Node = get_tree().current_scene
-	var selected: WoodTree = WorkerGathering.find_best_wood_tree(
+	return WorkerGathering.find_best_wood_tree(
 		global_position,
 		scene_root,
 		_is_enemy_worker(),
 		preferred,
-		null
+		null,
+		false
 	)
-	if selected != null:
-		return selected
-	return preferred
 
 
 func _lock_wood_gathering_position() -> void:

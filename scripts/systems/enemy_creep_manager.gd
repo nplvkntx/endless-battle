@@ -162,19 +162,7 @@ func _find_best_creep_camp(
 
 
 func _collect_creep_camps(tree: SceneTree) -> Array[Node3D]:
-	var camps: Dictionary = {}
-
-	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
-		if not _is_living_creep(node):
-			continue
-
-		var parent: Node = node.get_parent()
-		if parent == null or not parent is Node3D:
-			continue
-
-		camps[parent.get_instance_id()] = parent as Node3D
-
-	return camps.values()
+	return CreepCampSafety.collect_active_camps(tree)
 
 
 func _is_enemy_side_camp(camp: Node3D, enemy_rally: Vector3, tree: SceneTree) -> bool:

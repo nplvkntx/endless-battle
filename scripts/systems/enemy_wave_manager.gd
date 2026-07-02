@@ -5,6 +5,7 @@ extends Node
 
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const HERO_BEHAVIOR_INTERVAL_SECONDS := 1.0
+const MIN_HERO_LEVEL_FOR_ATTACK: int = 2
 
 @export var player_command_center_path: NodePath
 @export var wave_interval_seconds: float = 30.0
@@ -164,6 +165,11 @@ func _on_wave_timer() -> void:
 		return
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if _should_delay_offensive_wave(rally_position):
+		_hold_army_for_creep_phase(rally_position)
+		_schedule_next_wave()
+		return
+
 	var next_wave_number: int = _waves_launched + 1
 	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
 		next_wave_number
@@ -185,6 +191,41 @@ func _on_wave_timer() -> void:
 	EnemyArmyCommand.command_attack_move(wave_plan.get("units", []), attack_destination)
 	_waves_launched += 1
 	_schedule_next_wave()
+
+
+func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero != null and hero.level < MIN_HERO_LEVEL_FOR_ATTACK:
+		return true
+
+	return CreepCampSafety.has_uncleared_nearby_camps(
+		get_tree(),
+		rally_position,
+		EnemyCreepManager.CREEP_SEARCH_RANGE
+	)
+
+
+func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero == null or not is_instance_valid(hero):
+		return
+
+	if not EnemyArmyCommand.is_hero_healthy_enough_for_wave(hero):
+		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
+
+	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(
+		get_tree()
+	)
+	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+		EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
+		return
+
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(get_tree())
+	if creep_plan.get("can_launch", false):
+		return
+
+	EnemyArmyCommand.command_hold_at_rally(creep_plan.get("units", []), rally_position)
 
 
 func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:

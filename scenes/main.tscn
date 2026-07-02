@@ -172,24 +172,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
 mesh = SubResource("CylinderMesh_creep_placeholder")
 surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
 
-[node name="EasyCampPlayer" type="Node3D" parent="." unique_id=2053903713]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0, -30)
-
-[node name="Creep1" parent="EasyCampPlayer" unique_id=20762309 instance=ExtResource("24_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
-
-[node name="Creep2" parent="EasyCampPlayer" unique_id=430633536 instance=ExtResource("24_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
-
-[node name="EasyCampEnemy" type="Node3D" parent="." unique_id=1804294728]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 0, 30)
-
-[node name="Creep1" parent="EasyCampEnemy" unique_id=1804294729 instance=ExtResource("24_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
-
-[node name="Creep2" parent="EasyCampEnemy" unique_id=1804294730 instance=ExtResource("24_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
-
 [node name="MediumCampPlayer" type="Node3D" parent="." unique_id=1804294731]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0, -12)
 

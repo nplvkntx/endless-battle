@@ -86,11 +86,13 @@ static func find_nearest_gather_source(
 	from_position: Vector3,
 	scene_root: Node,
 	for_enemy: bool,
-	exclude: GatherableResource = null
+	exclude: GatherableResource = null,
+	allow_dangerous: bool = false
 ) -> GatherableResource:
 	if scene_root == null or not is_instance_valid(scene_root):
 		return null
 
+	var tree: SceneTree = scene_root.get_tree()
 	var closest_source: GatherableResource = null
 	var closest_distance_squared: float = INF
 
@@ -100,6 +102,12 @@ static func find_nearest_gather_source(
 
 		var source := node as GatherableResource
 		if source == exclude or not _is_usable_gather_source(source):
+			continue
+
+		if (
+			not allow_dangerous
+			and CreepCampSafety.is_resource_guarded_by_active_camp(source, tree)
+		):
 			continue
 
 		var distance_squared: float = from_position.distance_squared_to(source.global_position)
@@ -115,11 +123,13 @@ static func find_best_wood_tree(
 	scene_root: Node,
 	for_enemy: bool,
 	preferred: WoodTree = null,
-	exclude: GatherableResource = null
+	exclude: GatherableResource = null,
+	allow_dangerous: bool = false
 ) -> WoodTree:
 	if scene_root == null or not is_instance_valid(scene_root):
 		return null
 
+	var tree: SceneTree = scene_root.get_tree()
 	var best_tree: WoodTree = null
 	var best_assigned: int = 999999
 	var best_distance_squared: float = INF
@@ -128,20 +138,26 @@ static func find_best_wood_tree(
 		if not _is_matching_gather_source(node, &"wood", for_enemy):
 			continue
 
-		var tree := node as WoodTree
-		if tree == exclude or not _is_usable_gather_source(tree):
+		var wood_tree := node as WoodTree
+		if wood_tree == exclude or not _is_usable_gather_source(wood_tree):
 			continue
 
-		var assigned: int = tree.get_assigned_worker_count()
-		var distance_squared: float = from_position.distance_squared_to(tree.global_position)
+		if (
+			not allow_dangerous
+			and CreepCampSafety.is_resource_guarded_by_active_camp(wood_tree, tree)
+		):
+			continue
+
+		var assigned: int = wood_tree.get_assigned_worker_count()
+		var distance_squared: float = from_position.distance_squared_to(wood_tree.global_position)
 		var is_better: bool = false
 
 		if assigned < best_assigned:
 			is_better = true
 		elif assigned == best_assigned:
-			if tree == preferred and best_tree != preferred:
+			if wood_tree == preferred and best_tree != preferred:
 				is_better = true
-			elif best_tree == preferred and tree != preferred:
+			elif best_tree == preferred and wood_tree != preferred:
 				is_better = false
 			elif distance_squared < best_distance_squared:
 				is_better = true
@@ -149,7 +165,15 @@ static func find_best_wood_tree(
 		if is_better:
 			best_assigned = assigned
 			best_distance_squared = distance_squared
-			best_tree = tree
+			best_tree = wood_tree
+
+	if (
+		best_tree == null
+		and preferred != null
+		and allow_dangerous
+		and _is_usable_gather_source(preferred)
+	):
+		return preferred
 
 	return best_tree
 
@@ -180,6 +204,16 @@ static func _is_usable_gather_source(source: GatherableResource) -> bool:
 		and not source.is_queued_for_deletion()
 		and source.can_gather()
 	)
+
+
+static func is_safe_gather_source(
+	source: GatherableResource,
+	tree: SceneTree
+) -> bool:
+	if not _is_usable_gather_source(source):
+		return false
+
+	return not CreepCampSafety.is_resource_guarded_by_active_camp(source, tree)
 
 
 static func deposit(resource_id: StringName, amount: int, for_enemy: bool = false) -> void:

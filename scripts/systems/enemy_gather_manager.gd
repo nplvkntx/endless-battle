@@ -81,25 +81,25 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> void:
 	if command_center == null:
 		return
 
-	var gold_mine: GoldMine = _resolve_gold_mine()
-	var trees: Array[WoodTree] = _resolve_trees()
+	var gold_mine: GoldMine = _resolve_safe_gold_mine()
+	var trees: Array[WoodTree] = _resolve_safe_trees()
 	if gold_mine == null and trees.is_empty():
 		return
 
 	if prefer_gold and _is_valid_gold_mine(gold_mine):
-		worker.command_gather_gold_mine(gold_mine)
+		worker.command_gather_gold_mine(gold_mine, false)
 		return
 
 	if trees.is_empty():
 		if _is_valid_gold_mine(gold_mine):
-			worker.command_gather_gold_mine(gold_mine)
+			worker.command_gather_gold_mine(gold_mine, false)
 		return
 
 	var tree: WoodTree = _pick_tree_for_worker(worker, trees)
 	if tree != null and tree.can_gather():
-		worker.command_gather_tree(tree)
+		worker.command_gather_tree(tree, false)
 	elif _is_valid_gold_mine(gold_mine):
-		worker.command_gather_gold_mine(gold_mine)
+		worker.command_gather_gold_mine(gold_mine, false)
 
 
 func _rebalance_gather_workers() -> void:
@@ -363,6 +363,25 @@ func _resolve_enemy_command_center() -> CommandCenter:
 			return node as CommandCenter
 
 	return null
+
+
+func _resolve_safe_gold_mine() -> GoldMine:
+	var gold_mine: GoldMine = _resolve_gold_mine()
+	if gold_mine == null:
+		return null
+
+	if WorkerGathering.is_safe_gather_source(gold_mine, get_tree()):
+		return gold_mine
+
+	return null
+
+
+func _resolve_safe_trees() -> Array[WoodTree]:
+	var trees: Array[WoodTree] = []
+	for tree: WoodTree in _resolve_trees():
+		if WorkerGathering.is_safe_gather_source(tree, get_tree()):
+			trees.append(tree)
+	return trees
 
 
 func _resolve_gold_mine() -> GoldMine:
