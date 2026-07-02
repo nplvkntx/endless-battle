@@ -628,6 +628,14 @@ func _update_gather_trip() -> void:
 	if not _is_alive():
 		return
 
+	if (
+		_gather_state == GatherTripState.TO_SOURCE
+		or _gather_state == GatherTripState.GATHER_WAIT
+	):
+		if not _has_valid_gather_source():
+			_handle_gather_source_lost()
+			return
+
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
 			if _task_nudge_active:
@@ -916,11 +924,12 @@ func _attempt_construction_stuck_recovery() -> void:
 
 
 func _attempt_source_proximity_resolve() -> bool:
-	if not _is_valid_gather_source(_gather_source):
+	if not _has_valid_gather_source():
 		_handle_gather_source_lost()
 		return true
 
-	if not _is_near_resource_for_gather(_gather_source):
+	var source: GatherableResource = _get_valid_gather_source()
+	if not _is_near_resource_for_gather(source):
 		return false
 
 	has_move_target = false
@@ -1001,7 +1010,7 @@ func _attempt_gather_stuck_recovery() -> void:
 		if _is_gathering_wood():
 			return
 
-		if not _is_valid_gather_source(_gather_source):
+		if not _has_valid_gather_source():
 			_handle_gather_source_lost()
 			return
 
@@ -1084,10 +1093,10 @@ func _advance_task_approach_candidate() -> bool:
 func _apply_current_task_movement_target() -> void:
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
-			if not _is_valid_gather_source(_gather_source):
+			if not _has_valid_gather_source():
 				_handle_gather_source_lost()
 				return
-			_set_movement_to_gather_source(_gather_source)
+			_set_movement_to_gather_source(_get_valid_gather_source())
 		GatherTripState.TO_COMMAND_CENTER:
 			var dropoff: CommandCenter = _resolve_dropoff_target()
 			if dropoff == null:
@@ -1108,12 +1117,26 @@ func _apply_current_task_movement_target() -> void:
 		set_movement_target(_construction_target_point)
 
 
-func _is_valid_gather_source(source: GatherableResource) -> bool:
-	return (
-		source != null
-		and is_instance_valid(source)
-		and not source.is_queued_for_deletion()
-	)
+func _has_valid_gather_source() -> bool:
+	if _gather_source == null:
+		return false
+	if not is_instance_valid(_gather_source):
+		return false
+	return not _gather_source.is_queued_for_deletion()
+
+
+func _get_valid_gather_source() -> GatherableResource:
+	if not _has_valid_gather_source():
+		return null
+	return _gather_source
+
+
+func _is_valid_gather_source(source: Variant) -> bool:
+	if source == null or not source is GatherableResource:
+		return false
+	if not is_instance_valid(source):
+		return false
+	return not source.is_queued_for_deletion()
 
 
 func _is_near_resource_for_gather(source: CollisionObject3D) -> bool:
@@ -1141,27 +1164,28 @@ func _is_near_collision_target(
 
 
 func _handle_arrived_at_source() -> void:
-	if not _is_valid_gather_source(_gather_source):
+	if not _has_valid_gather_source():
 		_handle_gather_source_lost()
 		return
 
-	if not _is_near_resource_for_gather(_gather_source):
+	var source: GatherableResource = _get_valid_gather_source()
+	if not _is_near_resource_for_gather(source):
 		if _is_gathering_wood():
 			if not _is_near_wood_chop_spot(GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS):
-				_set_movement_to_gather_source(_gather_source)
+				_set_movement_to_gather_source(source)
 				return
 		elif _advance_task_approach_candidate():
 			_apply_current_task_movement_target()
 			return
 		elif not _is_near_collision_target(
-			_gather_source, GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS
+			source, GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS
 		):
 			_handle_gather_source_lost()
 			return
 
 	_source_approach_candidate_index = 0
 
-	if not _gather_source.can_gather():
+	if not source.can_gather():
 		if _carried_amount > 0:
 			_begin_return_to_command_center()
 		elif not _try_reassign_gather_source():
@@ -1208,13 +1232,14 @@ func _should_return_to_command_center_from_source() -> bool:
 	if _carried_amount <= 0:
 		return false
 
-	if not _is_valid_gather_source(_gather_source):
+	if not _has_valid_gather_source():
 		return true
 
-	if not _gather_source.can_gather():
+	var source: GatherableResource = _get_valid_gather_source()
+	if not source.can_gather():
 		return true
 
-	if not _gather_source.gathers_until_carry_full():
+	if not source.gathers_until_carry_full():
 		return true
 
 	return _carried_amount >= GatheringConfig.WORKER_CARRY_CAPACITY
@@ -1233,24 +1258,25 @@ func _on_gather_wait_finished() -> void:
 	if not _is_alive() or _gather_state != GatherTripState.GATHER_WAIT:
 		return
 
-	if not _is_valid_gather_source(_gather_source):
+	if not _has_valid_gather_source():
 		if _carried_amount > 0:
 			_begin_return_to_command_center()
 		elif not _try_reassign_gather_source():
 			_finish_gathering_idle()
 		return
 
-	var gathered: int = _gather_source.gather(_gather_source.get_gather_chunk_size())
+	var source: GatherableResource = _get_valid_gather_source()
+	var gathered: int = source.gather(source.get_gather_chunk_size())
 	_carried_amount += gathered
 
-	if _carried_amount <= 0 and not _gather_source.can_gather():
+	if _carried_amount <= 0 and not source.can_gather():
 		if not _try_reassign_gather_source():
 			_finish_gathering_idle()
 		return
 
 	if _should_return_to_command_center_from_source():
 		_begin_return_to_command_center()
-	elif _gather_source.can_gather():
+	elif source.can_gather():
 		_begin_gather_wait()
 	elif _carried_amount > 0:
 		_begin_return_to_command_center()
@@ -1300,8 +1326,9 @@ func _get_carried_resource_id() -> StringName:
 	if not _assigned_resource_id.is_empty():
 		return _assigned_resource_id
 
-	if _is_valid_gather_source(_gather_source):
-		return _gather_source.get_resource_id()
+	var source: GatherableResource = _get_valid_gather_source()
+	if source != null:
+		return source.get_resource_id()
 
 	return &""
 
@@ -1346,7 +1373,8 @@ func _continue_gather_cycle() -> void:
 		_finish_gathering_idle()
 		return
 
-	if not _is_valid_gather_source(_gather_source) or not _gather_source.can_gather():
+	var source: GatherableResource = _get_valid_gather_source()
+	if source == null or not source.can_gather():
 		if _try_reassign_gather_source():
 			return
 		_finish_gathering_idle()
@@ -1354,10 +1382,15 @@ func _continue_gather_cycle() -> void:
 
 	_gather_state = GatherTripState.TO_SOURCE
 	_source_approach_candidate_index = 0
-	_set_movement_to_gather_source(_gather_source)
+	_set_movement_to_gather_source(source)
 
 
 func _handle_gather_source_lost() -> void:
+	_gather_source = null
+	if _is_gathering_wood():
+		_unlock_wood_tree()
+	_clear_wood_chop_spot()
+
 	if _carried_amount > 0:
 		_begin_return_to_command_center()
 		return
@@ -1382,7 +1415,7 @@ func _try_reassign_gather_source() -> bool:
 			scene_root,
 			_is_enemy_worker(),
 			null,
-			_gather_source if _is_valid_gather_source(_gather_source) else null
+			_get_valid_gather_source()
 		)
 		if replacement == null:
 			return false
@@ -1402,8 +1435,9 @@ func _get_assigned_resource_id() -> StringName:
 	if not _assigned_resource_id.is_empty():
 		return _assigned_resource_id
 
-	if _is_valid_gather_source(_gather_source):
-		return _gather_source.get_resource_id()
+	var source: GatherableResource = _get_valid_gather_source()
+	if source != null:
+		return source.get_resource_id()
 
 	return &""
 
@@ -1438,8 +1472,9 @@ func _finish_gathering_idle() -> void:
 
 
 func _get_dropoff_search_position() -> Vector3:
-	if _is_valid_gather_source(_gather_source):
-		return _gather_source.global_position
+	var source: GatherableResource = _get_valid_gather_source()
+	if source != null:
+		return source.global_position
 
 	return global_position
 
@@ -1617,9 +1652,13 @@ func _is_near_wood_chop_spot(
 	return offset.length_squared() <= reach_distance * reach_distance
 
 
-func _set_movement_to_gather_source(source: GatherableResource) -> void:
-	if source is WoodTree:
-		var tree := source as WoodTree
+func _set_movement_to_gather_source(source: Variant) -> void:
+	if not _is_valid_gather_source(source):
+		return
+
+	var gather_source := source as GatherableResource
+	if gather_source is WoodTree:
+		var tree := gather_source as WoodTree
 		if not (_wood_chop_spot_valid and _locked_wood_tree == tree):
 			_wood_chop_spot = _compute_wood_chop_spot(tree)
 			_wood_chop_spot_valid = true
@@ -1627,7 +1666,7 @@ func _set_movement_to_gather_source(source: GatherableResource) -> void:
 		return
 
 	_clear_wood_chop_spot()
-	set_movement_target(_compute_resource_approach_position(source))
+	set_movement_target(_compute_resource_approach_position(gather_source))
 
 
 func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
