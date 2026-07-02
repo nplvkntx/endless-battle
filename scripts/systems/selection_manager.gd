@@ -9,7 +9,10 @@ signal inspection_changed(unit: Unit, building: Building)
 const DRAG_THRESHOLD_PIXELS: float = 4.0
 const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
 const UNIT_GROUP: StringName = &"units"
-const WORKER_GROUP: StringName = &"workers"
+const SELECTION_TYPE_WORKER: StringName = &"worker"
+const SELECTION_TYPE_SWORDSMAN: StringName = &"swordsman"
+const SELECTION_TYPE_ARCHER: StringName = &"archer"
+const SELECTION_TYPE_HERO: StringName = &"hero"
 const MULTI_SELECTION_WORKERS: StringName = &"workers"
 const MULTI_SELECTION_COMBAT: StringName = &"combat"
 const MULTI_SELECTION_MIXED: StringName = &"mixed"
@@ -974,23 +977,31 @@ func _is_same_unit_type(first_unit: Unit, second_unit: Unit) -> bool:
 
 
 func _get_unit_selection_group(unit: Unit) -> StringName:
-	if unit.is_in_group(WORKER_GROUP):
-		return WORKER_GROUP
-
-	# TODO: Return soldier/archer groups when those unit types exist.
+	if unit is Worker:
+		return SELECTION_TYPE_WORKER
+	if unit is Swordsman:
+		return SELECTION_TYPE_SWORDSMAN
+	if unit is Archer:
+		return SELECTION_TYPE_ARCHER
+	if unit is Hero:
+		return SELECTION_TYPE_HERO
 	return &""
 
 
 func _select_all_visible_same_type(clicked_unit: Unit, camera: Camera3D) -> void:
-	var type_group: StringName = _get_unit_selection_group(clicked_unit)
-	if type_group.is_empty():
+	var selection_type: StringName = _get_unit_selection_group(clicked_unit)
+	if selection_type.is_empty():
 		_set_selected_units([clicked_unit])
 		return
 
 	var units: Array[Unit] = []
-	for node: Node in get_tree().get_nodes_in_group(type_group):
+	for node: Node in get_tree().get_nodes_in_group(UNIT_GROUP):
 		var unit := node as Unit
 		if unit == null:
+			continue
+		if not _is_selectable_unit(unit):
+			continue
+		if _get_unit_selection_group(unit) != selection_type:
 			continue
 		if not camera.is_position_in_frustum(unit.global_position):
 			continue
