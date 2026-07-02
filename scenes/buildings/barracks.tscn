@@ -26,33 +26,33 @@ emission = Color(0.12, 0.72, 0.22, 1)
 cull_mode = 2
 
 [sub_resource type="BoxMesh" id="BoxMesh_hall"]
-size = Vector3(4, 1.4, 3)
+size = Vector3(3.5, 1.2, 2.5)
 
 [sub_resource type="BoxMesh" id="BoxMesh_roof_panel"]
-size = Vector3(4.2, 0.1, 1.6)
+size = Vector3(3.68, 0.09, 1.35)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_rack"]
-top_radius = 0.05
-bottom_radius = 0.05
-height = 2.0
+top_radius = 0.04
+bottom_radius = 0.04
+height = 1.65
 
 [sub_resource type="BoxMesh" id="BoxMesh_banner"]
-size = Vector3(0.06, 0.7, 0.45)
+size = Vector3(0.05, 0.58, 0.38)
 
 [sub_resource type="BoxMesh" id="BoxMesh_door"]
-size = Vector3(0.9, 1.2, 0.1)
+size = Vector3(0.78, 1.05, 0.08)
 
 [sub_resource type="BoxMesh" id="BoxMesh_axe"]
-size = Vector3(0.04, 0.35, 0.12)
+size = Vector3(0.035, 0.3, 0.1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
-size = Vector3(4.12, 0.025, 0.06)
+size = Vector3(3.62, 0.025, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
-size = Vector3(0.06, 0.025, 3.12)
+size = Vector3(0.06, 0.025, 2.62)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_barracks"]
-size = Vector3(4, 2, 3)
+size = Vector3(3.5, 1.6, 2.5)
 
 [node name="Barracks" type="StaticBody3D" groups=["buildings"]]
 collision_layer = 4
@@ -60,63 +60,63 @@ collision_mask = 3
 script = ExtResource("1_barracks")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
 mesh = SubResource("BoxMesh_hall")
 surface_material_override/0 = SubResource("StandardMaterial3D_barracks")
 
 [node name="Visuals" type="Node3D" parent="."]
 
 [node name="RoofLeft" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.78, -0.7)
+transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.66, -0.58)
 mesh = SubResource("BoxMesh_roof_panel")
 surface_material_override/0 = SubResource("StandardMaterial3D_roof")
 
 [node name="RoofRight" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, -0.34202, 0, 0.34202, 0.939693, 0, 0.78, 0.7)
+transform = Transform3D(1, 0, 0, 0, 0.939693, -0.34202, 0, 0.34202, 0.939693, 0, 0.66, 0.58)
 mesh = SubResource("BoxMesh_roof_panel")
 surface_material_override/0 = SubResource("StandardMaterial3D_roof")
 
 [node name="Door" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.28, -1.52)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.24, -1.27)
 mesh = SubResource("BoxMesh_door")
 surface_material_override/0 = SubResource("StandardMaterial3D_door")
 
 [node name="WeaponRack" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.85, 0.05, 0)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.62, 0.04, 0)
 mesh = SubResource("CylinderMesh_rack")
 surface_material_override/0 = SubResource("StandardMaterial3D_rack")
 
 [node name="Axe" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.92, 0.35, 0.15)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.68, 0.3, 0.12)
 mesh = SubResource("BoxMesh_axe")
 surface_material_override/0 = SubResource("StandardMaterial3D_rack")
 
 [node name="Banner" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.88, -1.52)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.74, -1.27)
 mesh = SubResource("BoxMesh_banner")
 surface_material_override/0 = SubResource("StandardMaterial3D_banner")
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.88, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.72, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.25)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.25)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.0, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.0, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 

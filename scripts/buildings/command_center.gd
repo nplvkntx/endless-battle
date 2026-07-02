@@ -15,7 +15,7 @@ const MAX_ENEMY_WORKER_QUEUE: int = 3
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_TEAM_ID: int = 1
 
-@export var worker_spawn_offset: Vector3 = Vector3(3.5, -0.75, 0.0)
+@export var worker_spawn_offset: Vector3 = Vector3(0.0, -0.75, -2.8)
 
 enum RallyTargetType {
 	NONE,

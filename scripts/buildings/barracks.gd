@@ -20,8 +20,8 @@ const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
 
-@export var swordsman_spawn_offset: Vector3 = Vector3(3.0, -0.5, 0.0)
-@export var archer_spawn_offset: Vector3 = Vector3(3.0, -0.5, 2.0)
+@export var swordsman_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
+@export var archer_spawn_offset: Vector3 = Vector3(1.2, -0.5, -2.5)
 
 @export var enable_enemy_auto_production: bool = false
 

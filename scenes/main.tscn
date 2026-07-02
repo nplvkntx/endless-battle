@@ -51,13 +51,13 @@ transparency = 1
 albedo_color = Color(0.42, 0.18, 0.52, 0.45)
 
 [sub_resource type="BoxMesh" id="BoxMesh_command_center"]
-size = Vector3(4, 2.5, 4)
+size = Vector3(3.5, 2, 3.5)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
 albedo_color = Color(0.75, 0.4, 0.15, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
-size = Vector3(4, 2.5, 4)
+size = Vector3(3.5, 2, 3.5)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_command_center"]
 albedo_color = Color(0.65, 0.15, 0.15, 1)
@@ -242,9 +242,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, -34)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.5, -33)
 
 [node name="CommandCenter" type="StaticBody3D" parent="." unique_id=1715301900 groups=["player_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -38)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1, -38)
 script = ExtResource("2_command_center")
-worker_spawn_offset = Vector3(0, -0.75, -3.5)
+worker_spawn_offset = Vector3(0, -0.75, -2.8)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter" unique_id=119345703]
 mesh = SubResource("BoxMesh_command_center")
@@ -258,16 +258,16 @@ script = ExtResource("19_health_component")
 max_health = 500
 
 [node name="Barracks" parent="." unique_id=155687893 instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 1, -38)
-swordsman_spawn_offset = Vector3(0, -0.5, -3.5)
-archer_spawn_offset = Vector3(1.5, -0.5, -3.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.8, -38)
+swordsman_spawn_offset = Vector3(0, -0.5, -2.5)
+archer_spawn_offset = Vector3(1.2, -0.5, -2.5)
 
 [node name="HealthComponent" type="Node" parent="Barracks" unique_id=1862133368]
 script = ExtResource("19_health_component")
 max_health = 300
 
 [node name="EnemyCommandCenter" type="StaticBody3D" parent="." unique_id=124807173 groups=["enemy_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 38)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1, 38)
 script = ExtResource("2_command_center")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter" unique_id=423569690]
@@ -336,7 +336,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 1.25, 6)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, 9)
 
 [node name="Farm" parent="." unique_id=43908211 instance=ExtResource("10_farm")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.75, -33)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.5, -33)
 
 [node name="GoldMine" parent="." unique_id=1424185328 instance=ExtResource("8_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 45, 1, -28)

@@ -3,13 +3,13 @@ extends RefCounted
 
 ## Shared building placement rules: grid snap, map bounds, footprints, and AI position search.
 
-const GRID_SIZE: float = 2.0
+const GRID_SIZE: float = 1.0
 const MAP_MIN_X: float = -50.0
 const MAP_MAX_X: float = 50.0
 const MAP_MIN_Z: float = -50.0
 const MAP_MAX_Z: float = 50.0
 
-const BUILDING_PADDING: float = 1.25
+const BUILDING_PADDING: float = 0.8
 const FOOTPRINT_PROBE_HEIGHT: float = 2.5
 const PLACEMENT_COLLISION_MASK: int = (
 	PhysicsLayers.WORLD | PhysicsLayers.UNITS | PhysicsLayers.BUILDINGS
@@ -20,24 +20,24 @@ const TREE_CLEARANCE: float = 4.0
 const DROPOFF_PATH_WIDTH: float = 3.0
 const MIN_NAV_PATH_POINTS: int = 2
 const WORKER_NAV_TEST_Y: float = 0.5
-const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.5
+const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.0
 
-const FARM_SIZE := Vector2(3.0, 2.0)
-const BARRACKS_SIZE := Vector2(4.0, 3.0)
-const BLACKSMITH_SIZE := Vector2(3.5, 3.0)
-const SHOP_SIZE := Vector2(3.0, 2.5)
+const FARM_SIZE := Vector2(2.0, 1.4)
+const BARRACKS_SIZE := Vector2(3.5, 2.5)
+const BLACKSMITH_SIZE := Vector2(2.2, 1.8)
+const SHOP_SIZE := Vector2(2.0, 1.6)
 const TOWER_SIZE := Vector2(2.0, 2.0)
-const HERO_ALTAR_SIZE := Vector2(3.5, 3.5)
-const COMMAND_CENTER_SIZE := Vector2(4.0, 4.0)
-const DEFAULT_FOOTPRINT := Vector2(3.0, 3.0)
+const HERO_ALTAR_SIZE := Vector2(3.0, 3.0)
+const COMMAND_CENTER_SIZE := Vector2(3.5, 3.5)
+const DEFAULT_FOOTPRINT := Vector2(2.5, 2.5)
 
-const FARM_GROUND_Y: float = 0.75
-const BARRACKS_GROUND_Y: float = 1.0
-const BLACKSMITH_GROUND_Y: float = 1.0
-const SHOP_GROUND_Y: float = 1.0
+const FARM_GROUND_Y: float = 0.5
+const BARRACKS_GROUND_Y: float = 0.8
+const BLACKSMITH_GROUND_Y: float = 0.8
+const SHOP_GROUND_Y: float = 0.7
 const TOWER_GROUND_Y: float = 1.5
-const HERO_ALTAR_GROUND_Y: float = 1.25
-const COMMAND_CENTER_GROUND_Y: float = 1.25
+const HERO_ALTAR_GROUND_Y: float = 1.0
+const COMMAND_CENTER_GROUND_Y: float = 1.0
 
 const RING_RADII: Array[float] = [6.0, 8.5, 11.0, 14.0, 17.0]
 const EXPANSION_RING_RADII: Array[float] = [16.0, 19.0, 22.0]
