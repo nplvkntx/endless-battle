@@ -28,9 +28,12 @@ const HERO_AOE_CHECK_RANGE := 10.0
 const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
 const HERO_EXECUTE_SEARCH_RANGE := 14.0
 
-const WAVE_1_MIN_NON_HERO_UNITS := 3
-const WAVE_2_MIN_NON_HERO_UNITS := 5
-const WAVE_3_MIN_NON_HERO_UNITS := 7
+const WAVE_1_MIN_NON_HERO_UNITS := 4
+const WAVE_2_MIN_NON_HERO_UNITS := 7
+const WAVE_3_MIN_NON_HERO_UNITS := 10
+const WAVE_4_MIN_NON_HERO_UNITS := 13
+const WAVE_REGROUP_MAX_DISTANCE := 22.0
+const WAVE_REBUILD_ARMY_RATIO := 0.55
 
 
 static func is_combat_unit(node: Node) -> bool:
@@ -105,8 +108,102 @@ static func get_min_non_hero_units_for_wave(wave_number: int) -> int:
 		return WAVE_1_MIN_NON_HERO_UNITS
 	if wave_number == 2:
 		return WAVE_2_MIN_NON_HERO_UNITS
+	if wave_number == 3:
+		return WAVE_3_MIN_NON_HERO_UNITS
 
-	return WAVE_3_MIN_NON_HERO_UNITS
+	return WAVE_4_MIN_NON_HERO_UNITS
+
+
+static func filter_units_near_rally(
+	units: Array,
+	rally_position: Vector3,
+	max_distance: float = WAVE_REGROUP_MAX_DISTANCE
+) -> Array:
+	var nearby_units: Array = []
+
+	for unit: Variant in units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+
+		if not unit is Node3D:
+			continue
+
+		if not is_living_combat_unit(unit as Node):
+			continue
+
+		if horizontal_distance((unit as Node3D).global_position, rally_position) <= max_distance:
+			nearby_units.append(unit)
+
+	return nearby_units
+
+
+static func is_army_regrouped_at_rally(
+	tree: SceneTree,
+	rally_position: Vector3,
+	min_non_hero_units: int,
+	max_distance: float = WAVE_REGROUP_MAX_DISTANCE
+) -> bool:
+	if rally_position == Vector3.ZERO:
+		return false
+
+	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
+	return (
+		filter_units_near_rally(non_hero_units, rally_position, max_distance).size()
+		>= min_non_hero_units
+	)
+
+
+static func command_regroup_at_rally(tree: SceneTree, rally_position: Vector3) -> void:
+	if rally_position == Vector3.ZERO:
+		return
+
+	var units: Array = collect_living_combat_units(tree)
+	command_hold_at_rally(units, rally_position)
+
+
+static func build_regrouped_attack_wave_units(
+	tree: SceneTree,
+	rally_position: Vector3,
+	min_non_hero_units: int
+) -> Dictionary:
+	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
+	var regrouped_non_hero: Array = filter_units_near_rally(
+		non_hero_units,
+		rally_position
+	)
+	var can_launch: bool = regrouped_non_hero.size() >= min_non_hero_units
+	var wave_units: Array = regrouped_non_hero.duplicate()
+
+	if can_launch:
+		var hero: Hero = find_living_enemy_hero(tree)
+		if (
+			hero != null
+			and regrouped_non_hero.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+			and is_hero_healthy_enough_for_wave(hero)
+			and horizontal_distance(hero.global_position, rally_position)
+			<= WAVE_REGROUP_MAX_DISTANCE + 6.0
+		):
+			wave_units.append(hero)
+
+	return {
+		"units": wave_units,
+		"can_launch": can_launch,
+		"non_hero_count": regrouped_non_hero.size(),
+		"total_non_hero_count": non_hero_units.size(),
+	}
+
+
+static func should_rebuild_army_after_wave(
+	current_non_hero_count: int,
+	last_wave_non_hero_count: int
+) -> bool:
+	if last_wave_non_hero_count <= 0:
+		return false
+
+	return (
+		current_non_hero_count
+		< int(float(last_wave_non_hero_count) * WAVE_REBUILD_ARMY_RATIO)
+	)
 
 
 static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) -> Dictionary:

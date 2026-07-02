@@ -682,6 +682,11 @@ func _update_build_trip() -> void:
 					_commit_to_construction()
 				else:
 					_try_repath_construction_movement()
+		BuildTripState.DONE:
+			_build_trip_state = BuildTripState.IDLE
+			_building_target = null
+			if _is_enemy_worker():
+				_notify_enemy_worker_needs_gather_job()
 
 
 func _try_commit_construction_if_in_range() -> bool:
@@ -744,8 +749,10 @@ func _try_repath_construction_movement() -> void:
 
 func _begin_construction_wait() -> void:
 	if _building_target == null or not is_instance_valid(_building_target):
-		_build_trip_state = BuildTripState.DONE
+		_build_trip_state = BuildTripState.IDLE
 		_building_target = null
+		if _is_enemy_worker():
+			_notify_enemy_worker_needs_gather_job()
 		return
 
 	_build_trip_state = BuildTripState.CONSTRUCTION_WAIT
@@ -1477,6 +1484,38 @@ func _finish_gathering_idle() -> void:
 	_return_dropoff = null
 	_carried_amount = 0
 	_clear_wood_chop_spot()
+
+	if _is_enemy_worker():
+		_notify_enemy_worker_needs_gather_job()
+
+
+func needs_gather_target_reassignment() -> bool:
+	if _build_trip_state != BuildTripState.IDLE:
+		return false
+
+	if _carried_amount > 0:
+		return false
+
+	if _gather_state == GatherTripState.GATHER_WAIT:
+		return false
+
+	if _gather_state == GatherTripState.TO_COMMAND_CENTER:
+		return false
+
+	if _gather_state == GatherTripState.IDLE or _gather_state == GatherTripState.DONE:
+		return true
+
+	if not _has_valid_gather_source():
+		return true
+
+	var source: GatherableResource = _get_valid_gather_source()
+	if not source.can_gather():
+		return true
+
+	if _is_enemy_worker() and not WorkerGathering.is_safe_gather_source(source, get_tree()):
+		return true
+
+	return false
 
 
 func _get_dropoff_search_position() -> Vector3:

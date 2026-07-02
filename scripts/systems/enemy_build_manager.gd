@@ -6,10 +6,13 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 4.0
-const TARGET_WORKERS_EARLY: int = 8
-const TARGET_WORKERS_MID: int = 10
-const TARGET_WORKERS_LATE: int = 12
-const MIN_WORKERS_BEFORE_MILITARY: int = 8
+const TARGET_WORKERS_EARLY: int = 10
+const TARGET_WORKERS_MID: int = 18
+const TARGET_WORKERS_LATE: int = 25
+const MIN_WORKERS_BEFORE_MILITARY: int = 10
+const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.65
+const EXPANSION_MINE_MAX_DISTANCE: float = 36.0
+const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
 const WORKER_PHASE_MID_SECONDS: float = 300.0
 const WORKER_PHASE_LATE_SECONDS: float = 600.0
 const WORKER_TRAIN_GOLD_COST: int = 50
@@ -156,7 +159,7 @@ func _run_build_order() -> void:
 		_try_sustain_military_production()
 
 	if _should_build_expansion_command_center():
-		_try_place_building(PLACEMENT_COMMAND_CENTER, true)
+		_try_place_expansion_command_center()
 
 
 func _update_enemy_hero_restoration() -> bool:
@@ -381,6 +384,12 @@ func _should_build_expansion_command_center() -> bool:
 	if not _has_completed_building(PLACEMENT_HERO_ALTAR) or not _has_living_enemy_hero():
 		return false
 
+	if _count_enemy_workers() < _get_target_worker_count():
+		return false
+
+	if _find_expansion_gold_mine_anchor() == null:
+		return false
+
 	return EnemyResourceManager.can_afford(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
 
 
@@ -393,11 +402,23 @@ func _try_train_enemy_workers() -> bool:
 	if command_center == null:
 		return false
 
+	if not EnemyResourceManager.has_food_supply(1):
+		if _needs_farm() and not _should_defer_gold_spending_for_workers():
+			return _try_place_building(PLACEMENT_FARM)
+
+	var pending_queue: int = command_center.get_worker_queue_count()
+	var max_trains_this_tick: int = 1 if pending_queue > 0 else CommandCenter.MAX_ENEMY_WORKER_QUEUE
+
 	var trained_any: bool = false
-	while _get_effective_worker_count() < target_workers:
+	var trained_this_tick: int = 0
+	while (
+		_get_effective_worker_count() < target_workers
+		and trained_this_tick < max_trains_this_tick
+	):
 		if not command_center.try_train_enemy_worker():
 			break
 		trained_any = true
+		trained_this_tick += 1
 
 	return trained_any
 
@@ -430,7 +451,22 @@ func _can_train_military_units() -> bool:
 	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
 		return false
 
+	if _should_rebuild_workers():
+		return false
+
 	return not _should_grow_worker_economy()
+
+
+func _should_rebuild_workers() -> bool:
+	var target_workers: int = _get_target_worker_count()
+	if target_workers <= 0:
+		return false
+
+	var rebuild_threshold: int = maxi(
+		MIN_WORKERS_BEFORE_MILITARY - 2,
+		int(float(target_workers) * WORKER_REBUILD_THRESHOLD_RATIO)
+	)
+	return _get_effective_worker_count() < rebuild_threshold
 
 
 func _get_effective_worker_count() -> int:
@@ -509,7 +545,95 @@ func _try_train_military(barracks: Barracks) -> void:
 			_train_swordsman_next = false
 
 
+func _try_place_expansion_command_center() -> bool:
+	var expansion_mine: GoldMine = _find_expansion_gold_mine_anchor()
+	if expansion_mine == null:
+		return false
+
+	return _try_place_building_at_anchor(
+		PLACEMENT_COMMAND_CENTER,
+		expansion_mine.global_position,
+		true
+	)
+
+
+func _find_expansion_gold_mine_anchor() -> GoldMine:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if rally_position == Vector3.ZERO:
+		return null
+
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return null
+
+	var best_mine: GoldMine = null
+	var best_distance: float = INF
+
+	for child: Node in scene_root.get_children():
+		if not child is GoldMine:
+			continue
+
+		if not child.name.begins_with("Enemy"):
+			continue
+
+		var mine: GoldMine = child as GoldMine
+		if not mine.can_gather():
+			continue
+
+		if not WorkerGathering.is_safe_gather_source(mine, get_tree()):
+			continue
+
+		if _has_command_center_near_position(mine.global_position):
+			continue
+
+		var distance: float = EnemyArmyCommand.horizontal_distance(
+			mine.global_position,
+			rally_position
+		)
+		if distance > EXPANSION_MINE_MAX_DISTANCE:
+			continue
+
+		if distance < best_distance:
+			best_distance = distance
+			best_mine = mine
+
+	return best_mine
+
+
+func _has_command_center_near_position(position: Vector3) -> bool:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is CommandCenter or not _is_living_building(node as Building):
+			continue
+
+		if (
+			EnemyArmyCommand.horizontal_distance(
+				position,
+				(node as Node3D).global_position
+			)
+			<= EXPANSION_CC_NEAR_MINE_DISTANCE
+		):
+			return true
+
+	return false
+
+
 func _try_place_building(building_type: StringName, prefer_expansion: bool = false) -> bool:
+	var anchor: CommandCenter = _resolve_primary_command_center()
+	if anchor == null or not is_instance_valid(anchor) or not anchor.is_inside_tree():
+		return false
+
+	return _try_place_building_at_anchor(
+		building_type,
+		anchor.global_position,
+		prefer_expansion
+	)
+
+
+func _try_place_building_at_anchor(
+	building_type: StringName,
+	anchor_position: Vector3,
+	prefer_expansion: bool = false
+) -> bool:
 	if _has_unfinished_construction():
 		return false
 
@@ -540,20 +664,16 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 	if not EnemyResourceManager.can_afford(gold_cost, wood_cost):
 		return false
 
-	var anchor: CommandCenter = _resolve_primary_command_center()
-	if anchor == null or not is_instance_valid(anchor) or not anchor.is_inside_tree():
-		return false
-
 	var parent: Node = get_node_or_null(buildings_parent_path)
 	if parent == null or not parent.is_inside_tree():
 		return false
 
 	var existing_buildings: Array[Node3D] = EnemyBuildPlacement.collect_nearby_buildings(
-		anchor.global_position,
+		anchor_position,
 		parent
 	)
 	var position: Vector3 = EnemyBuildPlacement.find_position(
-		anchor.global_position,
+		anchor_position,
 		building_type,
 		existing_buildings,
 		prefer_expansion,

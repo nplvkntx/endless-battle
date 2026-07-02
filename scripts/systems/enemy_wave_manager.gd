@@ -6,17 +6,25 @@ extends Node
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const HERO_BEHAVIOR_INTERVAL_SECONDS := 1.0
 const MIN_HERO_LEVEL_FOR_ATTACK: int = 2
+const MIN_CLEARED_CAMPS_FOR_ATTACK: int = 2
+const FIRST_ATTACK_FALLBACK_SECONDS: float = 420.0
+const ARMY_REGROUP_INTERVAL_SECONDS: float = 5.0
 
 @export var player_command_center_path: NodePath
-@export var wave_interval_seconds: float = 30.0
+@export var wave_interval_seconds: float = 35.0
 
 var _wave_active: bool = true
 var _waves_launched: int = 0
 var _tracked_player_command_center: CommandCenter = null
 var _hero_behavior_timer: float = 0.0
+var _regroup_timer: float = 0.0
+var _rebuilding_army_after_wave: bool = false
+var _last_wave_non_hero_count: int = 0
+var _match_start_msec: int = 0
 
 
 func _ready() -> void:
+	_match_start_msec = Time.get_ticks_msec()
 	_tracked_player_command_center = _resolve_player_command_center()
 	if _tracked_player_command_center != null:
 		_tracked_player_command_center.destroyed.connect(
@@ -28,11 +36,14 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_hero_behavior_timer += delta
-	if _hero_behavior_timer < HERO_BEHAVIOR_INTERVAL_SECONDS:
-		return
+	if _hero_behavior_timer >= HERO_BEHAVIOR_INTERVAL_SECONDS:
+		_hero_behavior_timer = 0.0
+		_update_hero_army_behavior()
 
-	_hero_behavior_timer = 0.0
-	_update_hero_army_behavior()
+	_regroup_timer += delta
+	if _regroup_timer >= ARMY_REGROUP_INTERVAL_SECONDS:
+		_regroup_timer = 0.0
+		_enforce_army_regroup_when_waiting()
 
 
 func _update_hero_army_behavior() -> void:
@@ -165,22 +176,43 @@ func _on_wave_timer() -> void:
 		return
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	var next_wave_number: int = _waves_launched + 1
+	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
+		next_wave_number
+	)
+
 	if _should_delay_offensive_wave(rally_position):
 		_hold_army_for_creep_phase(rally_position)
 		_schedule_next_wave()
 		return
 
-	var next_wave_number: int = _waves_launched + 1
-	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
-		next_wave_number
-	)
-	var wave_plan: Dictionary = EnemyArmyCommand.build_attack_wave_units(
+	_update_wave_rebuild_state(rally_position, min_non_hero_units)
+
+	if _rebuilding_army_after_wave:
+		_hold_army_until_ready(rally_position, _count_regrouped_non_hero_units(rally_position))
+		_schedule_next_wave()
+		return
+
+	if not EnemyArmyCommand.is_army_regrouped_at_rally(
 		get_tree(),
+		rally_position,
+		min_non_hero_units
+	):
+		EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
+		_schedule_next_wave()
+		return
+
+	var wave_plan: Dictionary = EnemyArmyCommand.build_regrouped_attack_wave_units(
+		get_tree(),
+		rally_position,
 		min_non_hero_units
 	)
 
 	if not wave_plan.get("can_launch", false):
-		_hold_army_until_ready(rally_position, int(wave_plan.get("non_hero_count", 0)))
+		_hold_army_until_ready(
+			rally_position,
+			int(wave_plan.get("non_hero_count", 0))
+		)
 		_schedule_next_wave()
 		return
 
@@ -188,21 +220,91 @@ func _on_wave_timer() -> void:
 		get_tree(),
 		rally_position
 	)
-	EnemyArmyCommand.command_attack_move(wave_plan.get("units", []), attack_destination)
+	var wave_units: Array = wave_plan.get("units", [])
+	EnemyArmyCommand.command_attack_move(wave_units, attack_destination)
 	_waves_launched += 1
+	_last_wave_non_hero_count = int(wave_plan.get("non_hero_count", 0))
+	_rebuilding_army_after_wave = true
 	_schedule_next_wave()
 
 
 func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
+	if _get_match_elapsed_seconds() >= FIRST_ATTACK_FALLBACK_SECONDS:
+		return false
+
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
-	if hero != null and hero.level < MIN_HERO_LEVEL_FOR_ATTACK:
-		return true
+	if hero != null and hero.level >= MIN_HERO_LEVEL_FOR_ATTACK:
+		return false
+
+	if _count_cleared_nearby_camps(rally_position) >= MIN_CLEARED_CAMPS_FOR_ATTACK:
+		return false
 
 	return CreepCampSafety.has_uncleared_nearby_camps(
 		get_tree(),
 		rally_position,
 		EnemyCreepManager.CREEP_SEARCH_RANGE
 	)
+
+
+func _count_cleared_nearby_camps(rally_position: Vector3) -> int:
+	return CreepCampSafety.count_cleared_enemy_side_camps(
+		get_tree(),
+		rally_position,
+		EnemyCreepManager.CREEP_SEARCH_RANGE,
+		EnemyCreepManager.CAMP_CLEAR_RADIUS
+	)
+
+
+func _get_match_elapsed_seconds() -> float:
+	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _update_wave_rebuild_state(
+	rally_position: Vector3,
+	min_non_hero_units: int
+) -> void:
+	if not _rebuilding_army_after_wave:
+		return
+
+	var regrouped_count: int = _count_regrouped_non_hero_units(rally_position)
+	if regrouped_count < min_non_hero_units:
+		return
+
+	var current_non_hero_count: int = EnemyArmyCommand.collect_living_non_hero_combat_units(
+		get_tree()
+	).size()
+	if (
+		_last_wave_non_hero_count > 0
+		and EnemyArmyCommand.should_rebuild_army_after_wave(
+			current_non_hero_count,
+			_last_wave_non_hero_count
+		)
+		and regrouped_count < min_non_hero_units + 2
+	):
+		return
+
+	_rebuilding_army_after_wave = false
+
+
+func _count_regrouped_non_hero_units(rally_position: Vector3) -> int:
+	return EnemyArmyCommand.filter_units_near_rally(
+		EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()),
+		rally_position
+	).size()
+
+
+func _enforce_army_regroup_when_waiting() -> void:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if rally_position == Vector3.ZERO:
+		return
+
+	var should_hold: bool = (
+		_should_delay_offensive_wave(rally_position) or _rebuilding_army_after_wave
+	)
+	if not should_hold:
+		return
+
+	_hold_army_for_creep_phase(rally_position)
 
 
 func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
@@ -225,7 +327,11 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 	if creep_plan.get("can_launch", false):
 		return
 
-	EnemyArmyCommand.command_hold_at_rally(creep_plan.get("units", []), rally_position)
+	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+		EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
+		return
+
+	EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
 
 
 func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:
@@ -235,16 +341,12 @@ func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> voi
 
 	if not EnemyArmyCommand.is_hero_healthy_enough_for_wave(hero):
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
-		return
 
 	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
 		_waves_launched + 1
 	)
-	if non_hero_count >= min_non_hero_units:
-		return
-
-	if non_hero_count < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
-		EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
+	if non_hero_count < min_non_hero_units:
+		EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
 
 
 func _has_any_attack_target() -> bool:

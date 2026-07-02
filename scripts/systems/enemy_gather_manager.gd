@@ -5,9 +5,9 @@ extends Node
 
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
-const REASSIGN_INTERVAL_SECONDS: float = 7.0
-const MIN_GOLD_WORKERS: int = 1
-const MIN_WOOD_WORKERS: int = 2
+const REASSIGN_INTERVAL_SECONDS: float = 4.0
+const EARLY_GAME_GOLD_RATIO: float = 0.6
+const BUILDING_PRESSURE_GOLD_RATIO: float = 0.45
 const FOOD_RESERVE: int = 2
 const WOOD_STOCK_COMFORT: int = 120
 const GOLD_STOCK_COMFORT: int = 150
@@ -81,7 +81,7 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> void:
 	if command_center == null:
 		return
 
-	var gold_mine: GoldMine = _resolve_safe_gold_mine()
+	var gold_mine: GoldMine = _resolve_best_safe_gold_mine(worker.global_position)
 	var trees: Array[WoodTree] = _resolve_safe_trees()
 	if gold_mine == null and trees.is_empty():
 		return
@@ -129,6 +129,21 @@ func _rebalance_gather_workers() -> void:
 	var target_gold: int = _apply_target_hysteresis(_compute_target_gold_workers(total), total)
 	var target_wood: int = total - target_gold
 
+	_reassign_idle_workers(gather_pool, target_gold)
+
+	gold_workers.clear()
+	wood_workers.clear()
+	unassigned_workers.clear()
+
+	for worker: Worker in gather_pool:
+		match worker.get_assigned_gather_resource_id():
+			&"gold":
+				gold_workers.append(worker)
+			&"wood":
+				wood_workers.append(worker)
+			_:
+				unassigned_workers.append(worker)
+
 	for worker: Worker in unassigned_workers:
 		if gold_workers.size() < target_gold:
 			assign_gather_job(worker, true)
@@ -163,30 +178,53 @@ func _compute_target_gold_workers(total_gather_workers: int) -> int:
 	if total_gather_workers == 1:
 		return 1
 
-	var min_gold: int = MIN_GOLD_WORKERS
-	var min_wood: int = MIN_WOOD_WORKERS
-	if _is_wood_heavy_imbalance():
-		min_wood = 1
-		min_gold = maxi(min_gold, 2)
+	var gold_ratio: float = EARLY_GAME_GOLD_RATIO
+	if _enemy_needs_wood_for_buildings() or _is_wood_heavy_imbalance():
+		gold_ratio = BUILDING_PRESSURE_GOLD_RATIO
 	elif _is_gold_heavy_imbalance():
-		min_gold = 1
-		min_wood = maxi(min_wood, 2)
+		gold_ratio = 0.75
 
-	var gold_target: int = mini(min_gold, total_gather_workers)
-	var wood_target: int = mini(min_wood, total_gather_workers - gold_target)
-	var remaining: int = total_gather_workers - gold_target - wood_target
+	var gold_target: int = int(round(float(total_gather_workers) * gold_ratio))
+	return clampi(gold_target, 1, total_gather_workers - 1)
 
-	if remaining > 0:
-		var bias: float = _compute_gather_bias()
-		var gold_share: float = clampf(0.5 + bias * 0.4, 0.2, 0.8)
-		var extra_gold: int = int(round(float(remaining) * gold_share))
-		gold_target += extra_gold
-		wood_target += remaining - extra_gold
 
-	if total_gather_workers >= 2:
-		gold_target = clampi(gold_target, 1, total_gather_workers - 1)
+func _reassign_idle_workers(gather_pool: Array[Worker], target_gold: int) -> void:
+	var active_gold: int = 0
+	var active_wood: int = 0
 
-	return gold_target
+	for worker: Worker in gather_pool:
+		if _is_idle_gather_worker(worker):
+			continue
+
+		match worker.get_assigned_gather_resource_id():
+			&"gold":
+				active_gold += 1
+			&"wood":
+				active_wood += 1
+
+	for worker: Worker in gather_pool:
+		if not _is_idle_gather_worker(worker):
+			continue
+
+		var prefer_gold: bool = active_gold < target_gold
+		assign_gather_job(worker, prefer_gold)
+		if prefer_gold:
+			active_gold += 1
+		else:
+			active_wood += 1
+
+
+func _is_idle_gather_worker(worker: Worker) -> bool:
+	if not _is_valid_worker(worker):
+		return false
+
+	if worker.is_on_construction_trip():
+		return false
+
+	if worker.is_carrying_gathered_resources():
+		return false
+
+	return worker.needs_gather_target_reassignment()
 
 
 func _apply_target_hysteresis(computed_target: int, total_gather_workers: int) -> int:
@@ -203,30 +241,6 @@ func _apply_target_hysteresis(computed_target: int, total_gather_workers: int) -
 		return computed_target
 
 	return clampi(_cached_target_gold, 1, maxi(1, total_gather_workers - 1))
-
-
-func _compute_gather_bias() -> float:
-	var wood: int = EnemyResourceManager.wood
-	var gold: int = EnemyResourceManager.gold
-
-	if wood >= RESOURCE_HIGH_THRESHOLD and gold <= RESOURCE_CRITICAL_THRESHOLD:
-		return 1.0
-	if gold >= RESOURCE_HIGH_THRESHOLD and wood <= RESOURCE_CRITICAL_THRESHOLD:
-		return -1.0
-	if wood <= RESOURCE_CRITICAL_THRESHOLD and gold <= RESOURCE_CRITICAL_THRESHOLD:
-		return 0.0
-
-	var wood_surplus: float = float(wood - WOOD_STOCK_COMFORT) / float(WOOD_STOCK_COMFORT)
-	var gold_surplus: float = float(gold - GOLD_STOCK_COMFORT) / float(GOLD_STOCK_COMFORT)
-	var bias: float = clampf(wood_surplus - gold_surplus, -1.0, 1.0) * 0.75
-
-	if _enemy_needs_wood_for_buildings():
-		bias -= 0.25
-
-	if _enemy_needs_gold_for_training():
-		bias += 0.25
-
-	return clampf(bias, -1.0, 1.0)
 
 
 func _is_wood_heavy_imbalance() -> bool:
@@ -365,15 +379,31 @@ func _resolve_enemy_command_center() -> CommandCenter:
 	return null
 
 
-func _resolve_safe_gold_mine() -> GoldMine:
-	var gold_mine: GoldMine = _resolve_gold_mine()
-	if gold_mine == null:
+func _resolve_best_safe_gold_mine(near_position: Vector3) -> GoldMine:
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
 		return null
 
-	if WorkerGathering.is_safe_gather_source(gold_mine, get_tree()):
-		return gold_mine
+	var source: GatherableResource = WorkerGathering.find_nearest_gather_source(
+		&"gold",
+		near_position,
+		scene_root,
+		true,
+		null,
+		false
+	)
+	if source is GoldMine:
+		return source as GoldMine
 
 	return null
+
+
+func _resolve_safe_gold_mine() -> GoldMine:
+	var command_center: CommandCenter = _resolve_enemy_command_center()
+	if command_center == null:
+		return null
+
+	return _resolve_best_safe_gold_mine(command_center.global_position)
 
 
 func _resolve_safe_trees() -> Array[WoodTree]:
@@ -458,4 +488,5 @@ func _is_valid_gold_mine(gold_mine: GoldMine) -> bool:
 		and is_instance_valid(gold_mine)
 		and not gold_mine.is_queued_for_deletion()
 		and gold_mine.can_gather()
+		and WorkerGathering.is_safe_gather_source(gold_mine, get_tree())
 	)

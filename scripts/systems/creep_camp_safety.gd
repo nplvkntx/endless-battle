@@ -49,6 +49,59 @@ static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
 	return camps.values()
 
 
+static func count_cleared_enemy_side_camps(
+	tree: SceneTree,
+	rally_position: Vector3,
+	search_range: float,
+	clear_radius: float
+) -> int:
+	if tree == null or rally_position == Vector3.ZERO:
+		return 0
+
+	var cleared: int = 0
+
+	for node: Node in tree.get_nodes_in_group(&"creep_camps"):
+		if not node is Node3D:
+			continue
+
+		var camp: Node3D = node as Node3D
+		if not _is_enemy_side_camp(camp, rally_position, tree):
+			continue
+
+		var distance: float = _horizontal_distance(camp.global_position, rally_position)
+		if distance > search_range:
+			continue
+
+		if _count_living_creeps_near(tree, camp.global_position, clear_radius) == 0:
+			cleared += 1
+
+	return cleared
+
+
+static func _count_living_creeps_near(
+	tree: SceneTree,
+	position: Vector3,
+	radius: float
+) -> int:
+	var count: int = 0
+
+	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+		if not _is_living_creep(node):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var distance: float = _horizontal_distance(
+			position,
+			(node as Node3D).global_position
+		)
+		if distance <= radius:
+			count += 1
+
+	return count
+
+
 static func has_uncleared_nearby_camps(
 	tree: SceneTree,
 	rally_position: Vector3,

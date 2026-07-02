@@ -10,6 +10,9 @@ const CAMP_ENGAGEMENT_RADIUS: float = 20.0
 const CAMP_CLEAR_RADIUS: float = 14.0
 const ARMY_UNDER_ATTACK_RANGE: float = 22.0
 const CAMP_POWER_MARGIN: float = 1.15
+const STRONG_CAMP_POWER_MARGIN: float = 1.35
+const STRONG_CAMP_POWER_THRESHOLD: int = 280
+const CREEP_REGROUP_MAX_DISTANCE: float = 24.0
 const CREEP_HERO_POWER: int = 220
 const CREEP_MELEE_POWER_PER_HEALTH: float = 1.0
 const CREEP_RANGED_POWER_PER_HEALTH: float = 0.85
@@ -37,8 +40,11 @@ func _update_creeping() -> void:
 		_retreat_creep_army(tree, rally_position)
 		return
 
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
 	if not creep_plan.get("can_launch", false):
+		var full_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+		if full_plan.get("can_launch", false):
+			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
 		return
 
 	var creep_army: Array = creep_plan.get("units", [])
@@ -71,12 +77,35 @@ func _update_creeping() -> void:
 
 
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
 	var creep_army: Array = creep_plan.get("units", [])
 	if creep_army.is_empty():
 		return
 
 	EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
+
+
+func _build_regrouped_creep_army(tree: SceneTree, rally_position: Vector3) -> Dictionary:
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	if not creep_plan.get("can_launch", false):
+		return creep_plan
+
+	var regrouped_units: Array = EnemyArmyCommand.filter_units_near_rally(
+		creep_plan.get("units", []),
+		rally_position,
+		CREEP_REGROUP_MAX_DISTANCE
+	)
+	var non_hero_count: int = 0
+	for unit: Variant in regrouped_units:
+		if unit is Hero:
+			continue
+		non_hero_count += 1
+
+	var can_launch: bool = non_hero_count >= EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
+	return {
+		"units": regrouped_units if can_launch else [],
+		"can_launch": can_launch,
+	}
 
 
 func _army_available_for_creeping(
@@ -146,7 +175,12 @@ func _find_best_creep_camp(
 		if camp_power <= 0:
 			continue
 
-		if float(camp_power) * CAMP_POWER_MARGIN > float(army_power):
+		var power_margin: float = (
+			STRONG_CAMP_POWER_MARGIN
+			if camp_power >= STRONG_CAMP_POWER_THRESHOLD
+			else CAMP_POWER_MARGIN
+		)
+		if float(camp_power) * power_margin > float(army_power):
 			continue
 
 		if (

@@ -123,6 +123,9 @@ static func _should_grant_player_gold(victim: Node, killer: Node) -> bool:
 
 static func _resolve_hero_recipient(victim: Node, killer: Node) -> Hero:
 	if victim != null and CombatTargetValidation.is_neutral_creep(victim):
+		if killer != null and CombatTargetValidation.is_enemy_faction(killer):
+			return _resolve_enemy_hero_for_creep_kill(victim, killer)
+
 		return _resolve_player_hero_for_creep_kill(victim, killer)
 
 	if not _is_enemy_army_victim(victim):
@@ -148,6 +151,43 @@ static func _is_enemy_army_victim(victim: Node) -> bool:
 		return true
 
 	return false
+
+
+static func _resolve_enemy_hero_for_creep_kill(victim: Node, killer: Node) -> Hero:
+	if killer is Hero and CombatTargetValidation.is_enemy_faction(killer):
+		return killer as Hero
+
+	var hero: Hero = _find_living_enemy_hero(victim)
+	if hero == null:
+		return null
+
+	if not _is_within_creep_xp_range(hero, victim):
+		return null
+
+	return hero
+
+
+static func _find_living_enemy_hero(context: Node) -> Hero:
+	if context == null or not is_instance_valid(context):
+		return null
+
+	var tree: SceneTree = context.get_tree()
+	if tree == null:
+		return null
+
+	for node: Node in tree.get_nodes_in_group(&"enemy_combat_units"):
+		if not node is Hero:
+			continue
+
+		if not CombatTargetValidation.is_enemy_faction(node):
+			continue
+
+		if CombatTargetValidation.get_target_current_health(node) <= 0:
+			continue
+
+		return node as Hero
+
+	return null
 
 
 static func _resolve_player_hero_for_creep_kill(victim: Node, killer: Node) -> Hero:
