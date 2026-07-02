@@ -4,9 +4,18 @@ extends RefCounted
 ## Detects active creep camps and whether gather resources are guarded.
 
 const CAMP_GUARD_RADIUS: float = 20.0
+const CAMP_RESPAWN_BLOCK_RADIUS: float = 20.0
 const CREEP_LEASH_DISTANCE: float = 16.0
 const CAMP_HOME_TOLERANCE: float = 1.25
 const CREEP_MOVE_SPEED: float = 3.5
+
+const _CAMP_BLOCK_UNIT_GROUPS: Array[StringName] = [
+	&"units",
+	&"heroes",
+	&"enemies",
+	&"enemy_workers",
+	&"enemy_combat_units",
+]
 
 
 static func is_resource_guarded_by_active_camp(
@@ -59,6 +68,22 @@ static func has_uncleared_nearby_camps(
 	return false
 
 
+static func is_camp_area_clear(camp_position: Vector3, tree: SceneTree) -> bool:
+	if tree == null or camp_position == Vector3.ZERO:
+		return false
+
+	var seen: Dictionary = {}
+
+	for group_name: StringName in _CAMP_BLOCK_UNIT_GROUPS:
+		for node: Node in tree.get_nodes_in_group(group_name):
+			if not _is_blocking_unit_in_camp(node, camp_position, seen):
+				continue
+
+			return false
+
+	return true
+
+
 static func get_camp_anchor_for_creep(creep: Node3D) -> Vector3:
 	if creep == null or not is_instance_valid(creep):
 		return Vector3.ZERO
@@ -88,6 +113,36 @@ static func _is_enemy_side_camp(
 		player_command_center.global_position
 	)
 	return distance_to_enemy <= distance_to_player
+
+
+static func _is_blocking_unit_in_camp(
+	node: Node,
+	camp_position: Vector3,
+	seen: Dictionary
+) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if node.is_queued_for_deletion():
+		return false
+
+	if not node is Node3D:
+		return false
+
+	var instance_id: int = node.get_instance_id()
+	if seen.has(instance_id):
+		return false
+
+	seen[instance_id] = true
+
+	if CombatTargetValidation.is_neutral_creep(node):
+		return false
+
+	if CombatTargetValidation.get_target_current_health(node) <= 0:
+		return false
+
+	var unit_position: Vector3 = (node as Node3D).global_position
+	return _horizontal_distance(unit_position, camp_position) <= CAMP_RESPAWN_BLOCK_RADIUS
 
 
 static func _is_living_creep(node: Node) -> bool:

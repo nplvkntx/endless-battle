@@ -1175,6 +1175,7 @@ func _on_health_depleted() -> void:
 	if not CombatTargetValidation.is_enemy_faction(self):
 		HeroProgressionStore.save_from_hero(self)
 	else:
+		HeroXpRewards.notify_unit_killed(self)
 		if is_in_group(&"enemy_combat_units"):
 			remove_from_group(&"enemy_combat_units")
 	_health_bar.visible = false

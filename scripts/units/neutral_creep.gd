@@ -112,6 +112,18 @@ func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float
 
 func _on_health_depleted() -> void:
 	HeroXpRewards.notify_unit_killed(self)
+	_notify_camp_parent()
 	_health_bar.visible = false
 	print("NeutralCreep died")
 	queue_free()
+
+
+func _notify_camp_parent() -> void:
+	var parent: Node = get_parent()
+	if parent == null or not is_instance_valid(parent):
+		return
+
+	if not parent.has_method(&"notify_creep_died"):
+		return
+
+	parent.call(&"notify_creep_died", self)

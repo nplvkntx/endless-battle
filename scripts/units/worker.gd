@@ -143,6 +143,7 @@ func _on_health_depleted() -> void:
 	else:
 		ResourceManager.release_food_used(FOOD_SUPPLY_USED)
 
+	HeroXpRewards.notify_unit_killed(self)
 	die()
 	print("Worker died")
 	queue_free()
