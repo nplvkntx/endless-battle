@@ -33,7 +33,10 @@ func _process(delta: float) -> void:
 
 
 func notify_creep_died(_creep: Node) -> void:
-	if not is_instance_valid(self):
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
+
+	if not is_inside_tree():
 		return
 
 	if _has_living_creeps():

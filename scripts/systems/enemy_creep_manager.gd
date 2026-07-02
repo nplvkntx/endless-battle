@@ -73,7 +73,12 @@ func _update_creeping() -> void:
 	if _is_army_engaging_camp(tree, creep_army, camp):
 		return
 
-	EnemyArmyCommand.command_attack_move(creep_army, camp.global_position)
+	var attack_destination: Vector3 = _resolve_camp_attack_destination(
+		tree,
+		camp,
+		army_center
+	)
+	EnemyArmyCommand.command_attack_move(creep_army, attack_destination)
 
 
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
@@ -220,6 +225,44 @@ func _is_enemy_side_camp(camp: Node3D, enemy_rally: Vector3, tree: SceneTree) ->
 
 func _is_camp_cleared(tree: SceneTree, camp: Node3D) -> bool:
 	return _count_living_creeps_near(tree, camp.global_position, CAMP_CLEAR_RADIUS) == 0
+
+
+func _resolve_camp_attack_destination(
+	tree: SceneTree,
+	camp: Node3D,
+	from_position: Vector3
+) -> Vector3:
+	var nearest_creep: Node3D = _find_nearest_living_creep_at_camp(tree, camp, from_position)
+	if nearest_creep != null:
+		return nearest_creep.global_position
+
+	return camp.global_position
+
+
+func _find_nearest_living_creep_at_camp(
+	tree: SceneTree,
+	camp: Node3D,
+	from_position: Vector3
+) -> Node3D:
+	var nearest_creep: Node3D = null
+	var nearest_distance: float = INF
+
+	for child: Node in camp.get_children():
+		if not _is_living_creep(child):
+			continue
+
+		if not child is Node3D:
+			continue
+
+		var distance: float = EnemyArmyCommand.horizontal_distance(
+			from_position,
+			(child as Node3D).global_position
+		)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest_creep = child as Node3D
+
+	return nearest_creep
 
 
 func _is_army_engaging_camp(tree: SceneTree, army: Array, camp: Node3D) -> bool:

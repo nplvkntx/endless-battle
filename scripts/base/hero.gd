@@ -11,6 +11,7 @@ signal ability_progression_changed()
 signal ability_ready(ability_id: StringName)
 signal inventory_changed()
 signal respawn_requested(hero: Hero)
+signal mana_changed(current_mana: int, max_mana: int)
 
 const MAX_LEVEL: int = 30
 const XP_PER_LEVEL_MULTIPLIER: int = 100
@@ -36,6 +37,8 @@ var item_spell_radius_bonus: float = 0.0
 var ability_points: int = 0
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var inventory: Array = []
+var current_mana: int = 0
+@export var max_mana: int = 100
 var _current_xp: float = 0.0
 
 
@@ -262,6 +265,70 @@ func get_ability_cooldown_at_rank(ability_id: StringName, rank: int) -> float:
 
 func get_ability_cooldown(ability_id: StringName) -> float:
 	return get_ability_cooldown_at_rank(ability_id, get_ability_rank(ability_id))
+
+
+func get_ground_slam_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_Q)
+
+
+func get_divine_protection_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_W)
+
+
+func get_power_strike_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_E)
+
+
+func get_execute_mana_cost() -> int:
+	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_R)
+
+
+func get_ground_slam_cooldown_remaining() -> float:
+	return 0.0
+
+
+func get_divine_protection_cooldown_remaining() -> float:
+	return 0.0
+
+
+func get_divine_protection_remaining() -> float:
+	return 0.0
+
+
+func is_divine_protection_active() -> bool:
+	return false
+
+
+func get_power_strike_cooldown_remaining() -> float:
+	return 0.0
+
+
+func is_power_strike_pending() -> bool:
+	return false
+
+
+func get_execute_cooldown_remaining() -> float:
+	return 0.0
+
+
+func is_execute_pending() -> bool:
+	return false
+
+
+func try_ground_slam() -> bool:
+	return false
+
+
+func try_divine_protection() -> bool:
+	return false
+
+
+func try_power_strike() -> bool:
+	return false
+
+
+func try_execute() -> bool:
+	return false
 
 
 func _get_ability_power_effect_scale(ability_id: StringName) -> float:

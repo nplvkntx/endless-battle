@@ -14,10 +14,10 @@ const ITEM_ARCANE_BOOTS: StringName = &"arcane_boots"
 const ITEM_ARCHMAGE_ORB: StringName = &"archmage_orb"
 
 const SHOP_ITEM_ORDER: Array[StringName] = [
-	ITEM_MAGE_RING,
-	ITEM_MANA_CRYSTAL,
-	ITEM_SORCERER_STAFF,
-	ITEM_ARCHMAGE_ORB,
+	ITEM_LONG_SWORD,
+	ITEM_RUBY_CRYSTAL,
+	ITEM_BOOTS,
+	ITEM_WIZARD_ORB,
 ]
 
 const SHOP_HOTKEYS: Dictionary = {

@@ -30,6 +30,10 @@ func _physics_process(delta: float) -> void:
 func _process_camp_defense(delta: float) -> void:
 	_clear_invalid_attack_target()
 
+	if _attack_target != null and not is_instance_valid(_attack_target):
+		_attack_target = null
+		_returning_home = true
+
 	if _attack_target != null and _is_target_beyond_leash(_attack_target):
 		_attack_target = null
 		_returning_home = true
@@ -120,7 +124,7 @@ func _on_health_depleted() -> void:
 
 func _notify_camp_parent() -> void:
 	var parent: Node = get_parent()
-	if parent == null or not is_instance_valid(parent):
+	if parent == null or not is_instance_valid(parent) or parent.is_queued_for_deletion():
 		return
 
 	if not parent.has_method(&"notify_creep_died"):

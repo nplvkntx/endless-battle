@@ -11,7 +11,8 @@ const ENEMY_TEAM_ID: int = 1
 const ENEMY_ATTACK_PRIORITY_ENGAGED := 1
 const ENEMY_ATTACK_PRIORITY_WORKER := 2
 const ENEMY_ATTACK_PRIORITY_MILITARY := 3
-const ENEMY_ATTACK_PRIORITY_BUILDING := 4
+const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 4
+const ENEMY_ATTACK_PRIORITY_BUILDING := 5
 const ENEMY_ATTACK_PRIORITY_INVALID := 99
 
 
@@ -240,6 +241,9 @@ static func find_closest_tower_attack_target_in_range(
 
 
 static func get_target_current_health(target: Variant) -> int:
+	if target == null or not is_instance_valid(target):
+		return 0
+
 	var health_component: HealthComponent = _get_health_component(target)
 	if health_component != null:
 		return health_component.current_health
@@ -372,6 +376,12 @@ static func get_enemy_attack_target_priority(
 		if distance <= attack_range:
 			return ENEMY_ATTACK_PRIORITY_ENGAGED
 		return ENEMY_ATTACK_PRIORITY_MILITARY
+
+	if is_neutral_creep(target):
+		var creep_attack_range: float = _get_attacker_attack_range(attacker)
+		if distance <= creep_attack_range:
+			return ENEMY_ATTACK_PRIORITY_ENGAGED
+		return ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP
 
 	if is_attackable_player_command_center(target):
 		return ENEMY_ATTACK_PRIORITY_BUILDING
@@ -507,6 +517,9 @@ static func _get_collision_xz_radius(body: CollisionObject3D) -> float:
 
 
 static func _can_receive_damage(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+
 	if target is Node and (target as Node).get_node_or_null("HealthComponent") != null:
 		return true
 
@@ -514,6 +527,9 @@ static func _can_receive_damage(target: Variant) -> bool:
 
 
 static func _is_alive(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+
 	var health_component: HealthComponent = _get_health_component(target)
 	if health_component != null:
 		return health_component.current_health > 0
@@ -525,6 +541,9 @@ static func _is_alive(target: Variant) -> bool:
 
 
 static func _get_health_component(target: Variant) -> HealthComponent:
+	if target == null or not is_instance_valid(target):
+		return null
+
 	if target is Node:
 		return (target as Node).get_node_or_null("HealthComponent") as HealthComponent
 	return null

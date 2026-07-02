@@ -46,7 +46,10 @@ static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
 
 		camps[parent.get_instance_id()] = parent as Node3D
 
-	return camps.values()
+	var active_camps: Array[Node3D] = []
+	for camp: Node3D in camps.values():
+		active_camps.append(camp)
+	return active_camps
 
 
 static func count_cleared_enemy_side_camps(

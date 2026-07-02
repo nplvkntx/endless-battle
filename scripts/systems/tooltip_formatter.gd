@@ -366,16 +366,11 @@ static func get_shop_item_blocked_reason(shop: Shop, item_id: StringName) -> Str
 	if shop == null or not is_instance_valid(shop):
 		return ""
 
-	if shop.get_nearby_shop_hero() == null:
-		return "Move hero near shop"
-
 	var item: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
 	if item == null:
 		return ""
 
-	if ResourceManager.gold < item.gold_cost:
-		return "Need more gold"
-	return ""
+	return HeroItemService.get_purchase_failure_reason(shop, item)
 
 
 static func get_hero_train_blocked_reason(hero_altar: HeroAltar) -> String:

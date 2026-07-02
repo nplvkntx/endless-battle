@@ -414,7 +414,9 @@ func _configure_enemy_mana_display(hero: Hero) -> void:
 	_tracked_hero = hero
 	if hero.has_signal("mana_changed") and not hero.mana_changed.is_connected(_on_tracked_mana_changed):
 		hero.mana_changed.connect(_on_tracked_mana_changed)
-	if hero.has_signal("level_changed"):
+	if hero.has_signal("level_changed") and not hero.level_changed.is_connected(
+		_on_tracked_enemy_hero_level_changed
+	):
 		hero.level_changed.connect(_on_tracked_enemy_hero_level_changed)
 	_update_enemy_hero_mana_display(hero)
 	_mana_bar.visible = true
@@ -1054,14 +1056,16 @@ func _get_selection_tooltip() -> String:
 	if selection_manager == null:
 		return ""
 
-	if selection_manager.inspected_unit != null:
-		return TooltipFormatter.format_unit(selection_manager.inspected_unit)
+	var inspected_unit: Unit = selection_manager.inspected_unit
+	if inspected_unit != null and is_instance_valid(inspected_unit):
+		return TooltipFormatter.format_unit(inspected_unit)
 
-	if selection_manager.inspected_building != null:
-		return TooltipFormatter.format_unit(selection_manager.inspected_building)
+	var inspected_building: Building = selection_manager.inspected_building
+	if inspected_building != null and is_instance_valid(inspected_building):
+		return TooltipFormatter.format_unit(inspected_building)
 
 	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null:
+	if selected_building != null and is_instance_valid(selected_building):
 		return TooltipFormatter.format_unit(selected_building)
 
 	var selected_units: Array[Unit] = selection_manager.selected_units

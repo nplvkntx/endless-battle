@@ -228,7 +228,20 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 
 
 static func build_creep_army(tree: SceneTree) -> Dictionary:
-	return build_attack_wave_units(tree, MIN_NON_HERO_FOR_HERO_JOIN)
+	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
+	var can_launch: bool = non_hero_units.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+	var creep_units: Array = non_hero_units.duplicate()
+
+	if can_launch:
+		var hero: Hero = find_living_enemy_hero(tree)
+		if hero != null and is_living_combat_unit(hero):
+			creep_units.append(hero)
+
+	return {
+		"units": creep_units,
+		"can_launch": can_launch,
+		"non_hero_count": non_hero_units.size(),
+	}
 
 
 static func is_enemy_base_threatened(tree: SceneTree) -> bool:

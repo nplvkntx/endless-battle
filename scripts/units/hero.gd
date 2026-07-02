@@ -5,14 +5,12 @@ extends Hero
 @export var attack_damage: int = 18
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 0.85
-@export var max_mana: int = 100
 @export var ground_slam_mana_cost: int = 40
 @export var mana_regen_rate: float = 5.0
 @export var divine_protection_mana_cost: int = 30
 @export var power_strike_mana_cost: int = 25
 @export var execute_mana_cost: int = 50
 
-signal mana_changed(current_mana: int, max_mana: int)
 signal divine_protection_state_changed(is_active: bool)
 
 const HEALTH_BAR_WIDTH := 1.4
@@ -50,7 +48,6 @@ var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
 var _ground_slam_cooldown_timer: float = 0.0
 var _ground_slam_pulse_tween: Tween
-var current_mana: int = 0
 var _mana_regen_accumulator: float = 0.0
 var _divine_protection_timer: float = 0.0
 var _divine_protection_cooldown_timer: float = 0.0
@@ -118,20 +115,12 @@ func get_ground_slam_cooldown() -> float:
 	return get_ability_cooldown(HeroAbilityProgression.ABILITY_Q)
 
 
-func get_ground_slam_mana_cost() -> int:
-	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_Q)
-
-
 func get_divine_protection_duration() -> float:
 	return get_ability_effect_strength(HeroAbilityProgression.ABILITY_W)
 
 
 func get_divine_protection_cooldown() -> float:
 	return get_ability_cooldown(HeroAbilityProgression.ABILITY_W)
-
-
-func get_divine_protection_mana_cost() -> int:
-	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_W)
 
 
 func get_power_strike_damage() -> int:
@@ -142,20 +131,12 @@ func get_power_strike_cooldown() -> float:
 	return get_ability_cooldown(HeroAbilityProgression.ABILITY_E)
 
 
-func get_power_strike_mana_cost() -> int:
-	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_E)
-
-
 func get_execute_health_threshold() -> float:
 	return get_ability_effect_strength(HeroAbilityProgression.ABILITY_R)
 
 
 func get_execute_cooldown() -> float:
 	return get_ability_cooldown(HeroAbilityProgression.ABILITY_R)
-
-
-func get_execute_mana_cost() -> int:
-	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_R)
 
 
 func _notify_hero_altars_of_death(_unit: Unit) -> void:

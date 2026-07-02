@@ -1419,11 +1419,41 @@ func _try_reassign_gather_source() -> bool:
 		return false
 
 	if resource_id == &"gold":
-		return false
+		var scene_root: Node = get_tree().current_scene
+		if scene_root == null:
+			return false
+
+		var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
+			&"gold",
+			global_position,
+			scene_root,
+			_is_enemy_worker(),
+			null,
+			false
+		)
+		if replacement == null or not replacement is GoldMine:
+			return false
+
+		var gold_mine: GoldMine = replacement as GoldMine
+		if not gold_mine.can_gather():
+			return false
+
+		if _is_enemy_worker() and not WorkerGathering.is_safe_gather_source(gold_mine, get_tree()):
+			return false
+
+		_gather_source = gold_mine
+		_assigned_resource_id = gold_mine.get_resource_id()
+		_source_approach_candidate_index = 0
+		_gather_state = GatherTripState.TO_SOURCE
+		_set_movement_to_gather_source(gold_mine)
+		return true
 
 	if resource_id == &"wood":
 		_unlock_wood_tree()
 		var scene_root: Node = get_tree().current_scene
+		if scene_root == null or not is_instance_valid(scene_root):
+			return false
+
 		var replacement: WoodTree = WorkerGathering.find_best_wood_tree(
 			global_position,
 			scene_root,

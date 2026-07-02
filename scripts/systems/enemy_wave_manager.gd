@@ -308,27 +308,17 @@ func _enforce_army_regroup_when_waiting() -> void:
 
 
 func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
-	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
-	if hero == null or not is_instance_valid(hero):
-		return
-
-	if not EnemyArmyCommand.is_hero_healthy_enough_for_wave(hero):
-		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
-		return
-
 	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(
 		get_tree()
 	)
 	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
-		EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
+		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+		if hero != null and is_instance_valid(hero):
+			EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
 		return
 
 	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(get_tree())
 	if creep_plan.get("can_launch", false):
-		return
-
-	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
-		EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
 		return
 
 	EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
