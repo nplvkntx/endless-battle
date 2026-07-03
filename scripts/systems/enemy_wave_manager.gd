@@ -21,10 +21,12 @@ var _regroup_timer: float = 0.0
 var _rebuilding_army_after_wave: bool = false
 var _last_wave_non_hero_count: int = 0
 var _match_start_msec: int = 0
+var _creep_manager: EnemyCreepManager = null
 
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_tracked_player_command_center = _resolve_player_command_center()
 	if _tracked_player_command_center != null:
 		_tracked_player_command_center.destroyed.connect(
@@ -240,6 +242,12 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 	if _get_match_elapsed_seconds() >= FIRST_ATTACK_FALLBACK_SECONDS:
 		return false
 
+	if EnemyEarlyStrategy.should_attack_early(get_tree(), rally_position):
+		return false
+
+	if _creep_manager != null and _creep_manager.should_abandon_creep_phase():
+		return false
+
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 	if hero != null and hero.level >= MIN_HERO_LEVEL_FOR_ATTACK:
 		return false
@@ -247,11 +255,17 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 	if _count_cleared_nearby_camps(rally_position) >= MIN_CLEARED_CAMPS_FOR_ATTACK:
 		return false
 
-	return CreepCampSafety.has_uncleared_nearby_camps(
+	if not CreepCampSafety.has_uncleared_nearby_camps(
 		get_tree(),
 		rally_position,
 		EnemyCreepManager.CREEP_SEARCH_RANGE
-	)
+	):
+		return false
+
+	if _creep_manager != null and not _creep_manager.has_safe_creep_camp_available():
+		return false
+
+	return true
 
 
 func _count_cleared_nearby_camps(rally_position: Vector3) -> int:

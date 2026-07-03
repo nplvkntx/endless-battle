@@ -17,8 +17,10 @@ const CREEP_HERO_POWER: int = 220
 const CREEP_MELEE_POWER_PER_HEALTH: float = 1.0
 const CREEP_RANGED_POWER_PER_HEALTH: float = 0.85
 const CREEP_DAMAGE_POWER_MULTIPLIER: float = 8.0
+const MAX_CREEP_SETBACKS_BEFORE_ATTACK: int = 3
 
 var _tick_timer: float = 0.0
+var _consecutive_creep_setbacks: int = 0
 
 
 func _process(delta: float) -> void:
@@ -28,6 +30,24 @@ func _process(delta: float) -> void:
 
 	_tick_timer = 0.0
 	_update_creeping()
+
+
+func should_abandon_creep_phase() -> bool:
+	return _consecutive_creep_setbacks >= MAX_CREEP_SETBACKS_BEFORE_ATTACK
+
+
+func has_safe_creep_camp_available() -> bool:
+	var tree: SceneTree = get_tree()
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	if not creep_plan.get("can_launch", false):
+		return false
+
+	var army_power: int = _estimate_army_power(creep_plan.get("units", []))
+	return _find_best_creep_camp(tree, rally_position, army_power) != null
 
 
 func _update_creeping() -> void:
@@ -57,6 +77,7 @@ func _update_creeping() -> void:
 
 	if EnemyArmyCommand.is_enemy_army_under_attack(tree, creep_army, ARMY_UNDER_ATTACK_RANGE):
 		if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
+			_record_creep_setback()
 			_retreat_creep_army(tree, rally_position)
 		return
 
@@ -70,9 +91,12 @@ func _update_creeping() -> void:
 	var army_power: int = _estimate_army_power(creep_army)
 	var camp: Node3D = _find_best_creep_camp(tree, rally_position, army_power)
 	if camp == null:
+		if _has_uncleared_enemy_side_camps(tree, rally_position):
+			_record_creep_setback()
 		return
 
 	if _is_camp_cleared(tree, camp):
+		_reset_creep_setbacks()
 		return
 
 	if _is_army_engaging_camp(tree, creep_army, camp):
@@ -87,6 +111,22 @@ func _update_creeping() -> void:
 		return
 
 	EnemyArmyCommand.command_attack_move(creep_army, attack_destination)
+
+
+func _record_creep_setback() -> void:
+	_consecutive_creep_setbacks += 1
+
+
+func _reset_creep_setbacks() -> void:
+	_consecutive_creep_setbacks = 0
+
+
+func _has_uncleared_enemy_side_camps(tree: SceneTree, rally_position: Vector3) -> bool:
+	return CreepCampSafety.has_uncleared_nearby_camps(
+		tree,
+		rally_position,
+		CREEP_SEARCH_RANGE
+	)
 
 
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
