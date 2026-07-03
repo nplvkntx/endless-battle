@@ -2,8 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bfyiykcfpyqqw" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
 [ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
-[ext_resource type="PackedScene" uid="uid://gjpafcmsoh1y" path="res://scenes/ui/hud.tscn" id="7_hud"]
-[ext_resource type="Script" uid="uid://t84aco6grm0h" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
+[ext_resource type="PackedScene" uid="uid://c5n8k3m7w2x9pud" path="res://scenes/ui/player_hud.tscn" id="7_player_hud"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
 [ext_resource type="PackedScene" uid="uid://c8h5m2k9w4xpn" path="res://scenes/world/ground.tscn" id="29_ground"]
 [ext_resource type="PackedScene" uid="uid://dq8n2k5m7w3xpa" path="res://scenes/world/neutral_creep_camps.tscn" id="30_neutral_creep_camps"]
@@ -11,18 +10,6 @@
 [ext_resource type="PackedScene" uid="uid://dp7k3m2n8w5xqb" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
 [ext_resource type="PackedScene" uid="uid://bq8n4m3w7x6xrc" path="res://scenes/match/enemy_starting_base.tscn" id="33_enemy_starting_base"]
 [ext_resource type="PackedScene" uid="uid://bqm8k4n2w7x3ms" path="res://scenes/match/match_systems.tscn" id="34_match_systems"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
-content_margin_left = 16.0
-content_margin_top = 8.0
-content_margin_right = 16.0
-content_margin_bottom = 8.0
-bg_color = Color(0.12, 0.08, 0.08, 0.9)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.85, 0.35, 0.3, 1)
 
 [node name="Main" type="Node3D" unique_id=1133004476]
 
@@ -40,55 +27,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("6_selection_box")
 
-[node name="GameUI" type="CanvasLayer" parent="." unique_id=606134238]
-
-[node name="Hud" parent="GameUI" unique_id=1874720175 instance=ExtResource("7_hud")]
-
-[node name="UnitPanel" parent="GameUI/Hud" index="1"]
-selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
-
-[node name="CommandBar" parent="GameUI/Hud" index="2"]
-selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
-
-[node name="SelectionCommandPanel" parent="GameUI/Hud/CommandBar/MarginContainer/VBoxContainer" index="0"]
-selection_manager_path = NodePath("../../../../../../MatchSystems/SelectionManager")
-build_manager_path = NodePath("../../../../../../MatchSystems/BuildManager")
-
-[node name="FeedbackMessage" type="Label" parent="GameUI" unique_id=500919632]
-visible = false
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -180.0
-offset_top = 44.0
-offset_right = 180.0
-offset_bottom = 76.0
-grow_horizontal = 2
-theme_override_colors/font_color = Color(1, 0.82, 0.78, 1)
-theme_override_font_sizes/font_size = 16
-theme_override_styles/normal = SubResource("StyleBoxFlat_feedback_message")
-text = "Population cap reached"
-horizontal_alignment = 1
-vertical_alignment = 1
-script = ExtResource("17_feedback_message")
-
-[node name="MatchResultLabel" type="Label" parent="GameUI" unique_id=477467453]
-visible = false
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -160.0
-offset_top = -24.0
-offset_right = 160.0
-offset_bottom = 24.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
-theme_override_font_sizes/font_size = 32
-horizontal_alignment = 1
-vertical_alignment = 1
+[node name="GameUI" parent="." instance=ExtResource("7_player_hud")]
 
 [node name="Ground" parent="." unique_id=1337121503 instance=ExtResource("29_ground")]
 

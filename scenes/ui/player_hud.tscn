@@ -1,0 +1,66 @@
+[gd_scene format=3 uid="uid://c2pbeet6gdndv"]
+
+[ext_resource type="PackedScene" uid="uid://gjpafcmsoh1y" path="res://scenes/ui/hud.tscn" id="1_hud"]
+[ext_resource type="Script" uid="uid://t84aco6grm0h" path="res://scripts/ui/feedback_message.gd" id="2_feedback_message"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
+content_margin_left = 16.0
+content_margin_top = 8.0
+content_margin_right = 16.0
+content_margin_bottom = 8.0
+bg_color = Color(0.12, 0.08, 0.08, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.35, 0.3, 1)
+
+[node name="GameUI" type="CanvasLayer" unique_id=606134238]
+
+[node name="Hud" parent="." unique_id=1874720175 instance=ExtResource("1_hud")]
+
+[node name="UnitPanel" parent="Hud" index="1"]
+selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
+
+[node name="CommandBar" parent="Hud" index="2"]
+selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
+
+[node name="SelectionCommandPanel" parent="Hud/CommandBar/MarginContainer/VBoxContainer" index="0"]
+selection_manager_path = NodePath("../../../../../../MatchSystems/SelectionManager")
+build_manager_path = NodePath("../../../../../../MatchSystems/BuildManager")
+
+[node name="FeedbackMessage" type="Label" parent="." unique_id=500919632]
+visible = false
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -180.0
+offset_top = 44.0
+offset_right = 180.0
+offset_bottom = 76.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.78, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleBoxFlat_feedback_message")
+text = "Population cap reached"
+horizontal_alignment = 1
+vertical_alignment = 1
+script = ExtResource("2_feedback_message")
+
+[node name="MatchResultLabel" type="Label" parent="." unique_id=477467453]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -24.0
+offset_right = 160.0
+offset_bottom = 24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+vertical_alignment = 1
