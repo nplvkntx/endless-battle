@@ -1,0 +1,51 @@
+[gd_scene format=3 uid="uid://exagw4nvcpru"]
+
+[ext_resource type="Script" uid="uid://bptnc3n0k7sbg" path="res://scripts/systems/selection_manager.gd" id="1_selection_manager"]
+[ext_resource type="Script" uid="uid://c1ftguf355mf" path="res://scripts/systems/gather_command_handler.gd" id="2_gather_command_handler"]
+[ext_resource type="Script" uid="uid://cxuw8agy6hjxe" path="res://scripts/systems/build_manager.gd" id="3_build_manager"]
+[ext_resource type="Script" uid="uid://cgqqodo0ymy15" path="res://scripts/systems/match_manager.gd" id="4_match_manager"]
+[ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="5_enemy_wave_manager"]
+[ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="6_enemy_gather_manager"]
+[ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
+[ext_resource type="Script" uid="uid://dmawlogwv25xq" path="res://scripts/systems/enemy_creep_manager.gd" id="8_enemy_creep_manager"]
+
+[node name="MatchSystems" type="Node"]
+
+[node name="SelectionManager" type="Node" parent="." unique_id=53640150]
+script = ExtResource("1_selection_manager")
+camera_path = NodePath("../../Camera3D")
+selection_box_path = NodePath("../../SelectionUI/SelectionBox")
+
+[node name="GatherCommandHandler" type="Node" parent="." unique_id=298477801]
+script = ExtResource("2_gather_command_handler")
+camera_path = NodePath("../../Camera3D")
+
+[node name="BuildManager" type="Node" parent="." unique_id=47046327]
+script = ExtResource("3_build_manager")
+camera_path = NodePath("../../Camera3D")
+buildings_parent_path = NodePath("../..")
+selection_manager_path = NodePath("../SelectionManager")
+
+[node name="MatchManager" type="Node" parent="." unique_id=1084555240]
+script = ExtResource("4_match_manager")
+player_command_center_path = NodePath("../../PlayerStartingBase/CommandCenter")
+enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
+match_result_label_path = NodePath("../../GameUI/MatchResultLabel")
+
+[node name="EnemyWaveManager" type="Node" parent="." unique_id=212905880]
+script = ExtResource("5_enemy_wave_manager")
+player_command_center_path = NodePath("../../PlayerStartingBase/CommandCenter")
+
+[node name="EnemyGatherManager" type="Node" parent="." unique_id=266528595]
+script = ExtResource("6_enemy_gather_manager")
+enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
+enemy_gold_mine_path = NodePath("../../MapResources/EnemyGoldMine")
+
+[node name="EnemyBuildManager" type="Node" parent="." unique_id=1908237249 groups=["enemy_build_manager"]]
+script = ExtResource("7_enemy_build_manager")
+enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
+enemy_gather_manager_path = NodePath("../EnemyGatherManager")
+buildings_parent_path = NodePath("../..")
+
+[node name="EnemyCreepManager" type="Node" parent="." unique_id=2101198463]
+script = ExtResource("8_enemy_creep_manager")
