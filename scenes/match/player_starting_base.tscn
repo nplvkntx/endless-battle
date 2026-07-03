@@ -1,0 +1,59 @@
+[gd_scene format=3 uid="uid://dp7k3m2n8w5xqb"]
+
+[ext_resource type="Script" uid="uid://cf1qxeyb66dtc" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
+[ext_resource type="PackedScene" uid="uid://c34sseipvxy7a" path="res://scenes/units/worker.tscn" id="2_worker"]
+[ext_resource type="PackedScene" uid="uid://bg5y8ctgvhkpp" path="res://scenes/buildings/farm.tscn" id="3_farm"]
+[ext_resource type="PackedScene" uid="uid://djfuwaovwcf3c" path="res://scenes/units/hero.tscn" id="4_hero"]
+[ext_resource type="Script" uid="uid://c0smd4kr0elli" path="res://scripts/components/health_component.gd" id="5_health_component"]
+[ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="6_barracks"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_command_center"]
+size = Vector3(3.5, 2, 3.5)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
+albedo_color = Color(0.75, 0.4, 0.15, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
+size = Vector3(3.5, 2, 3.5)
+
+[node name="PlayerStartingBase" type="Node3D"]
+
+[node name="Worker" parent="." unique_id=1420813028 instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)
+
+[node name="Worker2" parent="." unique_id=724827494 instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0.5, -34)
+
+[node name="Worker3" parent="." unique_id=1912011911 instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.5, -33.5)
+
+[node name="Worker4" parent="." unique_id=1388403132 instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, -34)
+
+[node name="DevHero" parent="." unique_id=274321212 instance=ExtResource("4_hero")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.5, -33)
+
+[node name="CommandCenter" type="StaticBody3D" parent="." unique_id=1715301900 groups=["player_command_center"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1, -38)
+script = ExtResource("1_command_center")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter" unique_id=119345703]
+mesh = SubResource("BoxMesh_command_center")
+surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter" unique_id=967640828]
+shape = SubResource("BoxShape3D_command_center")
+
+[node name="HealthComponent" type="Node" parent="CommandCenter" unique_id=445003066]
+script = ExtResource("5_health_component")
+max_health = 500
+
+[node name="Barracks" parent="." unique_id=155687893 instance=ExtResource("6_barracks")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.8, -38)
+
+[node name="HealthComponent" type="Node" parent="Barracks" unique_id=1862133368]
+script = ExtResource("5_health_component")
+max_health = 300
+
+[node name="Farm" parent="." unique_id=43908211 instance=ExtResource("3_farm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.5, -33)

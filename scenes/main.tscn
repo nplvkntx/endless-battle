@@ -6,14 +6,11 @@
 [ext_resource type="Script" uid="uid://bptnc3n0k7sbg" path="res://scripts/systems/selection_manager.gd" id="5_selection_manager"]
 [ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="PackedScene" uid="uid://gjpafcmsoh1y" path="res://scenes/ui/hud.tscn" id="7_hud"]
-[ext_resource type="PackedScene" uid="uid://bg5y8ctgvhkpp" path="res://scenes/buildings/farm.tscn" id="10_farm"]
 [ext_resource type="Script" uid="uid://cxuw8agy6hjxe" path="res://scripts/systems/build_manager.gd" id="11_build_manager"]
 [ext_resource type="Script" uid="uid://c1ftguf355mf" path="res://scripts/systems/gather_command_handler.gd" id="13_gather_command_handler"]
-[ext_resource type="PackedScene" uid="uid://djfuwaovwcf3c" path="res://scenes/units/hero.tscn" id="15_hero"]
 [ext_resource type="Script" uid="uid://t84aco6grm0h" path="res://scripts/ui/feedback_message.gd" id="17_feedback_message"]
 [ext_resource type="Script" uid="uid://c0smd4kr0elli" path="res://scripts/components/health_component.gd" id="19_health_component"]
 [ext_resource type="Script" uid="uid://cgqqodo0ymy15" path="res://scripts/systems/match_manager.gd" id="20_match_manager"]
-[ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="21_barracks"]
 [ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="22_enemy_wave_manager"]
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="23_enemy_gather_manager"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
@@ -22,6 +19,7 @@
 [ext_resource type="PackedScene" uid="uid://c8h5m2k9w4xpn" path="res://scenes/world/ground.tscn" id="29_ground"]
 [ext_resource type="PackedScene" uid="uid://dq8n2k5m7w3xpa" path="res://scenes/world/neutral_creep_camps.tscn" id="30_neutral_creep_camps"]
 [ext_resource type="PackedScene" uid="uid://c7k4m9n3w6xprb" path="res://scenes/world/map_resources.tscn" id="31_map_resources"]
+[ext_resource type="PackedScene" uid="uid://dp7k3m2n8w5xqb" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback_message"]
 content_margin_left = 16.0
@@ -37,9 +35,6 @@ border_color = Color(0.85, 0.35, 0.3, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_command_center"]
 size = Vector3(3.5, 2, 3.5)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
-albedo_color = Color(0.75, 0.4, 0.15, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
 size = Vector3(3.5, 2, 3.5)
@@ -60,13 +55,13 @@ script = ExtResource("11_build_manager")
 
 [node name="MatchManager" type="Node" parent="." unique_id=1084555240]
 script = ExtResource("20_match_manager")
-player_command_center_path = NodePath("../CommandCenter")
+player_command_center_path = NodePath("../PlayerStartingBase/CommandCenter")
 enemy_command_center_path = NodePath("../EnemyCommandCenter")
 match_result_label_path = NodePath("../GameUI/MatchResultLabel")
 
 [node name="EnemyWaveManager" type="Node" parent="." unique_id=212905880]
 script = ExtResource("22_enemy_wave_manager")
-player_command_center_path = NodePath("../CommandCenter")
+player_command_center_path = NodePath("../PlayerStartingBase/CommandCenter")
 
 [node name="EnemyGatherManager" type="Node" parent="." unique_id=266528595]
 script = ExtResource("23_enemy_gather_manager")
@@ -150,42 +145,7 @@ shadow_enabled = true
 
 [node name="NeutralCreepCamps" parent="." instance=ExtResource("30_neutral_creep_camps")]
 
-[node name="Worker" parent="." unique_id=1420813028 instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, -33)
-
-[node name="Worker2" parent="." unique_id=724827494 instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0.5, -34)
-
-[node name="Worker3" parent="." unique_id=1912011911 instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.5, -33.5)
-
-[node name="Worker4" parent="." unique_id=1388403132 instance=ExtResource("4_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, -34)
-
-[node name="DevHero" parent="." unique_id=274321212 instance=ExtResource("15_hero")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.5, -33)
-
-[node name="CommandCenter" type="StaticBody3D" parent="." unique_id=1715301900 groups=["player_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1, -38)
-script = ExtResource("2_command_center")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="CommandCenter" unique_id=119345703]
-mesh = SubResource("BoxMesh_command_center")
-surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="CommandCenter" unique_id=967640828]
-shape = SubResource("BoxShape3D_command_center")
-
-[node name="HealthComponent" type="Node" parent="CommandCenter" unique_id=445003066]
-script = ExtResource("19_health_component")
-max_health = 500
-
-[node name="Barracks" parent="." unique_id=155687893 instance=ExtResource("21_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.8, -38)
-
-[node name="HealthComponent" type="Node" parent="Barracks" unique_id=1862133368]
-script = ExtResource("19_health_component")
-max_health = 300
+[node name="PlayerStartingBase" parent="." instance=ExtResource("32_player_starting_base")]
 
 [node name="EnemyCommandCenter" type="StaticBody3D" parent="." unique_id=124807173 groups=["enemy_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1, 38)
@@ -215,6 +175,3 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 0.5, 34.5)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39, 0.5, 35)
 
 [node name="MapResources" parent="." instance=ExtResource("31_map_resources")]
-
-[node name="Farm" parent="." unique_id=43908211 instance=ExtResource("10_farm")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.5, -33)
