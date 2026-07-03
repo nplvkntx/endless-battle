@@ -1,0 +1,214 @@
+[gd_scene format=3 uid="uid://dbfxvg2ny1oyc"]
+
+[ext_resource type="PackedScene" uid="uid://crxg17shkoebg" path="res://scenes/units/neutral_creep.tscn" id="1_neutral_creep"]
+[ext_resource type="Script" uid="uid://bu5t1pigkcbv7" path="res://scripts/systems/creep_camp.gd" id="2_creep_camp"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_creep_placeholder"]
+top_radius = 10.0
+bottom_radius = 10.0
+height = 0.12
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_creep_placeholder"]
+transparency = 1
+albedo_color = Color(0.42, 0.18, 0.52, 0.45)
+
+[node name="NeutralCreepCamps" type="Node3D"]
+
+[node name="CreepCampPlaceholder" type="Node3D" parent="." unique_id=1672359482]
+
+[node name="MarkerMesh" type="MeshInstance3D" parent="CreepCampPlaceholder" unique_id=1623113975]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
+mesh = SubResource("CylinderMesh_creep_placeholder")
+surface_material_override/0 = SubResource("StandardMaterial3D_creep_placeholder")
+
+[node name="MediumCampPlayer" type="Node3D" parent="." unique_id=1804294731]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0, -12)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="MediumCampPlayer" unique_id=1804294732 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep2" parent="MediumCampPlayer" unique_id=1804294733 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep3" parent="MediumCampPlayer" unique_id=1804294734 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="MediumCampEnemy" type="Node3D" parent="." unique_id=1804294735]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0, 12)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="MediumCampEnemy" unique_id=1804294736 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep2" parent="MediumCampEnemy" unique_id=1804294737 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep3" parent="MediumCampEnemy" unique_id=1804294738 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="StrongCampPlayerExpansionA" type="Node3D" parent="." unique_id=301000036]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, -14)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampPlayerExpansionA" unique_id=301000037 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep2" parent="StrongCampPlayerExpansionA" unique_id=301000038 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep3" parent="StrongCampPlayerExpansionA" unique_id=301000039 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep4" parent="StrongCampPlayerExpansionA" unique_id=301000040 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="StrongCampPlayerExpansionB" type="Node3D" parent="." unique_id=301000041]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0, -26)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampPlayerExpansionB" unique_id=301000042 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep2" parent="StrongCampPlayerExpansionB" unique_id=301000043 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep3" parent="StrongCampPlayerExpansionB" unique_id=301000044 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep4" parent="StrongCampPlayerExpansionB" unique_id=301000045 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="StrongCampEnemyExpansionA" type="Node3D" parent="." unique_id=301000046]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, 14)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampEnemyExpansionA" unique_id=301000047 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep2" parent="StrongCampEnemyExpansionA" unique_id=301000048 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep3" parent="StrongCampEnemyExpansionA" unique_id=301000049 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep4" parent="StrongCampEnemyExpansionA" unique_id=301000050 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="StrongCampEnemyExpansionB" type="Node3D" parent="." unique_id=301000051]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 0, 26)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampEnemyExpansionB" unique_id=301000052 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep2" parent="StrongCampEnemyExpansionB" unique_id=301000053 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.5, -4)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep3" parent="StrongCampEnemyExpansionB" unique_id=301000054 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.5, 5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="Creep4" parent="StrongCampEnemyExpansionB" unique_id=301000055 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -5)
+attack_damage = 14
+attack_cooldown = 1.0
+
+[node name="StrongCampContestedExpansionEast" type="Node3D" parent="." unique_id=301000056]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 0, 5)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampContestedExpansionEast" unique_id=301000057 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0.5, 4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep2" parent="StrongCampContestedExpansionEast" unique_id=301000058 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep3" parent="StrongCampContestedExpansionEast" unique_id=301000059 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, 6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep4" parent="StrongCampContestedExpansionEast" unique_id=301000060 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, -6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep5" parent="StrongCampContestedExpansionEast" unique_id=301000061 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -7)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="StrongCampContestedExpansionWest" type="Node3D" parent="." unique_id=301000062]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 0, -5)
+script = ExtResource("2_creep_camp")
+
+[node name="Creep1" parent="StrongCampContestedExpansionWest" unique_id=301000063 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0.5, 4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep2" parent="StrongCampContestedExpansionWest" unique_id=301000064 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0.5, -4)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep3" parent="StrongCampContestedExpansionWest" unique_id=301000065 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, 6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep4" parent="StrongCampContestedExpansionWest" unique_id=301000066 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, -6)
+attack_damage = 16
+attack_cooldown = 0.95
+
+[node name="Creep5" parent="StrongCampContestedExpansionWest" unique_id=301000067 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -7)
+attack_damage = 16
+attack_cooldown = 0.95
