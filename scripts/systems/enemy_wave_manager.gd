@@ -198,7 +198,8 @@ func _on_wave_timer() -> void:
 		rally_position,
 		min_non_hero_units
 	):
-		EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
+		if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
+			EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
 		_schedule_next_wave()
 		return
 
@@ -221,6 +222,13 @@ func _on_wave_timer() -> void:
 		rally_position
 	)
 	var wave_units: Array = wave_plan.get("units", [])
+	if not EnemyArmyCommand.try_claim_army_mode(
+		EnemyArmyCommand.ArmyMode.ATTACKING,
+		true
+	):
+		_schedule_next_wave()
+		return
+
 	EnemyArmyCommand.command_attack_move(wave_units, attack_destination)
 	_waves_launched += 1
 	_last_wave_non_hero_count = int(wave_plan.get("non_hero_count", 0))
@@ -321,7 +329,8 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 	if creep_plan.get("can_launch", false):
 		return
 
-	EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
+	if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
+		EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
 
 
 func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:
@@ -335,7 +344,10 @@ func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> voi
 	var min_non_hero_units: int = EnemyArmyCommand.get_min_non_hero_units_for_wave(
 		_waves_launched + 1
 	)
-	if non_hero_count < min_non_hero_units:
+	if (
+		non_hero_count < min_non_hero_units
+		and EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING)
+	):
 		EnemyArmyCommand.command_regroup_at_rally(get_tree(), rally_position)
 
 

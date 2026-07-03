@@ -35,6 +35,69 @@ const WAVE_4_MIN_NON_HERO_UNITS := 13
 const WAVE_REGROUP_MAX_DISTANCE := 22.0
 const WAVE_REBUILD_ARMY_RATIO := 0.55
 
+enum ArmyMode {
+	IDLE,
+	CREEPING,
+	ATTACKING,
+	REGROUPING,
+	DEFENDING,
+}
+
+static var _army_mode: ArmyMode = ArmyMode.IDLE
+
+
+static func get_army_mode() -> ArmyMode:
+	return _army_mode
+
+
+## Returns true when the requested mode owns the army for issuing orders.
+## Pass allow_attack_override_creep when a ready wave should take over from creeping.
+static func try_claim_army_mode(
+	requested_mode: ArmyMode,
+	allow_attack_override_creep: bool = false
+) -> bool:
+	if requested_mode == _army_mode:
+		return true
+
+	match _army_mode:
+		ArmyMode.IDLE:
+			_army_mode = requested_mode
+			return true
+		ArmyMode.CREEPING:
+			if requested_mode == ArmyMode.ATTACKING and allow_attack_override_creep:
+				_army_mode = ArmyMode.ATTACKING
+				return true
+			if requested_mode == ArmyMode.REGROUPING or requested_mode == ArmyMode.DEFENDING:
+				_army_mode = requested_mode
+				return true
+			return false
+		ArmyMode.ATTACKING:
+			if requested_mode == ArmyMode.REGROUPING or requested_mode == ArmyMode.DEFENDING:
+				_army_mode = requested_mode
+				return true
+			return false
+		ArmyMode.REGROUPING:
+			if (
+				requested_mode == ArmyMode.CREEPING
+				or requested_mode == ArmyMode.ATTACKING
+				or requested_mode == ArmyMode.IDLE
+				or requested_mode == ArmyMode.DEFENDING
+			):
+				_army_mode = requested_mode
+				return true
+			return false
+		ArmyMode.DEFENDING:
+			if (
+				requested_mode == ArmyMode.REGROUPING
+				or requested_mode == ArmyMode.IDLE
+				or requested_mode == ArmyMode.CREEPING
+			):
+				_army_mode = requested_mode
+				return true
+			return false
+
+	return false
+
 
 static func is_combat_unit(node: Node) -> bool:
 	return node is Swordsman or node is Archer or node is Hero
