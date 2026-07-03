@@ -82,6 +82,8 @@ func _ready() -> void:
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_configure_faction_groups()
 	_configure_task_navigation_agent()
+	if _is_enemy_worker():
+		call_deferred("_notify_enemy_worker_needs_gather_job")
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -168,6 +170,9 @@ func _cancel_build_trip() -> void:
 func _configure_faction_groups() -> void:
 	if not is_in_group(&"enemy_workers"):
 		return
+
+	if team_id < 0:
+		team_id = CommandCenter.ENEMY_TEAM_ID
 
 	if is_in_group(&"workers"):
 		remove_from_group(&"workers")
@@ -1543,6 +1548,28 @@ func needs_gather_target_reassignment() -> bool:
 		return true
 
 	if _is_enemy_worker() and not WorkerGathering.is_safe_gather_source(source, get_tree()):
+		return true
+
+	return false
+
+
+func is_enemy_gather_fallback_idle() -> bool:
+	if not _is_enemy_worker() or not _is_alive():
+		return false
+
+	if is_on_construction_trip() or is_constructing():
+		return false
+
+	if is_carrying_gathered_resources():
+		return false
+
+	if needs_gather_target_reassignment():
+		return true
+
+	if not is_busy_with_task() and not has_move_target:
+		return true
+
+	if is_busy_with_task() and not has_move_target:
 		return true
 
 	return false

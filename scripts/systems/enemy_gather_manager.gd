@@ -14,6 +14,8 @@ const GOLD_STOCK_COMFORT: int = 150
 const RESOURCE_HIGH_THRESHOLD: int = 350
 const RESOURCE_CRITICAL_THRESHOLD: int = 100
 const TARGET_GOLD_SHIFT_THRESHOLD: int = 2
+const MIN_WOOD_WORKERS_WHEN_TREES_EXIST: int = 1
+const FALLBACK_IDLE_NEAR_CC_RADIUS: float = 8.0
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gold_mine_path: NodePath
@@ -27,8 +29,16 @@ func _ready() -> void:
 
 
 func _initial_assign_and_schedule() -> void:
+	# Wait for scene nodes, navigation agents, and the nav mesh bake to settle.
+	await get_tree().process_frame
+	await get_tree().process_frame
 	_rebalance_gather_workers()
+	call_deferred("_rebalance_gather_workers")
 	_schedule_reassign()
+
+
+func request_gather_rebalance() -> void:
+	call_deferred("_rebalance_gather_workers")
 
 
 func _schedule_reassign() -> void:
@@ -44,6 +54,7 @@ func _on_reassign_timer() -> void:
 		return
 
 	_rebalance_gather_workers()
+	_scan_fallback_idle_enemy_workers()
 	_schedule_reassign()
 
 
@@ -51,55 +62,33 @@ func assign_worker_adaptively(worker: Worker) -> void:
 	if not _can_reassign_worker(worker):
 		return
 
-	var command_center: CommandCenter = _resolve_enemy_command_center()
-	if command_center == null:
-		return
-
-	var gather_pool: Array[Worker] = _collect_gather_pool(command_center.global_position)
-	if gather_pool.is_empty():
-		return
-
-	var gold_count: int = 0
-	for pool_worker: Worker in gather_pool:
-		if pool_worker == worker:
-			continue
-		if pool_worker.get_assigned_gather_resource_id() == &"gold":
-			gold_count += 1
-
-	var target_gold: int = _apply_target_hysteresis(
-		_compute_target_gold_workers(gather_pool.size()),
-		gather_pool.size()
-	)
-	assign_gather_job(worker, gold_count < target_gold)
+	request_gather_rebalance()
 
 
-func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> void:
+func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> bool:
 	if worker == null or not is_instance_valid(worker):
-		return
+		return false
 
-	var command_center: CommandCenter = _resolve_enemy_command_center()
-	if command_center == null:
-		return
+	if _resolve_enemy_command_center() == null:
+		return false
 
 	var gold_mine: GoldMine = _resolve_best_safe_gold_mine(worker.global_position)
+	if not _is_valid_gold_mine(gold_mine):
+		var fallback_mine: GoldMine = _resolve_gold_mine()
+		if _is_valid_gold_mine(fallback_mine):
+			gold_mine = fallback_mine
+
 	var trees: Array[WoodTree] = _resolve_safe_trees()
 	if gold_mine == null and trees.is_empty():
-		return
+		return false
 
-	if prefer_gold and _is_valid_gold_mine(gold_mine):
-		worker.command_gather_gold_mine(gold_mine, false)
-		return
+	if prefer_gold and _try_assign_gold_gather(worker, gold_mine):
+		return true
 
-	if trees.is_empty():
-		if _is_valid_gold_mine(gold_mine):
-			worker.command_gather_gold_mine(gold_mine, false)
-		return
+	if _try_assign_wood_gather(worker, trees):
+		return true
 
-	var tree: WoodTree = _pick_tree_for_worker(worker, trees)
-	if tree != null and tree.can_gather():
-		worker.command_gather_tree(tree, false)
-	elif _is_valid_gold_mine(gold_mine):
-		worker.command_gather_gold_mine(gold_mine, false)
+	return _try_assign_gold_gather(worker, gold_mine)
 
 
 func _rebalance_gather_workers() -> void:
@@ -146,10 +135,9 @@ func _rebalance_gather_workers() -> void:
 
 	for worker: Worker in unassigned_workers:
 		if gold_workers.size() < target_gold:
-			assign_gather_job(worker, true)
-			gold_workers.append(worker)
-		else:
-			assign_gather_job(worker, false)
+			if assign_gather_job(worker, true):
+				_append_worker_to_gather_bucket(worker, gold_workers, wood_workers)
+		elif assign_gather_job(worker, false):
 			wood_workers.append(worker)
 
 	while gold_workers.size() > target_gold:
@@ -158,8 +146,11 @@ func _rebalance_gather_workers() -> void:
 			break
 
 		gold_workers.erase(worker)
-		assign_gather_job(worker, false)
-		wood_workers.append(worker)
+		if (
+			assign_gather_job(worker, false)
+			and worker.get_assigned_gather_resource_id() == &"wood"
+		):
+			wood_workers.append(worker)
 
 	while gold_workers.size() < target_gold and wood_workers.size() > target_wood:
 		var worker: Worker = _pick_worker_to_reassign(wood_workers)
@@ -167,8 +158,25 @@ func _rebalance_gather_workers() -> void:
 			break
 
 		wood_workers.erase(worker)
-		assign_gather_job(worker, true)
-		gold_workers.append(worker)
+		if (
+			assign_gather_job(worker, true)
+			and worker.get_assigned_gather_resource_id() == &"gold"
+		):
+			gold_workers.append(worker)
+
+	_assign_still_idle_workers(gather_pool, target_gold)
+	_ensure_wood_worker_coverage(gather_pool, target_gold)
+	_scan_fallback_idle_enemy_workers()
+
+
+func _append_worker_to_gather_bucket(
+	worker: Worker, gold_workers: Array[Worker], wood_workers: Array[Worker]
+) -> void:
+	match worker.get_assigned_gather_resource_id():
+		&"gold":
+			gold_workers.append(worker)
+		&"wood":
+			wood_workers.append(worker)
 
 
 func _compute_target_gold_workers(total_gather_workers: int) -> int:
@@ -207,16 +215,20 @@ func _reassign_idle_workers(gather_pool: Array[Worker], target_gold: int) -> voi
 			continue
 
 		var prefer_gold: bool = active_gold < target_gold
-		assign_gather_job(worker, prefer_gold)
-		if prefer_gold:
-			active_gold += 1
-		else:
-			active_wood += 1
+		if assign_gather_job(worker, prefer_gold):
+			match worker.get_assigned_gather_resource_id():
+				&"gold":
+					active_gold += 1
+				&"wood":
+					active_wood += 1
 
 
 func _is_idle_gather_worker(worker: Worker) -> bool:
 	if not _is_valid_worker(worker):
 		return false
+
+	if worker.has_method(&"is_enemy_gather_fallback_idle"):
+		return worker.is_enemy_gather_fallback_idle()
 
 	if worker.is_on_construction_trip():
 		return false
@@ -224,7 +236,162 @@ func _is_idle_gather_worker(worker: Worker) -> bool:
 	if worker.is_carrying_gathered_resources():
 		return false
 
-	return worker.needs_gather_target_reassignment()
+	if worker.needs_gather_target_reassignment():
+		return true
+
+	# Gather command was issued before navigation was ready and never started moving.
+	if (
+		worker.is_busy_with_task()
+		and not worker.has_move_target
+		and not worker.is_constructing()
+	):
+		return true
+
+	return false
+
+
+func _assign_still_idle_workers(gather_pool: Array[Worker], target_gold: int) -> void:
+	var active_gold: int = 0
+	for worker: Worker in gather_pool:
+		if (
+			worker.get_assigned_gather_resource_id() == &"gold"
+			and not _is_idle_gather_worker(worker)
+		):
+			active_gold += 1
+
+	for worker: Worker in gather_pool:
+		if not _is_idle_gather_worker(worker):
+			continue
+
+		var prefer_gold: bool = active_gold < target_gold
+		if assign_gather_job(worker, prefer_gold):
+			if worker.get_assigned_gather_resource_id() == &"gold":
+				active_gold += 1
+
+
+func _ensure_wood_worker_coverage(gather_pool: Array[Worker], target_gold: int) -> void:
+	var trees: Array[WoodTree] = _resolve_safe_trees()
+	if trees.is_empty() or gather_pool.size() <= 1:
+		return
+
+	var min_wood_workers: int = mini(
+		MIN_WOOD_WORKERS_WHEN_TREES_EXIST,
+		gather_pool.size() - target_gold
+	)
+	if min_wood_workers <= 0:
+		return
+
+	var active_wood: int = 0
+	var reassign_candidates: Array[Worker] = []
+
+	for worker: Worker in gather_pool:
+		if _is_idle_gather_worker(worker):
+			reassign_candidates.append(worker)
+			continue
+
+		if worker.get_assigned_gather_resource_id() == &"wood":
+			active_wood += 1
+
+	while active_wood < min_wood_workers and not reassign_candidates.is_empty():
+		var worker: Worker = reassign_candidates.pop_front()
+		if assign_gather_job(worker, false):
+			if worker.get_assigned_gather_resource_id() == &"wood":
+				active_wood += 1
+
+
+func _scan_fallback_idle_enemy_workers() -> void:
+	var command_center: CommandCenter = _resolve_enemy_command_center()
+	if command_center == null:
+		return
+
+	var trees: Array[WoodTree] = _resolve_safe_trees()
+	var gold_mine: GoldMine = _resolve_safe_gold_mine()
+	if gold_mine == null and trees.is_empty():
+		return
+
+	var idle_workers: Array[Worker] = []
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not _is_valid_worker(node):
+			continue
+
+		var worker: Worker = node as Worker
+		if not _is_fallback_idle_enemy_worker(worker, command_center):
+			continue
+
+		idle_workers.append(worker)
+
+	if idle_workers.is_empty():
+		return
+
+	var total_gather_workers: int = 0
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not _is_valid_worker(node):
+			continue
+
+		var pool_worker: Worker = node as Worker
+		if pool_worker.is_on_construction_trip():
+			continue
+
+		total_gather_workers += 1
+
+	var target_gold: int = _apply_target_hysteresis(
+		_compute_target_gold_workers(total_gather_workers),
+		maxi(1, total_gather_workers)
+	)
+	var active_gold: int = 0
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not _is_valid_worker(node):
+			continue
+
+		var worker: Worker = node as Worker
+		if _is_fallback_idle_enemy_worker(worker, command_center):
+			continue
+
+		if worker.get_assigned_gather_resource_id() == &"gold":
+			active_gold += 1
+
+	for worker: Worker in idle_workers:
+		if not _is_fallback_idle_enemy_worker(worker, command_center):
+			continue
+
+		var prefer_gold: bool = active_gold < target_gold
+		if assign_gather_job(worker, prefer_gold):
+			if worker.get_assigned_gather_resource_id() == &"gold":
+				active_gold += 1
+
+
+func _is_fallback_idle_enemy_worker(
+	worker: Worker, command_center: CommandCenter
+) -> bool:
+	if not _is_idle_gather_worker(worker):
+		return false
+
+	return _is_near_command_center(worker, command_center, FALLBACK_IDLE_NEAR_CC_RADIUS)
+
+
+func _is_near_command_center(
+	worker: Worker, command_center: CommandCenter, radius: float
+) -> bool:
+	var offset: Vector3 = worker.global_position - command_center.global_position
+	offset.y = 0.0
+	return offset.length_squared() <= radius * radius
+
+
+func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
+	if not _is_valid_gold_mine(gold_mine):
+		return false
+
+	worker.command_gather_gold_mine(gold_mine, false)
+	return not worker.needs_gather_target_reassignment()
+
+
+func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
+	var tree: WoodTree = _pick_tree_for_worker(worker, trees)
+	if tree == null or not tree.can_gather():
+		return false
+
+	worker.command_gather_tree(tree, false)
+	return not worker.needs_gather_target_reassignment()
 
 
 func _apply_target_hysteresis(computed_target: int, total_gather_workers: int) -> int:
@@ -484,7 +651,11 @@ func _is_valid_worker(node: Node) -> bool:
 	if node.is_queued_for_deletion():
 		return false
 
-	return node is Worker
+	if not node is Worker:
+		return false
+
+	var worker: Worker = node as Worker
+	return worker.get_current_health() > 0
 
 
 func _is_valid_gold_mine(gold_mine: GoldMine) -> bool:

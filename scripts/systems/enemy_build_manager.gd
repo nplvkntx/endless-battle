@@ -1018,9 +1018,9 @@ func _get_enemy_gather_manager() -> EnemyGatherManager:
 	return null
 
 
-func notify_enemy_worker_spawned(worker: Worker) -> void:
+func notify_enemy_worker_spawned(_worker: Worker) -> void:
 	var gather_manager: EnemyGatherManager = _get_enemy_gather_manager()
 	if gather_manager == null:
 		return
 
-	gather_manager.assign_worker_adaptively(worker)
+	gather_manager.request_gather_rebalance()
