@@ -569,7 +569,7 @@ func _find_expansion_gold_mine_anchor() -> GoldMine:
 	var best_mine: GoldMine = null
 	var best_distance: float = INF
 
-	for child: Node in scene_root.get_children():
+	for child: Node in WorkerGathering._map_resource_children(scene_root):
 		if not child is GoldMine:
 			continue
 

@@ -424,7 +424,9 @@ func _resolve_gold_mine() -> GoldMine:
 	if scene_root == null:
 		return null
 
-	var named_mine: Node = scene_root.get_node_or_null("EnemyGoldMine")
+	var named_mine: Node = scene_root.get_node_or_null("MapResources/EnemyGoldMine")
+	if named_mine == null:
+		named_mine = scene_root.get_node_or_null("EnemyGoldMine")
 	if named_mine is GoldMine:
 		return named_mine as GoldMine
 
@@ -437,7 +439,10 @@ func _resolve_trees() -> Array[WoodTree]:
 	if scene_root == null:
 		return trees
 
-	for child: Node in scene_root.get_children():
+	var map_resources: Node = scene_root.get_node_or_null("MapResources")
+	var search_root: Node = map_resources if map_resources != null else scene_root
+
+	for child: Node in search_root.get_children():
 		if not child is WoodTree:
 			continue
 		if not child.name.begins_with("EnemyTree"):

@@ -1,0 +1,180 @@
+[gd_scene format=3 uid="uid://dxwvi84m2vts6"]
+
+[ext_resource type="PackedScene" uid="uid://ew40ufc50053" path="res://scenes/resources/gold_mine.tscn" id="1_gold_mine"]
+[ext_resource type="PackedScene" uid="uid://bg40oion7ayqm" path="res://scenes/resources/tree.tscn" id="2_tree"]
+
+[node name="MapResources" type="Node3D"]
+
+[node name="EnemyGoldMine" parent="." unique_id=1569590764 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1, 28)
+
+[node name="EnemyTree" parent="." unique_id=22331947 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 1.25, 45)
+
+[node name="EnemyTree2" parent="." unique_id=143044998 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 1.25, 46)
+
+[node name="EnemyTree3" parent="." unique_id=1231018180 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.25, 45)
+
+[node name="EnemyTree4" parent="." unique_id=51841487 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1.25, 47)
+
+[node name="EnemyTree5" parent="." unique_id=1589963792 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 1.25, 45)
+
+[node name="EnemyTree6" parent="." unique_id=256292683 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44, 1.25, 46)
+
+[node name="ExpansionGoldMine" parent="." unique_id=1681892859 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 1, 5)
+
+[node name="ExpansionTree" parent="." unique_id=1032302420 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.25, 3)
+
+[node name="ExpansionTree2" parent="." unique_id=1180159206 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.25, 8)
+
+[node name="ExpansionTree3" parent="." unique_id=1132195448 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26, 1.25, 4)
+
+[node name="ExpansionTree4" parent="." unique_id=1332065153 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1.25, 7)
+
+[node name="ExpansionTree5" parent="." unique_id=962316972 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 1.25, 6)
+
+[node name="ExpansionTree6" parent="." unique_id=482112380 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, 9)
+
+[node name="GoldMine" parent="." unique_id=1424185328 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 45, 1, -28)
+
+[node name="Tree" parent="." unique_id=550423773 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1.25, -45)
+
+[node name="Tree2" parent="." unique_id=251769148 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 1.25, -46)
+
+[node name="Tree3" parent="." unique_id=165393704 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1.25, -45)
+
+[node name="Tree4" parent="." unique_id=679638822 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 1.25, -47)
+
+[node name="Tree5" parent="." unique_id=1522068370 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 1.25, -45)
+
+[node name="Tree6" parent="." unique_id=1805590681 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44, 1.25, -46)
+
+[node name="Tree7" parent="." unique_id=896239248 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46, 1.25, -45)
+
+[node name="Tree8" parent="." unique_id=2017030389 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 1.25, -47)
+
+[node name="PlayerExpansionGoldMineA" parent="." unique_id=301000001 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 1, -14)
+
+[node name="PlayerExpansionTreeA1" parent="." unique_id=301000002 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26, 1.25, -16)
+
+[node name="PlayerExpansionTreeA2" parent="." unique_id=301000003 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, 1.25, -11)
+
+[node name="PlayerExpansionTreeA3" parent="." unique_id=301000004 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32, 1.25, -15)
+
+[node name="PlayerExpansionTreeA4" parent="." unique_id=301000005 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1.25, -12)
+
+[node name="PlayerExpansionTreeA5" parent="." unique_id=301000006 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 27, 1.25, -13)
+
+[node name="PlayerExpansionTreeA6" parent="." unique_id=301000007 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33, 1.25, -10)
+
+[node name="PlayerExpansionGoldMineB" parent="." unique_id=301000008 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 1, -26)
+
+[node name="PlayerExpansionTreeB1" parent="." unique_id=301000009 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1.25, -28)
+
+[node name="PlayerExpansionTreeB2" parent="." unique_id=301000010 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 1.25, -23)
+
+[node name="PlayerExpansionTreeB3" parent="." unique_id=301000011 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 1.25, -27)
+
+[node name="PlayerExpansionTreeB4" parent="." unique_id=301000012 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.25, -24)
+
+[node name="PlayerExpansionTreeB5" parent="." unique_id=301000013 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 1.25, -25)
+
+[node name="PlayerExpansionTreeB6" parent="." unique_id=301000014 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19, 1.25, -22)
+
+[node name="EnemyExpansionGoldMineA" parent="." unique_id=301000015 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1, 14)
+
+[node name="EnemyExpansionTreeA1" parent="." unique_id=301000016 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 1.25, 16)
+
+[node name="EnemyExpansionTreeA2" parent="." unique_id=301000017 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1.25, 11)
+
+[node name="EnemyExpansionTreeA3" parent="." unique_id=301000018 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32, 1.25, 15)
+
+[node name="EnemyExpansionTreeA4" parent="." unique_id=301000019 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -34, 1.25, 12)
+
+[node name="EnemyExpansionTreeA5" parent="." unique_id=301000020 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 1.25, 13)
+
+[node name="EnemyExpansionTreeA6" parent="." unique_id=301000021 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -33, 1.25, 10)
+
+[node name="EnemyExpansionGoldMineB" parent="." unique_id=301000022 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, 1, 26)
+
+[node name="EnemyExpansionTreeB1" parent="." unique_id=301000023 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.25, 28)
+
+[node name="EnemyExpansionTreeB2" parent="." unique_id=301000024 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 1.25, 23)
+
+[node name="EnemyExpansionTreeB3" parent="." unique_id=301000025 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.25, 27)
+
+[node name="EnemyExpansionTreeB4" parent="." unique_id=301000026 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1.25, 24)
+
+[node name="EnemyExpansionTreeB5" parent="." unique_id=301000027 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.25, 25)
+
+[node name="EnemyExpansionTreeB6" parent="." unique_id=301000028 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19, 1.25, 22)
+
+[node name="ContestedExpansionGoldMineWest" parent="." unique_id=301000029 instance=ExtResource("1_gold_mine")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 1, -5)
+
+[node name="ContestedExpansionTreeW1" parent="." unique_id=301000030 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -28, 1.25, -7)
+
+[node name="ContestedExpansionTreeW2" parent="." unique_id=301000031 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 1.25, -2)
+
+[node name="ContestedExpansionTreeW3" parent="." unique_id=301000032 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -22, 1.25, -6)
+
+[node name="ContestedExpansionTreeW4" parent="." unique_id=301000033 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1.25, -3)
+
+[node name="ContestedExpansionTreeW5" parent="." unique_id=301000034 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 1.25, -4)
+
+[node name="ContestedExpansionTreeW6" parent="." unique_id=301000035 instance=ExtResource("2_tree")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -21, 1.25, -1)

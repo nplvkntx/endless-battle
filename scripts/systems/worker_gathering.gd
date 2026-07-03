@@ -5,6 +5,7 @@ extends RefCounted
 
 const PLAYER_DROPOFF_GROUP := &"player_command_center"
 const ENEMY_DROPOFF_GROUP := &"enemy_command_center"
+const MAP_RESOURCES_NODE_NAME := NodePath("MapResources")
 
 static var _enemy_stockpile_warning_shown: bool = false
 
@@ -96,7 +97,7 @@ static func find_nearest_gather_source(
 	var closest_source: GatherableResource = null
 	var closest_distance_squared: float = INF
 
-	for node: Node in scene_root.get_children():
+	for node: Node in _map_resource_children(scene_root):
 		if not _is_matching_gather_source(node, resource_id, for_enemy):
 			continue
 
@@ -134,7 +135,7 @@ static func find_best_wood_tree(
 	var best_assigned: int = 999999
 	var best_distance_squared: float = INF
 
-	for node: Node in scene_root.get_children():
+	for node: Node in _map_resource_children(scene_root):
 		if not _is_matching_gather_source(node, &"wood", for_enemy):
 			continue
 
@@ -176,6 +177,22 @@ static func find_best_wood_tree(
 		return preferred
 
 	return best_tree
+
+
+static func _map_resource_children(scene_root: Node) -> Array[Node]:
+	var nodes: Array[Node] = []
+	if scene_root == null:
+		return nodes
+
+	var map_resources: Node = scene_root.get_node_or_null(MAP_RESOURCES_NODE_NAME)
+	if map_resources != null:
+		for child: Node in map_resources.get_children():
+			nodes.append(child)
+		return nodes
+
+	for child: Node in scene_root.get_children():
+		nodes.append(child)
+	return nodes
 
 
 static func _is_matching_gather_source(
