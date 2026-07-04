@@ -20,6 +20,31 @@ func _ready() -> void:
 	_camp_anchor = CreepCampSafety.get_camp_anchor_for_creep(self)
 
 
+func take_damage(amount: float, attacker = null) -> void:
+	super.take_damage(amount, attacker)
+
+	var valid_attacker: Unit = _resolve_combat_attacker(
+		CombatTargetValidation.sanitize_damage_attacker(attacker)
+	)
+	if valid_attacker == null:
+		return
+
+	var parent: Node = get_parent()
+	if parent is CreepCamp:
+		(parent as CreepCamp).alert_camp_to_attacker(valid_attacker, self)
+
+
+func alert_to_attacker(attacker: Unit) -> void:
+	if attacker == null or not is_instance_valid(attacker):
+		return
+
+	if _health_component.current_health <= 0:
+		return
+
+	_set_attack_target(attacker)
+	_returning_home = false
+
+
 func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return

@@ -37,7 +37,7 @@ script = ExtResource("6_selection_box")
 script = ExtResource("25_navigation_region_setup")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=364435414]
-transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 36, 22, -26)
+transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, -36, 22, -26)
 current = true
 fov = 60.0
 script = ExtResource("3_camera_controller")

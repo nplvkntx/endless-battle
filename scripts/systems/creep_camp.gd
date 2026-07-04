@@ -32,6 +32,24 @@ func _process(delta: float) -> void:
 	_respawn_timer = -1.0
 
 
+func alert_camp_to_attacker(attacker: Unit, excluding: NeutralCreep = null) -> void:
+	if attacker == null or not is_instance_valid(attacker):
+		return
+
+	for child: Node in get_children():
+		if child == excluding:
+			continue
+
+		if not child is NeutralCreep:
+			continue
+
+		var creep: NeutralCreep = child as NeutralCreep
+		if not is_instance_valid(creep) or creep.is_queued_for_deletion():
+			continue
+
+		creep.alert_to_attacker(attacker)
+
+
 func notify_creep_died(_creep: Node) -> void:
 	if not is_instance_valid(self) or is_queued_for_deletion():
 		return

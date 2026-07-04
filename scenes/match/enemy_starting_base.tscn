@@ -16,7 +16,7 @@ size = Vector3(3.5, 2, 3.5)
 [node name="EnemyStartingBase" type="Node3D"]
 
 [node name="EnemyCommandCenter" type="StaticBody3D" parent="." unique_id=124807173 groups=["enemy_command_center"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1, 38)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1, 38)
 script = ExtResource("1_command_center")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter" unique_id=423569690]
@@ -31,13 +31,13 @@ script = ExtResource("3_health_component")
 max_health = 500
 
 [node name="EnemyWorker" parent="." unique_id=753698043 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 0.5, 34)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36, 0.5, 34)
 
 [node name="EnemyWorker2" parent="." unique_id=277831235 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -37, 0.5, 35)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0.5, 35)
 
 [node name="EnemyWorker3" parent="." unique_id=441442506 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 0.5, 34.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.5, 34.5)
 
 [node name="EnemyWorker4" parent="." unique_id=1562796510 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39, 0.5, 35)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0.5, 35)
