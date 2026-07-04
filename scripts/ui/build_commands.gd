@@ -256,7 +256,7 @@ func _setup_production_controls() -> void:
 
 	_worker_queue_row = _create_queue_row(_worker_queue_label)
 	_swordsman_queue_row = _create_queue_row(_swordsman_queue_label)
-	_archer_queue_row = _create_queue_row(_archer_queue_label)
+	_archer_queue_label.visible = false
 
 	_hero_queue_row = HBoxContainer.new()
 	_hero_queue_row.visible = false
@@ -684,33 +684,35 @@ func _rebuild_worker_queue_slots() -> void:
 
 
 func _rebuild_swordsman_queue_slots() -> void:
-	if _swordsman_queue_row == null or _tracked_barracks == null:
-		return
-
-	var queue_count: int = _tracked_barracks.get_swordsman_queue_count()
-	var in_progress: bool = _tracked_barracks.is_training_swordsman()
-	_rebuild_queue_slots(
-		_swordsman_queue_row,
-		queue_count,
-		in_progress,
-		Barracks.TRAIN_ID_SWORDSMAN,
-		"SW"
-	)
+	_rebuild_barracks_queue_slots()
 
 
 func _rebuild_archer_queue_slots() -> void:
-	if _archer_queue_row == null or _tracked_barracks == null:
+	pass
+
+
+func _rebuild_barracks_queue_slots() -> void:
+	if _swordsman_queue_row == null or _tracked_barracks == null:
 		return
 
-	var queue_count: int = _tracked_barracks.get_archer_queue_count()
-	var in_progress: bool = _tracked_barracks.is_training_archer()
-	_rebuild_queue_slots(
-		_archer_queue_row,
-		queue_count,
-		in_progress,
-		Barracks.TRAIN_ID_ARCHER,
-		"AR"
-	)
+	_clear_queue_row(_archer_queue_row)
+
+	var queue: Array[StringName] = _tracked_barracks.get_training_queue()
+	var in_progress: bool = _tracked_barracks.has_active_unit_training()
+
+	for child: Node in _swordsman_queue_row.get_children():
+		child.queue_free()
+
+	_swordsman_queue_row.visible = queue.size() > 0
+	if queue.is_empty():
+		return
+
+	for slot_index: int in queue.size():
+		var train_id: StringName = queue[slot_index]
+		var slot_label: String = "SW" if train_id == Barracks.TRAIN_ID_SWORDSMAN else "AR"
+		var slot_in_progress: bool = in_progress and slot_index == 0
+		var slot: PanelContainer = _create_queue_slot(slot_index, train_id, slot_in_progress, slot_label)
+		_swordsman_queue_row.add_child(slot)
 
 
 func _rebuild_hero_queue_slots() -> void:
@@ -813,19 +815,12 @@ func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bo
 
 		return _selected_command_center.cancel_worker_training_at(slot_index)
 
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN or train_id == Barracks.TRAIN_ID_ARCHER:
 		var barracks: Barracks = _get_barracks_for_queue_cancel()
 		if barracks == null:
 			return false
 
-		return barracks.cancel_swordsman_training_at(slot_index)
-
-	if train_id == Barracks.TRAIN_ID_ARCHER:
-		var barracks: Barracks = _get_barracks_for_queue_cancel()
-		if barracks == null:
-			return false
-
-		return barracks.cancel_archer_training_at(slot_index)
+		return barracks.cancel_training_at(slot_index)
 
 	if train_id == &"hero":
 		if _selected_hero_altar == null or slot_index != 0:
@@ -1194,9 +1189,10 @@ func _on_building_selection_changed(building: Building) -> void:
 		_tracked_barracks.building_state_changed.connect(_on_barracks_state_changed)
 		_tracked_barracks.swordsman_queue_changed.connect(_on_swordsman_queue_changed)
 		_tracked_barracks.archer_queue_changed.connect(_on_archer_queue_changed)
+		if _tracked_barracks.has_signal("training_queue_changed"):
+			_tracked_barracks.training_queue_changed.connect(_on_barracks_training_queue_changed)
 		_tracked_barracks.repeat_state_changed.connect(_on_production_repeat_state_changed)
-		_on_swordsman_queue_changed(_tracked_barracks.get_swordsman_queue_count())
-		_on_archer_queue_changed(_tracked_barracks.get_archer_queue_count())
+		_on_barracks_training_queue_changed()
 		_update_barracks_button_labels()
 	else:
 		_clear_queue_row(_swordsman_queue_row)
@@ -1564,11 +1560,15 @@ func _on_worker_queue_changed(_queue_count: int) -> void:
 
 
 func _on_swordsman_queue_changed(_queue_count: int) -> void:
-	_rebuild_swordsman_queue_slots()
+	_rebuild_barracks_queue_slots()
 
 
 func _on_archer_queue_changed(_queue_count: int) -> void:
-	_rebuild_archer_queue_slots()
+	_rebuild_barracks_queue_slots()
+
+
+func _on_barracks_training_queue_changed() -> void:
+	_rebuild_barracks_queue_slots()
 
 
 func _on_production_repeat_state_changed() -> void:
@@ -1602,6 +1602,12 @@ func _disconnect_barracks_signals() -> void:
 
 	if _tracked_barracks.archer_queue_changed.is_connected(_on_archer_queue_changed):
 		_tracked_barracks.archer_queue_changed.disconnect(_on_archer_queue_changed)
+
+	if (
+		_tracked_barracks.has_signal("training_queue_changed")
+		and _tracked_barracks.training_queue_changed.is_connected(_on_barracks_training_queue_changed)
+	):
+		_tracked_barracks.training_queue_changed.disconnect(_on_barracks_training_queue_changed)
 
 	if _tracked_barracks.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
 		_tracked_barracks.repeat_state_changed.disconnect(_on_production_repeat_state_changed)

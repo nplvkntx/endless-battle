@@ -775,9 +775,7 @@ func _get_training_queue_detail(building: Node) -> String:
 
 	if building is Barracks:
 		var barracks: Barracks = building as Barracks
-		var swordsman_count: int = barracks.get_swordsman_queue_count()
-		var archer_count: int = barracks.get_archer_queue_count()
-		var total_count: int = maxi(swordsman_count, 0) + maxi(archer_count, 0)
+		var total_count: int = barracks.get_total_queue_count()
 		if total_count > 1:
 			return "Queue: %d" % total_count
 		return ""
@@ -816,6 +814,8 @@ func _configure_production_display(building: Building) -> void:
 			_tracked_barracks.swordsman_queue_changed.connect(_on_production_changed)
 		if _tracked_barracks.has_signal("archer_queue_changed"):
 			_tracked_barracks.archer_queue_changed.connect(_on_production_changed)
+		if _tracked_barracks.has_signal("training_queue_changed"):
+			_tracked_barracks.training_queue_changed.connect(_on_production_changed)
 		_update_barracks_production()
 		return
 
@@ -882,45 +882,41 @@ func _update_barracks_production() -> void:
 		_hide_production_display()
 		return
 
-	var swordsman_count: int = -1
-	var archer_count: int = -1
-	if _tracked_barracks.has_method("get_swordsman_queue_count"):
-		swordsman_count = _tracked_barracks.get_swordsman_queue_count()
-	if _tracked_barracks.has_method("get_archer_queue_count"):
-		archer_count = _tracked_barracks.get_archer_queue_count()
+	var queue: Array[StringName] = []
+	if _tracked_barracks.has_method("get_training_queue"):
+		queue = _tracked_barracks.get_training_queue()
 
-	var training_parts: PackedStringArray = []
-	if swordsman_count > 0:
-		training_parts.append("Swordsman")
-	if archer_count > 0:
-		training_parts.append("Archer")
-
-	if training_parts.is_empty():
-		if swordsman_count == 0 and archer_count == 0:
-			_task_label.text = "Production: Idle"
+	if queue.is_empty():
+		if _tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN) or (
+			_tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER)
+		):
+			_task_label.text = "Production: Auto (%s)" % _tracked_barracks.get_repeat_unit_display_name()
 			_task_label.visible = true
 			_building_detail_label.visible = false
 		else:
-			_hide_production_display()
+			_task_label.text = "Production: Idle"
+			_task_label.visible = true
+			_building_detail_label.visible = false
 		return
 
 	if _tracked_barracks.has_active_unit_training():
 		return
 
+	var training_parts: PackedStringArray = []
+	for train_id: StringName in queue:
+		if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+			training_parts.append("Swordsman")
+		elif train_id == Barracks.TRAIN_ID_ARCHER:
+			training_parts.append("Archer")
+
 	_task_label.text = "Training: %s" % ", ".join(training_parts)
 	_task_label.visible = true
 
-	var queue_parts: PackedStringArray = []
-	if swordsman_count >= 0:
-		queue_parts.append("SW %d" % swordsman_count)
-	if archer_count >= 0:
-		queue_parts.append("AR %d" % archer_count)
-
-	if queue_parts.is_empty():
-		_building_detail_label.visible = false
-	else:
-		_building_detail_label.text = "Queue: %s" % " | ".join(queue_parts)
+	if queue.size() > 1:
+		_building_detail_label.text = "Queue: %d" % queue.size()
 		_building_detail_label.visible = true
+	else:
+		_building_detail_label.visible = false
 
 
 func _update_hero_altar_production() -> void:
@@ -972,6 +968,11 @@ func _clear_production_tracking() -> void:
 			and _tracked_barracks.archer_queue_changed.is_connected(_on_production_changed)
 		):
 			_tracked_barracks.archer_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_barracks.has_signal("training_queue_changed")
+			and _tracked_barracks.training_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_barracks.training_queue_changed.disconnect(_on_production_changed)
 
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
 		if (

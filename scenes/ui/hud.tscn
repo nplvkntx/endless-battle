@@ -433,9 +433,10 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
-text = "Swordsman Queue: 0"
+text = "Training Queue:"
 
 [node name="ArcherQueueLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/CenterPanel/BarracksPanel/BarracksQueuesRow"]
+visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
 theme_override_font_sizes/font_size = 10
