@@ -29,15 +29,22 @@ static func grant_for_kill(victim: Node, killer: Node) -> void:
 	if victim == null or not is_instance_valid(victim):
 		return
 
+	var granted_xp: int = 0
 	var xp_amount: int = get_xp_amount_for_victim(victim)
 	if xp_amount > 0:
 		var hero: Hero = _resolve_hero_recipient(victim, killer)
 		if hero != null and is_instance_valid(hero):
 			hero.add_xp(float(xp_amount))
+			granted_xp = xp_amount
 
+	var granted_gold: int = 0
 	var gold_amount: int = get_gold_amount_for_victim(victim)
 	if gold_amount > 0 and _should_grant_player_gold(victim, killer):
 		ResourceManager.add_gold(gold_amount)
+		granted_gold = gold_amount
+
+	if granted_xp > 0 or granted_gold > 0:
+		FloatingRewardText.spawn(victim, granted_xp, granted_gold)
 
 
 static func get_xp_amount_for_victim(victim: Node) -> int:

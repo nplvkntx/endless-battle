@@ -25,14 +25,32 @@ static func spawn_message(
 	if not is_instance_valid(target):
 		return
 
-	var instance: FloatingDamageNumber = SCENE.instantiate() as FloatingDamageNumber
-	target.get_tree().current_scene.add_child(instance)
-	instance._play(
+	spawn_message_at_position(
+		target,
 		message,
 		target.global_position + Vector3(0.0, SPAWN_HEIGHT, 0.0),
-		emphasized,
-		message_color
+		message_color,
+		emphasized
 	)
+
+
+static func spawn_message_at_position(
+	anchor: Node,
+	message: String,
+	world_position: Vector3,
+	message_color: Color = Color(1.0, 0.85, 0.2, 1.0),
+	emphasized: bool = false
+) -> void:
+	if not is_instance_valid(anchor):
+		return
+
+	var tree: SceneTree = anchor.get_tree()
+	if tree == null or tree.current_scene == null:
+		return
+
+	var instance: FloatingDamageNumber = SCENE.instantiate() as FloatingDamageNumber
+	tree.current_scene.add_child(instance)
+	instance._play(message, world_position, emphasized, message_color)
 
 
 func _play(
