@@ -104,6 +104,41 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
+func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+		if _visual_animator != null and _visual_animator.has_clip_for_state(UnitVisualAnimator.STATE_WORK):
+			return UnitVisualAnimator.LoopState.WORK
+		return UnitVisualAnimator.LoopState.IDLE
+
+	if _gather_state == GatherTripState.GATHER_WAIT:
+		if _visual_animator != null and _visual_animator.has_clip_for_state(UnitVisualAnimator.STATE_WORK):
+			return UnitVisualAnimator.LoopState.WORK
+		return UnitVisualAnimator.LoopState.IDLE
+
+	if _task_nudge_active:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	if _is_on_task_movement() and has_move_target:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	if has_move_target:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	return UnitVisualAnimator.LoopState.IDLE
+
+
+func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
+	animator.set_clip_preferences({
+		UnitVisualAnimator.STATE_IDLE: [&"Idle"],
+		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run"],
+		UnitVisualAnimator.STATE_WORK: [&"PickUp", &"Work", &"Gather", &"Chop", &"Mine", &"Construct"],
+	})
+
+
 func _is_alive() -> bool:
 	return (
 		_health_component != null

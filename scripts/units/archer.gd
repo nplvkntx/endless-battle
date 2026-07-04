@@ -75,6 +75,21 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
+func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	if has_move_target or _has_chase_target:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	return UnitVisualAnimator.LoopState.IDLE
+
+
+func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
+	animator.set_clip_preferences({
+		UnitVisualAnimator.STATE_IDLE: [&"Idle", &"Idle_Weapon"],
+		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run", &"Run_Holding"],
+		UnitVisualAnimator.STATE_ATTACK: [&"Bow_Shoot", &"Bow_Draw"],
+	})
+
+
 func get_attack_facing_direction() -> Vector3:
 	if _attack_target == null or not CombatTargetValidation.is_valid_combat_target(_attack_target):
 		return Vector3.ZERO
@@ -247,6 +262,7 @@ func _stop_and_attack(delta: float) -> void:
 
 
 func _fire_arrow() -> void:
+	play_visual_attack_animation()
 	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, ARROW_SPAWN_HEIGHT, 0.0)

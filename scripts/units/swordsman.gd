@@ -12,18 +12,13 @@ var _base_attack_damage: int = -1
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
-const ATTACK_LUNGE_DISTANCE := 0.35
-const ATTACK_LUNGE_DURATION := 0.12
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
 @onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
-@onready var _body_mesh: MeshInstance3D = $MeshInstance3D
 
 var _health_bar_fill_material: StandardMaterial3D
-var _body_mesh_rest_position: Vector3
-var _attack_lunge_tween: Tween
 var _attack_target: Node3D = null
 var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
@@ -41,7 +36,6 @@ func _ready() -> void:
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
-	_body_mesh_rest_position = _body_mesh.position
 	if CombatTargetValidation.is_enemy_faction(self):
 		if not UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
 			UpgradeManager.enemy_upgrade_applied.connect(_on_blacksmith_upgrade_applied)
@@ -76,6 +70,21 @@ func _update_health_bar(current_health: int, max_health: int) -> void:
 
 func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
+
+
+func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	if has_move_target or _has_chase_target:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	return UnitVisualAnimator.LoopState.IDLE
+
+
+func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
+	animator.set_clip_preferences({
+		UnitVisualAnimator.STATE_IDLE: [&"Idle", &"Idle_Weapon"],
+		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run", &"Run_Weapon"],
+		UnitVisualAnimator.STATE_ATTACK: [&"Sword_Attack", &"Sword_Attack2", &"Punch"],
+	})
 
 
 func get_attack_facing_direction() -> Vector3:
@@ -256,30 +265,7 @@ func _stop_and_attack(delta: float) -> void:
 
 
 func _play_attack_animation() -> void:
-	if _attack_lunge_tween != null and _attack_lunge_tween.is_valid():
-		_attack_lunge_tween.kill()
-
-	var lunge_offset := Vector3.ZERO
-	if CombatTargetValidation.is_valid_combat_target(_attack_target):
-		var direction := _attack_target.global_position - global_position
-		direction.y = 0.0
-		if direction.length_squared() > 0.001:
-			lunge_offset = global_transform.basis.inverse() * (direction.normalized() * ATTACK_LUNGE_DISTANCE)
-
-	_body_mesh.position = _body_mesh_rest_position
-	_attack_lunge_tween = create_tween()
-	_attack_lunge_tween.tween_property(
-		_body_mesh,
-		"position",
-		_body_mesh_rest_position + lunge_offset,
-		ATTACK_LUNGE_DURATION * 0.45
-	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_attack_lunge_tween.tween_property(
-		_body_mesh,
-		"position",
-		_body_mesh_rest_position,
-		ATTACK_LUNGE_DURATION * 0.55
-	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	play_visual_attack_animation()
 
 
 func apply_blacksmith_upgrades() -> void:

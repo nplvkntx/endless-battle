@@ -45,6 +45,7 @@ var _combat_target_scan_timer: float = 0.0
 var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
+var _visual_animator: UnitVisualAnimator
 
 
 func _ready() -> void:
@@ -57,6 +58,7 @@ func _ready() -> void:
 		_selection_indicator.visible = false
 	_visual_pivot = get_node_or_null("MeshInstance3D") as Node3D
 	_visual_facing_yaw_offset = _detect_visual_facing_yaw_offset()
+	_setup_visual_animator()
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
 
@@ -130,6 +132,36 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_update_visual_facing(delta)
+	_update_visual_animation()
+
+
+## Override to map gameplay state to idle/move/work loop clips.
+func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	if has_move_target:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
+		return UnitVisualAnimator.LoopState.MOVE
+
+	return UnitVisualAnimator.LoopState.IDLE
+
+
+## Override to customize imported clip name preferences per unit type.
+func _configure_visual_animator(_animator: UnitVisualAnimator) -> void:
+	pass
+
+
+## Override to trigger a one-shot attack clip at the exact gameplay attack moment.
+func play_visual_attack_animation() -> bool:
+	if _visual_animator == null:
+		return false
+
+	return _visual_animator.play_one_shot(UnitVisualAnimator.STATE_ATTACK)
+
+
+func get_visual_animator() -> UnitVisualAnimator:
+	return _visual_animator
 
 
 ## Override in combat units to face an attack target while idle or chasing.
@@ -165,6 +197,26 @@ func _update_visual_facing(delta: float) -> void:
 
 	var blend: float = minf(1.0, delta * VISUAL_FACING_TURN_SPEED)
 	_visual_pivot.rotation.y = lerp_angle(_visual_pivot.rotation.y, target_yaw, blend)
+
+
+func _setup_visual_animator() -> void:
+	if _visual_pivot == null or _visual_pivot.get_child_count() == 0:
+		return
+
+	var model_root: Node = _visual_pivot.get_child(0)
+	_visual_animator = UnitVisualAnimator.create_from_model_root(model_root)
+	if _visual_animator == null:
+		return
+
+	_configure_visual_animator(_visual_animator)
+	_visual_animator.play_initial_idle()
+
+
+func _update_visual_animation() -> void:
+	if _visual_animator == null:
+		return
+
+	_visual_animator.set_loop_state(get_visual_loop_state())
 
 
 func _detect_visual_facing_yaw_offset() -> float:
