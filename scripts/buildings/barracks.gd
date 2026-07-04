@@ -17,6 +17,7 @@ const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 4.0
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
+const MAX_ENEMY_UNIT_QUEUE: int = 3
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
 
@@ -102,7 +103,10 @@ func get_enemy_pending_unit_count() -> int:
 
 
 func try_train_enemy_swordsman() -> bool:
-	if building_state != STATE_COMPLETED or _is_training:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if _swordsman_queue_count >= MAX_ENEMY_UNIT_QUEUE:
 		return false
 
 	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
@@ -118,7 +122,10 @@ func try_train_enemy_swordsman() -> bool:
 
 
 func try_train_enemy_archer() -> bool:
-	if building_state != STATE_COMPLETED or _is_training_archer:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if _archer_queue_count >= MAX_ENEMY_UNIT_QUEUE:
 		return false
 
 	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):

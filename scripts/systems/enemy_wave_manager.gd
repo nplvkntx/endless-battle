@@ -205,6 +205,14 @@ func _on_wave_timer() -> void:
 		_schedule_next_wave()
 		return
 
+	var total_non_hero: int = EnemyArmyCommand.collect_living_non_hero_combat_units(
+		get_tree()
+	).size()
+	if total_non_hero < min_non_hero_units:
+		_hold_army_until_ready(rally_position, _count_regrouped_non_hero_units(rally_position))
+		_schedule_next_wave()
+		return
+
 	if not EnemyArmyCommand.is_army_regrouped_at_rally(
 		get_tree(),
 		rally_position,

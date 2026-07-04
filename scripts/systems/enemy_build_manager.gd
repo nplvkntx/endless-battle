@@ -6,22 +6,24 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 4.0
-const TARGET_WORKERS_EARLY: int = 10
-const TARGET_WORKERS_MID: int = 18
-const TARGET_WORKERS_LATE: int = 25
-const MIN_WORKERS_BEFORE_MILITARY: int = 10
-const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.65
+const TARGET_WORKERS_EARLY: int = 14
+const TARGET_WORKERS_MID: int = 24
+const TARGET_WORKERS_LATE: int = 32
+const MIN_WORKERS_BEFORE_MILITARY: int = 8
+const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.60
 const EXPANSION_MINE_MAX_DISTANCE: float = 36.0
 const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
 const WORKER_PHASE_MID_SECONDS: float = 300.0
 const WORKER_PHASE_LATE_SECONDS: float = 600.0
 const WORKER_TRAIN_GOLD_COST: int = 50
-const FOOD_RESERVE: int = 2
-const MAX_FARMS: int = 3
-const DEFAULT_MAX_BARRACKS: int = 2
-const DESIRED_ARMY_EARLY: int = 8
-const DESIRED_ARMY_MID: int = 14
-const DESIRED_ARMY_LATE: int = 22
+const FOOD_RESERVE: int = 5
+const MAX_FARMS: int = 5
+const DEFAULT_MAX_BARRACKS: int = 3
+const DESIRED_ARMY_EARLY: int = 12
+const DESIRED_ARMY_MID: int = 22
+const DESIRED_ARMY_LATE: int = 32
+const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 2
+const MILITARY_LOW_ARMY_DEFICIT: int = 6
 const ARMY_SIZE_MID_AFTER_SECONDS: float = 300.0
 const ARMY_SIZE_LATE_AFTER_SECONDS: float = 600.0
 const MILITARY_TRAIN_FOOD_COST: int = 1
@@ -111,8 +113,7 @@ func _on_build_tick() -> void:
 func _run_build_order() -> void:
 	_try_assign_idle_builder_to_construction()
 
-	if _try_train_enemy_workers():
-		return
+	_try_train_enemy_workers()
 
 	if _should_grow_worker_economy():
 		if _needs_farm() and not _should_defer_gold_spending_for_workers():
@@ -215,7 +216,7 @@ func _should_build_expansion_barracks() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
-	if _count_enemy_workers() < _get_target_worker_count():
+	if _count_enemy_workers() < mini(_get_target_worker_count(), MIN_WORKERS_BEFORE_MILITARY + 6):
 		return false
 
 	return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
@@ -375,7 +376,11 @@ func _needs_farm() -> bool:
 	if _count_farms() >= MAX_FARMS:
 		return false
 
-	return EnemyResourceManager.food_max - EnemyResourceManager.food_current <= FOOD_RESERVE
+	var headroom: int = maxi(
+		FOOD_RESERVE,
+		int(ceil(float(_get_desired_army_size()) * 0.35))
+	)
+	return EnemyResourceManager.food_max - EnemyResourceManager.food_current <= headroom
 
 
 func _should_build_expansion_command_center() -> bool:
@@ -458,7 +463,7 @@ func _can_train_military_units() -> bool:
 	if _should_rebuild_workers():
 		return false
 
-	return not _should_grow_worker_economy()
+	return true
 
 
 func _should_rebuild_workers() -> bool:
@@ -497,11 +502,23 @@ func _try_sustain_military_production() -> void:
 			_try_place_building(PLACEMENT_FARM)
 		return
 
-	for barracks: Barracks in _find_all_completed_enemy_barracks():
-		if not _needs_more_military_units():
-			break
+	var army_deficit: int = (
+		_get_desired_army_size()
+		- _count_living_military_units()
+		- _count_pending_military_units()
+	)
+	var trains_per_barracks: int = (
+		MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
+		if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
+		else 1
+	)
 
-		_try_train_military(barracks)
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		for _train_attempt: int in trains_per_barracks:
+			if not _needs_more_military_units():
+				break
+
+			_try_train_military(barracks)
 
 
 func _get_desired_army_size() -> int:

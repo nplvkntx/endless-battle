@@ -11,7 +11,7 @@ const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
-const MAX_ENEMY_WORKER_QUEUE: int = 3
+const MAX_ENEMY_WORKER_QUEUE: int = 5
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_TEAM_ID: int = 1
 
