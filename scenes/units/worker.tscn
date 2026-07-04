@@ -1,20 +1,8 @@
-[gd_scene load_steps=19 format=3 uid="uid://c34sseipvxy7a"]
+[gd_scene load_steps=10 format=3 uid="uid://c34sseipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_brown"]
-albedo_color = Color(0.5, 0.32, 0.14, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_vest"]
-albedo_color = Color(0.62, 0.42, 0.2, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
-albedo_color = Color(0.82, 0.68, 0.52, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tool"]
-albedo_color = Color(0.5, 0.5, 0.54, 1)
-metallic = 0.25
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/worker_peasant/Male_Peasant.fbx" id="3_worker_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
@@ -29,20 +17,6 @@ inner_radius = 0.4
 outer_radius = 0.46
 rings = 6
 ring_segments = 20
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
-radius = 0.15
-height = 0.3
-
-[sub_resource type="SphereMesh" id="SphereMesh_head"]
-radius = 0.11
-height = 0.22
-
-[sub_resource type="BoxMesh" id="BoxMesh_vest"]
-size = Vector3(0.22, 0.18, 0.14)
-
-[sub_resource type="BoxMesh" id="BoxMesh_pick"]
-size = Vector3(0.05, 0.22, 0.08)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -61,23 +35,9 @@ script = ExtResource("1_worker")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.06, 0)
-mesh = SubResource("CapsuleMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_brown")
 
-[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.24, 0)
-mesh = SubResource("SphereMesh_head")
-surface_material_override/0 = SubResource("StandardMaterial3D_skin")
-
-[node name="Vest" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, 0.02)
-mesh = SubResource("BoxMesh_vest")
-surface_material_override/0 = SubResource("StandardMaterial3D_vest")
-
-[node name="Pick" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.866025, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866025, 0.18, -0.02, 0.1)
-mesh = SubResource("BoxMesh_pick")
-surface_material_override/0 = SubResource("StandardMaterial3D_tool")
+[node name="WorkerModel" parent="MeshInstance3D" instance=ExtResource("3_worker_model")]
+transform = Transform3D(-0.4, 0, 0, 0, 0.4, 0, 0, 0, -0.4, 0, 0, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false

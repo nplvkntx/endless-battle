@@ -1,19 +1,8 @@
-[gd_scene load_steps=19 format=3 uid="uid://cg7dpeipvxy7a"]
+[gd_scene load_steps=9 format=3 uid="uid://cg7dpeipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/archer.gd" id="1_archer"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_green"]
-albedo_color = Color(0.14, 0.58, 0.22, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
-albedo_color = Color(0.82, 0.68, 0.52, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bow"]
-albedo_color = Color(0.4, 0.26, 0.12, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_quiver"]
-albedo_color = Color(0.32, 0.2, 0.1, 1)
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/ranger_warrior_candidates/Ranger.gltf" id="3_ranger_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
@@ -28,23 +17,6 @@ inner_radius = 0.44
 outer_radius = 0.5
 rings = 6
 ring_segments = 22
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
-radius = 0.19
-height = 0.56
-
-[sub_resource type="SphereMesh" id="SphereMesh_head"]
-radius = 0.14
-height = 0.28
-
-[sub_resource type="BoxMesh" id="BoxMesh_bow_limb"]
-size = Vector3(0.04, 0.36, 0.06)
-
-[sub_resource type="BoxMesh" id="BoxMesh_bow_grip"]
-size = Vector3(0.05, 0.1, 0.08)
-
-[sub_resource type="BoxMesh" id="BoxMesh_quiver"]
-size = Vector3(0.1, 0.22, 0.08)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -63,33 +35,9 @@ script = ExtResource("1_archer")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.03, 0)
-mesh = SubResource("CapsuleMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_green")
 
-[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.36, 0)
-mesh = SubResource("SphereMesh_head")
-surface_material_override/0 = SubResource("StandardMaterial3D_skin")
-
-[node name="BowUpper" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.866025, 0.5, 0, -0.5, 0.866025, 0, 0, 0, 1, 0.22, 0.1, -0.06)
-mesh = SubResource("BoxMesh_bow_limb")
-surface_material_override/0 = SubResource("StandardMaterial3D_bow")
-
-[node name="BowLower" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0.22, -0.06, -0.06)
-mesh = SubResource("BoxMesh_bow_limb")
-surface_material_override/0 = SubResource("StandardMaterial3D_bow")
-
-[node name="BowGrip" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.24, 0.02, -0.06)
-mesh = SubResource("BoxMesh_bow_grip")
-surface_material_override/0 = SubResource("StandardMaterial3D_bow")
-
-[node name="Quiver" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.14, 0.02, 0.12)
-mesh = SubResource("BoxMesh_quiver")
-surface_material_override/0 = SubResource("StandardMaterial3D_quiver")
+[node name="RangerModel" parent="MeshInstance3D" instance=ExtResource("3_ranger_model")]
+transform = Transform3D(-0.45, 0, 0, 0, 0.45, 0, 0, 0, -0.45, 0, 0, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false

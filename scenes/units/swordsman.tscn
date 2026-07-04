@@ -1,21 +1,8 @@
-[gd_scene load_steps=21 format=3 uid="uid://c6j7ryh4ug3lh"]
+[gd_scene load_steps=9 format=3 uid="uid://c6j7ryh4ug3lh"]
 
 [ext_resource type="Script" path="res://scripts/units/swordsman.gd" id="1_swordsman"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_red"]
-albedo_color = Color(0.78, 0.14, 0.14, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
-albedo_color = Color(0.82, 0.68, 0.52, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_metal"]
-albedo_color = Color(0.72, 0.74, 0.78, 1)
-metallic = 0.45
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_shield"]
-albedo_color = Color(0.58, 0.58, 0.65, 1)
-metallic = 0.35
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/ranger_warrior_candidates/Warrior.gltf" id="3_warrior_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
@@ -30,25 +17,6 @@ inner_radius = 0.46
 outer_radius = 0.52
 rings = 6
 ring_segments = 22
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
-radius = 0.22
-height = 0.52
-
-[sub_resource type="SphereMesh" id="SphereMesh_head"]
-radius = 0.15
-height = 0.3
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_helmet"]
-top_radius = 0.17
-bottom_radius = 0.17
-height = 0.1
-
-[sub_resource type="BoxMesh" id="BoxMesh_sword"]
-size = Vector3(0.04, 0.48, 0.08)
-
-[sub_resource type="BoxMesh" id="BoxMesh_shield"]
-size = Vector3(0.06, 0.32, 0.22)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(1, 1, 1)
@@ -67,28 +35,9 @@ script = ExtResource("1_swordsman")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
-mesh = SubResource("CapsuleMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_red")
 
-[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.34, 0)
-mesh = SubResource("SphereMesh_head")
-surface_material_override/0 = SubResource("StandardMaterial3D_skin")
-
-[node name="Helmet" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.46, 0)
-mesh = SubResource("CylinderMesh_helmet")
-surface_material_override/0 = SubResource("StandardMaterial3D_metal")
-
-[node name="Sword" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 0, 0, 1, 0.28, 0.02, 0)
-mesh = SubResource("BoxMesh_sword")
-surface_material_override/0 = SubResource("StandardMaterial3D_metal")
-
-[node name="Shield" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.24, 0, 0.04)
-mesh = SubResource("BoxMesh_shield")
-surface_material_override/0 = SubResource("StandardMaterial3D_shield")
+[node name="WarriorModel" parent="MeshInstance3D" instance=ExtResource("3_warrior_model")]
+transform = Transform3D(-0.45, 0, 0, 0, 0.45, 0, 0, 0, -0.45, 0, 0, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
