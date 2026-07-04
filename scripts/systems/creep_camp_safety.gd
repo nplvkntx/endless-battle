@@ -18,6 +18,11 @@ const _CAMP_BLOCK_UNIT_GROUPS: Array[StringName] = [
 ]
 
 
+static var _cached_active_camps_frame: int = -1
+static var _cached_active_camps_tree_id: int = -1
+static var _cached_active_camps: Array[Node3D] = []
+
+
 static func is_resource_guarded_by_active_camp(
 	resource: Node3D,
 	tree: SceneTree
@@ -34,6 +39,17 @@ static func is_resource_guarded_by_active_camp(
 
 
 static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
+	if tree == null:
+		return []
+
+	var frame: int = Engine.get_process_frames()
+	var tree_id: int = tree.get_instance_id()
+	if (
+		frame == _cached_active_camps_frame
+		and tree_id == _cached_active_camps_tree_id
+	):
+		return _cached_active_camps
+
 	var camps: Dictionary = {}
 
 	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
@@ -49,6 +65,10 @@ static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
 	var active_camps: Array[Node3D] = []
 	for camp: Node3D in camps.values():
 		active_camps.append(camp)
+
+	_cached_active_camps_frame = frame
+	_cached_active_camps_tree_id = tree_id
+	_cached_active_camps = active_camps
 	return active_camps
 
 

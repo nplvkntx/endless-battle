@@ -8,6 +8,10 @@ const ENEMY_DROPOFF_GROUP := &"enemy_command_center"
 const MAP_RESOURCES_NODE_NAME := NodePath("MapResources")
 
 static var _enemy_stockpile_warning_shown: bool = false
+static var _dropoff_cache_frame: int = -1
+static var _dropoff_cache_tree_id: int = -1
+static var _cached_player_dropoffs: Array[CommandCenter] = []
+static var _cached_enemy_dropoffs: Array[CommandCenter] = []
 
 
 static func find_nearest_dropoff(
@@ -18,17 +22,11 @@ static func find_nearest_dropoff(
 	if tree == null:
 		return null
 
-	var group_name: StringName = (
-		ENEMY_DROPOFF_GROUP if for_enemy else PLAYER_DROPOFF_GROUP
-	)
+	var dropoffs: Array[CommandCenter] = _get_cached_dropoffs(for_enemy, tree)
 	var closest_dropoff: CommandCenter = null
 	var closest_distance_squared: float = INF
 
-	for node: Node in tree.get_nodes_in_group(group_name):
-		if not node is CommandCenter:
-			continue
-
-		var command_center: CommandCenter = node as CommandCenter
+	for command_center: CommandCenter in dropoffs:
 		if not is_valid_dropoff(command_center, for_enemy):
 			continue
 
@@ -40,6 +38,26 @@ static func find_nearest_dropoff(
 			closest_dropoff = command_center
 
 	return closest_dropoff
+
+
+static func _get_cached_dropoffs(for_enemy: bool, tree: SceneTree) -> Array[CommandCenter]:
+	var frame: int = Engine.get_process_frames()
+	var tree_id: int = tree.get_instance_id()
+	if frame != _dropoff_cache_frame or tree_id != _dropoff_cache_tree_id:
+		_dropoff_cache_frame = frame
+		_dropoff_cache_tree_id = tree_id
+		_cached_player_dropoffs = _collect_dropoffs(PLAYER_DROPOFF_GROUP, tree)
+		_cached_enemy_dropoffs = _collect_dropoffs(ENEMY_DROPOFF_GROUP, tree)
+
+	return _cached_enemy_dropoffs if for_enemy else _cached_player_dropoffs
+
+
+static func _collect_dropoffs(group_name: StringName, tree: SceneTree) -> Array[CommandCenter]:
+	var dropoffs: Array[CommandCenter] = []
+	for node: Node in tree.get_nodes_in_group(group_name):
+		if node is CommandCenter:
+			dropoffs.append(node as CommandCenter)
+	return dropoffs
 
 
 static func is_valid_dropoff(command_center: CommandCenter, for_enemy: bool) -> bool:

@@ -511,7 +511,9 @@ func _finish_task_corner_nudge() -> void:
 		_gather_state == GatherTripState.TO_COMMAND_CENTER
 		and _carried_amount > 0
 	):
-		var dropoff: CommandCenter = _resolve_dropoff_target()
+		var dropoff: CommandCenter = _get_valid_cached_return_dropoff()
+		if dropoff == null:
+			dropoff = _resolve_dropoff_target()
 		if dropoff != null:
 			_move_toward_command_center_for_deposit(dropoff)
 			return
@@ -961,7 +963,9 @@ func _attempt_dropoff_proximity_resolve() -> bool:
 	if _carried_amount <= 0:
 		return false
 
-	var dropoff: CommandCenter = _resolve_dropoff_target()
+	var dropoff: CommandCenter = _get_valid_cached_return_dropoff()
+	if dropoff == null:
+		dropoff = _resolve_dropoff_target()
 	if dropoff == null:
 		return false
 
@@ -1081,7 +1085,9 @@ func _try_repath_task_movement() -> void:
 		_gather_state == GatherTripState.TO_COMMAND_CENTER
 		and _carried_amount > 0
 	):
-		var dropoff: CommandCenter = _resolve_dropoff_target()
+		var dropoff: CommandCenter = _get_valid_cached_return_dropoff()
+		if dropoff == null:
+			dropoff = _resolve_dropoff_target()
 		if dropoff != null:
 			_move_toward_command_center_for_deposit(dropoff)
 			return
@@ -1306,16 +1312,15 @@ func _on_gather_wait_finished() -> void:
 
 func _begin_return_to_command_center() -> void:
 	_dropoff_candidate_index = 0
-	if _is_gathering_wood():
-		var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(
-			global_position,
-			_is_enemy_worker(),
-			get_tree()
-		)
-		_return_dropoff = dropoff
-		_assigned_dropoff = dropoff
-	else:
-		_return_dropoff = null
+	var search_position: Vector3 = (
+		global_position if _is_gathering_wood() else _get_dropoff_search_position()
+	)
+	_return_dropoff = WorkerGathering.find_nearest_dropoff(
+		search_position,
+		_is_enemy_worker(),
+		get_tree()
+	)
+	_assigned_dropoff = _return_dropoff
 	_gather_state = GatherTripState.TO_COMMAND_CENTER
 	_ensure_returning_to_current_dropoff()
 
@@ -1326,6 +1331,8 @@ func _retry_return_to_command_center() -> void:
 
 
 func _has_valid_dropoff_target() -> bool:
+	if _get_valid_cached_return_dropoff() != null:
+		return true
 	return _resolve_dropoff_target() != null
 
 
@@ -1583,46 +1590,51 @@ func _get_dropoff_search_position() -> Vector3:
 	return global_position
 
 
+func _get_valid_cached_return_dropoff() -> CommandCenter:
+	if _return_dropoff == null or not is_instance_valid(_return_dropoff):
+		return null
+
+	if not WorkerGathering.is_valid_dropoff(_return_dropoff, _is_enemy_worker()):
+		return null
+
+	return _return_dropoff
+
+
 func _resolve_dropoff_target() -> CommandCenter:
+	var cached_return: CommandCenter = _get_valid_cached_return_dropoff()
+	if cached_return != null and _gather_state == GatherTripState.TO_COMMAND_CENTER:
+		_assigned_dropoff = cached_return
+		return cached_return
+
 	if (
-		_is_gathering_wood()
-		and _gather_state == GatherTripState.TO_COMMAND_CENTER
-		and _return_dropoff != null
-		and is_instance_valid(_return_dropoff)
-		and WorkerGathering.is_valid_dropoff(_return_dropoff, _is_enemy_worker())
+		_assigned_dropoff != null
+		and is_instance_valid(_assigned_dropoff)
+		and WorkerGathering.is_valid_dropoff(_assigned_dropoff, _is_enemy_worker())
 	):
-		_assigned_dropoff = _return_dropoff
-		return _return_dropoff
+		return _assigned_dropoff
 
 	_assigned_dropoff = WorkerGathering.find_nearest_dropoff(
 		_get_dropoff_search_position(),
 		_is_enemy_worker(),
 		get_tree()
 	)
+	if _gather_state == GatherTripState.TO_COMMAND_CENTER and _assigned_dropoff != null:
+		_return_dropoff = _assigned_dropoff
 	return _assigned_dropoff
 
 
 func _ensure_returning_to_current_dropoff() -> bool:
-	var dropoff: CommandCenter = null
-	if (
-		_is_gathering_wood()
-		and _return_dropoff != null
-		and is_instance_valid(_return_dropoff)
-		and WorkerGathering.is_valid_dropoff(_return_dropoff, _is_enemy_worker())
-	):
-		dropoff = _return_dropoff
-		_assigned_dropoff = dropoff
-	else:
+	var dropoff: CommandCenter = _get_valid_cached_return_dropoff()
+	if dropoff == null:
 		dropoff = _resolve_dropoff_target()
 		if dropoff == null:
 			_return_dropoff = null
 			return false
 		_return_dropoff = dropoff
 
-	if dropoff == _return_dropoff and has_move_target:
+	if has_move_target:
 		return true
 
-	_return_dropoff = dropoff
 	_dropoff_candidate_index = 0
 	set_movement_target(_compute_command_center_dropoff_position(dropoff))
 	return true
@@ -1782,6 +1794,7 @@ func _set_movement_to_gather_source(source: Variant) -> void:
 func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
 	var base_slot: int = _get_gather_approach_base_slot()
 	var fallback_position: Vector3 = global_position
+	var nearby_workers: Array[Worker] = _collect_workers_for_approach_check(tree)
 	var attempt_limit: int = mini(
 		GatheringConfig.APPROACH_OCCUPIED_MAX_ATTEMPTS,
 		GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES
@@ -1791,7 +1804,7 @@ func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
 		fallback_position = _compute_resource_approach_position_for_candidate(
 			tree, candidate_index
 		)
-		if _is_approach_position_occupied(fallback_position, tree):
+		if _is_approach_position_occupied(fallback_position, tree, nearby_workers):
 			continue
 		return fallback_position
 
@@ -1846,8 +1859,23 @@ func _compute_resource_approach_position_for_candidate(
 	return _snap_task_target_to_navigation(approach_position)
 
 
+func _collect_workers_for_approach_check(_source: CollisionObject3D) -> Array[Worker]:
+	var workers: Array[Worker] = []
+	for group_name: StringName in [&"workers", &"enemy_workers"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
+			if node == self or not node is Worker:
+				continue
+
+			var other_worker: Worker = node as Worker
+			if is_instance_valid(other_worker):
+				workers.append(other_worker)
+	return workers
+
+
 func _is_approach_position_occupied(
-	approach_position: Vector3, source: CollisionObject3D = null
+	approach_position: Vector3,
+	source: CollisionObject3D = null,
+	nearby_workers: Array[Worker] = []
 ) -> bool:
 	var occupied_radius_sq: float = (
 		GatheringConfig.APPROACH_OCCUPIED_RADIUS * GatheringConfig.APPROACH_OCCUPIED_RADIUS
@@ -1857,42 +1885,37 @@ func _is_approach_position_occupied(
 		* GatheringConfig.APPROACH_OCCUPIED_DESTINATION_RADIUS
 	)
 
-	for group_name: StringName in [&"workers", &"enemy_workers"]:
-		for node: Node in get_tree().get_nodes_in_group(group_name):
-			if node == self or not node is Worker:
-				continue
+	for other_worker: Worker in nearby_workers:
+		if not is_instance_valid(other_worker):
+			continue
 
-			var other_worker: Worker = node as Worker
-			if not is_instance_valid(other_worker):
-				continue
+		var to_other: Vector3 = other_worker.global_position - approach_position
+		to_other.y = 0.0
+		if to_other.length_squared() <= occupied_radius_sq:
+			return true
 
-			var to_other: Vector3 = other_worker.global_position - approach_position
-			to_other.y = 0.0
-			if to_other.length_squared() <= occupied_radius_sq:
+		if other_worker._is_on_task_movement() and other_worker._task_has_saved_destination:
+			var to_destination: Vector3 = (
+				other_worker._task_movement_destination - approach_position
+			)
+			to_destination.y = 0.0
+			if to_destination.length_squared() <= destination_radius_sq:
 				return true
 
-			if other_worker._is_on_task_movement() and other_worker._task_has_saved_destination:
-				var to_destination: Vector3 = (
-					other_worker._task_movement_destination - approach_position
-				)
-				to_destination.y = 0.0
-				if to_destination.length_squared() <= destination_radius_sq:
+		if source != null and other_worker._gather_source == source:
+			if other_worker._wood_chop_spot_valid:
+				var to_chop_spot: Vector3 = other_worker._wood_chop_spot - approach_position
+				to_chop_spot.y = 0.0
+				if to_chop_spot.length_squared() <= destination_radius_sq:
 					return true
 
-			if source != null and other_worker._gather_source == source:
-				if other_worker._wood_chop_spot_valid:
-					var to_chop_spot: Vector3 = other_worker._wood_chop_spot - approach_position
-					to_chop_spot.y = 0.0
-					if to_chop_spot.length_squared() <= destination_radius_sq:
-						return true
-
-				if other_worker._gather_state == GatherTripState.GATHER_WAIT:
-					var to_gathering_worker: Vector3 = (
-						other_worker.global_position - approach_position
-					)
-					to_gathering_worker.y = 0.0
-					if to_gathering_worker.length_squared() <= occupied_radius_sq:
-						return true
+			if other_worker._gather_state == GatherTripState.GATHER_WAIT:
+				var to_gathering_worker: Vector3 = (
+					other_worker.global_position - approach_position
+				)
+				to_gathering_worker.y = 0.0
+				if to_gathering_worker.length_squared() <= occupied_radius_sq:
+					return true
 
 	return false
 
@@ -1902,6 +1925,7 @@ func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 		return global_position
 
 	var fallback_position: Vector3 = global_position
+	var nearby_workers: Array[Worker] = _collect_workers_for_approach_check(source)
 	var attempt_limit: int = mini(
 		GatheringConfig.APPROACH_OCCUPIED_MAX_ATTEMPTS,
 		GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES - _source_approach_candidate_index
@@ -1911,7 +1935,7 @@ func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 		fallback_position = _compute_resource_approach_position_for_candidate(
 			source, candidate_index
 		)
-		if _is_approach_position_occupied(fallback_position, source):
+		if _is_approach_position_occupied(fallback_position, source, nearby_workers):
 			continue
 		if source is WoodTree and not _is_wood_chop_spot_reachable(fallback_position):
 			continue
