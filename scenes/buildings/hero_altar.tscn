@@ -1,26 +1,11 @@
-[gd_scene load_steps=19 format=3 uid="uid://c1254ou7ni8nw"]
+[gd_scene load_steps=8 format=3 uid="uid://c1254ou7ni8nw"]
 
 [ext_resource type="Script" path="res://scripts/buildings/hero_altar.gd" id="1_hero_altar"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/hero_altar_temple_candidates/Temple_SecondAge_Level3.gltf" id="3_temple_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_altar"]
 albedo_color = Color(0.52, 0.32, 0.72, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pedestal"]
-albedo_color = Color(0.4, 0.36, 0.46, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crystal"]
-albedo_color = Color(0.42, 0.82, 1.0, 1)
-emission_enabled = true
-emission = Color(0.22, 0.52, 0.88, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_glow"]
-albedo_color = Color(0.72, 0.52, 1.0, 1)
-emission_enabled = true
-emission = Color(0.48, 0.32, 0.82, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_step"]
-albedo_color = Color(0.46, 0.42, 0.52, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
 shading_mode = 0
@@ -33,29 +18,11 @@ cull_mode = 2
 [sub_resource type="BoxMesh" id="BoxMesh_base"]
 size = Vector3(3, 0.3, 3)
 
-[sub_resource type="BoxMesh" id="BoxMesh_step"]
-size = Vector3(2.4, 0.1, 2.4)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_pedestal"]
-top_radius = 0.72
-bottom_radius = 0.85
-height = 0.42
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_crystal"]
-top_radius = 0.0
-bottom_radius = 0.27
-height = 1.1
-cap_top = false
-
-[sub_resource type="SphereMesh" id="SphereMesh_glow"]
-radius = 0.17
-height = 0.34
-
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
-size = Vector3(3.12, 0.025, 0.06)
+size = Vector3(3.5, 0.025, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
-size = Vector3(0.06, 0.025, 3.12)
+size = Vector3(0.06, 0.025, 3.5)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_altar"]
 size = Vector3(3, 2, 3)
@@ -66,53 +33,37 @@ collision_mask = 3
 script = ExtResource("1_hero_altar")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.85, 0)
 mesh = SubResource("BoxMesh_base")
 surface_material_override/0 = SubResource("StandardMaterial3D_altar")
 
 [node name="Visuals" type="Node3D" parent="."]
 
-[node name="Step" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.66, 0)
-mesh = SubResource("BoxMesh_step")
-surface_material_override/0 = SubResource("StandardMaterial3D_step")
-
-[node name="Pedestal" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.44, 0)
-mesh = SubResource("CylinderMesh_pedestal")
-surface_material_override/0 = SubResource("StandardMaterial3D_pedestal")
-
-[node name="Crystal" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.32, 0)
-mesh = SubResource("CylinderMesh_crystal")
-surface_material_override/0 = SubResource("StandardMaterial3D_crystal")
-
-[node name="GlowOrb" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.88, 0)
-mesh = SubResource("SphereMesh_glow")
-surface_material_override/0 = SubResource("StandardMaterial3D_glow")
+[node name="TempleModel" parent="Visuals" instance=ExtResource("3_temple_model")]
+transform = Transform3D(-2, 0, 0, 0, 2, 0, 0, 0, -2, 0, -1, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.92, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.75)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.75)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 

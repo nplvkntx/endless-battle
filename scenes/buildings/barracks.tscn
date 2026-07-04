@@ -1,55 +1,27 @@
-[gd_scene load_steps=20 format=3 uid="uid://c3tjs5jv1rvr6"]
+[gd_scene load_steps=8 format=3 uid="uid://c3tjs5jv1rvr6"]
 
 [ext_resource type="Script" path="res://scripts/buildings/barracks.gd" id="1_barracks"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/Barracks_SecondAge_Level3.gltf" id="2_barracks_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_barracks"]
 albedo_color = Color(0.28, 0.28, 0.3, 1)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_roof"]
-albedo_color = Color(0.36, 0.18, 0.12, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rack"]
-albedo_color = Color(0.48, 0.32, 0.18, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_banner"]
-albedo_color = Color(0.2, 0.45, 0.85, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_door"]
-albedo_color = Color(0.18, 0.12, 0.08, 1)
-
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
 shading_mode = 0
 transparency = 1
-albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+albedo_color = Color(0.15, 0.55, 1, 0.55)
 emission_enabled = true
-emission = Color(0.12, 0.72, 0.22, 1)
+emission = Color(0.09, 0.33, 0.6, 1)
 cull_mode = 2
 
 [sub_resource type="BoxMesh" id="BoxMesh_hall"]
 size = Vector3(3.5, 1.2, 2.5)
 
-[sub_resource type="BoxMesh" id="BoxMesh_roof_panel"]
-size = Vector3(3.68, 0.09, 1.35)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_rack"]
-top_radius = 0.04
-bottom_radius = 0.04
-height = 1.65
-
-[sub_resource type="BoxMesh" id="BoxMesh_banner"]
-size = Vector3(0.05, 0.58, 0.38)
-
-[sub_resource type="BoxMesh" id="BoxMesh_door"]
-size = Vector3(0.78, 1.05, 0.08)
-
-[sub_resource type="BoxMesh" id="BoxMesh_axe"]
-size = Vector3(0.035, 0.3, 0.1)
-
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
-size = Vector3(3.62, 0.025, 0.06)
+size = Vector3(3.5, 0.025, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
-size = Vector3(0.06, 0.025, 2.62)
+size = Vector3(0.06, 0.025, 2.82)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_barracks"]
 size = Vector3(3.5, 1.6, 2.5)
@@ -60,53 +32,27 @@ collision_mask = 3
 script = ExtResource("1_barracks")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, 0)
 mesh = SubResource("BoxMesh_hall")
 surface_material_override/0 = SubResource("StandardMaterial3D_barracks")
 
 [node name="Visuals" type="Node3D" parent="."]
 
-[node name="RoofLeft" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, 0.34202, 0, -0.34202, 0.939693, 0, 0.66, -0.58)
-mesh = SubResource("BoxMesh_roof_panel")
-surface_material_override/0 = SubResource("StandardMaterial3D_roof")
-
-[node name="RoofRight" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 0.939693, -0.34202, 0, 0.34202, 0.939693, 0, 0.66, 0.58)
-mesh = SubResource("BoxMesh_roof_panel")
-surface_material_override/0 = SubResource("StandardMaterial3D_roof")
-
-[node name="Door" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.24, -1.27)
-mesh = SubResource("BoxMesh_door")
-surface_material_override/0 = SubResource("StandardMaterial3D_door")
-
-[node name="WeaponRack" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.62, 0.04, 0)
-mesh = SubResource("CylinderMesh_rack")
-surface_material_override/0 = SubResource("StandardMaterial3D_rack")
-
-[node name="Axe" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.68, 0.3, 0.12)
-mesh = SubResource("BoxMesh_axe")
-surface_material_override/0 = SubResource("StandardMaterial3D_rack")
-
-[node name="Banner" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.74, -1.27)
-mesh = SubResource("BoxMesh_banner")
-surface_material_override/0 = SubResource("StandardMaterial3D_banner")
+[node name="BarracksModel" parent="Visuals" instance=ExtResource("2_barracks_model")]
+transform = Transform3D(-2, 0, 0, 0, 2, 0, 0, 0, -2, 0, -0.75, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.72, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.25)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.41)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.25)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.41)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 

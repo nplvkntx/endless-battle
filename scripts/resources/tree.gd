@@ -8,6 +8,31 @@ extends GatherableResource
 var _assigned_worker_count: int = 0
 
 
+func _ready() -> void:
+	super._ready()
+	_activate_tree_variant()
+
+
+func _activate_tree_variant() -> void:
+	var visuals: Node3D = get_node_or_null("Visuals") as Node3D
+	if visuals == null:
+		return
+
+	var variants: Array[Node] = []
+	for child: Node in visuals.get_children():
+		variants.append(child)
+
+	if variants.is_empty():
+		return
+
+	var variant_index: int = absi(
+		hash(str(global_position.snapped(Vector3(0.01, 0.01, 0.01))))
+	) % variants.size()
+
+	for index: int in variants.size():
+		variants[index].visible = index == variant_index
+
+
 func get_assigned_worker_count() -> int:
 	return _assigned_worker_count
 

@@ -1,21 +1,10 @@
-[gd_scene load_steps=18 format=3 uid="uid://bxwg81vxxo5na"]
+[gd_scene load_steps=7 format=3 uid="uid://bxwg81vxxo5na"]
 
 [ext_resource type="Script" path="res://scripts/buildings/tower.gd" id="1_tower"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/tower_candidates/WatchTower_SecondAge_Level3.gltf" id="2_tower_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tower"]
 albedo_color = Color(0.44, 0.44, 0.48, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_platform"]
-albedo_color = Color(0.5, 0.5, 0.56, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crenellation"]
-albedo_color = Color(0.36, 0.36, 0.4, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flag"]
-albedo_color = Color(0.2, 0.45, 0.85, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pole"]
-albedo_color = Color(0.32, 0.22, 0.12, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
 shading_mode = 0
@@ -30,22 +19,8 @@ top_radius = 0.7
 bottom_radius = 0.85
 height = 2.2
 
-[sub_resource type="BoxMesh" id="BoxMesh_platform"]
-size = Vector3(1.9, 0.2, 1.9)
-
-[sub_resource type="BoxMesh" id="BoxMesh_crenellation"]
-size = Vector3(0.32, 0.26, 0.32)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_pole"]
-top_radius = 0.03
-bottom_radius = 0.04
-height = 0.7
-
-[sub_resource type="BoxMesh" id="BoxMesh_flag"]
-size = Vector3(0.04, 0.35, 0.22)
-
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge"]
-size = Vector3(2.12, 0.025, 0.06)
+size = Vector3(2.1, 0.025, 0.06)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_tower"]
 size = Vector3(2, 3, 2)
@@ -54,68 +29,37 @@ size = Vector3(2, 3, 2)
 script = ExtResource("1_tower")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
 mesh = SubResource("CylinderMesh_shaft")
 surface_material_override/0 = SubResource("StandardMaterial3D_tower")
 
 [node name="Visuals" type="Node3D" parent="."]
 
-[node name="Platform" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.02, 0)
-mesh = SubResource("BoxMesh_platform")
-surface_material_override/0 = SubResource("StandardMaterial3D_platform")
-
-[node name="CrenellationNE" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.68, 1.26, -0.68)
-mesh = SubResource("BoxMesh_crenellation")
-surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
-
-[node name="CrenellationNW" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.68, 1.26, -0.68)
-mesh = SubResource("BoxMesh_crenellation")
-surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
-
-[node name="CrenellationSE" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.68, 1.26, 0.68)
-mesh = SubResource("BoxMesh_crenellation")
-surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
-
-[node name="CrenellationSW" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.68, 1.26, 0.68)
-mesh = SubResource("BoxMesh_crenellation")
-surface_material_override/0 = SubResource("StandardMaterial3D_crenellation")
-
-[node name="FlagPole" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.45, 0)
-mesh = SubResource("CylinderMesh_pole")
-surface_material_override/0 = SubResource("StandardMaterial3D_pole")
-
-[node name="Flag" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.14, 1.62, 0)
-mesh = SubResource("BoxMesh_flag")
-surface_material_override/0 = SubResource("StandardMaterial3D_flag")
+[node name="TowerModel" parent="Visuals" instance=ExtResource("2_tower_model")]
+transform = Transform3D(-2.5, 0, 0, 0, 2.5, 0, 0, 0, -2.5, 0, -1.5, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.28, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.05)
 mesh = SubResource("BoxMesh_sel_edge")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.05)
 mesh = SubResource("BoxMesh_sel_edge")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.0, 0.03, 0)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 1.05, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -1.0, 0.03, 0)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -1.05, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 

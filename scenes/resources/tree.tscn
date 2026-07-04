@@ -1,23 +1,17 @@
-[gd_scene load_steps=8 format=3 uid="uid://bg40oion7ayqm"]
+[gd_scene load_steps=7 format=3 uid="uid://bg40oion7ayqm"]
 
 [ext_resource type="Script" path="res://scripts/resources/tree.gd" id="1_tree"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/nature/trees_all/Resource_Tree1.gltf" id="2_tree_model_1"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/nature/trees_all/Resource_Tree2.gltf" id="3_tree_model_2"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/nature/trees_all/Resource_PineTree.gltf" id="4_tree_model_3"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_trunk"]
 albedo_color = Color(0.42, 0.28, 0.14, 1)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_foliage"]
-albedo_color = Color(0.18, 0.62, 0.22, 1)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_trunk"]
 top_radius = 0.16
 bottom_radius = 0.2
 height = 1.1
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_foliage"]
-top_radius = 0.0
-bottom_radius = 0.55
-height = 1.2
-cap_top = false
 
 [sub_resource type="CylinderShape3D" id="CylinderShape3D_tree"]
 height = 2.5
@@ -27,14 +21,26 @@ radius = 0.45
 script = ExtResource("1_tree")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.7, 0)
 mesh = SubResource("CylinderMesh_trunk")
 surface_material_override/0 = SubResource("StandardMaterial3D_trunk")
 
 [node name="Foliage" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0)
-mesh = SubResource("CylinderMesh_foliage")
-surface_material_override/0 = SubResource("StandardMaterial3D_foliage")
+visible = false
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="TreeModel1" parent="Visuals" instance=ExtResource("2_tree_model_1")]
+transform = Transform3D(-2.8, 0, 0, 0, 2.8, 0, 0, 0, -2.8, 0, -1.25, 0)
+
+[node name="TreeModel2" parent="Visuals" instance=ExtResource("3_tree_model_2")]
+visible = false
+transform = Transform3D(-2.8, 0, 0, 0, 2.8, 0, 0, 0, -2.8, 0, -1.25, 0)
+
+[node name="TreeModel3" parent="Visuals" instance=ExtResource("4_tree_model_3")]
+visible = false
+transform = Transform3D(-2.8, 0, 0, 0, 2.8, 0, 0, 0, -2.8, 0, -1.25, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CylinderShape3D_tree")

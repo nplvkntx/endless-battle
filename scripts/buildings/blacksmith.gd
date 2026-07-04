@@ -26,6 +26,31 @@ func _ready() -> void:
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
 
 
+## Keep Quaternius Blacksmith materials untouched; team identity comes from the selection ring.
+func apply_team_visuals() -> void:
+	_restore_blacksmith_visual_materials()
+
+
+func _restore_blacksmith_visual_materials() -> void:
+	var visuals: Node3D = get_node_or_null("Visuals") as Node3D
+	if visuals == null:
+		return
+
+	_clear_imported_mesh_overrides(visuals)
+
+
+func _clear_imported_mesh_overrides(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mesh_instance := node as MeshInstance3D
+		mesh_instance.material_override = null
+		if mesh_instance.mesh != null:
+			for surface_index: int in mesh_instance.mesh.get_surface_count():
+				mesh_instance.set_surface_override_material(surface_index, null)
+
+	for child: Node in node.get_children():
+		_clear_imported_mesh_overrides(child)
+
+
 func can_research() -> bool:
 	if building_state != STATE_COMPLETED:
 		return false
