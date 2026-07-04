@@ -8,7 +8,7 @@ const SCOUT_RANGE := 55.0
 const ATTACK_PATH_DEFENSE_RANGE := 60.0
 const LOW_VISIBLE_ARMY_POWER := 140
 const ARMY_ADVANTAGE_RATIO := 1.35
-const ATTACK_VISIBLE_MIN_RATIO := 1.2
+const ATTACK_VISIBLE_MIN_RATIO := 1.0
 const GREEDY_BUILD_DISTANCE := 26.0
 const GREEDY_LOCAL_DEFENSE_RADIUS := 18.0
 const GREEDY_MAX_LOCAL_DEFENSE := 1
@@ -95,13 +95,16 @@ static func evaluate_wave_attack_commitment(
 		)
 
 	if match_elapsed_seconds >= UNKNOWN_ARMY_FALLBACK_SECONDS:
-		return _build_attack_decision(
-			true,
-			&"unknown_army_timeout",
-			{"wave_power": wave_power, "non_hero_count": non_hero_count}
-		)
+		if non_hero_count >= min_non_hero_units and wave_power >= EnemyArmyCommand.MIN_ATTACK_ARMY_POWER:
+			return _build_attack_decision(
+				true,
+				&"unknown_army_timeout",
+				{"wave_power": wave_power, "non_hero_count": non_hero_count}
+			)
 
-	if non_hero_count >= min_non_hero_units:
+		return _build_attack_decision(false, &"unknown_army_timeout_blocked")
+
+	if non_hero_count >= min_non_hero_units and wave_power >= EnemyArmyCommand.MIN_ATTACK_ARMY_POWER:
 		return _build_attack_decision(
 			true,
 			&"unknown_army_ready",

@@ -141,7 +141,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-	unit.set_movement_target(_claim_enemy_gather_target())
+	unit.set_movement_target(_claim_enemy_rally_target())
 
 
 func _finalize_enemy_unit(unit: Unit) -> void:
@@ -392,10 +392,20 @@ func _claim_rally_move_target() -> Vector3:
 
 
 func _claim_enemy_gather_target() -> Vector3:
-	var gather_center: Vector3 = global_position + ENEMY_GATHER_OFFSET
+	return _claim_enemy_rally_target()
+
+
+func _claim_enemy_rally_target() -> Vector3:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if rally_position == Vector3.ZERO:
+		var gather_center: Vector3 = global_position + ENEMY_GATHER_OFFSET
+		var slot_index: int = _enemy_gather_next_slot
+		_enemy_gather_next_slot += 1
+		return GroupMoveSpacing.compute_slot_target(gather_center, slot_index, RALLY_SLOT_SPACING)
+
 	var slot_index: int = _enemy_gather_next_slot
 	_enemy_gather_next_slot += 1
-	return GroupMoveSpacing.compute_slot_target(gather_center, slot_index, RALLY_SLOT_SPACING)
+	return GroupMoveSpacing.compute_slot_target(rally_position, slot_index, RALLY_SLOT_SPACING)
 
 
 func _update_rally_marker(marker_position: Vector3) -> void:

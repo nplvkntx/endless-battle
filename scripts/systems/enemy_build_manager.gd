@@ -347,6 +347,20 @@ func _hero_already_owns_item(hero: Hero, item_id: StringName) -> bool:
 
 
 func _should_send_hero_to_shop(hero: Hero) -> bool:
+	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	if (
+		army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
+		or army_mode == EnemyArmyCommand.ArmyMode.REGROUPING
+		or army_mode == EnemyArmyCommand.ArmyMode.DEFENDING
+	):
+		return false
+
+	if (
+		EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()).size()
+		< EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
+	):
+		return false
+
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	var offset: Vector3 = hero.global_position - rally_position
 	offset.y = 0.0

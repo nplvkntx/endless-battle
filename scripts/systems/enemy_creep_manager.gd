@@ -78,6 +78,10 @@ func _update_creeping() -> void:
 		_retreat_creep_army(tree, rally_position)
 		return
 
+	if _should_abort_creep_push(tree, creep_army):
+		_retreat_creep_army(tree, rally_position)
+		return
+
 	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(creep_army)
 	if army_center == Vector3.ZERO:
 		return
@@ -127,12 +131,27 @@ func _has_uncleared_enemy_side_camps(tree: SceneTree, rally_position: Vector3) -
 
 
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
-	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
 	var creep_army: Array = creep_plan.get("units", [])
 	if creep_army.is_empty():
+		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+		if hero != null and is_instance_valid(hero):
+			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
+	EnemyArmyCommand.cancel_offensive_orders(tree)
 	EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
+
+
+func _should_abort_creep_push(tree: SceneTree, creep_army: Array) -> bool:
+	var non_hero_count: int = 0
+	for unit: Variant in creep_army:
+		if unit is Hero:
+			continue
+		if EnemyArmyCommand.is_living_combat_unit(unit as Node):
+			non_hero_count += 1
+
+	return non_hero_count < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
 
 
 func _build_regrouped_creep_army(tree: SceneTree, rally_position: Vector3) -> Dictionary:

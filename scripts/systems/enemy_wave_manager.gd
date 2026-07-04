@@ -42,6 +42,8 @@ func _process(delta: float) -> void:
 		_hero_behavior_timer = 0.0
 		_update_hero_army_behavior()
 
+	_monitor_active_offensive_push()
+
 	_regroup_timer += delta
 	if _regroup_timer >= ARMY_REGROUP_INTERVAL_SECONDS:
 		_regroup_timer = 0.0
@@ -63,6 +65,11 @@ func _update_hero_army_behavior() -> void:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
+	if EnemyArmyCommand.is_hero_isolated_near_player_threat(get_tree(), hero):
+		_abort_active_offensive_push(rally_position)
+		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
+
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	var max_hero_distance: float = EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY
 	if army_mode == EnemyArmyCommand.ArmyMode.ATTACKING:
@@ -75,6 +82,7 @@ func _update_hero_army_behavior() -> void:
 		return
 
 	if non_hero_units.size() < EnemyArmyCommand.MIN_ARMY_UNITS_TO_CONTINUE_ATTACK:
+		_abort_active_offensive_push(rally_position)
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
@@ -91,7 +99,31 @@ func _update_hero_army_behavior() -> void:
 	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
 		var distance_to_rally: float = _horizontal_distance(hero.global_position, rally_position)
 		if distance_to_rally > EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY * 0.5:
+			_abort_active_offensive_push(rally_position)
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+
+
+func _monitor_active_offensive_push() -> void:
+	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.ATTACKING:
+		return
+
+	if not EnemyArmyCommand.should_abort_offensive_push(get_tree()):
+		return
+
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	_abort_active_offensive_push(rally_position)
+
+
+func _abort_active_offensive_push(rally_position: Vector3) -> void:
+	if EnemyArmyCommand.abort_offensive_and_regroup(get_tree()):
+		_rebuilding_army_after_wave = true
+
+	if rally_position == Vector3.ZERO:
+		return
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero != null and is_instance_valid(hero):
+		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 
 
 func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
@@ -243,14 +275,13 @@ func _on_wave_timer() -> void:
 		return
 
 	var wave_units: Array = wave_plan.get("units", [])
-	var attack_commitment: Dictionary = EnemyEarlyStrategy.evaluate_wave_attack_commitment(
+	var attack_commitment: Dictionary = EnemyArmyCommand.can_commit_attack_wave(
 		get_tree(),
-		rally_position,
 		wave_units,
-		min_non_hero_units,
-		_get_match_elapsed_seconds()
+		rally_position,
+		min_non_hero_units
 	)
-	if not attack_commitment.get("can_attack", false):
+	if not attack_commitment.get("can_commit", false):
 		_hold_army_when_too_weak_to_attack(rally_position)
 		_schedule_next_wave()
 		return
@@ -358,18 +389,27 @@ func _enforce_army_regroup_when_waiting() -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
+	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	if army_mode == EnemyArmyCommand.ArmyMode.ATTACKING:
+		if EnemyArmyCommand.should_abort_offensive_push(get_tree()):
+			_abort_active_offensive_push(rally_position)
+		return
+
 	var should_hold: bool = (
 		_should_delay_offensive_wave(rally_position) or _rebuilding_army_after_wave
 	)
-	if not should_hold:
+	if not should_hold and army_mode != EnemyArmyCommand.ArmyMode.REGROUPING:
 		return
 
 	_hold_army_for_creep_phase(rally_position)
+	EnemyArmyCommand.pull_straggler_units_to_rally(get_tree(), rally_position)
 
 
 func _hold_army_when_too_weak_to_attack(rally_position: Vector3) -> void:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		return
+
+	_rebuilding_army_after_wave = true
 
 	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(get_tree())
 	if creep_plan.get("can_launch", false):
