@@ -13,10 +13,11 @@ const UNITS_GROUP := &"units"
 const HEROES_GROUP := &"heroes"
 
 const ARMY_RALLY_OFFSET := Vector3(-2.0, -0.5, 3.0)
-const BASE_THREAT_DETECTION_RANGE := 55.0
-const APPROACH_DETECTION_RANGE := 68.0
-const WORKER_THREAT_RANGE := 30.0
-const BUILDING_THREAT_RANGE := 22.0
+const BASE_THREAT_DETECTION_RANGE := 60.0
+const APPROACH_DETECTION_RANGE := 75.0
+const WORKER_THREAT_RANGE := 36.0
+const BUILDING_THREAT_RANGE := 32.0
+const ENEMY_ECONOMY_AREA_RANGE := 42.0
 const FORMATION_SPACING := 2.0
 const RANGED_ROW_DEPTH_MULTIPLIER := 1.5
 const HERO_ROW_DEPTH_MULTIPLIER := 1.25
@@ -330,27 +331,13 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 	if rally_position == Vector3.ZERO:
 		return {"threatened": false}
 
-	var worker_threat: Vector3 = _find_player_military_near_enemy_workers(
-		tree,
-		WORKER_THREAT_RANGE
-	)
-	if worker_threat != Vector3.ZERO:
-		return {
-			"threatened": true,
-			"intercept_position": worker_threat,
-			"reason": &"workers",
-		}
+	var worker_threat: Dictionary = _evaluate_worker_defense_threat(tree)
+	if worker_threat.get("threatened", false):
+		return worker_threat
 
-	var building_threat: Vector3 = _find_player_military_near_enemy_buildings(
-		tree,
-		BUILDING_THREAT_RANGE
-	)
-	if building_threat != Vector3.ZERO:
-		return {
-			"threatened": true,
-			"intercept_position": building_threat,
-			"reason": &"buildings",
-		}
+	var building_threat: Dictionary = _evaluate_building_defense_threat(tree)
+	if building_threat.get("threatened", false):
+		return building_threat
 
 	var base_threat: Node3D = _find_player_military_near_position(
 		tree,
@@ -358,11 +345,17 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 		BASE_THREAT_DETECTION_RANGE
 	)
 	if base_threat != null:
-		return {
-			"threatened": true,
-			"intercept_position": base_threat.global_position,
-			"reason": &"base",
-		}
+		return _build_defense_threat_result(
+			_resolve_player_threat_cluster_position(tree, base_threat.global_position),
+			&"base"
+		)
+
+	var economy_threat: Node3D = _find_player_military_in_enemy_economy_area(tree)
+	if economy_threat != null:
+		return _build_defense_threat_result(
+			_resolve_player_threat_cluster_position(tree, economy_threat.global_position),
+			&"economy"
+		)
 
 	var approach_threat: Node3D = _find_player_military_near_position(
 		tree,
@@ -370,57 +363,23 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 		APPROACH_DETECTION_RANGE
 	)
 	if approach_threat != null:
-		return {
-			"threatened": true,
-			"intercept_position": approach_threat.global_position,
-			"reason": &"approach",
-		}
+		return _build_defense_threat_result(
+			_resolve_player_threat_cluster_position(tree, approach_threat.global_position),
+			&"approach"
+		)
 
 	return {"threatened": false}
 
 
 static func build_defense_army(
 	tree: SceneTree,
-	threat_anchor: Vector3 = Vector3.ZERO
+	_threat_anchor: Vector3 = Vector3.ZERO
 ) -> Array:
-	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
-	if rally_position == Vector3.ZERO:
+	if resolve_enemy_rally_position(tree) == Vector3.ZERO:
 		return []
 
-	var anchor_position: Vector3 = rally_position
-	if threat_anchor != Vector3.ZERO:
-		anchor_position = threat_anchor
-
-	var gathered_units: Array = []
-	var seen_units: Dictionary = {}
-
-	for unit: Variant in collect_living_combat_units(tree):
-		if unit == null or not is_instance_valid(unit):
-			continue
-
-		if not unit is Node3D:
-			continue
-
-		var unit_position: Vector3 = (unit as Node3D).global_position
-		var near_rally: bool = (
-			horizontal_distance(unit_position, rally_position) <= DEFENSE_GATHER_MAX_DISTANCE
-		)
-		var near_threat: bool = (
-			horizontal_distance(unit_position, anchor_position) <= DEFENSE_GATHER_MAX_DISTANCE
-		)
-		if not near_rally and not near_threat:
-			continue
-
-		gathered_units.append(unit)
-		seen_units[unit] = true
-
-	var hero: Hero = find_living_enemy_hero(tree)
-	if hero != null and not seen_units.has(hero):
-		var hero_distance: float = horizontal_distance(hero.global_position, rally_position)
-		if hero_distance <= DEFENSE_GATHER_MAX_DISTANCE + DEFENSE_HERO_EXTRA_GATHER_DISTANCE:
-			gathered_units.append(hero)
-
-	return gathered_units
+	# Rally every living combat unit so defense never trickles in one or two soldiers.
+	return collect_living_combat_units(tree)
 
 
 static func evaluate_defense_commitment(
@@ -438,8 +397,35 @@ static func evaluate_defense_commitment(
 	return {
 		"defender_power": defender_power,
 		"threat_power": threat_power,
-		"can_commit": defender_power >= threat_power,
+		"can_commit": should_defense_commit_attack(defense_army, defender_power, threat_power),
 	}
+
+
+static func should_defense_commit_attack(
+	defense_army: Array,
+	defender_power: int,
+	_threat_power: int
+) -> bool:
+	if defense_army.is_empty():
+		return false
+
+	# Always engage with the full gathered army; only pause if there is no army to send.
+	if defender_power <= 0:
+		return false
+
+	return true
+
+
+static func resolve_defense_intercept_position(
+	tree: SceneTree,
+	threat: Dictionary,
+	fallback_position: Vector3
+) -> Vector3:
+	var anchor_position: Vector3 = threat.get("intercept_position", fallback_position)
+	if anchor_position == Vector3.ZERO:
+		anchor_position = fallback_position
+
+	return _resolve_player_threat_cluster_position(tree, anchor_position)
 
 
 static func estimate_military_power(units: Array) -> int:
@@ -854,6 +840,205 @@ static func _issue_hold_at_rally(unit: Variant, rally_position: Vector3) -> void
 		return
 
 	_issue_attack_move(unit, rally_position)
+
+
+static func _build_defense_threat_result(
+	intercept_position: Vector3,
+	reason: StringName,
+	force_commit: bool = false
+) -> Dictionary:
+	return {
+		"threatened": true,
+		"intercept_position": intercept_position,
+		"reason": reason,
+		"force_commit": force_commit,
+	}
+
+
+static func _evaluate_worker_defense_threat(tree: SceneTree) -> Dictionary:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	var closest_attacker: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_WORKERS_GROUP):
+		if not node is Worker or not _has_positive_health(node):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var worker: Worker = node as Worker
+		var worker_position: Vector3 = (node as Node3D).global_position
+		var attacker: Node = CombatKillTracker.get_attacker(worker)
+		if _is_player_military_unit(attacker) and attacker is Node3D:
+			var distance: float = _horizontal_distance(
+				rally_position,
+				(attacker as Node3D).global_position
+			)
+			if distance < closest_distance:
+				closest_distance = distance
+				closest_attacker = attacker as Node3D
+			continue
+
+		var nearby_threat: Node3D = _find_player_military_near_position(
+			tree,
+			worker_position,
+			WORKER_THREAT_RANGE
+		)
+		if nearby_threat == null:
+			continue
+
+		var nearby_distance: float = _horizontal_distance(
+			rally_position,
+			nearby_threat.global_position
+		)
+		if nearby_distance < closest_distance:
+			closest_distance = nearby_distance
+			closest_attacker = nearby_threat
+
+	if closest_attacker != null:
+		return _build_defense_threat_result(
+			_resolve_player_threat_cluster_position(tree, closest_attacker.global_position),
+			&"workers",
+			true
+		)
+
+	return {"threatened": false}
+
+
+static func _evaluate_building_defense_threat(tree: SceneTree) -> Dictionary:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	var closest_attacker: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building or not _is_living_building(node as Building):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var building: Building = node as Building
+		var building_position: Vector3 = (node as Node3D).global_position
+		var attacker: Node = CombatKillTracker.get_attacker(building)
+		if _is_player_military_unit(attacker) and attacker is Node3D:
+			var distance: float = _horizontal_distance(
+				rally_position,
+				(attacker as Node3D).global_position
+			)
+			if distance < closest_distance:
+				closest_distance = distance
+				closest_attacker = attacker as Node3D
+			continue
+
+		var nearby_threat: Node3D = _find_player_military_near_position(
+			tree,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if nearby_threat == null:
+			continue
+
+		var nearby_distance: float = _horizontal_distance(
+			rally_position,
+			nearby_threat.global_position
+		)
+		if nearby_distance < closest_distance:
+			closest_distance = nearby_distance
+			closest_attacker = nearby_threat
+
+	if closest_attacker != null:
+		return _build_defense_threat_result(
+			_resolve_player_threat_cluster_position(tree, closest_attacker.global_position),
+			&"buildings",
+			true
+		)
+
+	return {"threatened": false}
+
+
+static func _find_player_military_in_enemy_economy_area(tree: SceneTree) -> Node3D:
+	var closest_target: Node3D = null
+	var closest_distance: float = INF
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_WORKERS_GROUP):
+		if not node is Worker or not _has_positive_health(node):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var worker_position: Vector3 = (node as Node3D).global_position
+		var threat: Node3D = _find_player_military_near_position(
+			tree,
+			worker_position,
+			ENEMY_ECONOMY_AREA_RANGE
+		)
+		if threat == null:
+			continue
+
+		var distance: float = _horizontal_distance(rally_position, threat.global_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = threat
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building or not _is_living_building(node as Building):
+			continue
+
+		if node is CommandCenter:
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var building_position: Vector3 = (node as Node3D).global_position
+		var threat: Node3D = _find_player_military_near_position(
+			tree,
+			building_position,
+			ENEMY_ECONOMY_AREA_RANGE
+		)
+		if threat == null:
+			continue
+
+		var distance: float = _horizontal_distance(rally_position, threat.global_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = threat
+
+	return closest_target
+
+
+static func _resolve_player_threat_cluster_position(
+	tree: SceneTree,
+	anchor_position: Vector3
+) -> Vector3:
+	var nearby_units: Array = collect_player_military_near(
+		tree,
+		anchor_position,
+		DEFENSE_THREAT_POWER_RANGE
+	)
+	if nearby_units.is_empty():
+		return anchor_position
+
+	var position_sum: Vector3 = Vector3.ZERO
+	var count: int = 0
+
+	for unit: Variant in nearby_units:
+		if unit == null or not is_instance_valid(unit):
+			continue
+
+		if not unit is Node3D:
+			continue
+
+		position_sum += (unit as Node3D).global_position
+		count += 1
+
+	if count == 0:
+		return anchor_position
+
+	return position_sum / float(count)
 
 
 static func _find_player_military_near_enemy_workers(

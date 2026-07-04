@@ -83,13 +83,15 @@ func try_research_upgrade(upgrade_id: StringName) -> bool:
 	return true
 
 
-func take_damage(amount: float, _attacker = null) -> void:
+func take_damage(amount: float, attacker = null) -> void:
 	if _health_component == null or _health_component.current_health <= 0:
 		return
 
 	if not _health_component.has_method("take_damage"):
 		return
 
+	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
+	CombatKillTracker.record_attacker(self, attacker)
 	_health_component.take_damage(maxi(0, int(amount)))
 
 

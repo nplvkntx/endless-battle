@@ -3,7 +3,7 @@ extends Node
 
 ## Intercepts player threats near the enemy base and holds DEFENDING army mode until clear.
 
-const DEFENSE_TICK_INTERVAL_SECONDS := 1.5
+const DEFENSE_TICK_INTERVAL_SECONDS := 1.0
 const THREAT_CLEAR_SECONDS := 6.0
 
 var _tick_timer: float = 0.0
@@ -31,24 +31,16 @@ func _update_defense() -> void:
 		if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
 			return
 
-		var intercept_position: Vector3 = threat.get("intercept_position", rally_position)
+		var intercept_position: Vector3 = EnemyArmyCommand.resolve_defense_intercept_position(
+			tree,
+			threat,
+			rally_position
+		)
 		var defense_army: Array = EnemyArmyCommand.build_defense_army(tree, intercept_position)
 		if defense_army.is_empty():
 			return
 
-		var commitment: Dictionary = EnemyArmyCommand.evaluate_defense_commitment(
-			tree,
-			defense_army,
-			intercept_position
-		)
-		if commitment.get("can_commit", false):
-			EnemyArmyCommand.command_attack_move(defense_army, intercept_position)
-		else:
-			var hold_position: Vector3 = EnemyArmyCommand.resolve_defense_hold_position(
-				rally_position,
-				intercept_position
-			)
-			EnemyArmyCommand.command_defend_position(defense_army, hold_position)
+		EnemyArmyCommand.command_attack_move(defense_army, intercept_position)
 		return
 
 	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.DEFENDING:

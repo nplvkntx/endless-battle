@@ -24,6 +24,8 @@ const DESIRED_ARMY_MID: int = 22
 const DESIRED_ARMY_LATE: int = 32
 const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 2
 const MILITARY_LOW_ARMY_DEFICIT: int = 6
+const MILITARY_DEFENSE_EXTRA_DESIRED: int = 6
+const MILITARY_DEFENSE_TRAINS_PER_BARRACKS: int = 2
 const ARMY_SIZE_MID_AFTER_SECONDS: float = 300.0
 const ARMY_SIZE_LATE_AFTER_SECONDS: float = 600.0
 const MILITARY_TRAIN_FOOD_COST: int = 1
@@ -503,14 +505,21 @@ func _try_sustain_military_production() -> void:
 		return
 
 	var army_deficit: int = (
-		_get_desired_army_size()
+		_get_effective_desired_army_size()
 		- _count_living_military_units()
 		- _count_pending_military_units()
 	)
+	var defending: bool = (
+		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING
+	)
 	var trains_per_barracks: int = (
-		MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
-		if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
-		else 1
+		MILITARY_DEFENSE_TRAINS_PER_BARRACKS
+		if defending
+		else (
+			MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
+			if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
+			else 1
+		)
 	)
 
 	for barracks: Barracks in _find_all_completed_enemy_barracks():
@@ -543,10 +552,18 @@ func _count_pending_military_units() -> int:
 	return pending
 
 
+func _get_effective_desired_army_size() -> int:
+	var desired: int = _get_desired_army_size()
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		desired += MILITARY_DEFENSE_EXTRA_DESIRED
+
+	return desired
+
+
 func _needs_more_military_units() -> bool:
 	return (
 		_count_living_military_units() + _count_pending_military_units()
-		< _get_desired_army_size()
+		< _get_effective_desired_army_size()
 	)
 
 
