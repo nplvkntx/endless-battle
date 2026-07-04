@@ -40,6 +40,7 @@ var _construction_timer_active: bool = false
 var _construction_elapsed: float = 0.0
 var _registered_builders: Array[Worker] = []
 var _mesh_instance: MeshInstance3D
+var _visuals_root: Node3D
 var _feedback_material_ready: bool = false
 var _mesh_material: StandardMaterial3D
 var _base_albedo: Color
@@ -57,6 +58,7 @@ func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
 	_mesh_instance = get_node_or_null("MeshInstance3D") as MeshInstance3D
+	_visuals_root = get_node_or_null("Visuals") as Node3D
 	_selection_indicator = get_node_or_null("SelectionIndicator") as Node3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
@@ -82,6 +84,16 @@ func set_selected(selected: bool) -> void:
 
 
 func play_selection_pulse() -> void:
+	if _visuals_root != null:
+		if _selection_pulse_tween != null and _selection_pulse_tween.is_valid():
+			_selection_pulse_tween.kill()
+		_selection_pulse_tween = TargetFeedback.play_selection_pulse(
+			self,
+			_visuals_root,
+			_selection_pulse_tween
+		)
+		return
+
 	if _mesh_instance == null:
 		return
 
@@ -111,6 +123,10 @@ func set_inspected(inspected: bool) -> void:
 
 
 func play_target_feedback() -> void:
+	if _visuals_root != null:
+		_feedback_tween = TargetFeedback.play_on_visuals(self, _visuals_root, _feedback_tween)
+		return
+
 	_ensure_feedback_material_ready()
 	if _mesh_instance == null or _mesh_material == null:
 		return

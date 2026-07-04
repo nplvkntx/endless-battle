@@ -6,6 +6,7 @@ extends StaticBody3D
 signal depleted()
 
 @onready var _mesh: MeshInstance3D = $MeshInstance3D
+@onready var _visuals_root: Node3D = get_node_or_null("Visuals") as Node3D
 
 var _mesh_material: StandardMaterial3D
 var _base_albedo: Color
@@ -34,6 +35,10 @@ func _ready() -> void:
 
 
 func play_target_feedback() -> void:
+	if _visuals_root != null:
+		_feedback_tween = TargetFeedback.play_on_visuals(self, _visuals_root, _feedback_tween)
+		return
+
 	if _mesh == null or _mesh_material == null:
 		return
 

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-[ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/TownCenter_SecondAge_Level3.gltf" id="3_town_center"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/hero_altar_temple_candidates/Temple_SecondAge_Level3.gltf" id="3_town_center"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_command_center"]
 albedo_color = Color(0.72, 0.38, 0.14, 1)
@@ -19,10 +19,10 @@ cull_mode = 2
 size = Vector3(3.5, 1.05, 3.5)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
-size = Vector3(4.76, 0.025, 0.06)
+size = Vector3(3.5, 0.025, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
-size = Vector3(0.06, 0.025, 4.76)
+size = Vector3(0.06, 0.025, 3.5)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
 size = Vector3(3.5, 2, 3.5)
@@ -40,29 +40,29 @@ surface_material_override/0 = SubResource("StandardMaterial3D_command_center")
 [node name="Visuals" type="Node3D" parent="."]
 
 [node name="TownCenterModel" parent="Visuals" instance=ExtResource("3_town_center")]
-transform = Transform3D(-2.5, 0, 0, 0, 2.5, 0, 0, 0, -2.5, 0, -0.98, 0)
+transform = Transform3D(-2, 0, 0, 0, 2, 0, 0, 0, -2, 0, -1, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.88, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.92, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -2.38)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.75)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 2.38)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.75)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.38, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.38, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
