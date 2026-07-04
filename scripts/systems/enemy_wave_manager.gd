@@ -54,10 +54,16 @@ func _update_hero_army_behavior() -> void:
 		return
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
-	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree())
 	var health_ratio: float = EnemyArmyCommand.get_health_ratio(hero)
 
 	_try_enemy_hero_abilities(hero, health_ratio)
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
+			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
+
+	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree())
 
 	if health_ratio < EnemyArmyCommand.HERO_RETREAT_HP_RATIO:
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
@@ -171,6 +177,10 @@ func _schedule_next_wave() -> void:
 
 func _on_wave_timer() -> void:
 	if not _wave_active:
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		_schedule_next_wave()
 		return
 
 	if not _has_any_attack_target():
@@ -316,6 +326,9 @@ func _count_regrouped_non_hero_units(rally_position: Vector3) -> int:
 
 
 func _enforce_army_regroup_when_waiting() -> void:
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		return
+
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	if rally_position == Vector3.ZERO:
 		return
@@ -348,6 +361,9 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 
 
 func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		return
+
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 	if hero == null or not is_instance_valid(hero):
 		return

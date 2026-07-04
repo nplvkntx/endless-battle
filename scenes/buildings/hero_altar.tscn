@@ -1,6 +1,7 @@
-[gd_scene load_steps=18 format=3 uid="uid://c1254ou7ni8nw"]
+[gd_scene load_steps=19 format=3 uid="uid://c1254ou7ni8nw"]
 
 [ext_resource type="Script" path="res://scripts/buildings/hero_altar.gd" id="1_hero_altar"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_altar"]
 albedo_color = Color(0.52, 0.32, 0.72, 1)
@@ -117,3 +118,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_altar")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 350

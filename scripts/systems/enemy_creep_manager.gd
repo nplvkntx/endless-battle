@@ -56,9 +56,7 @@ func _update_creeping() -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
-	if EnemyArmyCommand.is_enemy_base_threatened(tree):
-		if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
-			_retreat_creep_army(tree, rally_position)
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		return
 
 	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
@@ -76,9 +74,8 @@ func _update_creeping() -> void:
 		return
 
 	if EnemyArmyCommand.is_enemy_army_under_attack(tree, creep_army, ARMY_UNDER_ATTACK_RANGE):
-		if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
-			_record_creep_setback()
-			_retreat_creep_army(tree, rally_position)
+		_record_creep_setback()
+		_retreat_creep_army(tree, rally_position)
 		return
 
 	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(creep_army)

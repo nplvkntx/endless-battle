@@ -60,6 +60,7 @@ const COMMAND_CENTER_WOOD_COST: int = 400
 
 const CONSTRUCTION_DURATION: float = 4.0
 const BARRACKS_MAX_HEALTH: int = 300
+const FARM_MAX_HEALTH: int = 250
 const HERO_ALTAR_MAX_HEALTH: int = 350
 const COMMAND_CENTER_MAX_HEALTH: int = 500
 
@@ -294,6 +295,9 @@ func _has_stable_enemy_economy_for_shop() -> bool:
 func _try_sustain_shop_purchases() -> void:
 	if _shop_purchase_cooldown_ticks > 0:
 		_shop_purchase_cooldown_ticks -= 1
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		return
 
 	var shop: Shop = _find_completed_enemy_shop()
@@ -738,6 +742,8 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 	match building_type:
 		PLACEMENT_BARRACKS:
 			max_health = BARRACKS_MAX_HEALTH
+		PLACEMENT_FARM:
+			max_health = FARM_MAX_HEALTH
 		PLACEMENT_HERO_ALTAR:
 			max_health = HERO_ALTAR_MAX_HEALTH
 		PLACEMENT_COMMAND_CENTER:

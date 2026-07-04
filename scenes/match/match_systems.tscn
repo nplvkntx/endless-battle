@@ -8,6 +8,7 @@
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="6_enemy_gather_manager"]
 [ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
 [ext_resource type="Script" uid="uid://dmawlogwv25xq" path="res://scripts/systems/enemy_creep_manager.gd" id="8_enemy_creep_manager"]
+[ext_resource type="Script" uid="uid://c8kdef3nse7mgr" path="res://scripts/systems/enemy_defense_manager.gd" id="9_enemy_defense_manager"]
 
 [node name="MatchSystems" type="Node"]
 
@@ -49,3 +50,6 @@ buildings_parent_path = NodePath("../..")
 
 [node name="EnemyCreepManager" type="Node" parent="." unique_id=2101198463]
 script = ExtResource("8_enemy_creep_manager")
+
+[node name="EnemyDefenseManager" type="Node" parent="." unique_id=3847291056]
+script = ExtResource("9_enemy_defense_manager")

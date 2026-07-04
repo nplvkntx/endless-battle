@@ -1,6 +1,7 @@
-[gd_scene load_steps=24 format=3 uid="uid://c8farmplaceholder"]
+[gd_scene load_steps=25 format=3 uid="uid://c8farmplaceholder"]
 
 [ext_resource type="Script" path="res://scripts/buildings/farm.gd" id="1_farm"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_soil"]
 albedo_color = Color(0.4, 0.26, 0.12, 1)
@@ -166,3 +167,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_farm")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 250
