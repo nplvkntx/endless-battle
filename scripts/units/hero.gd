@@ -677,7 +677,7 @@ func find_execute_target(search_range: float) -> Node3D:
 	var best_unit_distance: float = INF
 
 	for group_name: StringName in [&"units", &"heroes"]:
-		for node: Node in get_tree().get_nodes_in_group(group_name):
+		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
 			if not _is_player_military_unit(node):
 				continue
 
@@ -916,7 +916,7 @@ func _damage_enemies_in_ground_slam_radius() -> void:
 	var slam_damage: int = get_ground_slam_damage()
 
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
-		for node: Node in get_tree().get_nodes_in_group(group_name):
+		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
 			if not node is Node3D:
 				continue
 			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
@@ -1029,12 +1029,15 @@ func _physics_process(delta: float) -> void:
 	_tick_execute_cooldown(delta)
 	_tick_mana_regen(delta)
 
+	var can_scan_targets: bool = tick_combat_target_scan_timer(delta)
+
 	if _has_execute_pending:
 		_process_execute(delta)
 	elif _has_power_strike_pending:
 		_process_power_strike(delta)
 	elif _attack_target == null and not has_move_target:
-		_try_auto_attack()
+		if can_scan_targets:
+			_try_auto_attack()
 
 	if (
 		_has_attack_move_destination
@@ -1042,7 +1045,8 @@ func _physics_process(delta: float) -> void:
 		and not _has_power_strike_pending
 		and not _has_execute_pending
 	):
-		_try_attack_move_engagement()
+		if can_scan_targets:
+			_try_attack_move_engagement()
 
 	if _attack_target != null and not _has_power_strike_pending and not _has_execute_pending:
 		if not CombatTargetValidation.is_valid_combat_target(_attack_target):
@@ -1112,10 +1116,6 @@ func _stop_and_attack(delta: float) -> void:
 
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
-	print(
-		"Hero dealt %d damage. Target remaining health: %d"
-		% [attack_damage, CombatTargetValidation.get_target_current_health(_attack_target)]
-	)
 	_attack_cooldown_timer = attack_cooldown
 
 
@@ -1181,7 +1181,6 @@ func _on_health_depleted() -> void:
 	has_move_target = false
 	velocity = Vector3.ZERO
 	die()
-	print("Hero died")
 	queue_free()
 
 

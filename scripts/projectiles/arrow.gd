@@ -87,7 +87,3 @@ func _apply_hit() -> void:
 		return
 
 	MeleeHitSound.play_at(self, _target.global_position)
-	print(
-		"Projectile dealt %d damage. Target remaining health: %d"
-		% [int(_damage), CombatTargetValidation.get_target_current_health(_target)]
-	)

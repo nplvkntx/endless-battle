@@ -143,7 +143,6 @@ func _on_health_depleted() -> void:
 	HeroXpRewards.notify_unit_killed(self)
 	_notify_camp_parent()
 	_health_bar.visible = false
-	print("NeutralCreep died")
 	queue_free()
 
 

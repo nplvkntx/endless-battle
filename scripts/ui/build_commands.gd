@@ -149,6 +149,8 @@ var _tracked_blacksmith: Blacksmith = null
 var _tracked_shop: Shop = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
+var _ui_refresh_timer: float = 0.0
+const UI_REFRESH_INTERVAL := 0.1
 var _auto_training_label: Label = null
 var _train_worker_base_label: String = ""
 var _train_swordsman_base_label: String = ""
@@ -238,10 +240,17 @@ func _ready() -> void:
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
 	_on_building_selection_changed(selection_manager.selected_building)
 	_on_selection_changed(selection_manager.selected_units)
+	set_process(false)
 
 
-func _process(_delta: float) -> void:
-	_update_hero_abilities_ui()
+func _process(delta: float) -> void:
+	_ui_refresh_timer += delta
+	if _ui_refresh_timer < UI_REFRESH_INTERVAL:
+		return
+
+	_ui_refresh_timer = 0.0
+	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+		_update_hero_abilities_ui()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
 
@@ -1400,6 +1409,17 @@ func _refresh_command_visibility() -> void:
 		or show_shop_items
 		or single_combat_unit
 	)
+	_sync_ui_process()
+
+
+func _sync_ui_process() -> void:
+	var needs_refresh: bool = (
+		(_tracked_hero != null and is_instance_valid(_tracked_hero))
+		or _shop_panel.visible
+	)
+	set_process(needs_refresh)
+	if not needs_refresh:
+		_ui_refresh_timer = 0.0
 
 
 func _apply_hero_command_visibility() -> void:

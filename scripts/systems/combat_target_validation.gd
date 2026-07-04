@@ -19,6 +19,26 @@ const ATTACK_SLOTS_PER_RING := 8
 const ATTACK_SLOT_ANGLE_STEP := TAU / float(ATTACK_SLOTS_PER_RING)
 
 static var _attack_slot_counter_by_target: Dictionary = {}
+static var _group_cache_frame: int = -1
+static var _group_cache_tree_id: int = -1
+static var _cached_group_nodes: Dictionary = {}
+
+
+static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> Array:
+	if tree == null:
+		return []
+
+	var frame: int = Engine.get_process_frames()
+	var tree_id: int = tree.get_instance_id()
+	if frame != _group_cache_frame or tree_id != _group_cache_tree_id:
+		_group_cache_frame = frame
+		_group_cache_tree_id = tree_id
+		_cached_group_nodes.clear()
+
+	if not _cached_group_nodes.has(group_name):
+		_cached_group_nodes[group_name] = tree.get_nodes_in_group(group_name)
+
+	return _cached_group_nodes[group_name]
 
 
 static func is_neutral_creep(target: Variant) -> bool:
@@ -227,7 +247,7 @@ static func find_closest_tower_attack_target_in_range(
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
 
-	for node: Node in tower.get_tree().get_nodes_in_group("enemies"):
+	for node: Node in get_cached_group_nodes(tower.get_tree(), &"enemies"):
 		if not node is Node3D:
 			continue
 		if not is_tower_attack_target(node):
@@ -298,18 +318,13 @@ static func apply_damage_to_target(target: Variant, amount: float, attacker = nu
 
 
 static func _call_take_damage(target: Object, amount: float, attacker = null) -> bool:
-	for method: Dictionary in target.get_method_list():
-		if method.get("name") != "take_damage":
-			continue
+	if not target.has_method("take_damage"):
+		return false
 
-		var args: Array = method.get("args", [])
-		if args.size() >= 2:
-			target.call("take_damage", amount, attacker)
-		else:
-			target.call("take_damage", amount)
-		return true
-
-	target.call("take_damage", amount)
+	if attacker != null:
+		target.call("take_damage", amount, attacker)
+	else:
+		target.call("take_damage", amount)
 	return true
 
 
@@ -402,8 +417,9 @@ static func _find_best_enemy_faction_attack_target(
 	var best_distance: float = INF
 	var groups_to_search: Array[StringName] = [&"units", PLAYER_COMMAND_CENTER_GROUP]
 
+	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
-		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):
+		for node: Node in get_cached_group_nodes(tree, group_name):
 			if not node is Node3D:
 				continue
 
@@ -437,8 +453,9 @@ static func _find_closest_hostile_attack_target_in_range(
 	var closest_distance: float = INF
 	var groups_to_search: Array[StringName] = get_hostile_search_groups()
 
+	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
-		for node: Node in attacker.get_tree().get_nodes_in_group(group_name):
+		for node: Node in get_cached_group_nodes(tree, group_name):
 			if not node is Node3D:
 				continue
 			if not is_attack_target_for_attacker(attacker, node):

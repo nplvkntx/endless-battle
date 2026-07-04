@@ -18,8 +18,6 @@ enum BuildTripState {
 	DONE,
 }
 
-const GOLD_MINE_COMMAND_MESSAGE: String = "Worker received gold mine command"
-const TREE_COMMAND_MESSAGE: String = "Worker received tree command"
 const HEALTH_BAR_WIDTH := 1.0
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const FOOD_SUPPLY_USED: int = 1
@@ -147,7 +145,6 @@ func _on_health_depleted() -> void:
 
 	HeroXpRewards.notify_unit_killed(self)
 	die()
-	print("Worker died")
 	queue_free()
 
 
@@ -526,7 +523,6 @@ func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) 
 	if not _is_alive():
 		return
 
-	print(GOLD_MINE_COMMAND_MESSAGE)
 	_start_gathering(gold_mine, player_ordered)
 
 
@@ -534,7 +530,6 @@ func command_gather_tree(tree: WoodTree, player_ordered: bool = true) -> void:
 	if not _is_alive():
 		return
 
-	print(TREE_COMMAND_MESSAGE)
 	_start_gathering(tree, player_ordered)
 
 
@@ -1861,8 +1856,9 @@ func _compute_resource_approach_position_for_candidate(
 
 func _collect_workers_for_approach_check(_source: CollisionObject3D) -> Array[Worker]:
 	var workers: Array[Worker] = []
+	var tree: SceneTree = get_tree()
 	for group_name: StringName in [&"workers", &"enemy_workers"]:
-		for node: Node in get_tree().get_nodes_in_group(group_name):
+		for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if node == self or not node is Worker:
 				continue
 

@@ -114,12 +114,12 @@ func _refresh_entities() -> void:
 
 
 func _collect_group_dots(tree: SceneTree, group_name: StringName, seen: Dictionary) -> void:
-	for node: Node in tree.get_nodes_in_group(group_name):
+	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 		_add_entity_dot(node, seen)
 
 
 func _collect_resource_dots(tree: SceneTree, seen: Dictionary) -> void:
-	for node: Node in tree.get_nodes_in_group(&"resource_nodes"):
+	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, &"resource_nodes"):
 		if not _mark_seen(node, seen):
 			continue
 		if not node is Node3D:

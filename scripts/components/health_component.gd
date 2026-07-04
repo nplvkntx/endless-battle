@@ -20,10 +20,6 @@ func take_damage(amount: int) -> void:
 		return
 
 	current_health = maxi(0, current_health - amount)
-	print(
-		"Took %d damage. Remaining health: %d / %d"
-		% [amount, current_health, max_health]
-	)
 	health_changed.emit(current_health, max_health)
 
 	if current_health <= 0:

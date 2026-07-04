@@ -32,6 +32,8 @@ var _tracked_hero_altar: HeroAltar = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_activity_building: Building = null
 var _is_enemy_inspect: bool = false
+var _activity_refresh_timer: float = 0.0
+const ACTIVITY_REFRESH_INTERVAL := 0.1
 
 const ENEMY_NAME_COLOR := Color(0.95, 0.35, 0.35, 1)
 const ENEMY_ACCENT_COLOR := Color(0.75, 0.22, 0.22, 1)
@@ -73,10 +75,15 @@ func _ready() -> void:
 	_refresh_panel()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not visible:
 		return
 
+	_activity_refresh_timer += delta
+	if _activity_refresh_timer < ACTIVITY_REFRESH_INTERVAL:
+		return
+
+	_activity_refresh_timer = 0.0
 	_update_activity_progress_display()
 
 

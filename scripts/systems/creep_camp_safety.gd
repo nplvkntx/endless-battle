@@ -52,7 +52,7 @@ static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
 
 	var camps: Dictionary = {}
 
-	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, CombatTargetValidation.NEUTRAL_CREEP_GROUP):
 		if not _is_living_creep(node):
 			continue
 
@@ -108,7 +108,7 @@ static func _count_living_creeps_near(
 ) -> int:
 	var count: int = 0
 
-	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, CombatTargetValidation.NEUTRAL_CREEP_GROUP):
 		if not _is_living_creep(node):
 			continue
 
@@ -151,7 +151,7 @@ static func is_camp_area_clear(camp_position: Vector3, tree: SceneTree) -> bool:
 	var seen: Dictionary = {}
 
 	for group_name: StringName in _CAMP_BLOCK_UNIT_GROUPS:
-		for node: Node in tree.get_nodes_in_group(group_name):
+		for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if not _is_blocking_unit_in_camp(node, camp_position, seen):
 				continue
 

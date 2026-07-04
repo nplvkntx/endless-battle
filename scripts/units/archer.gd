@@ -123,18 +123,22 @@ func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
 
+	var can_scan_targets: bool = tick_combat_target_scan_timer(delta)
+
 	if _attack_target == null and not has_move_target:
-		_try_auto_attack()
+		if can_scan_targets:
+			_try_auto_attack()
 
 	if _has_attack_move_destination and _attack_target == null:
-		_try_attack_move_engagement()
+		if can_scan_targets:
+			_try_attack_move_engagement()
 
 	if _attack_target != null:
 		if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			cancel_attack()
 			_resume_attack_move()
 		else:
-			if CombatTargetValidation.is_enemy_faction(self):
+			if CombatTargetValidation.is_enemy_faction(self) and can_scan_targets:
 				_try_retarget_higher_priority_during_attack()
 			_process_attack(delta)
 			return
@@ -305,7 +309,6 @@ func _on_health_depleted() -> void:
 	has_move_target = false
 	velocity = Vector3.ZERO
 	die()
-	print("Archer died")
 	queue_free()
 
 

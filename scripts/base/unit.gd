@@ -21,6 +21,7 @@ const UNSTUCK_MAX_SIDE_FLIPS := 1
 const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
+const COMBAT_TARGET_SCAN_INTERVAL := 0.3
 
 var team_id: int = -1
 var is_selected: bool = false
@@ -38,9 +39,11 @@ var _detour_time: float = 0.0
 var _detour_flips: int = 0
 var _detour_gave_up: bool = false
 var _distance_at_detour_start: float = 0.0
+var _combat_target_scan_timer: float = 0.0
 
 
 func _ready() -> void:
+	_combat_target_scan_timer = randf() * COMBAT_TARGET_SCAN_INTERVAL
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.UNITS
 	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
@@ -77,6 +80,18 @@ func set_movement_target(target: Vector3) -> void:
 	_movement_target = Vector3(target.x, global_position.y, target.z)
 	has_move_target = true
 	_reset_unstuck_state()
+
+
+## Returns true when a throttled combat target scan is due (auto-attack, engage, retarget).
+func tick_combat_target_scan_timer(
+	delta: float, interval: float = COMBAT_TARGET_SCAN_INTERVAL
+) -> bool:
+	_combat_target_scan_timer -= delta
+	if _combat_target_scan_timer > 0.0:
+		return false
+
+	_combat_target_scan_timer = interval + randf() * 0.05
+	return true
 
 
 func _physics_process(delta: float) -> void:

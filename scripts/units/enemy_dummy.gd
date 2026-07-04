@@ -67,7 +67,6 @@ func _get_health_bar_color(ratio: float) -> Color:
 func _on_health_depleted() -> void:
 	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
-	print("EnemyDummy died")
 	queue_free()
 
 
@@ -164,10 +163,6 @@ func _process_counter_attack(delta: float) -> void:
 		return
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
-	print(
-		"EnemyDummy dealt %d damage. Target remaining health: %d"
-		% [attack_damage, _attack_target.get_current_health()]
-	)
 	_attack_cooldown_timer = attack_cooldown
 	_clear_invalid_attack_target()
 
