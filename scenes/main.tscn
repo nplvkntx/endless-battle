@@ -5,7 +5,7 @@
 [ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="PackedScene" uid="uid://c5n8k3m7w2x9pud" path="res://scenes/ui/player_hud.tscn" id="7_player_hud"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
-[ext_resource type="PackedScene" uid="uid://c8h5m2k9w4xpn" path="res://scenes/world/ground.tscn" id="29_ground"]
+[ext_resource type="PackedScene" uid="uid://b7k3m9n4w2x8paf" path="res://scenes/maps/battlefield_1v1.tscn" id="29_battlefield_1v1"]
 [ext_resource type="PackedScene" uid="uid://dq8n2k5m7w3xpa" path="res://scenes/world/neutral_creep_camps.tscn" id="30_neutral_creep_camps"]
 [ext_resource type="PackedScene" uid="uid://c7k4m9n3w6xprb" path="res://scenes/world/map_resources.tscn" id="31_map_resources"]
 [ext_resource type="PackedScene" uid="uid://dp7k3m2n8w5xqb" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
@@ -31,7 +31,7 @@ script = ExtResource("6_selection_box")
 
 [node name="GameUI" parent="." instance=ExtResource("7_player_hud")]
 
-[node name="Ground" parent="." unique_id=1337121503 instance=ExtResource("29_ground")]
+[node name="Battlefield1v1" parent="." instance=ExtResource("29_battlefield_1v1")]
 
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=2094222557]
 script = ExtResource("25_navigation_region_setup")
