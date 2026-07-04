@@ -2,10 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cf1qxeyb66dtc" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
 [ext_resource type="PackedScene" uid="uid://c34sseipvxy7a" path="res://scenes/units/worker.tscn" id="2_worker"]
-[ext_resource type="PackedScene" uid="uid://bg5y8ctgvhkpp" path="res://scenes/buildings/farm.tscn" id="3_farm"]
-[ext_resource type="PackedScene" uid="uid://djfuwaovwcf3c" path="res://scenes/units/hero.tscn" id="4_hero"]
 [ext_resource type="Script" uid="uid://c0smd4kr0elli" path="res://scripts/components/health_component.gd" id="5_health_component"]
-[ext_resource type="PackedScene" uid="uid://c3tjs5jv1rvr6" path="res://scenes/buildings/barracks.tscn" id="6_barracks"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_command_center"]
 size = Vector3(3.5, 2, 3.5)
@@ -30,8 +27,8 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 0.5, -23.5)
 [node name="Worker4" parent="." unique_id=1388403132 instance=ExtResource("2_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32, 0.5, -24)
 
-[node name="DevHero" parent="." unique_id=274321212 instance=ExtResource("4_hero")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -33, 0.5, -23)
+[node name="Worker5" parent="." instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -33, 0.5, -23.5)
 
 [node name="CommandCenter" type="StaticBody3D" parent="." unique_id=1715301900 groups=["player_command_center"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 1, -28)
@@ -47,13 +44,3 @@ shape = SubResource("BoxShape3D_command_center")
 [node name="HealthComponent" type="Node" parent="CommandCenter" unique_id=445003066]
 script = ExtResource("5_health_component")
 max_health = 500
-
-[node name="Barracks" parent="." unique_id=155687893 instance=ExtResource("6_barracks")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 0.8, -38)
-
-[node name="HealthComponent" type="Node" parent="Barracks" unique_id=1862133368]
-script = ExtResource("5_health_component")
-max_health = 300
-
-[node name="Farm" parent="." unique_id=43908211 instance=ExtResource("3_farm")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 0.5, -33)

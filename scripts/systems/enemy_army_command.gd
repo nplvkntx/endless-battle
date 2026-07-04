@@ -254,10 +254,14 @@ static func build_regrouped_attack_wave_units(
 
 	if can_launch:
 		var hero: Hero = find_living_enemy_hero(tree)
+		var army_center: Vector3 = compute_army_center(regrouped_non_hero)
 		if (
 			hero != null
 			and regrouped_non_hero.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+			and army_center != Vector3.ZERO
 			and is_hero_healthy_enough_for_wave(hero)
+			and horizontal_distance(hero.global_position, army_center)
+			<= HERO_MAX_DISTANCE_FROM_ARMY
 			and horizontal_distance(hero.global_position, rally_position)
 			<= WAVE_REGROUP_MAX_DISTANCE + 6.0
 		):
@@ -291,10 +295,14 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 
 	if can_launch:
 		var hero: Hero = find_living_enemy_hero(tree)
+		var army_center: Vector3 = compute_army_center(non_hero_units)
 		if (
 			hero != null
 			and non_hero_units.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+			and army_center != Vector3.ZERO
 			and is_hero_healthy_enough_for_wave(hero)
+			and horizontal_distance(hero.global_position, army_center)
+			<= HERO_MAX_DISTANCE_FROM_ARMY
 		):
 			wave_units.append(hero)
 
@@ -312,7 +320,14 @@ static func build_creep_army(tree: SceneTree) -> Dictionary:
 
 	if can_launch:
 		var hero: Hero = find_living_enemy_hero(tree)
-		if hero != null and is_living_combat_unit(hero):
+		var army_center: Vector3 = compute_army_center(non_hero_units)
+		if (
+			hero != null
+			and army_center != Vector3.ZERO
+			and is_living_combat_unit(hero)
+			and horizontal_distance(hero.global_position, army_center)
+			<= HERO_MAX_DISTANCE_FROM_ARMY
+		):
 			creep_units.append(hero)
 
 	return {

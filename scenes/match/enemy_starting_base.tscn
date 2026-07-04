@@ -41,3 +41,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.5, 24.5)
 
 [node name="EnemyWorker4" parent="." unique_id=1562796510 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32, 0.5, 25)
+
+[node name="EnemyWorker5" parent="." groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 33, 0.5, 24.5)
