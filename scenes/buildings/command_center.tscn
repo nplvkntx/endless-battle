@@ -10,19 +10,19 @@ albedo_color = Color(0.72, 0.38, 0.14, 1)
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
 shading_mode = 0
 transparency = 1
-albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+albedo_color = Color(0.15, 0.55, 1, 0.55)
 emission_enabled = true
-emission = Color(0.12, 0.72, 0.22, 1)
+emission = Color(0.09, 0.33, 0.6, 1)
 cull_mode = 2
 
 [sub_resource type="BoxMesh" id="BoxMesh_foundation"]
 size = Vector3(3.5, 1.05, 3.5)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
-size = Vector3(3.62, 0.025, 0.06)
+size = Vector3(4.76, 0.025, 0.06)
 
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
-size = Vector3(0.06, 0.025, 3.62)
+size = Vector3(0.06, 0.025, 4.76)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
 size = Vector3(3.5, 2, 3.5)
@@ -47,22 +47,22 @@ visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.88, 0)
 
 [node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.75)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -2.38)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.75)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 2.38)
 mesh = SubResource("BoxMesh_sel_edge_h")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.75, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.38, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.75, 0.03, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.38, 0.03, 0)
 mesh = SubResource("BoxMesh_sel_edge_v")
 surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
