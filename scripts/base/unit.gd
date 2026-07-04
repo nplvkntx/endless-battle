@@ -64,7 +64,6 @@ func set_selected(selected: bool) -> void:
 	is_selected = selected
 	if _selection_indicator:
 		_selection_indicator.visible = selected
-	selected_changed.emit(is_selected)
 
 
 ## Shows or hides the selection ring while inspecting enemy/neutral entities.

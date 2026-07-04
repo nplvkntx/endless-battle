@@ -30,29 +30,44 @@ var _unit_tree_exiting_handlers: Dictionary = {}
 
 
 func get_multi_unit_selection_category() -> StringName:
-	_purge_invalid_selected_units()
-	if selected_units.size() <= 1:
-		return &""
+	return get_multi_selection_ui_info().category
 
+
+## Single-pass summary for multi-unit HUD and command panels.
+func get_multi_selection_ui_info() -> Dictionary:
+	_purge_invalid_selected_units()
+	var count: int = selected_units.size()
+	var primary_hero: Hero = null
 	var has_worker: bool = false
 	var has_combat: bool = false
+	var category: StringName = &""
+
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
+			continue
+		if unit is Hero and primary_hero == null:
+			primary_hero = unit as Hero
+		if count <= 1:
 			continue
 		if unit is Worker:
 			has_worker = true
 		elif unit is Swordsman or unit is Archer or unit is Hero:
 			has_combat = true
 		else:
-			return MULTI_SELECTION_OTHER
+			category = MULTI_SELECTION_OTHER
+			break
 
-	if has_worker and has_combat:
-		return MULTI_SELECTION_MIXED
-	if has_worker:
-		return MULTI_SELECTION_WORKERS
-	if has_combat:
-		return MULTI_SELECTION_COMBAT
-	return MULTI_SELECTION_OTHER
+	if count > 1 and category != MULTI_SELECTION_OTHER:
+		if has_worker and has_combat:
+			category = MULTI_SELECTION_MIXED
+		elif has_worker:
+			category = MULTI_SELECTION_WORKERS
+		elif has_combat:
+			category = MULTI_SELECTION_COMBAT
+		else:
+			category = MULTI_SELECTION_OTHER
+
+	return {"count": count, "category": category, "primary_hero": primary_hero}
 
 
 func has_commandable_selected_units() -> bool:
@@ -64,15 +79,7 @@ func has_commandable_selected_units() -> bool:
 
 
 func get_primary_ui_hero() -> Hero:
-	_purge_invalid_selected_units()
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
-			continue
-		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
-			continue
-		if unit is Hero:
-			return unit as Hero
-	return null
+	return get_multi_selection_ui_info().primary_hero
 
 
 var _left_button_down: bool = false
@@ -83,8 +90,9 @@ var _last_click_time_msec: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	_purge_invalid_selection()
+	# Avoid scanning large selections on every mouse-move frame.
 	if event is InputEventMouseButton:
+		_purge_invalid_selection()
 		var mouse_button := event as InputEventMouseButton
 		match mouse_button.button_index:
 			MOUSE_BUTTON_LEFT:
@@ -329,21 +337,26 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 	InputManager.disarm_attack_move()
 	_purge_invalid_selected_units()
-	var dispatched_to_military := false
+	var military_units: Array[Unit] = []
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
-		if unit is Swordsman:
-			(unit as Swordsman).command_attack(target)
-			dispatched_to_military = true
-		elif unit is Archer:
-			(unit as Archer).command_attack(target)
-			dispatched_to_military = true
-		elif unit is Hero:
-			(unit as Hero).command_attack(target)
-			dispatched_to_military = true
+		if unit is Swordsman or unit is Archer or unit is Hero:
+			military_units.append(unit)
 
-	if dispatched_to_military and target is Building:
+	if military_units.is_empty():
+		return
+
+	for index: int in military_units.size():
+		var unit: Unit = military_units[index]
+		if unit is Swordsman:
+			(unit as Swordsman).command_attack(target, index)
+		elif unit is Archer:
+			(unit as Archer).command_attack(target, index)
+		elif unit is Hero:
+			(unit as Hero).command_attack(target, index)
+
+	if target is Building:
 		_play_attack_target_feedback(target as Building)
 
 
@@ -451,9 +464,16 @@ func _play_attack_target_feedback(building: Building) -> void:
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:
 	var units: Array[Unit] = []
+	var world_xz_bounds: Rect2 = _get_world_xz_bounds_from_screen_rect(camera, rect)
+	var use_world_bounds: bool = world_xz_bounds.size.length_squared() > 0.0
+
 	for node: Node in get_tree().get_nodes_in_group(UNIT_GROUP):
 		var unit := node as Unit
 		if unit == null:
+			continue
+		if not _is_selectable_unit(unit):
+			continue
+		if use_world_bounds and not _is_unit_in_world_xz_bounds(unit, world_xz_bounds):
 			continue
 		if not _is_unit_in_selection_rect(unit, camera, rect):
 			continue
@@ -469,6 +489,47 @@ func _is_unit_in_selection_rect(unit: Unit, camera: Camera3D, rect: Rect2) -> bo
 	return rect.has_point(screen_position)
 
 
+func _get_world_xz_bounds_from_screen_rect(camera: Camera3D, rect: Rect2) -> Rect2:
+	var corners: Array[Vector2] = [
+		rect.position,
+		rect.position + Vector2(rect.size.x, 0.0),
+		rect.position + rect.size,
+		rect.position + Vector2(0.0, rect.size.y),
+	]
+
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_z: float = INF
+	var max_z: float = -INF
+	var any_valid: bool = false
+
+	for corner: Vector2 in corners:
+		var world_position: Vector3 = _raycast_ground_plane(camera, corner)
+		if not world_position.is_finite():
+			continue
+		any_valid = true
+		min_x = minf(min_x, world_position.x)
+		max_x = maxf(max_x, world_position.x)
+		min_z = minf(min_z, world_position.z)
+		max_z = maxf(max_z, world_position.z)
+
+	if not any_valid:
+		return Rect2()
+
+	const BOUNDS_PADDING: float = 1.5
+	return Rect2(
+		min_x - BOUNDS_PADDING,
+		min_z - BOUNDS_PADDING,
+		(max_x - min_x) + BOUNDS_PADDING * 2.0,
+		(max_z - min_z) + BOUNDS_PADDING * 2.0
+	)
+
+
+func _is_unit_in_world_xz_bounds(unit: Unit, bounds: Rect2) -> bool:
+	var position: Vector3 = unit.global_position
+	return bounds.has_point(Vector2(position.x, position.z))
+
+
 func _make_screen_rect(start: Vector2, end: Vector2) -> Rect2:
 	return Rect2(
 		Vector2(minf(start.x, end.x), minf(start.y, end.y)),
@@ -477,17 +538,41 @@ func _make_screen_rect(start: Vector2, end: Vector2) -> Rect2:
 
 
 func _set_selected_units(units: Array[Unit]) -> void:
-	if _arrays_match(selected_units, units):
+	var next_units: Array[Unit] = _filter_selectable_units(units.duplicate())
+	if _arrays_match(selected_units, next_units):
 		return
 
 	_clear_inspection_without_signal()
 	_clear_building_selection_without_signal()
-	_clear_selection_without_signal()
-	selected_units = _filter_selectable_units(units.duplicate())
+	_apply_units_selection_diff(next_units)
+	selection_changed.emit(selected_units)
+
+
+func _apply_units_selection_diff(next_units: Array[Unit]) -> void:
+	var next_ids: Dictionary = {}
+	for unit: Unit in next_units:
+		next_ids[unit.get_instance_id()] = true
+
+	for index: int in range(selected_units.size() - 1, -1, -1):
+		var unit: Unit = selected_units[index]
+		if next_ids.has(unit.get_instance_id()):
+			continue
+		_untrack_unit_selection(unit)
+		selected_units.remove_at(index)
+
+	var current_ids: Dictionary = {}
 	for unit: Unit in selected_units:
+		current_ids[unit.get_instance_id()] = true
+
+	var ordered_units: Array[Unit] = []
+	for unit: Unit in next_units:
+		ordered_units.append(unit)
+		if current_ids.has(unit.get_instance_id()):
+			continue
 		_safe_set_unit_selected(unit, true)
 		_track_unit_selection(unit)
-	selection_changed.emit(selected_units)
+
+	selected_units = ordered_units
 
 
 func _clear_selection() -> void:
@@ -573,8 +658,7 @@ func _track_unit_selection(unit: Unit) -> void:
 	if _unit_tree_exiting_handlers.has(unit_id):
 		return
 
-	var handler := func() -> void:
-		_on_selected_unit_tree_exiting(unit)
+	var handler: Callable = _on_selected_unit_tree_exiting.bind(unit)
 	_unit_tree_exiting_handlers[unit_id] = handler
 	unit.tree_exiting.connect(handler, CONNECT_ONE_SHOT)
 

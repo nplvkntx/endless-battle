@@ -15,6 +15,11 @@ const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 4
 const ENEMY_ATTACK_PRIORITY_BUILDING := 5
 const ENEMY_ATTACK_PRIORITY_INVALID := 99
 
+const ATTACK_SLOTS_PER_RING := 8
+const ATTACK_SLOT_ANGLE_STEP := TAU / float(ATTACK_SLOTS_PER_RING)
+
+static var _attack_slot_counter_by_target: Dictionary = {}
+
 
 static func is_neutral_creep(target: Variant) -> bool:
 	if target == null or not target is Node:
@@ -461,11 +466,29 @@ static func _get_attacker_attack_range(attacker: Node3D) -> float:
 	return 2.0
 
 
+static func claim_attack_approach_slot(target: Node) -> int:
+	if target == null or not is_instance_valid(target):
+		return 0
+
+	var target_id: int = target.get_instance_id()
+	var next_slot: int = int(_attack_slot_counter_by_target.get(target_id, 0))
+	_attack_slot_counter_by_target[target_id] = next_slot + 1
+	return next_slot
+
+
+static func clear_attack_approach_slots(target: Node) -> void:
+	if target == null:
+		return
+
+	_attack_slot_counter_by_target.erase(target.get_instance_id())
+
+
 static func compute_attack_approach_position(
 	attacker: Node3D,
 	target: Node3D,
 	attack_range: float,
-	stopping_distance: float
+	stopping_distance: float,
+	slot_index: int = 0
 ) -> Vector3:
 	var target_center: Vector3 = target.global_position
 	var to_attacker: Vector3 = attacker.global_position - target_center
@@ -484,11 +507,24 @@ static func compute_attack_approach_position(
 	else:
 		standoff_distance = maxf(attack_range - stopping_distance, stopping_distance)
 
-	var approach_position: Vector3 = (
-		target_center + to_attacker.normalized() * standoff_distance
-	)
+	var base_direction: Vector3 = to_attacker.normalized()
+	var direction: Vector3 = _apply_attack_slot_direction(base_direction, slot_index)
+	var approach_position: Vector3 = target_center + direction * standoff_distance
 	approach_position.y = attacker.global_position.y
 	return approach_position
+
+
+static func _apply_attack_slot_direction(base_direction: Vector3, slot_index: int) -> Vector3:
+	if slot_index <= 0:
+		return base_direction
+
+	var slot_in_ring: int = slot_index % ATTACK_SLOTS_PER_RING
+	var ring: int = slot_index / ATTACK_SLOTS_PER_RING
+	var angle: float = float(slot_in_ring) * ATTACK_SLOT_ANGLE_STEP
+	if ring > 0:
+		angle += ATTACK_SLOT_ANGLE_STEP * 0.5 * float(ring)
+
+	return base_direction.rotated(Vector3.UP, angle).normalized()
 
 
 static func _get_collision_xz_radius(body: CollisionObject3D) -> float:

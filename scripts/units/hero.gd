@@ -42,6 +42,7 @@ var _health_bar_fill_material: StandardMaterial3D
 var _body_mesh_rest_position: Vector3
 var _attack_lunge_tween: Tween
 var _attack_target: Node3D = null
+var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
@@ -56,11 +57,13 @@ var _body_base_color: Color
 var _divine_protection_glow_tween: Tween
 var _power_strike_cooldown_timer: float = 0.0
 var _power_strike_target: Node3D = null
+var _power_strike_approach_slot: int = -1
 var _has_power_strike_pending: bool = false
 var _power_strike_lunge_tween: Tween
 var _power_strike_flash_tween: Tween
 var _execute_cooldown_timer: float = 0.0
 var _execute_target: Node3D = null
+var _execute_approach_slot: int = -1
 var _has_execute_pending: bool = false
 var _execute_lunge_tween: Tween
 
@@ -195,12 +198,13 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
-func command_attack(target: Node3D) -> void:
+func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
 	_cancel_power_strike()
 	_cancel_execute()
+	_assign_attack_approach_slot(target, assigned_slot)
 	_attack_target = target
 	_has_chase_target = false
 
@@ -222,7 +226,13 @@ func cancel_attack_move() -> void:
 
 
 func cancel_attack() -> void:
+	if (
+		_attack_target != null
+		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
+	):
+		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
 	_attack_target = null
+	_attack_approach_slot = -1
 	_has_chase_target = false
 
 
@@ -441,15 +451,19 @@ func _begin_power_strike(target: Node3D) -> void:
 	cancel_attack_move()
 	cancel_attack()
 	_power_strike_target = target
+	_power_strike_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
 	_has_power_strike_pending = true
 
 	if not _is_in_attack_range(target):
-		_set_move_destination(_compute_attack_approach_position(target))
+		_set_move_destination(
+			_compute_attack_approach_position(target, _power_strike_approach_slot)
+		)
 
 
 func _cancel_power_strike() -> void:
 	_has_power_strike_pending = false
 	_power_strike_target = null
+	_power_strike_approach_slot = -1
 
 
 func _process_power_strike(_delta: float) -> void:
@@ -462,7 +476,11 @@ func _process_power_strike(_delta: float) -> void:
 		return
 
 	if not has_move_target:
-		_set_move_destination(_compute_attack_approach_position(_power_strike_target))
+		_set_move_destination(
+			_compute_attack_approach_position(
+				_power_strike_target, _power_strike_approach_slot
+			)
+		)
 
 
 func _execute_power_strike() -> void:
@@ -706,15 +724,19 @@ func _begin_execute(target: Node3D) -> void:
 	cancel_attack()
 	_cancel_power_strike()
 	_execute_target = target
+	_execute_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
 	_has_execute_pending = true
 
 	if not _is_in_attack_range(target):
-		_set_move_destination(_compute_attack_approach_position(target))
+		_set_move_destination(
+			_compute_attack_approach_position(target, _execute_approach_slot)
+		)
 
 
 func _cancel_execute() -> void:
 	_has_execute_pending = false
 	_execute_target = null
+	_execute_approach_slot = -1
 
 
 func _process_execute(_delta: float) -> void:
@@ -727,7 +749,9 @@ func _process_execute(_delta: float) -> void:
 		return
 
 	if not has_move_target:
-		_set_move_destination(_compute_attack_approach_position(_execute_target))
+		_set_move_destination(
+			_compute_attack_approach_position(_execute_target, _execute_approach_slot)
+		)
 
 
 func _get_target_health_ratio(target: Node3D) -> float:
@@ -1208,7 +1232,17 @@ func _horizontal_distance_to(target: Node3D) -> float:
 	return CombatTargetValidation.get_horizontal_center_distance(self, target)
 
 
-func _compute_attack_approach_position(target: Node3D) -> Vector3:
+func _compute_attack_approach_position(target: Node3D, approach_slot: int = -1) -> Vector3:
+	var slot_index: int = approach_slot
+	if slot_index < 0:
+		slot_index = maxi(_attack_approach_slot, 0)
 	return CombatTargetValidation.compute_attack_approach_position(
-		self, target, attack_range, stopping_distance
+		self, target, attack_range, stopping_distance, slot_index
 	)
+
+
+func _assign_attack_approach_slot(target: Node3D, assigned_slot: int) -> void:
+	if assigned_slot >= 0:
+		_attack_approach_slot = assigned_slot
+	elif _attack_target != target:
+		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)

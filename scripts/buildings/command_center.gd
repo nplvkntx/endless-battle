@@ -13,6 +13,7 @@ const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
 const MAX_ENEMY_WORKER_QUEUE: int = 5
 const RALLY_MARKER_Y: float = 0.05
+const RALLY_SLOT_SPACING: float = 2.0
 const ENEMY_TEAM_ID: int = 1
 
 @export var worker_spawn_offset: Vector3 = Vector3(0.0, -0.75, -2.8)
@@ -33,6 +34,7 @@ var _rally_target_type: RallyTargetType = RallyTargetType.NONE
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_resource: GatherableResource = null
 var _rally_marker: MeshInstance3D = null
+var _rally_next_slot: int = 0
 
 @onready var _health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 
@@ -203,6 +205,7 @@ func set_rally_point(ground_position: Vector3) -> void:
 	_rally_target_type = RallyTargetType.GROUND
 	_rally_resource = null
 	_rally_point = Vector3(ground_position.x, global_position.y + worker_spawn_offset.y, ground_position.z)
+	_rally_next_slot = 0
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
 
 
@@ -405,9 +408,15 @@ func _apply_worker_rally(worker: Worker) -> void:
 
 	match _rally_target_type:
 		RallyTargetType.GROUND:
-			worker.set_movement_target(_rally_point)
+			worker.set_movement_target(_claim_ground_rally_target())
 		RallyTargetType.RESOURCE:
 			_assign_worker_to_rally_resource(worker)
+
+
+func _claim_ground_rally_target() -> Vector3:
+	var slot_index: int = _rally_next_slot
+	_rally_next_slot += 1
+	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
 
 
 func _assign_worker_to_rally_resource(worker: Worker) -> void:

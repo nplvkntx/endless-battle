@@ -129,14 +129,13 @@ func _refresh_panel() -> void:
 	_is_enemy_inspect = false
 	_apply_player_visual_style()
 
-	var primary_hero: Hero = selection_manager.get_primary_ui_hero()
-	if primary_hero != null and selected_units.size() > 1:
-		_show_unit_info(primary_hero)
-		return
-
 	if selected_units.size() > 1:
-		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
-		_show_multiple_units(selected_units, multi_category)
+		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
+		var primary_hero: Hero = multi_info.primary_hero
+		if primary_hero != null:
+			_show_unit_info(primary_hero)
+			return
+		_show_multiple_units(selected_units, multi_info.category)
 		return
 
 	_show_unit_info(selected_units[0])

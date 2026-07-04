@@ -11,6 +11,7 @@ const TRAIN_FOOD_COST: int = 2
 const TRAIN_SECONDS: float = 6.0
 const HERO_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
 const RALLY_MARKER_Y: float = 0.05
+const RALLY_SLOT_SPACING: float = 2.0
 const HERO_GROUP: StringName = &"heroes"
 const ENEMY_TEAM_ID: int = 1
 
@@ -21,6 +22,7 @@ var _hero_training_session: int = 0
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
+var _rally_next_slot: int = 0
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -115,7 +117,14 @@ func set_rally_point(ground_position: Vector3) -> void:
 		global_position.y + HERO_SPAWN_OFFSET.y,
 		ground_position.z
 	)
+	_rally_next_slot = 0
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
+
+
+func _claim_rally_move_target() -> Vector3:
+	var slot_index: int = _rally_next_slot
+	_rally_next_slot += 1
+	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
 
 
 func _update_rally_marker(marker_position: Vector3) -> void:
@@ -233,7 +242,7 @@ func _spawn_hero() -> void:
 		collision_shape.disabled = false
 
 	if _has_rally_point:
-		hero.set_movement_target(_rally_point)
+		hero.set_movement_target(_claim_rally_move_target())
 
 
 func _spawn_enemy_hero() -> void:

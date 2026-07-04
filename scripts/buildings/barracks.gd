@@ -20,6 +20,7 @@ const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
+const RALLY_SLOT_SPACING: float = 2.0
 
 @export var swordsman_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
 @export var archer_spawn_offset: Vector3 = Vector3(1.2, -0.5, -2.5)
@@ -40,6 +41,8 @@ var _last_queued_train_id: StringName = &""
 var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
+var _rally_next_slot: int = 0
+var _enemy_gather_next_slot: int = 0
 var _enemy_production_spawn_swordsman_next: bool = true
 var _enemy_production_active: bool = false
 
@@ -151,7 +154,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-	unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
+	unit.set_movement_target(_claim_enemy_gather_target())
 
 
 func _finalize_enemy_unit(unit: Unit) -> void:
@@ -398,7 +401,21 @@ func set_rally_point(ground_position: Vector3) -> void:
 		global_position.y + swordsman_spawn_offset.y,
 		ground_position.z
 	)
+	_rally_next_slot = 0
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
+
+
+func _claim_rally_move_target() -> Vector3:
+	var slot_index: int = _rally_next_slot
+	_rally_next_slot += 1
+	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
+
+
+func _claim_enemy_gather_target() -> Vector3:
+	var gather_center: Vector3 = global_position + ENEMY_GATHER_OFFSET
+	var slot_index: int = _enemy_gather_next_slot
+	_enemy_gather_next_slot += 1
+	return GroupMoveSpacing.compute_slot_target(gather_center, slot_index, RALLY_SLOT_SPACING)
 
 
 func _update_rally_marker(marker_position: Vector3) -> void:
@@ -572,10 +589,10 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-		unit.set_movement_target(global_position + ENEMY_GATHER_OFFSET)
+		unit.set_movement_target(_claim_enemy_gather_target())
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
-		unit.set_movement_target(_rally_point)
+		unit.set_movement_target(_claim_rally_move_target())
 	else:
 		_finalize_spawned_unit(unit)
 

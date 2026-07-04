@@ -791,11 +791,9 @@ func _on_queue_slot_gui_input(slot: Control, event: InputEvent, train_id: String
 	if mouse_event.button_index != MOUSE_BUTTON_RIGHT or not mouse_event.pressed:
 		return
 
-	print("RMB queue cancel pressed")
 	slot.accept_event()
 
 	var cancelled: bool = _try_cancel_production_at_slot(train_id, slot_index)
-	print("Cancel result: %s" % cancelled)
 	if not cancelled:
 		return
 
@@ -1307,14 +1305,15 @@ func _refresh_command_visibility() -> void:
 	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
-		var primary_hero: Hero = selection_manager.get_primary_ui_hero()
+		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
+		var primary_hero: Hero = multi_info.primary_hero
 		if primary_hero != null:
 			_apply_hero_command_visibility()
 			_set_tracked_hero(primary_hero)
 			visible = true
 			return
 
-		var multi_category: StringName = selection_manager.get_multi_unit_selection_category()
+		var multi_category: StringName = multi_info.category
 		if multi_category == &"workers":
 			_apply_worker_command_visibility()
 			_set_tracked_hero(null)

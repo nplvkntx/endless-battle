@@ -25,6 +25,7 @@ var _health_bar_fill_material: StandardMaterial3D
 var _body_mesh_rest_position: Vector3
 var _attack_lunge_tween: Tween
 var _attack_target: Node3D = null
+var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
@@ -77,10 +78,11 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
-func command_attack(target: Node3D) -> void:
+func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
+	_assign_attack_approach_slot(target, assigned_slot)
 	_attack_target = target
 	_has_chase_target = false
 
@@ -100,7 +102,13 @@ func cancel_attack_move() -> void:
 
 
 func cancel_attack() -> void:
+	if (
+		_attack_target != null
+		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
+	):
+		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
 	_attack_target = null
+	_attack_approach_slot = -1
 	_has_chase_target = false
 
 
@@ -374,6 +382,14 @@ func _horizontal_distance_to(target: Node3D) -> float:
 
 
 func _compute_attack_approach_position(target: Node3D) -> Vector3:
+	var slot_index: int = maxi(_attack_approach_slot, 0)
 	return CombatTargetValidation.compute_attack_approach_position(
-		self, target, attack_range, stopping_distance
+		self, target, attack_range, stopping_distance, slot_index
 	)
+
+
+func _assign_attack_approach_slot(target: Node3D, assigned_slot: int) -> void:
+	if assigned_slot >= 0:
+		_attack_approach_slot = assigned_slot
+	elif _attack_target != target:
+		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)

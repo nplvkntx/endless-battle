@@ -116,3 +116,14 @@ static func compute_targets(center: Vector3, unit_count: int, spacing: float = D
 			index += 1
 
 	return targets
+
+
+## Returns one grid slot around center. Slot 0 is the center; higher slots expand outward.
+static func compute_slot_target(
+	center: Vector3, slot_index: int, spacing: float = DEFAULT_SPACING
+) -> Vector3:
+	if slot_index <= 0:
+		return center
+
+	var targets: Array[Vector3] = compute_targets(center, slot_index + 1, spacing)
+	return targets[slot_index]
