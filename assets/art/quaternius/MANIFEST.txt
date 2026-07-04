@@ -1,0 +1,69 @@
+Endless Battle Human Faction Art Pack v1
+
+Selected/organized files:
+
+buildings/TownCenter_SecondAge_Level3.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/TownCenter_SecondAge_Level3.gltf
+buildings/Barracks_SecondAge_Level3.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Barracks_SecondAge_Level3.gltf
+buildings/Farm_SecondAge_Level1.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Farm_SecondAge_Level1.gltf
+buildings/Mine.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Mine.gltf
+buildings/Archery_SecondAge_Level3.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Archery_SecondAge_Level3.gltf
+buildings/Temple_SecondAge_Level1.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Temple_SecondAge_Level1.gltf
+buildings/WatchTower_SecondAge_Level2.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/WatchTower_SecondAge_Level2.gltf
+buildings/Market_SecondAge_Level3.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Market_SecondAge_Level3.gltf
+nature/Resource_PineTree.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_PineTree.gltf
+nature/Resource_PineTree_Group.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_PineTree_Group.gltf
+nature/Resource_PineTree_Group_Cut.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_PineTree_Group_Cut.gltf
+nature/Resource_Tree1.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_Tree1.gltf
+nature/Resource_Tree2.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_Tree2.gltf
+nature/Resource_Tree_Group.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_Tree_Group.gltf
+nature/Resource_Tree_Group_Cut.gltf  <-  Ultimate Fantasy RTS - Aug 2022/glTF/Resource_Tree_Group_Cut.gltf
+characters/worker_peasant/Male_Peasant_Arms.fbx  <-  Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Arms.fbx
+characters/worker_peasant/Male_Peasant_Body.fbx  <-  Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Body.fbx
+characters/worker_peasant/Male_Peasant_Feet.fbx  <-  Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Feet.fbx
+characters/worker_peasant/Male_Peasant_Legs.fbx  <-  Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Legs.fbx
+characters/worker_peasant/Male_Peasant.fbx  <-  Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Outfits/Male_Peasant.fbx
+characters/worker_peasant/textures/T_Peasant_BaseColor.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_BaseColor.png
+characters/worker_peasant/textures/T_Peasant_Normal.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_Normal.png
+characters/worker_peasant/textures/T_Peasant_ORM.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_ORM.png
+characters/worker_peasant/textures/T_Peasant_BaseColor.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_BaseColor.png
+characters/worker_peasant/textures/T_Peasant_Normal.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_Normal.png
+characters/worker_peasant/textures/T_Peasant_ORM.png  <-  Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_ORM.png
+characters/worker_peasant/textures/T_Peasant_Normal.png  <-  Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/Normals-UnrealEngine/T_Peasant_Normal.png
+characters/worker_peasant/textures/T_Peasant_2_BaseColor.png  <-  Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_2_BaseColor.png
+characters/worker_peasant/textures/T_Peasant_BaseColor.png  <-  Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_BaseColor.png
+characters/worker_peasant/textures/T_Peasant_Normal.png  <-  Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_Normal.png
+characters/worker_peasant/textures/T_Peasant_ORM.png  <-  Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_ORM.png
+characters/knight_swordsman/fbx/Club.fbx  <-  Knight by @Quaternius/FBX/Club.fbx
+characters/knight_swordsman/fbx/ShortSword.fbx  <-  Knight by @Quaternius/FBX/ShortSword.fbx
+characters/knight_swordsman/fbx/Helmet1.fbx  <-  Knight by @Quaternius/FBX/Helmet1.fbx
+characters/knight_swordsman/fbx/Katana.fbx  <-  Knight by @Quaternius/FBX/Katana.fbx
+characters/knight_swordsman/fbx/Helmet2.fbx  <-  Knight by @Quaternius/FBX/Helmet2.fbx
+characters/knight_swordsman/fbx/Sword.fbx  <-  Knight by @Quaternius/FBX/Sword.fbx
+characters/knight_swordsman/fbx/KnightCharacter.fbx  <-  Knight by @Quaternius/FBX/KnightCharacter.fbx
+characters/knight_swordsman/fbx/Helmet3.fbx  <-  Knight by @Quaternius/FBX/Helmet3.fbx
+characters/knight_swordsman/fbx/ShoulderPads.fbx  <-  Knight by @Quaternius/FBX/ShoulderPads.fbx
+characters/rpg_candidates/Ranger_Arrow.fbx  <-  RPG Characters - Nov 2020/FBX/Only Weapons/Ranger_Arrow.fbx
+characters/rpg_candidates/Ranger_Bow.fbx  <-  RPG Characters - Nov 2020/FBX/Only Weapons/Ranger_Bow.fbx
+characters/rpg_candidates/Warrior_Sword.fbx  <-  RPG Characters - Nov 2020/FBX/Only Weapons/Warrior_Sword.fbx
+characters/rpg_candidates/Ranger.fbx  <-  RPG Characters - Nov 2020/FBX/Ranger.fbx
+characters/rpg_candidates/Warrior.fbx  <-  RPG Characters - Nov 2020/FBX/Warrior.fbx
+characters/rpg_candidates/Ranger.fbx  <-  RPG Characters - Nov 2020/Humanoid Rig Versions/FBX/Ranger.fbx
+characters/rpg_candidates/Warrior.fbx  <-  RPG Characters - Nov 2020/Humanoid Rig Versions/FBX/Warrior.fbx
+characters/rpg_candidates/Ranger_Bow_Texture.png  <-  RPG Characters - Nov 2020/Textures/Ranger_Bow_Texture.png
+characters/rpg_candidates/Ranger_Texture.png  <-  RPG Characters - Nov 2020/Textures/Ranger_Texture.png
+characters/rpg_candidates/Warrior_Sword_Texture.png  <-  RPG Characters - Nov 2020/Textures/Warrior_Sword_Texture.png
+characters/rpg_candidates/Warrior_Texture.png  <-  RPG Characters - Nov 2020/Textures/Warrior_Texture.png
+weapons/fbx/Bow_Wooden2.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Bow_Wooden2.fbx
+weapons/fbx/Spear.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Spear.fbx
+weapons/fbx/Sword_Big.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Sword_Big.fbx
+weapons/fbx/Arrow.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Arrow.fbx
+weapons/fbx/Sword.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Sword.fbx
+weapons/fbx/Bow_Wooden.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Bow_Wooden.fbx
+weapons/fbx/Shield_Round.fbx  <-  Medieval Weapons Pack by @Quaternius/FBX/Shield_Round.fbx
+props/Anvil.bin  <-  Exports/glTF/Anvil.bin
+props/Anvil.gltf  <-  Exports/glTF/Anvil.gltf
+props/Barrel.bin  <-  Exports/glTF/Barrel.bin
+props/Barrel.gltf  <-  Exports/glTF/Barrel.gltf
+props/Coin.bin  <-  Exports/glTF/Coin.bin
+props/Coin.gltf  <-  Exports/glTF/Coin.gltf
+licenses/Ultimate_Fantasy_RTS_License.txt  <-  Ultimate Fantasy RTS - Aug 2022/License.txt

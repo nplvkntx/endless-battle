@@ -14,6 +14,8 @@ const ENEMY_ACCENT := Color(1.0, 0.22, 0.18, 1.0)
 
 const BODY_ACCENT_LERP := 0.12
 const BODY_EMISSION_STRENGTH := 0.4
+const IMPORTED_ART_ACCENT_LERP := 0.05
+const IMPORTED_ART_EMISSION_STRENGTH := 0.1
 const MARKER_ALPHA := 0.85
 const MARKER_EMISSION_STRENGTH := 0.6
 
@@ -146,7 +148,8 @@ static func _tint_mesh_tree(node: Node, accent: Color, owner: Node3D) -> void:
 		return
 
 	if node is MeshInstance3D:
-		_tint_mesh_instance(node as MeshInstance3D, accent)
+		var subtle_art_tint: bool = _is_imported_art_mesh(node, owner)
+		_tint_mesh_instance(node as MeshInstance3D, accent, subtle_art_tint)
 
 	for child: Node in node.get_children():
 		_tint_mesh_tree(child, accent, owner)
@@ -170,7 +173,19 @@ static func _should_skip_building_visual_node(node: Node, owner: Node3D) -> bool
 	return false
 
 
-static func _tint_mesh_instance(mesh: MeshInstance3D, accent: Color) -> void:
+static func _is_imported_art_mesh(node: Node, owner: Node3D) -> bool:
+	var visuals: Node = owner.get_node_or_null("Visuals")
+	if visuals == null:
+		return false
+
+	return visuals.is_ancestor_of(node)
+
+
+static func _tint_mesh_instance(
+	mesh: MeshInstance3D,
+	accent: Color,
+	subtle_art_tint: bool = false
+) -> void:
 	var source_material: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
 	if source_material == null:
 		source_material = mesh.material_override as StandardMaterial3D
@@ -188,6 +203,13 @@ static func _tint_mesh_instance(mesh: MeshInstance3D, accent: Color) -> void:
 	else:
 		mesh.material_override = material
 
-	material.emission_enabled = true
-	material.emission = accent * BODY_EMISSION_STRENGTH
-	material.albedo_color = material.albedo_color.lerp(accent, BODY_ACCENT_LERP)
+	var accent_lerp: float = (
+		IMPORTED_ART_ACCENT_LERP if subtle_art_tint else BODY_ACCENT_LERP
+	)
+	var emission_strength: float = (
+		IMPORTED_ART_EMISSION_STRENGTH if subtle_art_tint else BODY_EMISSION_STRENGTH
+	)
+	material.emission_enabled = emission_strength > 0.0
+	if material.emission_enabled:
+		material.emission = accent * emission_strength
+	material.albedo_color = material.albedo_color.lerp(accent, accent_lerp)

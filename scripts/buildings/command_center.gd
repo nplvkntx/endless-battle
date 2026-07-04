@@ -41,8 +41,9 @@ var _rally_next_slot: int = 0
 
 func _ready() -> void:
 	super._ready()
-	if building_state == STATE_COMPLETED:
-		_ensure_dropoff_registration()
+	if building_state.is_empty():
+		set_completed()
+	_ensure_dropoff_registration()
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
 
@@ -54,12 +55,15 @@ func complete_construction() -> void:
 
 func _ensure_dropoff_registration() -> void:
 	if is_in_group(&"enemy_command_center") or team_id == ENEMY_TEAM_ID:
+		team_id = ENEMY_TEAM_ID
 		if is_in_group(&"player_command_center"):
 			remove_from_group(&"player_command_center")
 		if not is_in_group(&"enemy_command_center"):
 			add_to_group(&"enemy_command_center")
 		return
 
+	if team_id < 0:
+		team_id = 0
 	if not is_in_group(&"player_command_center"):
 		add_to_group(&"player_command_center")
 	if is_in_group(&"enemy_command_center"):

@@ -1,34 +1,12 @@
 [gd_scene format=3 uid="uid://0dsydyxmkkwe"]
 
-[ext_resource type="Script" uid="uid://cf1qxeyb66dtc" path="res://scripts/buildings/command_center.gd" id="1_command_center"]
+[ext_resource type="PackedScene" uid="uid://dthkmgtnrowg3" path="res://scenes/buildings/command_center.tscn" id="1_command_center_scene"]
 [ext_resource type="PackedScene" uid="uid://c34sseipvxy7a" path="res://scenes/units/worker.tscn" id="2_worker"]
-[ext_resource type="Script" uid="uid://c0smd4kr0elli" path="res://scripts/components/health_component.gd" id="3_health_component"]
-
-[sub_resource type="BoxMesh" id="BoxMesh_command_center"]
-size = Vector3(3.5, 2, 3.5)
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_enemy_command_center"]
-albedo_color = Color(0.65, 0.15, 0.15, 1)
-
-[sub_resource type="BoxShape3D" id="BoxShape3D_command_center"]
-size = Vector3(3.5, 2, 3.5)
 
 [node name="EnemyStartingBase" type="Node3D"]
 
-[node name="EnemyCommandCenter" type="StaticBody3D" parent="." unique_id=124807173 groups=["enemy_command_center"]]
+[node name="EnemyCommandCenter" parent="." unique_id=124807173 groups=["buildings", "enemy_command_center"] instance=ExtResource("1_command_center_scene")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 1, 28)
-script = ExtResource("1_command_center")
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="EnemyCommandCenter" unique_id=423569690]
-mesh = SubResource("BoxMesh_command_center")
-surface_material_override/0 = SubResource("StandardMaterial3D_enemy_command_center")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="EnemyCommandCenter" unique_id=600774934]
-shape = SubResource("BoxShape3D_command_center")
-
-[node name="HealthComponent" type="Node" parent="EnemyCommandCenter" unique_id=344685389]
-script = ExtResource("3_health_component")
-max_health = 500
 
 [node name="EnemyWorker" parent="." unique_id=753698043 groups=["enemies", "enemy_workers"] instance=ExtResource("2_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29, 0.5, 24)
