@@ -90,8 +90,38 @@ func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
 	})
 
 
+func _process(delta: float) -> void:
+	_sanitize_attack_target()
+	super._process(delta)
+
+
+func _sanitize_attack_target() -> void:
+	if _attack_target == null:
+		return
+
+	if not is_instance_valid(_attack_target):
+		cancel_attack()
+		_resume_attack_move()
+		return
+
+	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
+		cancel_attack()
+		_resume_attack_move()
+
+
+func _is_attack_target_valid_for_facing() -> bool:
+	if _attack_target == null:
+		return false
+
+	if not is_instance_valid(_attack_target):
+		_attack_target = null
+		return false
+
+	return CombatTargetValidation.is_valid_combat_target(_attack_target)
+
+
 func get_attack_facing_direction() -> Vector3:
-	if _attack_target == null or not CombatTargetValidation.is_valid_combat_target(_attack_target):
+	if not _is_attack_target_valid_for_facing():
 		return Vector3.ZERO
 
 	var direction: Vector3 = _attack_target.global_position - global_position
@@ -128,6 +158,7 @@ func cancel_attack_move() -> void:
 func cancel_attack() -> void:
 	if (
 		_attack_target != null
+		and is_instance_valid(_attack_target)
 		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
 	):
 		CombatTargetValidation.clear_attack_approach_slots(_attack_target)

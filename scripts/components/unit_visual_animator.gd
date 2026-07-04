@@ -37,7 +37,7 @@ var _one_shot_active: bool = false
 
 
 static func create_from_model_root(model_root: Node) -> UnitVisualAnimator:
-	if model_root == null:
+	if model_root == null or not is_instance_valid(model_root):
 		return null
 
 	var animation_player: AnimationPlayer = _find_animation_player(model_root)
@@ -48,6 +48,7 @@ static func create_from_model_root(model_root: Node) -> UnitVisualAnimator:
 	animator._animation_player = animation_player
 	animator._available_clips = animator._collect_animation_names()
 	if animator._available_clips.is_empty():
+		animator.release()
 		return null
 
 	if not animation_player.animation_finished.is_connected(animator._on_animation_finished):
@@ -57,15 +58,44 @@ static func create_from_model_root(model_root: Node) -> UnitVisualAnimator:
 
 
 static func _find_animation_player(root: Node) -> AnimationPlayer:
+	if root == null or not is_instance_valid(root):
+		return null
+
 	if root is AnimationPlayer:
 		return root as AnimationPlayer
 
-	for child: Node in root.get_children():
-		var found: AnimationPlayer = _find_animation_player(child)
+	for child_variant: Variant in root.get_children():
+		if child_variant == null or not is_instance_valid(child_variant):
+			continue
+		if not child_variant is Node:
+			continue
+
+		var found: AnimationPlayer = _find_animation_player(child_variant as Node)
 		if found != null:
 			return found
 
 	return null
+
+
+func release() -> void:
+	if _animation_player != null and is_instance_valid(_animation_player):
+		if _animation_player.animation_finished.is_connected(_on_animation_finished):
+			_animation_player.animation_finished.disconnect(_on_animation_finished)
+
+	_animation_player = null
+	_one_shot_active = false
+	_current_playing_clip = &""
+
+
+func _clear_animation_player_if_stale() -> bool:
+	if _animation_player == null:
+		return false
+
+	if is_instance_valid(_animation_player):
+		return true
+
+	release()
+	return false
 
 
 func set_clip_preferences(preferences: Dictionary) -> void:
@@ -78,16 +108,26 @@ func get_available_clips() -> PackedStringArray:
 	return _available_clips
 
 
+func has_animation_player() -> bool:
+	return _animation_player != null and is_instance_valid(_animation_player)
+
+
 func has_clip_for_state(state_key: StringName) -> bool:
 	return not _resolve_clip(state_key).is_empty()
 
 
 func play_initial_idle() -> void:
+	if not _clear_animation_player_if_stale():
+		return
+
 	_current_loop_state = LoopState.IDLE
 	_apply_loop_state(LoopState.IDLE, true)
 
 
 func set_loop_state(new_state: LoopState) -> void:
+	if not _clear_animation_player_if_stale():
+		return
+
 	if _current_loop_state == new_state and not _one_shot_active:
 		_refresh_loop_clip_if_needed(new_state)
 		return
@@ -100,6 +140,9 @@ func set_loop_state(new_state: LoopState) -> void:
 
 
 func play_one_shot(state_key: StringName) -> bool:
+	if not _clear_animation_player_if_stale():
+		return false
+
 	var clip_name: StringName = _resolve_clip(state_key)
 	if clip_name.is_empty():
 		return false
@@ -217,6 +260,8 @@ func _loop_state_to_key(state: LoopState) -> StringName:
 
 
 func _on_animation_finished(animation_name: StringName) -> void:
+	if not _clear_animation_player_if_stale():
+		return
 	if not _one_shot_active:
 		return
 	if animation_name != _current_playing_clip:

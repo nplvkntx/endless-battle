@@ -63,6 +63,12 @@ func _ready() -> void:
 	call_deferred("apply_team_visuals")
 
 
+func _exit_tree() -> void:
+	if _visual_animator != null:
+		_visual_animator.release()
+		_visual_animator = null
+
+
 ## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
 func apply_team_visuals() -> void:
 	TeamVisuals.apply_to_entity(self, team_id)
@@ -182,7 +188,8 @@ func get_facing_direction() -> Vector3:
 
 
 func _update_visual_facing(delta: float) -> void:
-	if _visual_pivot == null:
+	if _visual_pivot == null or not is_instance_valid(_visual_pivot):
+		_visual_pivot = null
 		return
 
 	var direction: Vector3 = get_facing_direction()
@@ -200,11 +207,20 @@ func _update_visual_facing(delta: float) -> void:
 
 
 func _setup_visual_animator() -> void:
-	if _visual_pivot == null or _visual_pivot.get_child_count() == 0:
+	if _visual_pivot == null or not is_instance_valid(_visual_pivot):
+		_visual_pivot = null
 		return
 
-	var model_root: Node = _visual_pivot.get_child(0)
-	_visual_animator = UnitVisualAnimator.create_from_model_root(model_root)
+	if _visual_pivot.get_child_count() == 0:
+		return
+
+	var model_root_variant: Variant = _visual_pivot.get_child(0)
+	if model_root_variant == null or not is_instance_valid(model_root_variant):
+		return
+	if not model_root_variant is Node:
+		return
+
+	_visual_animator = UnitVisualAnimator.create_from_model_root(model_root_variant as Node)
 	if _visual_animator == null:
 		return
 
@@ -217,15 +233,25 @@ func _update_visual_animation() -> void:
 		return
 
 	_visual_animator.set_loop_state(get_visual_loop_state())
+	if _visual_animator != null and not _visual_animator.has_animation_player():
+		_visual_animator = null
 
 
 func _detect_visual_facing_yaw_offset() -> float:
-	if _visual_pivot == null or _visual_pivot.get_child_count() == 0:
+	if _visual_pivot == null or not is_instance_valid(_visual_pivot):
+		_visual_pivot = null
 		return PI
 
-	var model: Node3D = _visual_pivot.get_child(0) as Node3D
-	if model == null:
+	if _visual_pivot.get_child_count() == 0:
 		return PI
+
+	var model_variant: Variant = _visual_pivot.get_child(0)
+	if model_variant == null or not is_instance_valid(model_variant):
+		return PI
+	if not model_variant is Node3D:
+		return PI
+
+	var model: Node3D = model_variant as Node3D
 
 	var basis: Basis = model.transform.basis
 	if basis.x.x < 0.0 and basis.z.z < 0.0:

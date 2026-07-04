@@ -72,6 +72,7 @@ var _locked_wood_tree: WoodTree = null
 
 func _ready() -> void:
 	super._ready()
+	_hide_worker_weapon_visual()
 	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
 	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
@@ -135,8 +136,21 @@ func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
 	animator.set_clip_preferences({
 		UnitVisualAnimator.STATE_IDLE: [&"Idle"],
 		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run"],
-		UnitVisualAnimator.STATE_WORK: [&"PickUp", &"Work", &"Gather", &"Chop", &"Mine", &"Construct"],
+		UnitVisualAnimator.STATE_WORK: [&"PickUp"],
 	})
+
+
+func _hide_worker_weapon_visual() -> void:
+	if _visual_pivot == null or not is_instance_valid(_visual_pivot):
+		_visual_pivot = null
+		return
+
+	for weapon_name: StringName in [&"Warrior_Sword", &"Weapon.R"]:
+		var weapon_variant: Variant = _visual_pivot.find_child(weapon_name, true, false)
+		if weapon_variant == null or not is_instance_valid(weapon_variant):
+			continue
+		if weapon_variant is Node3D:
+			(weapon_variant as Node3D).visible = false
 
 
 func _is_alive() -> bool:
@@ -1893,13 +1907,16 @@ func _collect_workers_for_approach_check(_source: CollisionObject3D) -> Array[Wo
 	var workers: Array[Worker] = []
 	var tree: SceneTree = get_tree()
 	for group_name: StringName in [&"workers", &"enemy_workers"]:
-		for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
-			if node == self or not node is Worker:
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
+			if node_variant == self:
+				continue
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not node_variant is Worker:
 				continue
 
-			var other_worker: Worker = node as Worker
-			if is_instance_valid(other_worker):
-				workers.append(other_worker)
+			var other_worker: Worker = node_variant as Worker
+			workers.append(other_worker)
 	return workers
 
 
@@ -1916,9 +1933,13 @@ func _is_approach_position_occupied(
 		* GatheringConfig.APPROACH_OCCUPIED_DESTINATION_RADIUS
 	)
 
-	for other_worker: Worker in nearby_workers:
-		if not is_instance_valid(other_worker):
+	for other_worker_variant: Variant in nearby_workers:
+		if other_worker_variant == null or not is_instance_valid(other_worker_variant):
 			continue
+		if not other_worker_variant is Worker:
+			continue
+
+		var other_worker: Worker = other_worker_variant as Worker
 
 		var to_other: Vector3 = other_worker.global_position - approach_position
 		to_other.y = 0.0

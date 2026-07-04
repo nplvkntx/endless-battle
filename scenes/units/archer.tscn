@@ -36,7 +36,10 @@ script = ExtResource("1_archer")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.03, 0)
 
-[node name="RangerModel" parent="MeshInstance3D" instance=ExtResource("3_ranger_model")]
+[node name="ArcherModelFacing" type="Node3D" parent="MeshInstance3D"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+
+[node name="RangerModel" parent="MeshInstance3D/ArcherModelFacing" instance=ExtResource("3_ranger_model")]
 transform = Transform3D(-0.45, 0, 0, 0, 0.45, 0, 0, 0, -0.45, 0, 0, 0)
 
 [node name="SelectionIndicator" type="Node3D" parent="."]

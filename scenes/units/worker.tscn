@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/worker_peasant/Male_Peasant.fbx" id="3_worker_model"]
+[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/ranger_warrior_candidates/Warrior.gltf" id="3_worker_model"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
 shading_mode = 0
