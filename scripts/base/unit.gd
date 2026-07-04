@@ -22,6 +22,8 @@ const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
 const COMBAT_TARGET_SCAN_INTERVAL := 0.3
+const VISUAL_FACING_TURN_SPEED := 12.0
+const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.04
 
 var team_id: int = -1
 var is_selected: bool = false
@@ -40,6 +42,9 @@ var _detour_flips: int = 0
 var _detour_gave_up: bool = false
 var _distance_at_detour_start: float = 0.0
 var _combat_target_scan_timer: float = 0.0
+var _visual_pivot: Node3D
+var _visual_facing_yaw_offset: float = PI
+var _visual_facing_initialized: bool = false
 
 
 func _ready() -> void:
@@ -50,6 +55,8 @@ func _ready() -> void:
 	_selection_indicator = get_node_or_null("SelectionIndicator") as Node3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
+	_visual_pivot = get_node_or_null("MeshInstance3D") as Node3D
+	_visual_facing_yaw_offset = _detect_visual_facing_yaw_offset()
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
 
@@ -119,6 +126,60 @@ func _physics_process(delta: float) -> void:
 	var position_before: Vector3 = global_position
 	move_and_slide()
 	_update_unstuck(delta, position_before, direction, distance)
+
+
+func _process(delta: float) -> void:
+	_update_visual_facing(delta)
+
+
+## Override in combat units to face an attack target while idle or chasing.
+func get_attack_facing_direction() -> Vector3:
+	return Vector3.ZERO
+
+
+func get_facing_direction() -> Vector3:
+	var attack_direction: Vector3 = get_attack_facing_direction()
+	if attack_direction.length_squared() > 0.001:
+		return attack_direction
+
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
+		return horizontal_velocity.normalized()
+
+	return Vector3.ZERO
+
+
+func _update_visual_facing(delta: float) -> void:
+	if _visual_pivot == null:
+		return
+
+	var direction: Vector3 = get_facing_direction()
+	if direction.length_squared() <= 0.001:
+		return
+
+	var target_yaw: float = atan2(direction.x, direction.z) + _visual_facing_yaw_offset
+	if not _visual_facing_initialized:
+		_visual_pivot.rotation.y = target_yaw
+		_visual_facing_initialized = true
+		return
+
+	var blend: float = minf(1.0, delta * VISUAL_FACING_TURN_SPEED)
+	_visual_pivot.rotation.y = lerp_angle(_visual_pivot.rotation.y, target_yaw, blend)
+
+
+func _detect_visual_facing_yaw_offset() -> float:
+	if _visual_pivot == null or _visual_pivot.get_child_count() == 0:
+		return PI
+
+	var model: Node3D = _visual_pivot.get_child(0) as Node3D
+	if model == null:
+		return PI
+
+	var basis: Basis = model.transform.basis
+	if basis.x.x < 0.0 and basis.z.z < 0.0:
+		return 0.0
+
+	return PI
 
 
 func _get_detour_direction(forward: Vector3) -> Vector3:

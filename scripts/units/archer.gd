@@ -75,6 +75,18 @@ func _get_health_bar_color(ratio: float) -> Color:
 	return Color.from_hsv(ratio * HEALTH_BAR_HUE_GREEN, 0.85, 0.9)
 
 
+func get_attack_facing_direction() -> Vector3:
+	if _attack_target == null or not CombatTargetValidation.is_valid_combat_target(_attack_target):
+		return Vector3.ZERO
+
+	var direction: Vector3 = _attack_target.global_position - global_position
+	direction.y = 0.0
+	if direction.length_squared() <= 0.001:
+		return Vector3.ZERO
+
+	return direction.normalized()
+
+
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
