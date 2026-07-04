@@ -88,28 +88,16 @@ func _on_enemy_command_center_destroyed(_building: Building) -> void:
 	_end_match(MatchState.VICTORY, VICTORY_MESSAGE)
 
 
-func _end_match(next_state: MatchState, message: String) -> void:
+func _end_match(next_state: MatchState, _message: String) -> void:
 	if _match_state != MatchState.PLAYING:
 		return
 
 	_match_state = next_state
-	_show_match_result(message)
-	get_tree().paused = true
-
-
-func _show_match_result(message: String) -> void:
-	var label: Label = get_node_or_null(match_result_label_path) as Label
-	if label == null:
-		ResourceManager.show_feedback(message)
-		return
-
-	label.text = message
-	label.modulate = (
-		Color(0.45, 1.0, 0.55, 1.0)
-		if _match_state == MatchState.VICTORY
-		else Color(1.0, 0.4, 0.35, 1.0)
-	)
-	label.visible = true
+	match next_state:
+		MatchState.VICTORY:
+			MatchSession.call_deferred("show_victory_screen")
+		MatchState.DEFEAT:
+			MatchSession.call_deferred("show_defeat_screen")
 
 
 func _apply_debug_damage(command_center: CommandCenter) -> void:

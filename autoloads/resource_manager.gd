@@ -20,6 +20,14 @@ var food_max: int = STARTING_FOOD_MAX
 
 
 func _ready() -> void:
+	reset_to_starting_values()
+
+
+func reset_to_starting_values() -> void:
+	gold = STARTING_GOLD
+	wood = STARTING_WOOD
+	food_current = STARTING_FOOD
+	food_max = STARTING_FOOD_MAX
 	_emit_resource_state()
 
 

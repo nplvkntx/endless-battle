@@ -1,5 +1,6 @@
 [gd_scene format=3 uid="uid://cpee3usuf6htk"]
 
+[ext_resource type="Script" path="res://scripts/systems/match_bootstrap.gd" id="1_match_bootstrap"]
 [ext_resource type="Script" uid="uid://bfyiykcfpyqqw" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
 [ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
 [ext_resource type="PackedScene" uid="uid://c5n8k3m7w2x9pud" path="res://scenes/ui/player_hud.tscn" id="7_player_hud"]
@@ -12,6 +13,7 @@
 [ext_resource type="PackedScene" uid="uid://bqm8k4n2w7x3ms" path="res://scenes/match/match_systems.tscn" id="34_match_systems"]
 
 [node name="Main" type="Node3D" unique_id=1133004476]
+script = ExtResource("1_match_bootstrap")
 
 [node name="MatchSystems" parent="." instance=ExtResource("34_match_systems")]
 

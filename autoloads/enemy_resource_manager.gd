@@ -13,6 +13,15 @@ var food_max: int = STARTING_FOOD_MAX
 
 
 func _ready() -> void:
+	reset_to_starting_values()
+
+
+func reset_to_starting_values() -> void:
+	gold = ResourceManager.STARTING_GOLD
+	wood = ResourceManager.STARTING_WOOD
+	food_current = 0
+	food_max = STARTING_FOOD_MAX
+	resources_changed.emit()
 	call_deferred("_initialize_population_from_scene")
 
 
