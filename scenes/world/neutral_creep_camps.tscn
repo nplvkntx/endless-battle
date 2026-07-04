@@ -121,116 +121,104 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -7)
 attack_damage = 16
 attack_cooldown = 0.95
 
-[node name="MediumCampNorthwestRoute" type="Node3D" parent="." unique_id=1804294731]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 0, -8)
+[node name="MediumCampNorthCenter" type="Node3D" parent="." unique_id=301000068]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -12)
 script = ExtResource("2_creep_camp")
 
-[node name="Creep1" parent="MediumCampNorthwestRoute" unique_id=1804294732 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+[node name="Creep1" parent="MediumCampNorthCenter" unique_id=301000069 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep2" parent="MediumCampNorthwestRoute" unique_id=1804294733 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+[node name="Creep2" parent="MediumCampNorthCenter" unique_id=301000070 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep3" parent="MediumCampNorthwestRoute" unique_id=1804294734 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+[node name="Creep3" parent="MediumCampNorthCenter" unique_id=301000071 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.5, 3)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="MediumCampSoutheastRoute" type="Node3D" parent="." unique_id=1804294735]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0, 8)
+[node name="Creep4" parent="MediumCampNorthCenter" unique_id=1804294732 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep5" parent="MediumCampNorthCenter" unique_id=1804294733 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, -2)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep6" parent="MediumCampNorthCenter" unique_id=1804294734 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, 2)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="MediumCampSouthCenter" type="Node3D" parent="." unique_id=301000072]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 12)
 script = ExtResource("2_creep_camp")
 
-[node name="Creep1" parent="MediumCampSoutheastRoute" unique_id=1804294736 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+[node name="Creep1" parent="MediumCampSouthCenter" unique_id=301000073 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep2" parent="MediumCampSoutheastRoute" unique_id=1804294737 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+[node name="Creep2" parent="MediumCampSouthCenter" unique_id=301000074 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep3" parent="MediumCampSoutheastRoute" unique_id=1804294738 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+[node name="Creep3" parent="MediumCampSouthCenter" unique_id=301000075 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.5, 3)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="MediumCampSouthwestFlank" type="Node3D" parent="." unique_id=301000060]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, 14)
+[node name="Creep4" parent="MediumCampSouthCenter" unique_id=1804294736 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.5, -3)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep5" parent="MediumCampSouthCenter" unique_id=1804294737 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, -2)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="Creep6" parent="MediumCampSouthCenter" unique_id=1804294738 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, 2)
+attack_damage = 11
+attack_cooldown = 1.1
+
+[node name="MediumCampCentralCrossroads" type="Node3D" parent="." unique_id=1804294731]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 script = ExtResource("2_creep_camp")
 
-[node name="Creep1" parent="MediumCampSouthwestFlank" unique_id=301000061 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+[node name="Creep1" parent="MediumCampCentralCrossroads" unique_id=301000061 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, 2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep2" parent="MediumCampSouthwestFlank" unique_id=301000062 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+[node name="Creep2" parent="MediumCampCentralCrossroads" unique_id=301000062 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, -2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep3" parent="MediumCampSouthwestFlank" unique_id=301000063 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+[node name="Creep3" parent="MediumCampCentralCrossroads" unique_id=301000063 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.5, 3)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="MediumCampNortheastFlank" type="Node3D" parent="." unique_id=301000064]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, -14)
-script = ExtResource("2_creep_camp")
-
-[node name="Creep1" parent="MediumCampNortheastFlank" unique_id=301000065 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
+[node name="Creep4" parent="MediumCampCentralCrossroads" unique_id=301000065 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.5, -3)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep2" parent="MediumCampNortheastFlank" unique_id=301000066 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
+[node name="Creep5" parent="MediumCampCentralCrossroads" unique_id=301000066 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.5, -2)
 attack_damage = 11
 attack_cooldown = 1.1
 
-[node name="Creep3" parent="MediumCampNortheastFlank" unique_id=301000067 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="MediumCampUpperCenter" type="Node3D" parent="." unique_id=301000068]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -18)
-script = ExtResource("2_creep_camp")
-
-[node name="Creep1" parent="MediumCampUpperCenter" unique_id=301000069 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="Creep2" parent="MediumCampUpperCenter" unique_id=301000070 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="Creep3" parent="MediumCampUpperCenter" unique_id=301000071 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="MediumCampLowerCenter" type="Node3D" parent="." unique_id=301000072]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 18)
-script = ExtResource("2_creep_camp")
-
-[node name="Creep1" parent="MediumCampLowerCenter" unique_id=301000073 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.5, 3)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="Creep2" parent="MediumCampLowerCenter" unique_id=301000074 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.5, -3)
-attack_damage = 11
-attack_cooldown = 1.1
-
-[node name="Creep3" parent="MediumCampLowerCenter" unique_id=301000075 instance=ExtResource("1_neutral_creep")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -6)
+[node name="Creep6" parent="MediumCampCentralCrossroads" unique_id=301000067 instance=ExtResource("1_neutral_creep")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.5, 2)
 attack_damage = 11
 attack_cooldown = 1.1
