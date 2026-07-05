@@ -916,6 +916,8 @@ func _resolve_primary_command_center() -> CommandCenter:
 	if _primary_command_center != null and _is_living_building(_primary_command_center):
 		return _primary_command_center
 
+	_primary_command_center = null
+
 	if not enemy_command_center_path.is_empty():
 		var path_node: Node = get_node_or_null(enemy_command_center_path)
 		if path_node is CommandCenter and _is_living_building(path_node as CommandCenter):

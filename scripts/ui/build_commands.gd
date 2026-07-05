@@ -1225,7 +1225,7 @@ func _on_building_selection_changed(building: Building) -> void:
 		_hero_status_label.text = "Hero: Ready to train"
 		_clear_queue_row(_hero_queue_row)
 
-	if building is Blacksmith:
+	if building is Blacksmith and is_instance_valid(building):
 		_tracked_blacksmith = building as Blacksmith
 		_tracked_blacksmith.building_state_changed.connect(_on_blacksmith_state_changed)
 		if not _tracked_blacksmith.research_state_changed.is_connected(_on_blacksmith_research_state_changed):
@@ -1233,7 +1233,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_tracked_blacksmith = null
 
-	if building is Shop:
+	if building is Shop and is_instance_valid(building):
 		_tracked_shop = building as Shop
 		_tracked_shop.building_state_changed.connect(_on_shop_state_changed)
 	else:
@@ -1288,6 +1288,8 @@ func _refresh_command_visibility() -> void:
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
 	var selected_building: Building = selection_manager.selected_building
+	if selected_building != null and not is_instance_valid(selected_building):
+		selected_building = null
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
 	if nothing_selected:
@@ -1607,75 +1609,65 @@ func _on_production_repeat_state_changed() -> void:
 
 
 func _disconnect_worker_queue_signal() -> void:
-	if _selected_command_center == null:
-		return
+	if _selected_command_center != null and is_instance_valid(_selected_command_center):
+		if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
+			_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
 
-	if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
-		_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
-
-	if _selected_command_center.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
-		_selected_command_center.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+		if _selected_command_center.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
+			_selected_command_center.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
 
 	_selected_command_center = null
 
 
 func _disconnect_barracks_signals() -> void:
-	if _tracked_barracks == null:
-		return
+	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
+		if _tracked_barracks.building_state_changed.is_connected(_on_barracks_state_changed):
+			_tracked_barracks.building_state_changed.disconnect(_on_barracks_state_changed)
 
-	if _tracked_barracks.building_state_changed.is_connected(_on_barracks_state_changed):
-		_tracked_barracks.building_state_changed.disconnect(_on_barracks_state_changed)
+		if _tracked_barracks.swordsman_queue_changed.is_connected(_on_swordsman_queue_changed):
+			_tracked_barracks.swordsman_queue_changed.disconnect(_on_swordsman_queue_changed)
 
-	if _tracked_barracks.swordsman_queue_changed.is_connected(_on_swordsman_queue_changed):
-		_tracked_barracks.swordsman_queue_changed.disconnect(_on_swordsman_queue_changed)
+		if _tracked_barracks.archer_queue_changed.is_connected(_on_archer_queue_changed):
+			_tracked_barracks.archer_queue_changed.disconnect(_on_archer_queue_changed)
 
-	if _tracked_barracks.archer_queue_changed.is_connected(_on_archer_queue_changed):
-		_tracked_barracks.archer_queue_changed.disconnect(_on_archer_queue_changed)
+		if (
+			_tracked_barracks.has_signal("training_queue_changed")
+			and _tracked_barracks.training_queue_changed.is_connected(_on_barracks_training_queue_changed)
+		):
+			_tracked_barracks.training_queue_changed.disconnect(_on_barracks_training_queue_changed)
 
-	if (
-		_tracked_barracks.has_signal("training_queue_changed")
-		and _tracked_barracks.training_queue_changed.is_connected(_on_barracks_training_queue_changed)
-	):
-		_tracked_barracks.training_queue_changed.disconnect(_on_barracks_training_queue_changed)
-
-	if _tracked_barracks.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
-		_tracked_barracks.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+		if _tracked_barracks.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
+			_tracked_barracks.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
 
 	_tracked_barracks = null
 
 
 func _disconnect_hero_altar_signals() -> void:
-	if _tracked_hero_altar == null:
-		return
+	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
+		if _tracked_hero_altar.building_state_changed.is_connected(_on_hero_altar_state_changed):
+			_tracked_hero_altar.building_state_changed.disconnect(_on_hero_altar_state_changed)
 
-	if _tracked_hero_altar.building_state_changed.is_connected(_on_hero_altar_state_changed):
-		_tracked_hero_altar.building_state_changed.disconnect(_on_hero_altar_state_changed)
-
-	if _tracked_hero_altar.hero_altar_state_changed.is_connected(_on_hero_altar_state_changed):
-		_tracked_hero_altar.hero_altar_state_changed.disconnect(_on_hero_altar_state_changed)
+		if _tracked_hero_altar.hero_altar_state_changed.is_connected(_on_hero_altar_state_changed):
+			_tracked_hero_altar.hero_altar_state_changed.disconnect(_on_hero_altar_state_changed)
 
 	_tracked_hero_altar = null
 
 
 func _disconnect_blacksmith_signals() -> void:
-	if _tracked_blacksmith == null:
-		return
+	if _tracked_blacksmith != null and is_instance_valid(_tracked_blacksmith):
+		if _tracked_blacksmith.building_state_changed.is_connected(_on_blacksmith_state_changed):
+			_tracked_blacksmith.building_state_changed.disconnect(_on_blacksmith_state_changed)
 
-	if _tracked_blacksmith.building_state_changed.is_connected(_on_blacksmith_state_changed):
-		_tracked_blacksmith.building_state_changed.disconnect(_on_blacksmith_state_changed)
-
-	if _tracked_blacksmith.research_state_changed.is_connected(_on_blacksmith_research_state_changed):
-		_tracked_blacksmith.research_state_changed.disconnect(_on_blacksmith_research_state_changed)
+		if _tracked_blacksmith.research_state_changed.is_connected(_on_blacksmith_research_state_changed):
+			_tracked_blacksmith.research_state_changed.disconnect(_on_blacksmith_research_state_changed)
 
 	_tracked_blacksmith = null
 
 
 func _disconnect_shop_signals() -> void:
-	if _tracked_shop == null:
-		return
-
-	if _tracked_shop.building_state_changed.is_connected(_on_shop_state_changed):
-		_tracked_shop.building_state_changed.disconnect(_on_shop_state_changed)
+	if _tracked_shop != null and is_instance_valid(_tracked_shop):
+		if _tracked_shop.building_state_changed.is_connected(_on_shop_state_changed):
+			_tracked_shop.building_state_changed.disconnect(_on_shop_state_changed)
 
 	_tracked_shop = null
 

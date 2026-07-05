@@ -610,11 +610,15 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
 	_return_dropoff = null
-	_assigned_dropoff = WorkerGathering.find_nearest_dropoff(
+	var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(
 		source.global_position,
 		_is_enemy_worker(),
 		get_tree()
 	)
+	if dropoff != null and is_instance_valid(dropoff):
+		_assigned_dropoff = dropoff
+	else:
+		_assigned_dropoff = null
 	_gather_stuck_recovery_cooldown = 0.0
 	_reset_gather_stuck_watch()
 	_clear_wood_chop_spot()
@@ -1193,6 +1197,7 @@ func _has_valid_gather_source() -> bool:
 	if _gather_source == null:
 		return false
 	if not is_instance_valid(_gather_source):
+		_gather_source = null
 		return false
 	return not _gather_source.is_queued_for_deletion()
 
@@ -1362,12 +1367,17 @@ func _begin_return_to_command_center() -> void:
 	var search_position: Vector3 = (
 		global_position if _is_gathering_wood() else _get_dropoff_search_position()
 	)
-	_return_dropoff = WorkerGathering.find_nearest_dropoff(
+	var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(
 		search_position,
 		_is_enemy_worker(),
 		get_tree()
 	)
-	_assigned_dropoff = _return_dropoff
+	if dropoff != null and is_instance_valid(dropoff):
+		_return_dropoff = dropoff
+		_assigned_dropoff = dropoff
+	else:
+		_return_dropoff = null
+		_assigned_dropoff = null
 	_gather_state = GatherTripState.TO_COMMAND_CENTER
 	_ensure_returning_to_current_dropoff()
 
@@ -1660,11 +1670,15 @@ func _resolve_dropoff_target() -> CommandCenter:
 	):
 		return _assigned_dropoff
 
-	_assigned_dropoff = WorkerGathering.find_nearest_dropoff(
+	var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(
 		_get_dropoff_search_position(),
 		_is_enemy_worker(),
 		get_tree()
 	)
+	if dropoff != null and is_instance_valid(dropoff):
+		_assigned_dropoff = dropoff
+	else:
+		_assigned_dropoff = null
 	if _gather_state == GatherTripState.TO_COMMAND_CENTER and _assigned_dropoff != null:
 		_return_dropoff = _assigned_dropoff
 	return _assigned_dropoff
