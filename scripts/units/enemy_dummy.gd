@@ -66,8 +66,10 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 func _on_health_depleted() -> void:
 	_attack_target = null
+	EnemyUnitMission.clear_unit_mission(self)
 	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
+	die()
 	queue_free()
 
 
@@ -135,12 +137,11 @@ func _physics_process(delta: float) -> void:
 
 
 func _set_attack_target(target: Unit) -> void:
-	if not is_instance_valid(target):
-		return
-	if not _is_valid_attack_target(target):
+	var safe_target: Unit = NodeSafety.safe_node(target) as Unit
+	if safe_target == null or not _is_valid_attack_target(safe_target):
 		return
 
-	_attack_target = target
+	_attack_target = safe_target
 
 
 func _process_counter_attack(delta: float) -> void:
@@ -198,10 +199,7 @@ func _play_attack_animation() -> void:
 
 
 func _clear_invalid_attack_target() -> void:
-	if _attack_target == null:
-		return
-
-	if not is_instance_valid(_attack_target):
+	if not NodeSafety.is_alive_node(_attack_target):
 		_attack_target = null
 		return
 

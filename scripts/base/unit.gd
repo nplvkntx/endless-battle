@@ -64,6 +64,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	EnemyUnitMission.clear_unit_mission(self)
 	if _visual_animator != null:
 		_visual_animator.release()
 		_visual_animator = null
@@ -422,4 +423,5 @@ func take_damage(_amount: float, _attacker = null) -> void:
 
 ## Handles unit death and notifies listeners through signals.
 func die() -> void:
+	NodeSafety.prepare_node_for_death(self)
 	died.emit(self)

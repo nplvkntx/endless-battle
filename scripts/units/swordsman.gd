@@ -46,6 +46,9 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	cancel_attack_move()
+	cancel_attack()
+	EnemyUnitMission.clear_unit_mission(self)
 	if UpgradeManager.upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
 		UpgradeManager.upgrade_applied.disconnect(_on_blacksmith_upgrade_applied)
 	if UpgradeManager.enemy_upgrade_applied.is_connected(_on_blacksmith_upgrade_applied):
@@ -96,7 +99,7 @@ func _sanitize_attack_target() -> void:
 	if _attack_target == null:
 		return
 
-	if not is_instance_valid(_attack_target):
+	if not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
 		_resume_attack_move()
 		return
@@ -107,10 +110,7 @@ func _sanitize_attack_target() -> void:
 
 
 func _is_attack_target_valid_for_facing() -> bool:
-	if _attack_target == null:
-		return false
-
-	if not is_instance_valid(_attack_target):
+	if not NodeSafety.is_alive_node(_attack_target):
 		_attack_target = null
 		return false
 
@@ -130,13 +130,15 @@ func get_attack_facing_direction() -> Vector3:
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
-	if not is_instance_valid(target):
+	if not NodeSafety.is_alive_node(target):
 		return
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
 	_assign_attack_approach_slot(target, assigned_slot)
-	_attack_target = target
+	_attack_target = NodeSafety.safe_node(target) as Node3D
+	if _attack_target == null:
+		return
 	_has_chase_target = false
 
 	if not _is_in_attack_range(_attack_target):
@@ -155,11 +157,7 @@ func cancel_attack_move() -> void:
 
 
 func cancel_attack() -> void:
-	if (
-		_attack_target != null
-		and is_instance_valid(_attack_target)
-		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
-	):
+	if NodeSafety.is_alive_node(_attack_target):
 		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
 	_attack_target = null
 	_attack_approach_slot = -1
@@ -347,6 +345,7 @@ func take_damage(amount: float, attacker = null) -> void:
 		CombatTargetValidation.is_enemy_faction(self)
 		and attacker is Node3D
 		and CombatTargetValidation.is_attack_target_for_attacker(self, attacker)
+		and EnemyUnitMission.allows_combat_micro(self)
 	):
 		command_attack(attacker as Node3D)
 
@@ -360,6 +359,7 @@ func _on_health_depleted() -> void:
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
+	EnemyUnitMission.clear_unit_mission(self)
 	has_move_target = false
 	velocity = Vector3.ZERO
 	die()
@@ -367,7 +367,11 @@ func _on_health_depleted() -> void:
 
 
 func _begin_chase() -> void:
-	if _attack_target == null or _has_chase_target:
+	if not NodeSafety.is_alive_node(_attack_target):
+		cancel_attack()
+		return
+
+	if _has_chase_target:
 		return
 
 	_set_move_destination(_compute_attack_approach_position(_attack_target))

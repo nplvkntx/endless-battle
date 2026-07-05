@@ -22,7 +22,7 @@ static func spawn_message(
 	message_color: Color = Color(1.0, 0.85, 0.2, 1.0),
 	emphasized: bool = false
 ) -> void:
-	if not is_instance_valid(target):
+	if not NodeSafety.is_alive_node(target):
 		return
 
 	spawn_message_at_position(
@@ -41,7 +41,7 @@ static func spawn_message_at_position(
 	message_color: Color = Color(1.0, 0.85, 0.2, 1.0),
 	emphasized: bool = false
 ) -> void:
-	if not is_instance_valid(anchor):
+	if not NodeSafety.is_alive_node(anchor):
 		return
 
 	var tree: SceneTree = anchor.get_tree()

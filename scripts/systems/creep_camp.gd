@@ -33,7 +33,7 @@ func _process(delta: float) -> void:
 
 
 func alert_camp_to_attacker(attacker: Unit, excluding: NeutralCreep = null) -> void:
-	if attacker == null or not is_instance_valid(attacker):
+	if not NodeSafety.is_alive_node(attacker):
 		return
 
 	for child: Node in get_children():
@@ -44,7 +44,7 @@ func alert_camp_to_attacker(attacker: Unit, excluding: NeutralCreep = null) -> v
 			continue
 
 		var creep: NeutralCreep = child as NeutralCreep
-		if not is_instance_valid(creep) or creep.is_queued_for_deletion():
+		if not NodeSafety.is_alive_node(creep):
 			continue
 
 		creep.alert_to_attacker(attacker)

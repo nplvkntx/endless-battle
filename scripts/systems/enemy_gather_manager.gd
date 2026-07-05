@@ -381,7 +381,12 @@ func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
 	if not _is_valid_gold_mine(gold_mine):
 		return false
 
+	if not EnemyUnitMission.can_override_mission(worker, EnemyUnitMission.Mission.ECONOMY):
+		return false
+
 	worker.command_gather_gold_mine(gold_mine, false)
+	if not worker.needs_gather_target_reassignment():
+		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
 	return not worker.needs_gather_target_reassignment()
 
 
@@ -390,7 +395,12 @@ func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
 	if tree == null or not tree.can_gather():
 		return false
 
+	if not EnemyUnitMission.can_override_mission(worker, EnemyUnitMission.Mission.ECONOMY):
+		return false
+
 	worker.command_gather_tree(tree, false)
+	if not worker.needs_gather_target_reassignment():
+		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
 	return not worker.needs_gather_target_reassignment()
 
 
@@ -489,7 +499,9 @@ func _is_enemy_training_military_or_hero() -> bool:
 func _collect_gather_pool(command_center_position: Vector3) -> Array[Worker]:
 	var gather_pool: Array[Worker] = []
 
-	for worker: Worker in _find_enemy_workers(command_center_position):
+	for worker: Worker in NodeSafety.clean_node_array(_find_enemy_workers(command_center_position)):
+		if not NodeSafety.is_alive_node(worker):
+			continue
 		if worker.is_on_construction_trip():
 			continue
 		gather_pool.append(worker)
@@ -512,6 +524,9 @@ func _can_reassign_worker(worker: Worker) -> bool:
 	if worker.is_on_construction_trip():
 		return false
 
+	if EnemyUnitMission.get_unit_mission(worker) == EnemyUnitMission.Mission.BUILD:
+		return false
+
 	return not worker.is_carrying_gathered_resources()
 
 
@@ -522,7 +537,7 @@ func _pick_tree_for_worker(worker: Worker, trees: Array[WoodTree]) -> WoodTree:
 	var closest_tree: WoodTree = null
 	var closest_distance_squared: float = INF
 	for tree: WoodTree in trees:
-		if tree == null or not tree.can_gather():
+		if tree == null or not is_instance_valid(tree) or not tree.can_gather():
 			continue
 
 		var distance_squared: float = worker.global_position.distance_squared_to(tree.global_position)
@@ -645,10 +660,7 @@ func _find_enemy_workers(command_center_position: Vector3) -> Array[Worker]:
 
 
 func _is_valid_worker(node: Node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	if node.is_queued_for_deletion():
+	if not NodeSafety.is_alive_node(node):
 		return false
 
 	if not node is Worker:

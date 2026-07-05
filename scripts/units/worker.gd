@@ -259,6 +259,7 @@ func get_current_health() -> int:
 func _on_health_depleted() -> void:
 	_cancel_build_trip()
 	cancel_gathering()
+	EnemyUnitMission.clear_unit_mission(self)
 	has_move_target = false
 	velocity = Vector3.ZERO
 	_health_bar.visible = false
@@ -271,6 +272,29 @@ func _on_health_depleted() -> void:
 	HeroXpRewards.notify_unit_killed(self)
 	die()
 	queue_free()
+
+
+func _exit_tree() -> void:
+	_cancel_build_trip()
+	cancel_gathering()
+	EnemyUnitMission.clear_unit_mission(self)
+
+
+func _sanitize_stored_targets() -> void:
+	if not NodeSafety.is_alive_node(_gather_source):
+		_gather_source = null
+
+	if not NodeSafety.is_alive_node(_building_target):
+		_cancel_build_trip()
+
+	if not NodeSafety.is_alive_node(_locked_wood_tree):
+		_locked_wood_tree = null
+
+	if not NodeSafety.is_alive_node(_assigned_dropoff):
+		_assigned_dropoff = null
+
+	if not NodeSafety.is_alive_node(_return_dropoff):
+		_return_dropoff = null
 
 
 func _cancel_build_trip() -> void:
@@ -309,6 +333,8 @@ func _configure_faction_groups() -> void:
 func _physics_process(delta: float) -> void:
 	if not _is_alive():
 		return
+
+	_sanitize_stored_targets()
 
 	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
 		velocity = Vector3.ZERO
@@ -680,7 +706,9 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 	if not _is_valid_gather_source(source):
 		return
 
-	_gather_source = source
+	_gather_source = NodeSafety.safe_node(source) as GatherableResource
+	if _gather_source == null:
+		return
 	_assigned_resource_id = source.get_resource_id()
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
@@ -728,7 +756,9 @@ func start_construction_order(building: Building) -> void:
 	_cancel_build_trip()
 	cancel_gathering()
 	_build_trip_state = BuildTripState.TO_BUILDING
-	_building_target = building
+	_building_target = NodeSafety.safe_node(building) as Building
+	if _building_target == null:
+		return
 	_build_approach_candidate_index = 0
 	_construction_target_point_valid = false
 	_construction_stuck_recovery_cooldown = 0.0
@@ -756,6 +786,13 @@ func on_building_construction_finished() -> void:
 
 	if _is_enemy_worker():
 		_notify_enemy_worker_needs_gather_job()
+
+
+func notify_building_destroyed(building: Building) -> void:
+	if _building_target != building:
+		return
+
+	_cancel_build_trip()
 
 
 func _notify_enemy_worker_needs_gather_job() -> void:
@@ -1855,14 +1892,17 @@ func _clear_wood_chop_spot() -> void:
 
 
 func _lock_to_wood_tree(tree: WoodTree) -> void:
+	if tree == null or not is_instance_valid(tree):
+		_unlock_wood_tree()
+		return
+
 	if _locked_wood_tree == tree:
 		return
 
 	_unlock_wood_tree()
 	_clear_wood_chop_spot()
 	_locked_wood_tree = tree
-	if tree != null and is_instance_valid(tree):
-		tree.register_assigned_worker()
+	tree.register_assigned_worker()
 
 
 func _unlock_wood_tree() -> void:

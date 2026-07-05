@@ -7,18 +7,33 @@ const LAST_ATTACKER_META := &"_last_damage_attacker"
 
 
 static func record_attacker(victim: Node, attacker: Node) -> void:
-	if victim == null or attacker == null or not is_instance_valid(attacker):
+	if not NodeSafety.is_alive_node(victim):
+		return
+
+	attacker = NodeSafety.safe_node(attacker) as Node
+	if attacker == null:
 		return
 
 	victim.set_meta(LAST_ATTACKER_META, attacker)
 
 
 static func get_attacker(victim: Node) -> Node:
-	if victim == null or not victim.has_meta(LAST_ATTACKER_META):
+	if not NodeSafety.is_alive_node(victim):
+		return null
+
+	if not victim.has_meta(LAST_ATTACKER_META):
 		return null
 
 	var attacker: Variant = victim.get_meta(LAST_ATTACKER_META)
-	if attacker == null or not attacker is Node or not is_instance_valid(attacker as Node):
+	if not NodeSafety.is_alive_node(attacker):
 		return null
 
 	return attacker as Node
+
+
+static func clear_attacker_record(victim: Node) -> void:
+	if victim == null or not is_instance_valid(victim):
+		return
+
+	if victim.has_meta(LAST_ATTACKER_META):
+		victim.remove_meta(LAST_ATTACKER_META)

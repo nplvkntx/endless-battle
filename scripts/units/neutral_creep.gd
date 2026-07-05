@@ -35,7 +35,7 @@ func take_damage(amount: float, attacker = null) -> void:
 
 
 func alert_to_attacker(attacker: Unit) -> void:
-	if attacker == null or not is_instance_valid(attacker):
+	if not NodeSafety.is_alive_node(attacker):
 		return
 
 	if _health_component.current_health <= 0:
@@ -49,13 +49,12 @@ func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
 
+	_clear_invalid_attack_target()
 	_process_camp_defense(delta)
 
 
 func _process_camp_defense(delta: float) -> void:
-	_clear_invalid_attack_target()
-
-	if _attack_target != null and not is_instance_valid(_attack_target):
+	if not NodeSafety.is_alive_node(_attack_target):
 		_attack_target = null
 		_returning_home = true
 
@@ -140,9 +139,11 @@ func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float
 
 
 func _on_health_depleted() -> void:
+	_attack_target = null
 	HeroXpRewards.notify_unit_killed(self)
 	_notify_camp_parent()
 	_health_bar.visible = false
+	die()
 	queue_free()
 
 

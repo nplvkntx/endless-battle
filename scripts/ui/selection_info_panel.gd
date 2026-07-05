@@ -670,7 +670,7 @@ func _hide_activity_progress_bar() -> void:
 
 func _configure_activity_tracking(building: Building) -> void:
 	_disconnect_activity_building_signals()
-	_tracked_activity_building = building
+	_tracked_activity_building = NodeSafety.safe_node(building) as Building
 
 	if _tracked_activity_building == null:
 		return

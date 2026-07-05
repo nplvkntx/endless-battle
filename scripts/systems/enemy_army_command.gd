@@ -158,7 +158,7 @@ static func pull_straggler_units_to_rally(
 
 	var stragglers: Array = []
 	for unit: Variant in collect_living_combat_units(tree):
-		if unit == null or not is_instance_valid(unit) or not unit is Node3D:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
 			continue
 
 		if horizontal_distance((unit as Node3D).global_position, rally_position) > max_distance:
@@ -167,11 +167,11 @@ static func pull_straggler_units_to_rally(
 	if stragglers.is_empty():
 		return
 
-	command_hold_at_rally(stragglers, rally_position)
+	command_hold_at_rally(stragglers, rally_position, EnemyUnitMission.Mission.REGROUP)
 
 
 static func is_hero_isolated_near_player_threat(tree: SceneTree, hero: Hero) -> bool:
-	if hero == null or not is_instance_valid(hero):
+	if not NodeSafety.is_alive_node(hero):
 		return false
 
 	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
@@ -206,7 +206,7 @@ static func can_commit_attack_wave(
 	var hero_in_wave: Hero = null
 
 	for unit: Variant in wave_units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if unit is Hero:
@@ -273,10 +273,7 @@ static func is_non_hero_combat_unit(node: Node) -> bool:
 
 
 static func is_living_combat_unit(node: Node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	if node.is_queued_for_deletion():
+	if not NodeSafety.is_alive_node(node):
 		return false
 
 	if not is_combat_unit(node):
@@ -343,10 +340,11 @@ static func filter_units_near_rally(
 	rally_position: Vector3,
 	max_distance: float = WAVE_REGROUP_MAX_DISTANCE
 ) -> Array:
+	units = NodeSafety.clean_node_array(units)
 	var nearby_units: Array = []
 
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if not unit is Node3D:
@@ -383,7 +381,47 @@ static func command_regroup_at_rally(tree: SceneTree, rally_position: Vector3) -
 
 	cancel_offensive_orders(tree)
 	var units: Array = collect_living_combat_units(tree)
-	command_hold_at_rally(units, rally_position)
+	command_hold_at_rally(units, rally_position, EnemyUnitMission.Mission.REGROUP)
+
+
+static func assign_reinforcement_regroup(tree: SceneTree, unit: Unit) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return
+
+	if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP):
+		return
+
+	command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.REGROUP)
+
+
+static func pull_reinforcement_units_to_rally(
+	tree: SceneTree,
+	rally_position: Vector3,
+	max_distance: float = WAVE_REGROUP_MAX_DISTANCE
+) -> void:
+	if rally_position == Vector3.ZERO:
+		return
+
+	var reinforcements: Array = []
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if mission != EnemyUnitMission.Mission.REGROUP and mission != EnemyUnitMission.Mission.IDLE:
+			continue
+
+		if horizontal_distance((unit as Node3D).global_position, rally_position) > max_distance:
+			reinforcements.append(unit)
+
+	if reinforcements.is_empty():
+		return
+
+	command_hold_at_rally(reinforcements, rally_position, EnemyUnitMission.Mission.REGROUP)
 
 
 static func build_regrouped_attack_wave_units(
@@ -594,7 +632,7 @@ static func estimate_military_power(units: Array) -> int:
 	var power: int = 0
 
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if not is_living_combat_unit(unit as Node):
@@ -759,14 +797,14 @@ static func resolve_wave_attack_destination(tree: SceneTree, enemy_base_position
 
 
 static func is_hero_healthy_enough_for_wave(hero: Hero) -> bool:
-	if hero == null or not is_instance_valid(hero):
+	if not NodeSafety.is_alive_node(hero):
 		return false
 
 	return get_health_ratio(hero) >= HERO_WAVE_JOIN_HP_RATIO
 
 
 static func get_health_ratio(node: Node) -> float:
-	if node == null or not is_instance_valid(node):
+	if not NodeSafety.is_alive_node(node):
 		return 0.0
 
 	var health_component: HealthComponent = node.get_node_or_null(
@@ -779,18 +817,19 @@ static func get_health_ratio(node: Node) -> float:
 
 
 static func command_retreat_hero(hero: Hero, rally_position: Vector3) -> void:
-	if hero == null or not is_instance_valid(hero):
+	if not NodeSafety.is_alive_node(hero):
 		return
 
 	if not is_living_combat_unit(hero):
 		return
 
 	_cancel_unit_offensive_orders(hero)
+	EnemyUnitMission.try_set_mission(hero, EnemyUnitMission.Mission.RETREAT)
 	_issue_hold_at_rally(hero, rally_position)
 
 
 static func _cancel_unit_offensive_orders(unit: Variant) -> void:
-	if unit == null or not is_instance_valid(unit):
+	if not NodeSafety.is_alive_node(unit):
 		return
 
 	if (unit as Object).has_method("cancel_attack_move"):
@@ -800,24 +839,37 @@ static func _cancel_unit_offensive_orders(unit: Variant) -> void:
 		(unit as Object).call("cancel_attack")
 
 
-static func command_attack_move(units: Array, destination: Vector3) -> void:
-	_issue_spaced_group_orders(units, destination, true)
+static func command_attack_move(
+	units: Array,
+	destination: Vector3,
+	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
+) -> void:
+	_issue_spaced_group_orders(units, destination, true, mission)
 
 
 static func command_defend_position(units: Array, position: Vector3) -> void:
-	command_attack_move(units, position)
+	command_attack_move(units, position, EnemyUnitMission.Mission.DEFEND)
 
 
 static func command_retreat_to(units: Array, position: Vector3) -> void:
-	_issue_spaced_group_orders(units, position, false)
+	_issue_spaced_group_orders(
+		units,
+		position,
+		false,
+		EnemyUnitMission.Mission.RETREAT
+	)
 
 
-static func command_hold_at_rally(units: Array, rally_position: Vector3) -> void:
-	_issue_spaced_group_orders(units, rally_position, false)
+static func command_hold_at_rally(
+	units: Array,
+	rally_position: Vector3,
+	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.REGROUP
+) -> void:
+	_issue_spaced_group_orders(units, rally_position, false, mission)
 
 
 static func _issue_attack_move(unit: Variant, destination: Vector3) -> void:
-	if unit == null or not is_instance_valid(unit):
+	if not NodeSafety.is_alive_node(unit):
 		return
 
 	if not is_living_combat_unit(unit as Node):
@@ -829,8 +881,15 @@ static func _issue_attack_move(unit: Variant, destination: Vector3) -> void:
 	(unit as Object).call("command_attack_move", destination)
 
 
-static func _issue_spaced_group_orders(units: Array, center: Vector3, use_attack_move: bool) -> void:
-	var ordered_units: Array = _order_units_for_formation(units)
+static func _issue_spaced_group_orders(
+	units: Array,
+	center: Vector3,
+	use_attack_move: bool,
+	mission: EnemyUnitMission.Mission
+) -> void:
+	units = NodeSafety.clean_node_array(units)
+	var commandable_units: Array = EnemyUnitMission.filter_commandable_units(units, mission)
+	var ordered_units: Array = _order_units_for_formation(commandable_units)
 	if ordered_units.is_empty():
 		return
 
@@ -845,14 +904,20 @@ static func _issue_spaced_group_orders(units: Array, center: Vector3, use_attack
 	)
 	for index: int in ordered_units.size():
 		var unit: Variant = ordered_units[index]
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		var target: Vector3 = move_targets[index]
+		if not EnemyUnitMission.should_reissue_move_order(unit as Node, target, mission):
+			continue
+
 		if use_attack_move:
 			_issue_attack_move(unit, target)
 		else:
 			_issue_hold_at_rally(unit, target)
+
+		EnemyUnitMission.try_set_mission(unit as Node, mission)
+		EnemyUnitMission.record_move_order(unit as Node, target, mission)
 
 
 static func _order_units_for_formation(units: Array) -> Array:
@@ -861,7 +926,7 @@ static func _order_units_for_formation(units: Array) -> Array:
 	var hero_units: Array = []
 
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if unit is Worker:
@@ -910,7 +975,7 @@ static func _compute_attack_formation_targets(
 	var ranged_count: int = 0
 	var hero_count: int = 0
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if is_hero_unit(unit as Node):
@@ -949,7 +1014,7 @@ static func _compute_attack_formation_targets(
 	var hero_index: int = 0
 
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			targets.append(destination)
 			continue
 
@@ -977,6 +1042,7 @@ static func _compute_attack_formation_targets(
 
 
 static func compute_army_center(units: Array) -> Vector3:
+	units = NodeSafety.clean_node_array(units)
 	if units.is_empty():
 		return Vector3.ZERO
 
@@ -984,7 +1050,7 @@ static func compute_army_center(units: Array) -> Vector3:
 	var count: int = 0
 
 	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if not unit is Node3D:
@@ -1003,7 +1069,7 @@ static func compute_army_center(units: Array) -> Vector3:
 
 
 static func _issue_hold_at_rally(unit: Variant, rally_position: Vector3) -> void:
-	if unit == null or not is_instance_valid(unit):
+	if not NodeSafety.is_alive_node(unit):
 		return
 
 	if not is_living_combat_unit(unit as Node):
@@ -1200,7 +1266,7 @@ static func _resolve_player_threat_cluster_position(
 	var count: int = 0
 
 	for unit: Variant in nearby_units:
-		if unit == null or not is_instance_valid(unit):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if not unit is Node3D:
@@ -1311,7 +1377,7 @@ static func _find_player_military_near_position(
 
 
 static func _is_player_military_unit(node: Node) -> bool:
-	if node == null or not is_instance_valid(node):
+	if not NodeSafety.is_alive_node(node):
 		return false
 
 	if node.is_queued_for_deletion():
@@ -1391,7 +1457,7 @@ static func _find_nearest_living_player_unit(
 
 
 static func _is_living_building(building: Building) -> bool:
-	if building == null or not is_instance_valid(building):
+	if not NodeSafety.is_alive_node(building):
 		return false
 
 	if building.is_queued_for_deletion():

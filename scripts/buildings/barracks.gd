@@ -166,7 +166,7 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-	unit.set_movement_target(_claim_enemy_rally_target())
+	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
 
 
 func _finalize_enemy_unit(unit: Unit) -> void:

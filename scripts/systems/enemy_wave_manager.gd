@@ -22,11 +22,13 @@ var _rebuilding_army_after_wave: bool = false
 var _last_wave_non_hero_count: int = 0
 var _match_start_msec: int = 0
 var _creep_manager: EnemyCreepManager = null
+var _director: EnemyStrategicDirector = null
 
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
 	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	_tracked_player_command_center = _resolve_player_command_center()
 	if _tracked_player_command_center != null:
 		_tracked_player_command_center.destroyed.connect(
@@ -283,6 +285,8 @@ func _on_wave_timer() -> void:
 	)
 	if not attack_commitment.get("can_commit", false):
 		_hold_army_when_too_weak_to_attack(rally_position)
+		if _director != null:
+			_director.notify_attack_failed()
 		_schedule_next_wave()
 		return
 
@@ -290,6 +294,13 @@ func _on_wave_timer() -> void:
 		get_tree(),
 		rally_position
 	)
+	if _director != null:
+		if not _director.should_prioritize_attack() and _should_delay_offensive_wave(rally_position):
+			_hold_army_for_creep_phase(rally_position)
+			_schedule_next_wave()
+			return
+		_director.set_attack_target_position(attack_destination)
+
 	if not EnemyArmyCommand.try_claim_army_mode(
 		EnemyArmyCommand.ArmyMode.ATTACKING,
 		true
@@ -297,7 +308,13 @@ func _on_wave_timer() -> void:
 		_schedule_next_wave()
 		return
 
-	EnemyArmyCommand.command_attack_move(wave_units, attack_destination)
+	EnemyArmyCommand.command_attack_move(
+		wave_units,
+		attack_destination,
+		EnemyUnitMission.Mission.ATTACK
+	)
+	if _director != null:
+		_director.notify_attack_launched()
 	_waves_launched += 1
 	_last_wave_non_hero_count = int(wave_plan.get("non_hero_count", 0))
 	_rebuilding_army_after_wave = true
@@ -393,6 +410,8 @@ func _enforce_army_regroup_when_waiting() -> void:
 	if army_mode == EnemyArmyCommand.ArmyMode.ATTACKING:
 		if EnemyArmyCommand.should_abort_offensive_push(get_tree()):
 			_abort_active_offensive_push(rally_position)
+			if _director != null:
+				_director.notify_army_losses()
 		return
 
 	var should_hold: bool = (
@@ -469,6 +488,9 @@ func _has_any_attack_target() -> bool:
 
 
 func _resolve_player_command_center() -> CommandCenter:
+	if not NodeSafety.is_alive_node(_tracked_player_command_center):
+		_tracked_player_command_center = null
+
 	if _tracked_player_command_center != null and _is_living_command_center(
 		_tracked_player_command_center
 	):

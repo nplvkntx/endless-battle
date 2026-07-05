@@ -219,7 +219,7 @@ func get_attack_facing_direction() -> Vector3:
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
-	if not is_instance_valid(target):
+	if not NodeSafety.is_alive_node(target):
 		return
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
@@ -227,7 +227,9 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	_cancel_power_strike()
 	_cancel_execute()
 	_assign_attack_approach_slot(target, assigned_slot)
-	_attack_target = target
+	_attack_target = NodeSafety.safe_node(target) as Node3D
+	if _attack_target == null:
+		return
 	_has_chase_target = false
 
 	if not _is_in_attack_range(_attack_target):
@@ -248,11 +250,7 @@ func cancel_attack_move() -> void:
 
 
 func cancel_attack() -> void:
-	if (
-		_attack_target != null
-		and is_instance_valid(_attack_target)
-		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
-	):
+	if NodeSafety.is_alive_node(_attack_target):
 		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
 	_attack_target = null
 	_attack_approach_slot = -1
@@ -263,9 +261,22 @@ func _sanitize_attack_target() -> void:
 	if _attack_target == null:
 		return
 
-	if not is_instance_valid(_attack_target):
+	if not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
 		_resume_attack_move()
+		return
+
+	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
+		cancel_attack()
+		_resume_attack_move()
+
+
+func _sanitize_ability_targets() -> void:
+	if not NodeSafety.is_alive_node(_power_strike_target):
+		_cancel_power_strike()
+
+	if not NodeSafety.is_alive_node(_execute_target):
+		_cancel_execute()
 
 
 func set_movement_target(target: Vector3) -> void:
@@ -471,17 +482,22 @@ func _resolve_ability_target() -> Node3D:
 
 
 func _begin_power_strike(target: Node3D) -> void:
-	if not is_instance_valid(target):
+	_power_strike_target = NodeSafety.safe_node(target) as Node3D
+	if _power_strike_target == null:
 		return
+
 	cancel_attack_move()
 	cancel_attack()
-	_power_strike_target = target
-	_power_strike_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
+	_power_strike_approach_slot = CombatTargetValidation.claim_attack_approach_slot(
+		_power_strike_target
+	)
 	_has_power_strike_pending = true
 
-	if not _is_in_attack_range(target):
+	if not _is_in_attack_range(_power_strike_target):
 		_set_move_destination(
-			_compute_attack_approach_position(target, _power_strike_approach_slot)
+			_compute_attack_approach_position(
+				_power_strike_target, _power_strike_approach_slot
+			)
 		)
 
 
@@ -609,6 +625,9 @@ func _on_power_strike_flash_finished() -> void:
 
 
 func _spawn_power_strike_hit_effect(target: Node3D) -> void:
+	if not NodeSafety.is_alive_node(target):
+		return
+
 	var effect: PowerStrikeHitEffect = POWER_STRIKE_HIT_EFFECT_SCENE.instantiate() as PowerStrikeHitEffect
 	if effect == null:
 		return
@@ -745,18 +764,21 @@ func _is_player_military_unit(node: Node) -> bool:
 
 
 func _begin_execute(target: Node3D) -> void:
-	if not is_instance_valid(target):
+	_execute_target = NodeSafety.safe_node(target) as Node3D
+	if _execute_target == null:
 		return
+
 	cancel_attack_move()
 	cancel_attack()
 	_cancel_power_strike()
-	_execute_target = target
-	_execute_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
+	_execute_approach_slot = CombatTargetValidation.claim_attack_approach_slot(
+		_execute_target
+	)
 	_has_execute_pending = true
 
-	if not _is_in_attack_range(target):
+	if not _is_in_attack_range(_execute_target):
 		_set_move_destination(
-			_compute_attack_approach_position(target, _execute_approach_slot)
+			_compute_attack_approach_position(_execute_target, _execute_approach_slot)
 		)
 
 
@@ -869,6 +891,9 @@ func _play_execute_lunge(target: Node3D) -> void:
 
 
 func _spawn_execute_hit_effect(target: Node3D) -> void:
+	if not NodeSafety.is_alive_node(target):
+		return
+
 	var effect: ExecuteHitEffect = EXECUTE_HIT_EFFECT_SCENE.instantiate() as ExecuteHitEffect
 	if effect == null:
 		return
@@ -944,6 +969,8 @@ func _damage_enemies_in_ground_slam_radius() -> void:
 
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
 		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
+			if not NodeSafety.is_alive_node(node):
+				continue
 			if not node is Node3D:
 				continue
 			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
@@ -1048,6 +1075,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_sanitize_attack_target()
+	_sanitize_ability_targets()
 
 	_tick_ground_slam_cooldown(delta)
 	_tick_divine_protection(delta)
@@ -1200,6 +1228,7 @@ func _on_health_depleted() -> void:
 		HeroXpRewards.notify_unit_killed(self)
 		if is_in_group(&"enemy_combat_units"):
 			remove_from_group(&"enemy_combat_units")
+	EnemyUnitMission.clear_unit_mission(self)
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
@@ -1211,8 +1240,20 @@ func _on_health_depleted() -> void:
 	queue_free()
 
 
+func _exit_tree() -> void:
+	cancel_attack_move()
+	cancel_attack()
+	_cancel_power_strike()
+	_cancel_execute()
+	EnemyUnitMission.clear_unit_mission(self)
+
+
 func _begin_chase() -> void:
-	if _attack_target == null or _has_chase_target:
+	if not NodeSafety.is_alive_node(_attack_target):
+		cancel_attack()
+		return
+
+	if _has_chase_target:
 		return
 
 	_set_move_destination(_compute_attack_approach_position(_attack_target))

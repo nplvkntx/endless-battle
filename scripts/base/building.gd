@@ -183,7 +183,22 @@ func take_damage(_amount: float, _attacker = null) -> void:
 
 ## Handles building destruction and notifies listeners through signals.
 func destroy_building() -> void:
+	_release_registered_builders_on_destroy()
+	NodeSafety.prepare_node_for_death(self)
 	destroyed.emit(self)
+
+
+func _release_registered_builders_on_destroy() -> void:
+	_prune_invalid_builders()
+
+	for builder: Worker in _registered_builders.duplicate():
+		if not NodeSafety.is_alive_node(builder):
+			continue
+
+		if builder.has_method(&"notify_building_destroyed"):
+			builder.notify_building_destroyed(self)
+
+	_registered_builders.clear()
 
 
 ## Shows an unfinished placeholder until a worker finishes construction.
@@ -385,7 +400,7 @@ func _footprint_offset_to_world(local_offset: Vector3) -> Vector3:
 
 
 func unregister_builder(worker: Worker) -> void:
-	if worker == null:
+	if worker == null or not is_instance_valid(worker):
 		return
 
 	var index: int = _registered_builders.find(worker)
@@ -398,11 +413,14 @@ func unregister_builder(worker: Worker) -> void:
 ## Called when a worker arrives at the build site.
 func register_builder(worker: Worker) -> void:
 	if building_state == STATE_COMPLETED:
-		if worker != null:
+		if worker != null and is_instance_valid(worker):
 			worker.on_building_construction_finished()
 		return
 
-	if worker != null and worker not in _registered_builders:
+	if worker == null or not is_instance_valid(worker):
+		return
+
+	if worker not in _registered_builders:
 		_registered_builders.append(worker)
 
 	if building_state == STATE_UNDER_CONSTRUCTION:

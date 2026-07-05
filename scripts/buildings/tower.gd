@@ -68,6 +68,9 @@ func _find_closest_enemy_in_range() -> Node3D:
 
 
 func _fire_projectile(target: Node3D) -> void:
+	if not NodeSafety.is_alive_node(target):
+		return
+
 	if not CombatTargetValidation.is_tower_attack_target(target):
 		return
 

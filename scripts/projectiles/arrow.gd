@@ -17,8 +17,8 @@ var _lifetime: float = 0.0
 
 
 func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Node = null) -> void:
-	_target = target if is_instance_valid(target) else null
-	_attacker = attacker if is_instance_valid(attacker) else null
+	_target = NodeSafety.safe_node(target) as Node3D
+	_attacker = NodeSafety.safe_node(attacker) as Node
 	_damage = damage
 	global_position = spawn_position
 
@@ -62,7 +62,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _is_target_alive() -> bool:
-	if _target == null or not is_instance_valid(_target):
+	if not NodeSafety.is_alive_node(_target):
 		_target = null
 		return false
 

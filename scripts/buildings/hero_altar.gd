@@ -299,10 +299,7 @@ func _spawn_enemy_hero() -> void:
 	if collision_shape != null:
 		collision_shape.disabled = false
 
-	EnemyArmyCommand.command_hold_at_rally(
-		[hero],
-		EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
-	)
+	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), hero)
 
 
 func _has_living_player_hero() -> bool:

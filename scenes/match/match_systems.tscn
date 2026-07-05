@@ -9,8 +9,12 @@
 [ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
 [ext_resource type="Script" uid="uid://dmawlogwv25xq" path="res://scripts/systems/enemy_creep_manager.gd" id="8_enemy_creep_manager"]
 [ext_resource type="Script" uid="uid://c8kdef3nse7mgr" path="res://scripts/systems/enemy_defense_manager.gd" id="9_enemy_defense_manager"]
+[ext_resource type="Script" uid="uid://d4stratdirector9" path="res://scripts/systems/enemy_strategic_director.gd" id="10_enemy_strategic_director"]
 
 [node name="MatchSystems" type="Node"]
+
+[node name="EnemyStrategicDirector" type="Node" parent="."]
+script = ExtResource("10_enemy_strategic_director")
 
 [node name="SelectionManager" type="Node" parent="." unique_id=53640150]
 script = ExtResource("1_selection_manager")

@@ -77,6 +77,7 @@ var _primary_command_center: CommandCenter = null
 var _train_swordsman_next: bool = true
 var _tick_active: bool = true
 var _shop_purchase_cooldown_ticks: int = 0
+var _director: EnemyStrategicDirector = null
 
 
 func _ready() -> void:
@@ -84,6 +85,7 @@ func _ready() -> void:
 
 
 func _begin_build_order() -> void:
+	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	_primary_command_center = _resolve_primary_command_center()
 	if _primary_command_center == null:
 		push_warning("EnemyBuildManager: enemy Command Center not found")
@@ -403,6 +405,9 @@ func _should_build_expansion_command_center() -> bool:
 	if _count_living_command_centers() >= 2:
 		return false
 
+	if _director != null and not _director.should_prioritize_expansion():
+		return false
+
 	if _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
 		return false
 
@@ -570,6 +575,8 @@ func _get_effective_desired_army_size() -> int:
 	var desired: int = _get_desired_army_size()
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		desired += MILITARY_DEFENSE_EXTRA_DESIRED
+	elif _director != null and _director.should_boost_army_production():
+		desired += 4
 
 	return desired
 
@@ -869,6 +876,11 @@ func _assign_nearest_builder(building: Building) -> void:
 		return
 
 	worker.command_build(building)
+	EnemyUnitMission.try_set_mission(
+		worker,
+		EnemyUnitMission.Mission.BUILD,
+		EnemyUnitMission.BUILD_COMMITMENT_SECONDS
+	)
 
 
 func _find_nearest_available_enemy_worker(

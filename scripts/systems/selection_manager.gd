@@ -708,6 +708,7 @@ func _purge_invalid_selection() -> void:
 
 
 func _purge_invalid_selected_units() -> void:
+	selected_units = NodeSafety.clean_node_array(selected_units)
 	var removed_any: bool = false
 
 	for index: int in range(selected_units.size() - 1, -1, -1):
@@ -862,33 +863,14 @@ func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
 
 
 func _is_selectable_unit(candidate: Variant) -> bool:
-	if candidate == null:
-		return false
-
-	if not is_instance_valid(candidate):
-		return false
-
-	if not candidate is Node:
-		return false
-
-	if not candidate is Unit:
-		return false
-
-	var unit: Unit = candidate as Unit
-	if unit.is_queued_for_deletion():
-		return false
-
-	if unit.is_in_group(&"enemies"):
-		return false
-
-	return true
+	return NodeSafety.is_alive_node(candidate) and candidate is Unit and not (candidate as Unit).is_in_group(&"enemies")
 
 
 func _get_commandable_selected_units() -> Array[Unit]:
 	var commandable_units: Array[Unit] = []
-	for unit: Unit in selected_units:
+	for unit: Unit in NodeSafety.clean_node_array(selected_units):
 		if _is_commandable_unit(unit):
-			commandable_units.append(unit)
+			commandable_units.append(unit as Unit)
 	return commandable_units
 
 

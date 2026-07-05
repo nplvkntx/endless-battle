@@ -21,12 +21,15 @@ const CREEP_XP_SHARE_RANGE: float = 18.0
 
 
 static func notify_unit_killed(victim: Node) -> void:
+	if not NodeSafety.is_alive_node(victim):
+		return
+
 	var killer: Node = CombatKillTracker.get_attacker(victim)
 	grant_for_kill(victim, killer)
 
 
 static func grant_for_kill(victim: Node, killer: Node) -> void:
-	if victim == null or not is_instance_valid(victim):
+	if not NodeSafety.is_alive_node(victim):
 		return
 
 	var granted_xp: int = 0

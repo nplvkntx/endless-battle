@@ -58,7 +58,11 @@ func _update_defense() -> void:
 			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
 			return
 
-		EnemyArmyCommand.command_attack_move(grouped_army, intercept_position)
+		EnemyArmyCommand.command_attack_move(
+			grouped_army,
+			intercept_position,
+			EnemyUnitMission.Mission.DEFEND
+		)
 		return
 
 	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.DEFENDING:

@@ -21,6 +21,11 @@ const MAX_CREEP_SETBACKS_BEFORE_ATTACK: int = 3
 
 var _tick_timer: float = 0.0
 var _consecutive_creep_setbacks: int = 0
+var _director: EnemyStrategicDirector = null
+
+
+func _ready() -> void:
+	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 
 
 func _process(delta: float) -> void:
@@ -59,6 +64,9 @@ func _update_creeping() -> void:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		return
 
+	if _director != null and not _director.should_prioritize_creep():
+		return
+
 	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
 	if not creep_plan.get("can_launch", false):
 		var full_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
@@ -70,6 +78,7 @@ func _update_creeping() -> void:
 		return
 
 	var creep_army: Array = creep_plan.get("units", [])
+	creep_army = NodeSafety.clean_node_array(creep_army)
 	if creep_army.is_empty():
 		return
 
@@ -91,10 +100,15 @@ func _update_creeping() -> void:
 
 	var army_power: int = _estimate_army_power(creep_army)
 	var camp: Node3D = _find_best_creep_camp(tree, rally_position, army_power)
-	if camp == null:
+	if camp == null or not is_instance_valid(camp):
 		if _has_uncleared_enemy_side_camps(tree, rally_position):
 			_record_creep_setback()
+		if _director != null:
+			_director.clear_creep_target()
 		return
+
+	if _director != null:
+		_director.set_creep_target(camp)
 
 	if _is_camp_cleared(tree, camp):
 		_reset_creep_setbacks()
@@ -111,7 +125,11 @@ func _update_creeping() -> void:
 	if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.CREEPING):
 		return
 
-	EnemyArmyCommand.command_attack_move(creep_army, attack_destination)
+	EnemyArmyCommand.command_attack_move(
+		creep_army,
+		attack_destination,
+		EnemyUnitMission.Mission.CREEP
+	)
 
 
 func _record_creep_setback() -> void:
@@ -133,9 +151,10 @@ func _has_uncleared_enemy_side_camps(tree: SceneTree, rally_position: Vector3) -
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
 	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
 	var creep_army: Array = creep_plan.get("units", [])
+	creep_army = NodeSafety.clean_node_array(creep_army)
 	if creep_army.is_empty():
 		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
-		if hero != null and is_instance_valid(hero):
+		if hero != null and NodeSafety.is_alive_node(hero):
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
@@ -145,7 +164,9 @@ func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
 
 func _should_abort_creep_push(tree: SceneTree, creep_army: Array) -> bool:
 	var non_hero_count: int = 0
-	for unit: Variant in creep_army:
+	for unit: Variant in NodeSafety.clean_node_array(creep_army):
+		if not NodeSafety.is_alive_node(unit):
+			continue
 		if unit is Hero:
 			continue
 		if EnemyArmyCommand.is_living_combat_unit(unit as Node):
@@ -165,7 +186,9 @@ func _build_regrouped_creep_army(tree: SceneTree, rally_position: Vector3) -> Di
 		CREEP_REGROUP_MAX_DISTANCE
 	)
 	var non_hero_count: int = 0
-	for unit: Variant in regrouped_units:
+	for unit: Variant in NodeSafety.clean_node_array(regrouped_units):
+		if not NodeSafety.is_alive_node(unit):
+			continue
 		if unit is Hero:
 			continue
 		non_hero_count += 1
@@ -227,6 +250,9 @@ func _find_best_creep_camp(
 	var best_distance: float = INF
 
 	for camp: Node3D in _collect_creep_camps(tree):
+		if camp == null or not is_instance_valid(camp):
+			continue
+
 		if not _is_enemy_side_camp(camp, rally_position, tree):
 			continue
 
@@ -288,6 +314,9 @@ func _is_enemy_side_camp(camp: Node3D, enemy_rally: Vector3, tree: SceneTree) ->
 
 
 func _is_camp_cleared(tree: SceneTree, camp: Node3D) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return true
+
 	return _count_living_creeps_near(tree, camp.global_position, CAMP_CLEAR_RADIUS) == 0
 
 
@@ -296,6 +325,9 @@ func _resolve_camp_attack_destination(
 	camp: Node3D,
 	from_position: Vector3
 ) -> Vector3:
+	if camp == null or not is_instance_valid(camp):
+		return from_position
+
 	var nearest_creep: Node3D = _find_nearest_living_creep_at_camp(tree, camp, from_position)
 	if nearest_creep != null:
 		return nearest_creep.global_position
@@ -330,6 +362,9 @@ func _find_nearest_living_creep_at_camp(
 
 
 func _is_army_engaging_camp(tree: SceneTree, army: Array, camp: Node3D) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return false
+
 	if _count_living_creeps_near(tree, camp.global_position, CAMP_ENGAGEMENT_RADIUS) == 0:
 		return false
 
@@ -366,8 +401,8 @@ func _count_living_creeps_near(tree: SceneTree, position: Vector3, radius: float
 func _estimate_army_power(units: Array) -> int:
 	var power: int = 0
 
-	for unit: Variant in units:
-		if unit == null or not is_instance_valid(unit):
+	for unit: Variant in NodeSafety.clean_node_array(units):
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
 		if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
@@ -419,10 +454,7 @@ func _estimate_camp_power(camp: Node3D) -> int:
 
 
 func _is_living_creep(node: Node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	if node.is_queued_for_deletion():
+	if not NodeSafety.is_alive_node(node):
 		return false
 
 	if not CombatTargetValidation.is_neutral_creep(node):

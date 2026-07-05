@@ -49,19 +49,35 @@ static func is_neutral_creep(target: Variant) -> bool:
 
 
 static func is_valid_combat_target(target: Variant) -> bool:
-	if target == null:
-		return false
-	if not is_instance_valid(target):
-		return false
-
-	var node: Node = target as Node
-	if node != null and node.is_queued_for_deletion():
+	if not NodeSafety.is_alive_node(target):
 		return false
 
 	if not _can_receive_damage(target):
 		return false
 
 	return _is_alive(target)
+
+
+static func clear_target_combat_state(target: Node) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	clear_attack_approach_slots(target)
+	CombatKillTracker.clear_attacker_record(target)
+
+
+static func purge_stale_attack_slots() -> int:
+	var removed: int = 0
+
+	for target_id: Variant in _attack_slot_counter_by_target.keys():
+		var node: Variant = instance_from_id(int(target_id))
+		if NodeSafety.is_alive_node(node):
+			continue
+
+		_attack_slot_counter_by_target.erase(target_id)
+		removed += 1
+
+	return removed
 
 
 static func is_attackable_enemy_building(target: Variant) -> bool:
@@ -280,20 +296,11 @@ static func get_target_current_health(target: Variant) -> int:
 
 
 static func sanitize_damage_attacker(attacker: Variant) -> Node:
-	if attacker == null:
+	var safe_attacker: Variant = NodeSafety.safe_node(attacker)
+	if safe_attacker == null or not safe_attacker is Node:
 		return null
 
-	if not is_instance_valid(attacker):
-		return null
-
-	if not attacker is Node:
-		return null
-
-	var node: Node = attacker as Node
-	if node.is_queued_for_deletion():
-		return null
-
-	return node
+	return safe_attacker as Node
 
 
 static func apply_damage_to_target(target: Variant, amount: float, attacker = null) -> bool:
@@ -507,6 +514,12 @@ static func compute_attack_approach_position(
 	stopping_distance: float,
 	slot_index: int = 0
 ) -> Vector3:
+	if attacker == null or not is_instance_valid(attacker):
+		return Vector3.ZERO
+
+	if target == null or not is_instance_valid(target):
+		return attacker.global_position
+
 	var target_center: Vector3 = target.global_position
 	var to_attacker: Vector3 = attacker.global_position - target_center
 	to_attacker.y = 0.0
