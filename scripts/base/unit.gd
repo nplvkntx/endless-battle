@@ -80,14 +80,15 @@ func set_selected(selected: bool) -> void:
 		return
 
 	is_selected = selected
-	if _selection_indicator:
-		_selection_indicator.visible = selected
+	SelectionGlow.set_selection_glow_selected(self, selected)
 
 
 ## Shows or hides the selection ring while inspecting enemy/neutral entities.
 func set_inspected(inspected: bool) -> void:
-	if _selection_indicator:
-		_selection_indicator.visible = inspected
+	if inspected:
+		SelectionGlow.set_selection_glow_selected(self, true)
+	elif not is_selected:
+		SelectionGlow.set_selection_glow_selected(self, false)
 
 
 ## Sets a single move target. Called only when a move command is issued.

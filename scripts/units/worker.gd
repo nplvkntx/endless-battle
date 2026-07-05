@@ -86,6 +86,36 @@ func _ready() -> void:
 	_configure_task_navigation_agent()
 	if _is_enemy_worker():
 		call_deferred("_notify_enemy_worker_needs_gather_job")
+	call_deferred("_hide_worker_floor_disc")
+
+
+func apply_team_visuals() -> void:
+	super.apply_team_visuals()
+	_hide_worker_floor_disc()
+
+
+func set_selected(selected: bool) -> void:
+	super.set_selected(selected)
+	_hide_worker_floor_disc()
+
+
+func set_inspected(inspected: bool) -> void:
+	super.set_inspected(inspected)
+	_hide_worker_floor_disc()
+
+
+func _hide_worker_floor_disc() -> void:
+	var accent_marker := get_node_or_null("TeamAccentMarker") as MeshInstance3D
+	if accent_marker != null:
+		accent_marker.visible = false
+
+	var selection_indicator := get_node_or_null("SelectionIndicator") as Node3D
+	if selection_indicator != null:
+		selection_indicator.visible = false
+
+	var ring := get_node_or_null("SelectionIndicator/Ring") as MeshInstance3D
+	if ring != null:
+		ring.visible = false
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
