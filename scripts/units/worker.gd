@@ -27,6 +27,7 @@ const CONSTRUCTION_REPATH_COOLDOWN: float = 1.25
 const BUILD_START_RANGE: float = 0.5
 ## Imported GLTF root (CharacterArmature): parent of skeleton bones + skinned mesh.
 const WORKER_ARMATURE_PATH: NodePath = ^"MeshInstance3D/WorkerModel"
+const DEBUG_AI_WORKER_GATHER: bool = false
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -70,7 +71,16 @@ var _construction_repath_cooldown: float = 0.0
 var _wood_chop_spot: Vector3 = Vector3.ZERO
 var _wood_chop_spot_valid: bool = false
 var _locked_wood_tree: WoodTree = null
+var _pinned_starting_gold_mine: GoldMine = null
 var _work_armature_flip_active: bool = false
+var _last_gather_command_source: StringName = &""
+var _ai_unstuck_active: bool = false
+var _ai_unstuck_target: Vector3 = Vector3.ZERO
+var _ai_unstuck_time: float = 0.0
+var _ai_unstuck_watch_position: Vector3 = Vector3.ZERO
+var _ai_unstuck_watch_time: float = 0.0
+var _ai_unstuck_cooldown: float = 0.0
+var _ai_unstuck_direction_offset: int = 0
 
 
 func _ready() -> void:
@@ -131,7 +141,7 @@ func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
 			return UnitVisualAnimator.LoopState.WORK
 		return UnitVisualAnimator.LoopState.IDLE
 
-	if _task_nudge_active:
+	if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
 		return UnitVisualAnimator.LoopState.MOVE
 
 	if _is_on_task_movement() and has_move_target:
@@ -290,6 +300,9 @@ func _sanitize_stored_targets() -> void:
 	if not NodeSafety.is_alive_node(_locked_wood_tree):
 		_locked_wood_tree = null
 
+	if not NodeSafety.is_alive_node(_pinned_starting_gold_mine):
+		_pinned_starting_gold_mine = null
+
 	if not NodeSafety.is_alive_node(_assigned_dropoff):
 		_assigned_dropoff = null
 
@@ -311,6 +324,7 @@ func _cancel_build_trip() -> void:
 	_reset_construction_stuck_watch()
 	_disable_task_navigation()
 	_reset_task_corner_nudge()
+	_reset_ai_unstuck_state()
 
 
 func _configure_faction_groups() -> void:
@@ -363,7 +377,9 @@ func _physics_process(delta: float) -> void:
 
 	var position_before: Vector3 = global_position
 
-	if _task_nudge_active:
+	if _is_enemy_worker() and WorkerAiUnstuck.is_active(self):
+		WorkerAiUnstuck.process_movement(self, delta)
+	elif _task_nudge_active:
 		_process_task_corner_nudge(delta)
 	elif _is_on_task_movement() and has_move_target:
 		var arrived: bool = false
@@ -384,15 +400,18 @@ func _physics_process(delta: float) -> void:
 		else:
 			if _build_trip_state == BuildTripState.TO_BUILDING:
 				_try_commit_construction_if_in_range()
-			else:
+			elif not _is_enemy_worker():
 				_update_task_corner_stuck_detection(delta, position_before)
 	elif has_move_target:
 		super._physics_process(delta)
 	else:
 		velocity = Vector3.ZERO
 
-	_update_gather_stuck_recovery(delta)
-	_update_construction_stuck_recovery(delta)
+	if _is_enemy_worker():
+		WorkerAiUnstuck.update_detection(self, delta)
+	else:
+		_update_gather_stuck_recovery(delta)
+		_update_construction_stuck_recovery(delta)
 	_update_gather_trip()
 	_update_build_trip()
 
@@ -430,6 +449,14 @@ func _reset_task_corner_nudge() -> void:
 	_task_nudge_side_attempts = 0
 	_task_nudge_side_sign = 1.0
 	_reset_gather_stuck_watch()
+
+
+func _reset_ai_unstuck_state() -> void:
+	_ai_unstuck_active = false
+	_ai_unstuck_target = Vector3.ZERO
+	_ai_unstuck_time = 0.0
+	_ai_unstuck_direction_offset = 0
+	WorkerAiUnstuck.reset_watch(self)
 
 
 func _reset_gather_stuck_watch() -> void:
@@ -674,27 +701,55 @@ func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) 
 	if not _is_alive():
 		return
 
+	_last_gather_command_source = &"command_gather_gold_mine"
 	_start_gathering(gold_mine, player_ordered)
+	_debug_log_ai_gather_state("command_gather_gold_mine")
 
 
 func command_gather_tree(tree: WoodTree, player_ordered: bool = true) -> void:
 	if not _is_alive():
 		return
 
+	_last_gather_command_source = &"command_gather_tree"
 	_start_gathering(tree, player_ordered)
+	_debug_log_ai_gather_state("command_gather_tree")
+
+
+func pin_starting_gold_mine(gold_mine: GoldMine) -> void:
+	if gold_mine == null or not is_instance_valid(gold_mine):
+		return
+
+	_pinned_starting_gold_mine = gold_mine
+
+
+func get_pinned_starting_gold_mine() -> GoldMine:
+	if not NodeSafety.is_alive_node(_pinned_starting_gold_mine):
+		_pinned_starting_gold_mine = null
+		return null
+
+	return _pinned_starting_gold_mine
 
 
 func _start_gathering(source: GatherableResource, player_ordered: bool = true) -> void:
 	_cancel_build_trip()
 	cancel_gathering()
 	if source == null or not is_instance_valid(source):
+		_debug_log_ai_gather_state("start_gathering_invalid_source")
 		return
 
 	if (
 		not player_ordered
 		and CreepCampSafety.is_resource_guarded_by_active_camp(source, get_tree())
 	):
+		_debug_log_ai_gather_state("start_gathering_creep_guarded")
 		return
+
+	if source is GoldMine and _is_enemy_worker():
+		var pinned_mine: GoldMine = get_pinned_starting_gold_mine()
+		if pinned_mine != null:
+			source = pinned_mine
+		else:
+			pin_starting_gold_mine(source as GoldMine)
 
 	if source is WoodTree:
 		var wood_tree: WoodTree = _select_wood_tree(source as WoodTree, player_ordered)
@@ -728,6 +783,7 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 	_clear_wood_chop_spot()
 	_gather_state = GatherTripState.TO_SOURCE
 	_set_movement_to_gather_source(source)
+	_debug_log_ai_gather_state("start_gathering_committed")
 
 
 func cancel_gathering() -> void:
@@ -745,6 +801,7 @@ func cancel_gathering() -> void:
 	_clear_wood_chop_spot()
 	_disable_task_navigation()
 	_reset_task_corner_nudge()
+	_reset_ai_unstuck_state()
 
 
 func start_construction_order(building: Building) -> void:
@@ -816,14 +873,14 @@ func _update_gather_trip() -> void:
 
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
-			if _task_nudge_active:
+			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
 				return
 			if _attempt_source_proximity_resolve():
 				return
 			if not has_move_target:
 				_handle_arrived_at_source()
 		GatherTripState.TO_COMMAND_CENTER:
-			if _task_nudge_active:
+			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
 				return
 			if _carried_amount > 0:
 				_ensure_returning_to_current_dropoff()
@@ -844,7 +901,7 @@ func _update_build_trip() -> void:
 
 	match _build_trip_state:
 		BuildTripState.TO_BUILDING:
-			if _task_nudge_active:
+			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
 				return
 			if _try_commit_construction_if_in_range():
 				return
@@ -877,6 +934,7 @@ func _commit_to_construction() -> void:
 	_construction_target_point_valid = false
 	_disable_task_navigation()
 	_reset_task_corner_nudge()
+	_reset_ai_unstuck_state()
 	_reset_construction_stuck_watch()
 	velocity = Vector3.ZERO
 	_begin_construction_wait()
@@ -1164,9 +1222,17 @@ func _update_gather_stuck_recovery(delta: float) -> void:
 		_reset_gather_stuck_watch()
 		return
 
-	if _task_nudge_active or not has_move_target:
+	if _task_nudge_active:
 		_reset_gather_stuck_watch()
 		return
+
+	if not has_move_target:
+		var waiting_to_start_gather: bool = (
+			_gather_state == GatherTripState.TO_SOURCE and _has_valid_gather_source()
+		)
+		if not waiting_to_start_gather:
+			_reset_gather_stuck_watch()
+			return
 
 	if _gather_state == GatherTripState.TO_SOURCE and _is_gathering_wood():
 		if _wood_chop_spot_valid and _is_near_wood_chop_spot():
@@ -1199,6 +1265,10 @@ func _attempt_gather_stuck_recovery() -> void:
 
 		if not _has_valid_gather_source():
 			_handle_gather_source_lost()
+			return
+
+		if not has_move_target and not _task_has_saved_destination:
+			_set_movement_to_gather_source(_get_valid_gather_source())
 			return
 
 		if _advance_task_approach_candidate():
@@ -1601,22 +1671,26 @@ func _try_reassign_gather_source() -> bool:
 		return false
 
 	if resource_id == &"gold":
-		var scene_root: Node = get_tree().current_scene
-		if scene_root == null:
-			return false
+		var gold_mine: GoldMine = null
+		if _is_enemy_worker():
+			gold_mine = get_pinned_starting_gold_mine()
+		if gold_mine == null:
+			var scene_root: Node = get_tree().current_scene
+			if scene_root == null:
+				return false
 
-		var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
-			&"gold",
-			global_position,
-			scene_root,
-			_is_enemy_worker(),
-			null,
-			false
-		)
-		if replacement == null or not is_instance_valid(replacement) or not replacement is GoldMine:
-			return false
+			var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
+				&"gold",
+				global_position,
+				scene_root,
+				_is_enemy_worker(),
+				null,
+				false
+			)
+			if replacement == null or not is_instance_valid(replacement) or not replacement is GoldMine:
+				return false
 
-		var gold_mine: GoldMine = replacement as GoldMine
+			gold_mine = replacement as GoldMine
 		if not gold_mine.can_gather():
 			return false
 
@@ -1698,6 +1772,7 @@ func _finish_gathering_idle() -> void:
 	_clear_wood_chop_spot()
 
 	if _is_enemy_worker():
+		_debug_log_ai_gather_state("finish_gathering_idle")
 		_notify_enemy_worker_needs_gather_job()
 
 
@@ -1740,16 +1815,92 @@ func is_enemy_gather_fallback_idle() -> bool:
 	if is_carrying_gathered_resources():
 		return false
 
+	match _gather_state:
+		GatherTripState.GATHER_WAIT:
+			return false
+		GatherTripState.TO_COMMAND_CENTER:
+			return false
+		GatherTripState.TO_SOURCE:
+			if _has_valid_gather_source():
+				if has_move_target or _task_has_saved_destination:
+					return false
+				# Assigned to gather but movement never started (nav not ready).
+				return true
+
 	if needs_gather_target_reassignment():
 		return true
 
-	if not is_busy_with_task() and not has_move_target:
-		return true
+	return not is_busy_with_task() and not has_move_target
 
-	if is_busy_with_task() and not has_move_target:
-		return true
 
-	return false
+func is_on_active_gather_trip() -> bool:
+	if _build_trip_state != BuildTripState.IDLE:
+		return false
+
+	match _gather_state:
+		GatherTripState.GATHER_WAIT, GatherTripState.TO_COMMAND_CENTER:
+			return true
+		GatherTripState.TO_SOURCE:
+			return _has_valid_gather_source()
+		_:
+			return false
+
+
+func _debug_log_ai_gather_state(trigger: String) -> void:
+	if not DEBUG_AI_WORKER_GATHER or not _is_enemy_worker():
+		return
+
+	var source_name: String = "none"
+	var source: GatherableResource = _get_valid_gather_source()
+	if source != null and is_instance_valid(source):
+		source_name = source.name
+
+	var dropoff_name: String = "none"
+	var dropoff: CommandCenter = _assigned_dropoff
+	if dropoff == null:
+		dropoff = _return_dropoff
+	if dropoff != null and is_instance_valid(dropoff):
+		dropoff_name = dropoff.name
+
+	var nav_destination: Vector3 = (
+		_task_movement_destination if _task_has_saved_destination else Vector3.ZERO
+	)
+	var idle_reason: String = "active"
+	if is_enemy_gather_fallback_idle():
+		if needs_gather_target_reassignment():
+			idle_reason = "needs_reassignment"
+		elif not is_busy_with_task() and not has_move_target:
+			idle_reason = "no_task_no_move"
+		elif (
+			_gather_state == GatherTripState.TO_SOURCE
+			and _has_valid_gather_source()
+			and not has_move_target
+			and not _task_has_saved_destination
+		):
+			idle_reason = "to_source_no_move"
+		else:
+			idle_reason = "fallback_idle"
+
+	print(
+		(
+			"[AI Worker %s] %s | gather=%s build=%s carry=%d/%s "
+			+ "source=%s dropoff=%s nav=%s move=%s cmd=%s idle=%s"
+		)
+		% [
+			name,
+			trigger,
+			GatherTripState.keys()[_gather_state],
+			BuildTripState.keys()[_build_trip_state],
+			_carried_amount,
+			_assigned_resource_id,
+			source_name,
+			dropoff_name,
+			nav_destination,
+			has_move_target,
+			_last_gather_command_source,
+			idle_reason,
+		]
+	)
 
 
 func _get_dropoff_search_position() -> Vector3:
@@ -1936,6 +2087,7 @@ func _lock_wood_gathering_position() -> void:
 	_task_has_saved_destination = false
 	_disable_task_navigation()
 	_reset_task_corner_nudge()
+	_reset_ai_unstuck_state()
 	velocity = Vector3.ZERO
 
 

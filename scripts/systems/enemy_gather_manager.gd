@@ -16,12 +16,16 @@ const RESOURCE_CRITICAL_THRESHOLD: int = 100
 const TARGET_GOLD_SHIFT_THRESHOLD: int = 2
 const MIN_WOOD_WORKERS_WHEN_TREES_EXIST: int = 1
 const FALLBACK_IDLE_NEAR_CC_RADIUS: float = 8.0
+const STARTING_GOLD_WORKERS: int = 4
+const NAV_READY_MAX_FRAMES: int = 60
+const DEBUG_AI_WORKER_GATHER: bool = false
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gold_mine_path: NodePath
 
 var _reassign_active: bool = true
 var _cached_target_gold: int = -1
+var _starting_gold_mine: GoldMine = null
 
 
 func _ready() -> void:
@@ -30,8 +34,15 @@ func _ready() -> void:
 
 func _initial_assign_and_schedule() -> void:
 	# Wait for scene nodes, navigation agents, and the nav mesh bake to settle.
-	await get_tree().process_frame
-	await get_tree().process_frame
+	var frames_waited: int = 0
+	while frames_waited < NAV_READY_MAX_FRAMES:
+		await get_tree().process_frame
+		frames_waited += 1
+		if _is_enemy_navigation_ready():
+			break
+
+	_starting_gold_mine = _resolve_starting_gold_mine()
+	_assign_starting_workers()
 	_rebalance_gather_workers()
 	call_deferred("_rebalance_gather_workers")
 	_schedule_reassign()
@@ -69,17 +80,17 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false) -> bool:
 	if worker == null or not is_instance_valid(worker):
 		return false
 
+	if not _can_assign_gather_job(worker):
+		_debug_log_assign(worker, "blocked_by_mission", prefer_gold)
+		return false
+
 	if _resolve_enemy_command_center() == null:
 		return false
 
-	var gold_mine: GoldMine = _resolve_best_safe_gold_mine(worker.global_position)
-	if not _is_valid_gold_mine(gold_mine):
-		var fallback_mine: GoldMine = _resolve_gold_mine()
-		if _is_valid_gold_mine(fallback_mine):
-			gold_mine = fallback_mine
-
+	var gold_mine: GoldMine = _resolve_starting_gold_mine()
 	var trees: Array[WoodTree] = _resolve_safe_trees()
 	if gold_mine == null and trees.is_empty():
+		_debug_log_assign(worker, "no_resources", prefer_gold)
 		return false
 
 	if prefer_gold and _try_assign_gold_gather(worker, gold_mine):
@@ -169,6 +180,38 @@ func _rebalance_gather_workers() -> void:
 	_scan_fallback_idle_enemy_workers()
 
 
+func _assign_starting_workers() -> void:
+	var command_center: CommandCenter = _resolve_enemy_command_center()
+	if command_center == null:
+		return
+
+	var gather_pool: Array[Worker] = _collect_gather_pool(command_center.global_position)
+	if gather_pool.is_empty():
+		return
+
+	var gold_assigned: int = 0
+	for worker: Worker in gather_pool:
+		if gold_assigned < STARTING_GOLD_WORKERS:
+			if assign_gather_job(worker, true):
+				gold_assigned += 1
+		else:
+			assign_gather_job(worker, false)
+
+
+func _is_enemy_navigation_ready() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not _is_valid_worker(node):
+			continue
+
+		var agent: NavigationAgent3D = (
+			node.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
+		)
+		if agent != null and WorkerTaskNavigation.can_use(agent):
+			return true
+
+	return false
+
+
 func _append_worker_to_gather_bucket(
 	worker: Worker, gold_workers: Array[Worker], wood_workers: Array[Worker]
 ) -> void:
@@ -237,14 +280,6 @@ func _is_idle_gather_worker(worker: Worker) -> bool:
 		return false
 
 	if worker.needs_gather_target_reassignment():
-		return true
-
-	# Gather command was issued before navigation was ready and never started moving.
-	if (
-		worker.is_busy_with_task()
-		and not worker.has_move_target
-		and not worker.is_constructing()
-	):
 		return true
 
 	return false
@@ -354,7 +389,15 @@ func _scan_fallback_idle_enemy_workers() -> void:
 		if not _is_fallback_idle_enemy_worker(worker, command_center):
 			continue
 
-		var prefer_gold: bool = active_gold < target_gold
+		var assigned_id: StringName = worker.get_assigned_gather_resource_id()
+		var prefer_gold: bool
+		if assigned_id == &"gold":
+			prefer_gold = true
+		elif assigned_id == &"wood":
+			prefer_gold = false
+		else:
+			prefer_gold = active_gold < target_gold
+
 		if assign_gather_job(worker, prefer_gold):
 			if worker.get_assigned_gather_resource_id() == &"gold":
 				active_gold += 1
@@ -381,12 +424,14 @@ func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
 	if not _is_valid_gold_mine(gold_mine):
 		return false
 
-	if not EnemyUnitMission.can_override_mission(worker, EnemyUnitMission.Mission.ECONOMY):
+	if not _can_assign_gather_job(worker):
 		return false
 
+	worker.pin_starting_gold_mine(gold_mine)
 	worker.command_gather_gold_mine(gold_mine, false)
 	if not worker.needs_gather_target_reassignment():
 		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
+		_debug_log_assign(worker, "assigned_gold", true)
 	return not worker.needs_gather_target_reassignment()
 
 
@@ -395,12 +440,13 @@ func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
 	if tree == null or not tree.can_gather():
 		return false
 
-	if not EnemyUnitMission.can_override_mission(worker, EnemyUnitMission.Mission.ECONOMY):
+	if not _can_assign_gather_job(worker):
 		return false
 
 	worker.command_gather_tree(tree, false)
 	if not worker.needs_gather_target_reassignment():
 		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
+		_debug_log_assign(worker, "assigned_wood", false)
 	return not worker.needs_gather_target_reassignment()
 
 
@@ -511,6 +557,8 @@ func _collect_gather_pool(command_center_position: Vector3) -> Array[Worker]:
 
 func _pick_worker_to_reassign(workers: Array[Worker]) -> Worker:
 	for worker: Worker in workers:
+		if not _is_idle_gather_worker(worker):
+			continue
 		if _can_reassign_worker(worker):
 			return worker
 
@@ -524,10 +572,39 @@ func _can_reassign_worker(worker: Worker) -> bool:
 	if worker.is_on_construction_trip():
 		return false
 
+	if worker.has_method(&"is_enemy_gather_fallback_idle"):
+		if not worker.is_enemy_gather_fallback_idle():
+			return false
+
 	if EnemyUnitMission.get_unit_mission(worker) == EnemyUnitMission.Mission.BUILD:
 		return false
 
 	return not worker.is_carrying_gathered_resources()
+
+
+func _can_assign_gather_job(worker: Worker) -> bool:
+	if worker == null or not is_instance_valid(worker):
+		return false
+
+	if worker.is_on_construction_trip():
+		return false
+
+	if worker.is_carrying_gathered_resources():
+		return false
+
+	if worker.has_method(&"is_enemy_gather_fallback_idle"):
+		if not worker.is_enemy_gather_fallback_idle():
+			return false
+
+	match EnemyUnitMission.get_unit_mission(worker):
+		EnemyUnitMission.Mission.BUILD:
+			return false
+		EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.DEFEND:
+			return false
+		EnemyUnitMission.Mission.CREEP, EnemyUnitMission.Mission.RETREAT:
+			return false
+		_:
+			return true
 
 
 func _pick_tree_for_worker(worker: Worker, trees: Array[WoodTree]) -> WoodTree:
@@ -561,6 +638,19 @@ func _resolve_enemy_command_center() -> CommandCenter:
 	return null
 
 
+func _resolve_starting_gold_mine() -> GoldMine:
+	if _is_valid_gold_mine(_starting_gold_mine):
+		return _starting_gold_mine
+
+	var configured_mine: GoldMine = _resolve_gold_mine()
+	if _is_valid_gold_mine(configured_mine):
+		_starting_gold_mine = configured_mine
+		return configured_mine
+
+	_starting_gold_mine = null
+	return null
+
+
 func _resolve_best_safe_gold_mine(near_position: Vector3) -> GoldMine:
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
@@ -581,11 +671,7 @@ func _resolve_best_safe_gold_mine(near_position: Vector3) -> GoldMine:
 
 
 func _resolve_safe_gold_mine() -> GoldMine:
-	var command_center: CommandCenter = _resolve_enemy_command_center()
-	if command_center == null:
-		return null
-
-	return _resolve_best_safe_gold_mine(command_center.global_position)
+	return _resolve_starting_gold_mine()
 
 
 func _resolve_safe_trees() -> Array[WoodTree]:
@@ -677,4 +763,22 @@ func _is_valid_gold_mine(gold_mine: GoldMine) -> bool:
 		and not gold_mine.is_queued_for_deletion()
 		and gold_mine.can_gather()
 		and WorkerGathering.is_safe_gather_source(gold_mine, get_tree())
+	)
+
+
+func _debug_log_assign(worker: Worker, reason: String, prefer_gold: bool) -> void:
+	if not DEBUG_AI_WORKER_GATHER or worker == null:
+		return
+
+	print(
+		"[EnemyGatherManager] %s worker=%s prefer_gold=%s assigned=%s idle=%s"
+		% [
+			reason,
+			worker.name,
+			prefer_gold,
+			worker.get_assigned_gather_resource_id(),
+			worker.is_enemy_gather_fallback_idle()
+			if worker.has_method(&"is_enemy_gather_fallback_idle")
+			else false,
+		]
 	)
