@@ -25,6 +25,8 @@ const CONSTRUCTION_STUCK_RECOVERY_DELAY: float = 2.0
 const CONSTRUCTION_STUCK_RECOVERY_COOLDOWN: float = 0.75
 const CONSTRUCTION_REPATH_COOLDOWN: float = 1.25
 const BUILD_START_RANGE: float = 0.5
+## Imported GLTF root (CharacterArmature): parent of skeleton bones + skinned mesh.
+const WORKER_ARMATURE_PATH: NodePath = ^"MeshInstance3D/WorkerModel"
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -68,6 +70,7 @@ var _construction_repath_cooldown: float = 0.0
 var _wood_chop_spot: Vector3 = Vector3.ZERO
 var _wood_chop_spot_valid: bool = false
 var _locked_wood_tree: WoodTree = null
+var _work_armature_flip_active: bool = false
 
 
 func _ready() -> void:
@@ -138,6 +141,67 @@ func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
 		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run"],
 		UnitVisualAnimator.STATE_WORK: [&"PickUp"],
 	})
+
+
+func _is_playing_work_animation() -> bool:
+	return get_visual_loop_state() == UnitVisualAnimator.LoopState.WORK
+
+
+func _get_work_facing_target() -> Node3D:
+	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+		return _building_target
+	if _gather_state == GatherTripState.GATHER_WAIT:
+		return _get_valid_gather_source() as Node3D
+	return null
+
+
+func face_work_target(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	var target_position: Vector3 = target.global_position
+	target_position.y = global_position.y
+	look_at(target_position, Vector3.UP)
+
+	if _visual_pivot != null and is_instance_valid(_visual_pivot):
+		_visual_pivot.rotation_degrees.y = 0.0
+
+
+func set_work_armature_flip(enabled: bool) -> void:
+	var armature: Node3D = get_node_or_null(WORKER_ARMATURE_PATH) as Node3D
+	if armature == null:
+		return
+
+	armature.rotation_degrees.y = 180.0 if enabled else 0.0
+	_work_armature_flip_active = enabled
+
+
+func _clear_work_facing() -> void:
+	rotation.y = 0.0
+	set_work_armature_flip(false)
+	_visual_facing_initialized = false
+
+
+func _update_work_facing() -> void:
+	if not _is_playing_work_animation():
+		if _work_armature_flip_active or absf(rotation.y) > 0.001:
+			_clear_work_facing()
+		return
+
+	face_work_target(_get_work_facing_target())
+	set_work_armature_flip(true)
+
+
+func _process(delta: float) -> void:
+	_update_work_facing()
+	super._process(delta)
+
+
+func _update_visual_facing(delta: float) -> void:
+	if _is_playing_work_animation():
+		return
+
+	super._update_visual_facing(delta)
 
 
 func _hide_worker_weapon_visual() -> void:
