@@ -36,7 +36,11 @@ static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> A
 		_cached_group_nodes.clear()
 
 	if not _cached_group_nodes.has(group_name):
-		_cached_group_nodes[group_name] = tree.get_nodes_in_group(group_name)
+		var valid_nodes: Array = []
+		for node_variant: Variant in tree.get_nodes_in_group(group_name):
+			if node_variant != null and is_instance_valid(node_variant):
+				valid_nodes.append(node_variant)
+		_cached_group_nodes[group_name] = valid_nodes
 
 	return _cached_group_nodes[group_name]
 

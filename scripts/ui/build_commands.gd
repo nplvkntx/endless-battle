@@ -174,6 +174,13 @@ var _shop_item_ids: Array[StringName] = []
 var _shop_item_button_handlers: Array[Callable] = []
 var _blacksmith_upgrade_button_handlers: Array[Callable] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
+const PRODUCTION_ICON_SLOT_SCENE: PackedScene = preload("res://scenes/ui/production_icon_slot.tscn")
+const USE_PRODUCTION_ICON_SLOTS := true
+
+var _barracks_swordsman_slot: ProductionIconSlot = null
+var _barracks_archer_slot: ProductionIconSlot = null
+var _town_center_worker_slot: ProductionIconSlot = null
+var _hero_altar_slot: ProductionIconSlot = null
 
 
 func _ready() -> void:
@@ -197,6 +204,8 @@ func _ready() -> void:
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_setup_production_controls()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_setup_production_icon_slots()
 	_setup_blacksmith_upgrade_controls()
 	_setup_shop_item_controls()
 	_set_town_center_button_labels()
@@ -253,6 +262,8 @@ func _process(delta: float) -> void:
 		_update_hero_abilities_ui()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
+	if _production_icons_visible():
+		_refresh_all_production_slots()
 
 
 func _setup_production_controls() -> void:
@@ -272,6 +283,310 @@ func _setup_production_controls() -> void:
 	_hero_queue_row.add_theme_constant_override("separation", 2)
 	_hero_altar_panel.add_child(_hero_queue_row)
 	_hero_altar_panel.move_child(_hero_queue_row, _hero_status_label.get_index() + 1)
+
+
+func _setup_production_icon_slots() -> void:
+	_barracks_swordsman_slot = _create_production_icon_slot(
+		Barracks.TRAIN_ID_SWORDSMAN, _barracks_training_row
+	)
+	_barracks_archer_slot = _create_production_icon_slot(Barracks.TRAIN_ID_ARCHER, _barracks_training_row)
+	_town_center_worker_slot = _create_production_icon_slot(
+		CommandCenter.TRAIN_ID_WORKER, _buttons_row
+	)
+	_hero_altar_slot = _create_production_icon_slot(&"hero", _hero_altar_training_row)
+
+	_train_swordsman_button.visible = false
+	_train_archer_button.visible = false
+	_train_worker_button.visible = false
+	_train_hero_button.visible = false
+
+
+func _create_production_icon_slot(train_id: StringName, parent: Control) -> ProductionIconSlot:
+	var slot: ProductionIconSlot = PRODUCTION_ICON_SLOT_SCENE.instantiate() as ProductionIconSlot
+	slot.visible = false
+	slot.production_slot_clicked.connect(_on_production_slot_clicked)
+	parent.add_child(slot)
+	parent.move_child(slot, 0)
+	slot.configure(train_id, UnitProductionIcons.get_icon_texture(train_id))
+	TooltipManager.bind_control(slot, func() -> String: return _get_production_slot_tooltip(train_id))
+	return slot
+
+
+func _production_icons_visible() -> bool:
+	if not USE_PRODUCTION_ICON_SLOTS:
+		return false
+
+	return (
+		(_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
+		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
+		or (_hero_altar_slot != null and _hero_altar_slot.visible)
+	)
+
+
+func _refresh_all_production_slots() -> void:
+	if _selected_barracks != null and is_instance_valid(_selected_barracks):
+		_refresh_barracks_production_slots()
+	if _selected_command_center != null and is_instance_valid(_selected_command_center):
+		_refresh_town_center_production_slot()
+	if _selected_hero_altar != null and is_instance_valid(_selected_hero_altar):
+		_refresh_hero_altar_production_slot()
+
+
+func _refresh_barracks_production_slots() -> void:
+	if _barracks_swordsman_slot == null or _barracks_archer_slot == null:
+		return
+
+	if _selected_barracks == null or not is_instance_valid(_selected_barracks):
+		return
+
+	var barracks: Barracks = _selected_barracks
+	_barracks_swordsman_slot.set_queue_count(barracks.get_swordsman_queue_count())
+	_barracks_swordsman_slot.set_infinite_enabled(
+		barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN)
+	)
+	_barracks_swordsman_slot.set_training_progress(
+		barracks.get_active_unit_training_progress(),
+		barracks.is_training_swordsman()
+	)
+
+	_barracks_archer_slot.set_queue_count(barracks.get_archer_queue_count())
+	_barracks_archer_slot.set_infinite_enabled(
+		barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER)
+	)
+	_barracks_archer_slot.set_training_progress(
+		barracks.get_active_unit_training_progress(),
+		barracks.is_training_archer()
+	)
+
+
+func _refresh_town_center_production_slot() -> void:
+	if _town_center_worker_slot == null or _selected_command_center == null:
+		return
+
+	var command_center: CommandCenter = _selected_command_center
+	_town_center_worker_slot.set_queue_count(command_center.get_worker_queue_count())
+	_town_center_worker_slot.set_infinite_enabled(
+		command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER)
+	)
+	_town_center_worker_slot.set_training_progress(
+		command_center.get_active_unit_training_progress(),
+		command_center.is_training_worker()
+	)
+
+
+func _refresh_hero_altar_production_slot() -> void:
+	if _hero_altar_slot == null or _selected_hero_altar == null:
+		return
+
+	var hero_altar: HeroAltar = _selected_hero_altar
+	var queue_count: int = 1 if hero_altar.is_training_hero() else 0
+	_hero_altar_slot.set_queue_count(queue_count)
+	_hero_altar_slot.set_infinite_enabled(false)
+	_hero_altar_slot.set_training_progress(
+		hero_altar.get_active_unit_training_progress(),
+		hero_altar.is_training_hero()
+	)
+
+
+func _set_production_icon_visibility(
+	show_barracks: bool,
+	show_town_center: bool,
+	show_hero_altar: bool
+) -> void:
+	if not USE_PRODUCTION_ICON_SLOTS:
+		return
+
+	if _barracks_swordsman_slot != null:
+		_barracks_swordsman_slot.visible = show_barracks
+	if _barracks_archer_slot != null:
+		_barracks_archer_slot.visible = show_barracks
+	if _town_center_worker_slot != null:
+		_town_center_worker_slot.visible = show_town_center
+	if _hero_altar_slot != null:
+		_hero_altar_slot.visible = show_hero_altar
+
+	_train_swordsman_button.visible = show_barracks and not USE_PRODUCTION_ICON_SLOTS
+	_train_archer_button.visible = show_barracks and not USE_PRODUCTION_ICON_SLOTS
+	_train_worker_button.visible = show_town_center and not USE_PRODUCTION_ICON_SLOTS
+	_train_hero_button.visible = show_hero_altar and not USE_PRODUCTION_ICON_SLOTS
+
+	if USE_PRODUCTION_ICON_SLOTS:
+		if show_barracks:
+			_clear_queue_row(_swordsman_queue_row)
+		if show_town_center:
+			_clear_queue_row(_worker_queue_row)
+		if show_hero_altar:
+			_clear_queue_row(_hero_queue_row)
+
+	if show_barracks:
+		_refresh_barracks_production_slots()
+	if show_town_center:
+		_refresh_town_center_production_slot()
+	if show_hero_altar:
+		_refresh_hero_altar_production_slot()
+
+
+func _on_production_slot_clicked(train_id: StringName, event: InputEventMouseButton) -> void:
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		_handle_production_left_click(train_id, event)
+	elif event.button_index == MOUSE_BUTTON_RIGHT:
+		_handle_production_right_click(train_id, event)
+
+
+func _handle_production_left_click(train_id: StringName, event: InputEventMouseButton) -> void:
+	if event.ctrl_pressed:
+		_handle_production_toggle_repeat(train_id)
+		_after_production_action()
+		return
+
+	var queue_amount: int = 5 if event.shift_pressed else 1
+
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		if _selected_barracks == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_barracks.try_train_swordsman()
+	elif train_id == Barracks.TRAIN_ID_ARCHER:
+		if _selected_barracks == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_barracks.try_train_archer()
+	elif train_id == CommandCenter.TRAIN_ID_WORKER:
+		if _selected_command_center == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_command_center.try_train_worker()
+	elif train_id == &"hero":
+		if _selected_hero_altar == null:
+			return
+
+		_selected_hero_altar.try_train_hero()
+	else:
+		return
+
+	_after_production_action()
+
+
+func _handle_production_right_click(train_id: StringName, event: InputEventMouseButton) -> void:
+	if event.ctrl_pressed:
+		_disable_production_repeat(train_id)
+		_after_production_action()
+		return
+
+	var cancel_amount: int = 5 if event.shift_pressed else 1
+	_cancel_production_units(train_id, cancel_amount)
+	_after_production_action()
+
+
+func _handle_production_toggle_repeat(train_id: StringName) -> void:
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
+		_selected_barracks.try_train_swordsman_with_repeat(true)
+	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
+		_selected_barracks.try_train_archer_with_repeat(true)
+	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
+		_selected_command_center.try_train_worker_with_repeat(true)
+
+
+func _disable_production_repeat(train_id: StringName) -> void:
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
+		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
+			_selected_barracks.set_repeat_training(false)
+	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
+		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
+			_selected_barracks.set_repeat_training(false)
+	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
+		if _selected_command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER):
+			_selected_command_center.set_repeat_training(false)
+
+
+func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
+	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
+	elif train_id == Barracks.TRAIN_ID_ARCHER:
+		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
+	elif train_id == CommandCenter.TRAIN_ID_WORKER:
+		_cancel_worker_units(cancel_amount)
+	elif train_id == &"hero":
+		if _selected_hero_altar != null:
+			_selected_hero_altar.cancel_hero_training()
+
+
+func _cancel_barracks_unit_type(barracks: Barracks, train_id: StringName, cancel_amount: int) -> void:
+	if barracks == null or not is_instance_valid(barracks):
+		return
+
+	for _unused: int in cancel_amount:
+		var type_count: int = (
+			barracks.get_swordsman_queue_count()
+			if train_id == Barracks.TRAIN_ID_SWORDSMAN
+			else barracks.get_archer_queue_count()
+		)
+		if type_count <= 0:
+			break
+
+		var type_slot_index: int = type_count - 1
+		var cancelled: bool = (
+			barracks.cancel_swordsman_training_at(type_slot_index)
+			if train_id == Barracks.TRAIN_ID_SWORDSMAN
+			else barracks.cancel_archer_training_at(type_slot_index)
+		)
+		if not cancelled:
+			break
+
+
+func _cancel_worker_units(cancel_amount: int) -> void:
+	if _selected_command_center == null:
+		return
+
+	for _unused: int in cancel_amount:
+		var queue_count: int = _selected_command_center.get_worker_queue_count()
+		if queue_count <= 0:
+			break
+
+		if not _selected_command_center.cancel_worker_training_at(queue_count - 1):
+			break
+
+
+func _after_production_action() -> void:
+	_update_barracks_button_labels()
+	_update_town_center_button_labels()
+	_update_auto_training_label()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_all_production_slots()
+	else:
+		_rebuild_worker_queue_slots()
+		_rebuild_swordsman_queue_slots()
+		_rebuild_archer_queue_slots()
+		_rebuild_hero_queue_slots()
+
+
+func _get_production_slot_tooltip(train_id: StringName) -> String:
+	var base_tooltip: String = ""
+	match train_id:
+		Barracks.TRAIN_ID_SWORDSMAN:
+			base_tooltip = _get_train_swordsman_tooltip()
+		Barracks.TRAIN_ID_ARCHER:
+			base_tooltip = _get_train_archer_tooltip()
+		CommandCenter.TRAIN_ID_WORKER:
+			base_tooltip = _get_train_worker_tooltip()
+		&"hero":
+			base_tooltip = _get_train_hero_tooltip()
+		_:
+			return ""
+
+	if base_tooltip.is_empty():
+		return base_tooltip
+
+	if train_id == &"hero":
+		return "%s\nLeft-click: train\nRight-click: cancel" % base_tooltip
+
+	return (
+		"%s\nLeft-click: queue +1 | Shift: +5 | Ctrl: infinite\n"
+		+ "Right-click: cancel -1 | Shift: -5 | Ctrl: off infinite"
+	) % base_tooltip
 
 
 func _setup_blacksmith_upgrade_controls() -> void:
@@ -1277,7 +1592,10 @@ func _update_hero_altar_status() -> void:
 		_hero_status_label.text = "Hero: Ready to train"
 
 	_train_hero_button.disabled = not _tracked_hero_altar.can_train_hero()
-	_rebuild_hero_queue_slots()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_hero_altar_production_slot()
+	else:
+		_rebuild_hero_queue_slots()
 
 
 func _refresh_command_visibility() -> void:
@@ -1394,12 +1712,15 @@ func _refresh_command_visibility() -> void:
 		_update_hero_altar_status()
 
 	if show_town_center_commands:
-		_rebuild_worker_queue_slots()
+		if not USE_PRODUCTION_ICON_SLOTS:
+			_rebuild_worker_queue_slots()
 	if show_barracks_training:
-		_rebuild_swordsman_queue_slots()
-		_rebuild_archer_queue_slots()
+		if not USE_PRODUCTION_ICON_SLOTS:
+			_rebuild_swordsman_queue_slots()
+			_rebuild_archer_queue_slots()
 	if show_hero_altar_training:
-		_rebuild_hero_queue_slots()
+		if not USE_PRODUCTION_ICON_SLOTS:
+			_rebuild_hero_queue_slots()
 	else:
 		_clear_queue_row(_hero_queue_row)
 
@@ -1408,6 +1729,10 @@ func _refresh_command_visibility() -> void:
 	if not show_barracks_training:
 		_clear_queue_row(_swordsman_queue_row)
 		_clear_queue_row(_archer_queue_row)
+
+	_set_production_icon_visibility(
+		show_barracks_training, show_town_center_commands, show_hero_altar_training
+	)
 
 	_update_auto_training_label()
 
@@ -1427,6 +1752,7 @@ func _sync_ui_process() -> void:
 	var needs_refresh: bool = (
 		(_tracked_hero != null and is_instance_valid(_tracked_hero))
 		or _shop_panel.visible
+		or _production_icons_visible()
 	)
 	set_process(needs_refresh)
 	if not needs_refresh:
@@ -1587,25 +1913,39 @@ func _on_attack_pressed() -> void:
 
 
 func _on_worker_queue_changed(_queue_count: int) -> void:
-	_rebuild_worker_queue_slots()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_town_center_production_slot()
+	else:
+		_rebuild_worker_queue_slots()
 
 
 func _on_swordsman_queue_changed(_queue_count: int) -> void:
-	_rebuild_barracks_queue_slots()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_barracks_production_slots()
+	else:
+		_rebuild_barracks_queue_slots()
 
 
 func _on_archer_queue_changed(_queue_count: int) -> void:
-	_rebuild_barracks_queue_slots()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_barracks_production_slots()
+	else:
+		_rebuild_barracks_queue_slots()
 
 
 func _on_barracks_training_queue_changed() -> void:
-	_rebuild_barracks_queue_slots()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_barracks_production_slots()
+	else:
+		_rebuild_barracks_queue_slots()
 
 
 func _on_production_repeat_state_changed() -> void:
 	_update_auto_training_label()
 	_update_town_center_button_labels()
 	_update_barracks_button_labels()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_all_production_slots()
 
 
 func _disconnect_worker_queue_signal() -> void:

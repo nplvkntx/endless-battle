@@ -103,7 +103,7 @@ func _schedule_tick() -> void:
 
 
 func _on_build_tick() -> void:
-	if not _tick_active:
+	if not _tick_active or not is_inside_tree():
 		return
 
 	if _resolve_primary_command_center() == null:
@@ -677,6 +677,9 @@ func _has_command_center_near_position(position: Vector3) -> bool:
 
 
 func _try_place_building(building_type: StringName, prefer_expansion: bool = false) -> bool:
+	if not is_inside_tree():
+		return false
+
 	var anchor: CommandCenter = _resolve_primary_command_center()
 	if anchor == null or not is_instance_valid(anchor) or not anchor.is_inside_tree():
 		return false
@@ -693,6 +696,9 @@ func _try_place_building_at_anchor(
 	anchor_position: Vector3,
 	prefer_expansion: bool = false
 ) -> bool:
+	if not is_inside_tree():
+		return false
+
 	if _has_unfinished_construction():
 		return false
 

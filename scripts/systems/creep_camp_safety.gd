@@ -31,7 +31,11 @@ static func is_resource_guarded_by_active_camp(
 		return false
 
 	var resource_position: Vector3 = resource.global_position
-	for camp: Node3D in collect_active_camps(tree):
+	for camp_variant: Variant in collect_active_camps(tree):
+		if camp_variant == null or not is_instance_valid(camp_variant) or not camp_variant is Node3D:
+			continue
+
+		var camp: Node3D = camp_variant as Node3D
 		if _horizontal_distance(resource_position, camp.global_position) <= CAMP_GUARD_RADIUS:
 			return true
 
@@ -48,23 +52,33 @@ static func collect_active_camps(tree: SceneTree) -> Array[Node3D]:
 		frame == _cached_active_camps_frame
 		and tree_id == _cached_active_camps_tree_id
 	):
-		return _cached_active_camps
+		return _prune_stale_cached_active_camps()
 
 	var camps: Dictionary = {}
 
-	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		CombatTargetValidation.NEUTRAL_CREEP_GROUP
+	):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+
+		var node: Node = node_variant as Node
 		if not _is_living_creep(node):
 			continue
 
 		var parent: Node = node.get_parent()
-		if parent == null or not parent is Node3D:
+		if parent == null or not is_instance_valid(parent) or not parent is Node3D:
 			continue
 
 		camps[parent.get_instance_id()] = parent as Node3D
 
 	var active_camps: Array[Node3D] = []
-	for camp: Node3D in camps.values():
-		active_camps.append(camp)
+	for camp_variant: Variant in camps.values():
+		if camp_variant == null or not is_instance_valid(camp_variant) or not camp_variant is Node3D:
+			continue
+
+		active_camps.append(camp_variant as Node3D)
 
 	_cached_active_camps_frame = frame
 	_cached_active_camps_tree_id = tree_id
@@ -83,11 +97,11 @@ static func count_cleared_enemy_side_camps(
 
 	var cleared: int = 0
 
-	for node: Node in tree.get_nodes_in_group(&"creep_camps"):
-		if not node is Node3D:
+	for node_variant: Variant in tree.get_nodes_in_group(&"creep_camps"):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node3D:
 			continue
 
-		var camp: Node3D = node as Node3D
+		var camp: Node3D = node_variant as Node3D
 		if not _is_enemy_side_camp(camp, rally_position, tree):
 			continue
 
@@ -108,17 +122,18 @@ static func _count_living_creeps_near(
 ) -> int:
 	var count: int = 0
 
-	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		CombatTargetValidation.NEUTRAL_CREEP_GROUP
+	):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node3D:
+			continue
+
+		var node: Node3D = node_variant as Node3D
 		if not _is_living_creep(node):
 			continue
 
-		if not node is Node3D:
-			continue
-
-		var distance: float = _horizontal_distance(
-			position,
-			(node as Node3D).global_position
-		)
+		var distance: float = _horizontal_distance(position, node.global_position)
 		if distance <= radius:
 			count += 1
 
@@ -133,7 +148,11 @@ static func has_uncleared_nearby_camps(
 	if tree == null or rally_position == Vector3.ZERO:
 		return false
 
-	for camp: Node3D in collect_active_camps(tree):
+	for camp_variant: Variant in collect_active_camps(tree):
+		if camp_variant == null or not is_instance_valid(camp_variant) or not camp_variant is Node3D:
+			continue
+
+		var camp: Node3D = camp_variant as Node3D
 		if not _is_enemy_side_camp(camp, rally_position, tree):
 			continue
 
@@ -151,7 +170,11 @@ static func is_camp_area_clear(camp_position: Vector3, tree: SceneTree) -> bool:
 	var seen: Dictionary = {}
 
 	for group_name: StringName in _CAMP_BLOCK_UNIT_GROUPS:
-		for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+				continue
+
+			var node: Node = node_variant as Node
 			if not _is_blocking_unit_in_camp(node, camp_position, seen):
 				continue
 
@@ -176,10 +199,13 @@ static func _is_enemy_side_camp(
 	enemy_rally: Vector3,
 	tree: SceneTree
 ) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return false
+
 	var player_command_center: CommandCenter = (
 		EnemyArmyCommand.find_living_player_command_center(tree)
 	)
-	if player_command_center == null:
+	if player_command_center == null or not is_instance_valid(player_command_center):
 		return true
 
 	var camp_position: Vector3 = camp.global_position
@@ -238,3 +264,15 @@ static func _horizontal_distance(from_position: Vector3, to_position: Vector3) -
 	var offset: Vector3 = from_position - to_position
 	offset.y = 0.0
 	return offset.length()
+
+
+static func _prune_stale_cached_active_camps() -> Array[Node3D]:
+	var valid_camps: Array[Node3D] = []
+	for camp_variant: Variant in _cached_active_camps:
+		if camp_variant == null or not is_instance_valid(camp_variant) or not camp_variant is Node3D:
+			continue
+
+		valid_camps.append(camp_variant as Node3D)
+
+	_cached_active_camps = valid_camps
+	return valid_camps

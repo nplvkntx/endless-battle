@@ -17,6 +17,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not is_inside_tree():
+		return
+
 	if not _waiting_to_respawn:
 		return
 

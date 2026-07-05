@@ -58,6 +58,9 @@ var _ghost_material: StandardMaterial3D = null
 
 
 func _process(_delta: float) -> void:
+	if not is_inside_tree():
+		return
+
 	if _active_placement.is_empty() or _placement_ghost == null:
 		return
 
@@ -149,6 +152,9 @@ func start_command_center_placement() -> void:
 
 
 func _start_placement(placement_type: StringName) -> void:
+	if not is_inside_tree():
+		return
+
 	if not _active_placement.is_empty():
 		return
 
@@ -181,6 +187,9 @@ func _cancel_placement() -> void:
 
 
 func _place_building() -> void:
+	if not is_inside_tree():
+		return
+
 	if _placement_ghost == null or _active_placement.is_empty():
 		return
 
@@ -228,8 +237,8 @@ func _place_building() -> void:
 		return
 
 	var building: Building = scene.instantiate() as Building
-	building.global_position = _placement_ghost.global_position
 	buildings_parent.add_child(building)
+	building.global_position = _placement_ghost.global_position
 	building.start_under_construction()
 
 	var workers: Array[Worker] = _get_selected_workers()
@@ -370,7 +379,11 @@ func _update_ghost_validity(position: Vector3) -> void:
 
 
 func _is_current_placement_valid() -> bool:
-	if _placement_ghost == null or _active_placement.is_empty():
+	if (
+		_placement_ghost == null
+		or not is_instance_valid(_placement_ghost)
+		or _active_placement.is_empty()
+	):
 		return false
 
 	return _is_placement_valid_at(_placement_ghost.global_position)
@@ -382,7 +395,7 @@ func _is_placement_valid_at(position: Vector3) -> bool:
 		return false
 
 	var exclude_nodes: Array[Node] = []
-	if _placement_ghost != null:
+	if _placement_ghost != null and is_instance_valid(_placement_ghost):
 		exclude_nodes.append(_placement_ghost)
 
 	return EnemyBuildPlacement.is_position_valid(
