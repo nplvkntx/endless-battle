@@ -267,7 +267,11 @@ static func find_closest_tower_attack_target_in_range(
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
 
-	for node: Node in get_cached_group_nodes(tower.get_tree(), &"enemies"):
+	for node_variant: Variant in get_cached_group_nodes(tower.get_tree(), &"enemies"):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+
+		var node: Node = node_variant as Node
 		if not node is Node3D:
 			continue
 		if not is_tower_attack_target(node):
@@ -430,7 +434,11 @@ static func _find_best_enemy_faction_attack_target(
 
 	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
-		for node: Node in get_cached_group_nodes(tree, group_name):
+		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+				continue
+
+			var node: Node = node_variant as Node
 			if not node is Node3D:
 				continue
 
@@ -466,7 +474,11 @@ static func _find_closest_hostile_attack_target_in_range(
 
 	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
-		for node: Node in get_cached_group_nodes(tree, group_name):
+		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+				continue
+
+			var node: Node = node_variant as Node
 			if not node is Node3D:
 				continue
 			if not is_attack_target_for_attacker(attacker, node):

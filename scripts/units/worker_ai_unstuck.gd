@@ -10,7 +10,7 @@ static func is_active(worker: Worker) -> bool:
 	return worker._ai_unstuck_active
 
 
-static func reset_state(worker: Worker) -> void:
+static func clear_unstuck_state(worker: Worker) -> void:
 	worker._ai_unstuck_active = false
 	worker._ai_unstuck_target = Vector3.ZERO
 	worker._ai_unstuck_time = 0.0

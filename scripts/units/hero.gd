@@ -70,14 +70,12 @@ var _execute_lunge_tween: Tween
 
 func _ready() -> void:
 	super._ready()
-	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
-	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_body_mesh_rest_position = _body_mesh.position
-	var body_material := _body_mesh.get_surface_override_material(0) as StandardMaterial3D
-	_body_material = body_material.duplicate() as StandardMaterial3D
+	_body_material = HealthBarDisplay.duplicate_mesh_material(_body_mesh)
 	_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
 	if CombatTargetValidation.is_enemy_faction(self):

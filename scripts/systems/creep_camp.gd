@@ -39,14 +39,17 @@ func alert_camp_to_attacker(attacker: Unit, excluding: NeutralCreep = null) -> v
 	if not NodeSafety.is_alive_node(attacker):
 		return
 
-	for child: Node in get_children():
-		if child == excluding:
+	for child_variant: Variant in get_children():
+		if child_variant == excluding:
 			continue
 
-		if not child is NeutralCreep:
+		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:
 			continue
 
-		var creep: NeutralCreep = child as NeutralCreep
+		if not child_variant is NeutralCreep:
+			continue
+
+		var creep: NeutralCreep = child_variant as NeutralCreep
 		if not NodeSafety.is_alive_node(creep):
 			continue
 
@@ -69,7 +72,11 @@ func notify_creep_died(_creep: Node) -> void:
 func _capture_spawn_configs() -> void:
 	_spawn_configs.clear()
 
-	for child: Node in get_children():
+	for child_variant: Variant in get_children():
+		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:
+			continue
+
+		var child: Node = child_variant as Node
 		if not child is NeutralCreep:
 			continue
 
@@ -107,21 +114,25 @@ func _respawn_camp() -> void:
 
 
 func _has_living_creeps() -> bool:
-	for child: Node in get_children():
-		if _is_living_creep(child):
+	for child_variant: Variant in get_children():
+		if _is_living_creep(child_variant):
 			return true
 
 	return false
 
 
-func _is_living_creep(node: Node) -> bool:
+func _is_living_creep(node: Variant) -> bool:
 	if node == null or not is_instance_valid(node):
 		return false
 
-	if node.is_queued_for_deletion():
+	if not node is Node:
 		return false
 
-	if not CombatTargetValidation.is_neutral_creep(node):
+	var living_node: Node = node as Node
+	if living_node.is_queued_for_deletion():
 		return false
 
-	return CombatTargetValidation.get_target_current_health(node) > 0
+	if not CombatTargetValidation.is_neutral_creep(living_node):
+		return false
+
+	return CombatTargetValidation.get_target_current_health(living_node) > 0

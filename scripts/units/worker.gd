@@ -86,8 +86,7 @@ var _ai_unstuck_direction_offset: int = 0
 func _ready() -> void:
 	super._ready()
 	_hide_worker_weapon_visual()
-	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
-	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
@@ -452,11 +451,7 @@ func _reset_task_corner_nudge() -> void:
 
 
 func _reset_ai_unstuck_state() -> void:
-	_ai_unstuck_active = false
-	_ai_unstuck_target = Vector3.ZERO
-	_ai_unstuck_time = 0.0
-	_ai_unstuck_direction_offset = 0
-	WorkerAiUnstuck.reset_watch(self)
+	WorkerAiUnstuck.clear_unstuck_state(self)
 
 
 func _reset_gather_stuck_watch() -> void:

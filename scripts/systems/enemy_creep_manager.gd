@@ -343,16 +343,20 @@ func _find_nearest_living_creep_at_camp(
 	var nearest_creep: Node3D = null
 	var nearest_distance: float = INF
 
-	for child: Node in camp.get_children():
-		if not _is_living_creep(child):
+	for child_variant: Variant in camp.get_children():
+		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:
 			continue
 
-		if not child is Node3D:
+		if not _is_living_creep(child_variant):
 			continue
 
+		if not child_variant is Node3D:
+			continue
+
+		var child: Node3D = child_variant as Node3D
 		var distance: float = EnemyArmyCommand.horizontal_distance(
 			from_position,
-			(child as Node3D).global_position
+			child.global_position
 		)
 		if distance < nearest_distance:
 			nearest_distance = distance
@@ -381,7 +385,11 @@ func _is_army_engaging_camp(tree: SceneTree, army: Array, camp: Node3D) -> bool:
 func _count_living_creeps_near(tree: SceneTree, position: Vector3, radius: float) -> int:
 	var count: int = 0
 
-	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+	for node_variant: Variant in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+
+		var node: Node = node_variant as Node
 		if not _is_living_creep(node):
 			continue
 
@@ -434,7 +442,11 @@ func _estimate_army_power(units: Array) -> int:
 func _estimate_camp_power(camp: Node3D) -> int:
 	var power: int = 0
 
-	for child: Node in camp.get_children():
+	for child_variant: Variant in camp.get_children():
+		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:
+			continue
+
+		var child: Node = child_variant as Node
 		if not _is_living_creep(child):
 			continue
 
@@ -453,8 +465,11 @@ func _estimate_camp_power(camp: Node3D) -> int:
 	return power
 
 
-func _is_living_creep(node: Node) -> bool:
+func _is_living_creep(node: Variant) -> bool:
 	if not NodeSafety.is_alive_node(node):
+		return false
+
+	if not node is Node:
 		return false
 
 	if not CombatTargetValidation.is_neutral_creep(node):

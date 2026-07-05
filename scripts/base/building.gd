@@ -149,16 +149,11 @@ func _ensure_feedback_material_ready() -> void:
 	if _mesh_instance == null:
 		return
 
-	var source_material: StandardMaterial3D = (
-		_mesh_instance.get_surface_override_material(0) as StandardMaterial3D
-	)
-	if source_material == null:
-		source_material = _mesh_instance.material_override as StandardMaterial3D
-	if source_material == null:
+	_mesh_material = HealthBarDisplay.duplicate_mesh_material(_mesh_instance)
+	if _mesh_material == null:
 		return
 
-	_mesh_material = source_material.duplicate() as StandardMaterial3D
-	if _mesh_instance.get_surface_override_material(0) != null:
+	if _mesh_instance.get_surface_override_material_count() > 0:
 		_mesh_instance.set_surface_override_material(0, _mesh_material)
 	else:
 		_mesh_instance.material_override = _mesh_material

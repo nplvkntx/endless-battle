@@ -186,19 +186,11 @@ static func _tint_mesh_instance(
 	accent: Color,
 	subtle_art_tint: bool = false
 ) -> void:
-	var source_material: StandardMaterial3D = mesh.get_surface_override_material(0) as StandardMaterial3D
-	if source_material == null:
-		source_material = mesh.material_override as StandardMaterial3D
-	if source_material == null and mesh.mesh != null:
-		source_material = mesh.mesh.surface_get_material(0) as StandardMaterial3D
-	if source_material == null:
-		return
-
-	var material: StandardMaterial3D = source_material.duplicate() as StandardMaterial3D
+	var material: StandardMaterial3D = HealthBarDisplay.duplicate_mesh_material(mesh)
 	if material == null:
 		return
 
-	if mesh.get_surface_override_material(0) != null:
+	if mesh.get_surface_override_material_count() > 0:
 		mesh.set_surface_override_material(0, material)
 	else:
 		mesh.material_override = material

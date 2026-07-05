@@ -33,8 +33,7 @@ var _has_attack_move_destination: bool = false
 func _ready() -> void:
 	super._ready()
 	_cache_base_stats()
-	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
-	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)

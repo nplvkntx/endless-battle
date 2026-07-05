@@ -31,11 +31,9 @@ var _attack_cooldown_timer: float = 0.0
 
 func _ready() -> void:
 	super._ready()
-	var fill_material := _health_bar_fill.get_surface_override_material(0) as StandardMaterial3D
-	_health_bar_fill_material = fill_material.duplicate() as StandardMaterial3D
+	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
-	var body_material := _body_mesh.get_surface_override_material(0) as StandardMaterial3D
-	_body_material = body_material.duplicate() as StandardMaterial3D
+	_body_material = HealthBarDisplay.duplicate_mesh_material(_body_mesh)
 	_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
 	_body_mesh_rest_position = _body_mesh.position

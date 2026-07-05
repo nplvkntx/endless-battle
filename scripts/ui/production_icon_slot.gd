@@ -19,9 +19,13 @@ var _pending_icon_texture: Texture2D = null
 func _ready() -> void:
 	custom_minimum_size = SLOT_SIZE
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_progress_fill.visible = false
-	_queue_label.visible = false
-	_infinite_label.visible = false
+	_ensure_child_refs()
+	if _progress_fill != null:
+		_progress_fill.visible = false
+	if _queue_label != null:
+		_queue_label.visible = false
+	if _infinite_label != null:
+		_infinite_label.visible = false
 	gui_input.connect(_on_gui_input)
 
 	if _pending_icon_texture != null:
@@ -37,9 +41,19 @@ func configure(p_train_id: StringName, icon_texture: Texture2D) -> void:
 		_pending_icon_texture = icon_texture
 
 
-func _apply_icon_texture(icon_texture: Texture2D) -> void:
+func _ensure_child_refs() -> void:
 	if _icon_rect == null:
 		_icon_rect = get_node_or_null("IconLayer/IconRect") as TextureRect
+	if _progress_fill == null:
+		_progress_fill = get_node_or_null("IconLayer/ProgressFill") as ColorRect
+	if _queue_label == null:
+		_queue_label = get_node_or_null("IconLayer/QueueLabel") as Label
+	if _infinite_label == null:
+		_infinite_label = get_node_or_null("IconLayer/InfiniteLabel") as Label
+
+
+func _apply_icon_texture(icon_texture: Texture2D) -> void:
+	_ensure_child_refs()
 	if _icon_rect == null:
 		push_error("ProductionIconSlot: IconLayer/IconRect missing")
 		return
@@ -47,15 +61,24 @@ func _apply_icon_texture(icon_texture: Texture2D) -> void:
 
 
 func set_queue_count(count: int) -> void:
+	_ensure_child_refs()
+	if _queue_label == null:
+		return
 	_queue_label.visible = count > 0
 	_queue_label.text = str(count)
 
 
 func set_infinite_enabled(enabled: bool) -> void:
+	_ensure_child_refs()
+	if _infinite_label == null:
+		return
 	_infinite_label.visible = enabled
 
 
 func set_training_progress(ratio: float, is_training: bool) -> void:
+	_ensure_child_refs()
+	if _progress_fill == null:
+		return
 	_progress_fill.visible = is_training
 	if not is_training:
 		return

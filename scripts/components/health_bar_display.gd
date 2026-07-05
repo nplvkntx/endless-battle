@@ -4,6 +4,26 @@ extends RefCounted
 ## Shared world-space health bar fill and visibility rules.
 
 
+static func duplicate_mesh_material(mesh: MeshInstance3D) -> StandardMaterial3D:
+	if mesh == null or not is_instance_valid(mesh):
+		return StandardMaterial3D.new()
+
+	if mesh.get_surface_override_material_count() > 0:
+		var override_material: Material = mesh.get_surface_override_material(0)
+		if override_material is StandardMaterial3D:
+			return (override_material as StandardMaterial3D).duplicate()
+
+	if mesh.material_override is StandardMaterial3D:
+		return (mesh.material_override as StandardMaterial3D).duplicate()
+
+	if mesh.mesh != null and mesh.mesh.get_surface_count() > 0:
+		var surface_material: Material = mesh.mesh.surface_get_material(0)
+		if surface_material is StandardMaterial3D:
+			return (surface_material as StandardMaterial3D).duplicate()
+
+	return StandardMaterial3D.new()
+
+
 static func should_show(current_health: int, max_health: int) -> bool:
 	if max_health <= 0:
 		return false

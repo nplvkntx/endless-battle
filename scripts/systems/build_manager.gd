@@ -57,11 +57,19 @@ var _placement_ghost: Node3D = null
 var _ghost_material: StandardMaterial3D = null
 
 
+func _ready() -> void:
+	set_process(false)
+
+
 func _process(_delta: float) -> void:
 	if not is_inside_tree():
 		return
 
 	if _active_placement.is_empty() or _placement_ghost == null:
+		return
+
+	if not is_instance_valid(_placement_ghost) or not _placement_ghost.is_inside_tree():
+		_cancel_placement()
 		return
 
 	var camera: Camera3D = get_node_or_null(camera_path) as Camera3D
@@ -176,11 +184,13 @@ func _start_placement(placement_type: StringName) -> void:
 	_disable_ghost_processing(_placement_ghost)
 	_apply_ghost_material(_placement_ghost)
 	buildings_parent.add_child(_placement_ghost)
+	set_process(true)
 
 
 func _cancel_placement() -> void:
 	_active_placement = &""
 	_ghost_material = null
+	set_process(false)
 	if _placement_ghost != null:
 		_placement_ghost.queue_free()
 		_placement_ghost = null
@@ -191,6 +201,9 @@ func _place_building() -> void:
 		return
 
 	if _placement_ghost == null or _active_placement.is_empty():
+		return
+
+	if not is_instance_valid(_placement_ghost) or not _placement_ghost.is_inside_tree():
 		return
 
 	if not _is_current_placement_valid():
@@ -229,16 +242,20 @@ func _place_building() -> void:
 		return
 
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
-	if buildings_parent == null:
+	if buildings_parent == null or not buildings_parent.is_inside_tree():
 		return
 
 	var scene: PackedScene = _get_building_scene(_active_placement)
 	if scene == null:
 		return
 
+	var placement_position: Vector3 = _placement_ghost.global_position
+	if not placement_position.is_finite():
+		return
+
 	var building: Building = scene.instantiate() as Building
 	buildings_parent.add_child(building)
-	building.global_position = _placement_ghost.global_position
+	building.global_position = placement_position
 	building.start_under_construction()
 
 	var workers: Array[Worker] = _get_selected_workers()

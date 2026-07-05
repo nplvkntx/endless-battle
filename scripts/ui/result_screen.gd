@@ -11,13 +11,8 @@ extends Control
 func _ready() -> void:
 	get_tree().paused = false
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	print("Result screen loaded: ", title_text)
 
 	_title_label.text = title_text
-
-	_restart_button.mouse_entered.connect(func() -> void: print("RESTART HOVER"))
-	_main_menu_button.mouse_entered.connect(func() -> void: print("MAIN MENU HOVER"))
-	_quit_button.mouse_entered.connect(func() -> void: print("QUIT HOVER"))
 
 	_restart_button.pressed.connect(_on_restart_pressed)
 	_main_menu_button.pressed.connect(_on_main_menu_pressed)
