@@ -123,8 +123,11 @@ func _refresh_panel() -> void:
 		_show_resource_info(selection_manager.inspected_resource)
 		return
 
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
 	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null:
+	if selected_building != null and NodeSafety.is_alive_node(selected_building):
 		_show_building_info(selected_building)
 		return
 
@@ -145,7 +148,12 @@ func _refresh_panel() -> void:
 		_show_multiple_units(selected_units, multi_info.category)
 		return
 
-	_show_unit_info(selected_units[0])
+	var single_unit: Unit = selected_units[0]
+	if not NodeSafety.is_alive_node(single_unit):
+		_hide_panel()
+		return
+
+	_show_unit_info(single_unit)
 
 
 func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
@@ -1072,8 +1080,11 @@ func _get_selection_tooltip() -> String:
 		return TooltipFormatter.format_unit(inspected_building)
 
 	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null and is_instance_valid(selected_building):
+	if selected_building != null and NodeSafety.is_alive_node(selected_building):
 		return TooltipFormatter.format_unit(selected_building)
+
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
 	if selected_units.is_empty():
@@ -1082,4 +1093,8 @@ func _get_selection_tooltip() -> String:
 	if selected_units.size() > 1:
 		return "Multiple units selected"
 
-	return TooltipFormatter.format_unit(selected_units[0])
+	var single_unit: Unit = selected_units[0]
+	if not NodeSafety.is_alive_node(single_unit):
+		return ""
+
+	return TooltipFormatter.format_unit(single_unit)

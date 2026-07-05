@@ -21,6 +21,9 @@ const MARKER_EMISSION_STRENGTH := 0.6
 
 
 static func resolve_team(owner: Node, team_id: int) -> int:
+	if not NodeSafety.is_alive_node(owner):
+		return NEUTRAL_TEAM_ID
+
 	if team_id >= ENEMY_TEAM_ID:
 		return ENEMY_TEAM_ID
 	if team_id == PLAYER_TEAM_ID:
@@ -41,7 +44,7 @@ static func get_accent_color(team: int) -> Color:
 
 
 static func apply_to_entity(owner: Node3D, team_id: int) -> void:
-	if owner == null:
+	if not NodeSafety.is_alive_node(owner):
 		return
 
 	var team: int = resolve_team(owner, team_id)

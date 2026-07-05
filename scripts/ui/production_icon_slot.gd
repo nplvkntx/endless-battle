@@ -55,9 +55,12 @@ func _ensure_child_refs() -> void:
 func _apply_icon_texture(icon_texture: Texture2D) -> void:
 	_ensure_child_refs()
 	if _icon_rect == null:
-		push_error("ProductionIconSlot: IconLayer/IconRect missing")
 		return
-	_icon_rect.texture = icon_texture
+
+	var resolved_texture: Texture2D = icon_texture
+	if resolved_texture == null and not train_id.is_empty():
+		resolved_texture = UnitProductionIcons.get_icon_texture(train_id)
+	_icon_rect.texture = resolved_texture
 
 
 func set_queue_count(count: int) -> void:

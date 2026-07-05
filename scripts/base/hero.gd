@@ -379,10 +379,11 @@ func try_learn_ability(ability_id: StringName) -> bool:
 		ability_progression.learn_ability(ability_id)
 		ability_points_changed.emit(ability_points)
 		ability_progression_changed.emit()
-		print(
-			"Learned ability %s (rank %d). Ability points remaining: %d"
-			% [ability_id, get_ability_rank(ability_id), ability_points]
-		)
+		if OS.is_debug_build():
+			print(
+				"Learned ability %s (rank %d). Ability points remaining: %d"
+				% [ability_id, get_ability_rank(ability_id), ability_points]
+			)
 		return true
 
 	var reason: String = ability_progression.get_learn_blocked_reason(
@@ -414,8 +415,6 @@ func _on_level_up() -> void:
 	_apply_level_stat_gains()
 	level_changed.emit(level)
 	_show_level_up_feedback()
-	print("Level Up! Hero reached level %d" % level)
-	print("Ability points: %d" % ability_points)
 
 
 func _apply_level_stat_gains() -> void:

@@ -700,6 +700,15 @@ func _clear_unit_tree_exiting_handler(unit: Unit) -> void:
 	_unit_tree_exiting_handlers.erase(unit_id)
 
 
+## Public wrapper for UI/systems that read selected_units or selected_building directly.
+func purge_invalid_selection() -> void:
+	_purge_invalid_selection()
+
+
+func safe_clear_selection() -> void:
+	purge_invalid_selection()
+
+
 func _purge_invalid_selection() -> void:
 	_purge_invalid_selected_units()
 	_purge_invalid_selected_building()
@@ -725,6 +734,9 @@ func _purge_invalid_selected_units() -> void:
 
 
 func _purge_invalid_selected_building() -> void:
+	if selected_building == null:
+		return
+
 	if _is_selectable_building(selected_building):
 		return
 

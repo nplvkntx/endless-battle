@@ -78,7 +78,7 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 		return selection_manager.has_commandable_selected_units()
 
 	var building: Building = selection_manager.selected_building
-	if building == null:
+	if building == null or not NodeSafety.is_alive_node(building):
 		return false
 
 	if building is CommandCenter:
@@ -100,4 +100,5 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 
 
 func _sync_command_grid() -> void:
+	# Placeholder hotkey grid is unused; real commands live in SelectionCommandPanel.
 	_command_button_grid.visible = false

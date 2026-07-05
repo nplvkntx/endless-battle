@@ -104,6 +104,9 @@ func apply_team_visuals() -> void:
 
 
 func _hide_worker_team_accent_marker() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	var accent_marker := get_node_or_null("TeamAccentMarker") as MeshInstance3D
 	if accent_marker != null:
 		accent_marker.visible = false
@@ -468,6 +471,9 @@ func _configure_task_navigation_agent() -> void:
 
 
 func _sync_navigation_agent_position() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	if _navigation_agent == null:
 		return
 
@@ -497,6 +503,9 @@ func _refresh_task_navigation() -> void:
 
 
 func _check_task_navigation_reachable() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	if not _is_on_task_movement() or not has_move_target:
 		_task_navigation_active = false
 		return
@@ -848,6 +857,9 @@ func notify_building_destroyed(building: Building) -> void:
 
 
 func _notify_enemy_worker_needs_gather_job() -> void:
+	if not NodeSafety.is_alive_node(self) or not is_inside_tree():
+		return
+
 	for node: Node in get_tree().get_nodes_in_group(&"enemy_build_manager"):
 		if node is EnemyBuildManager:
 			(node as EnemyBuildManager).notify_enemy_worker_spawned(self)
@@ -953,6 +965,9 @@ func _assign_construction_target_point(advance_to_next: bool = false) -> void:
 
 
 func _try_repath_construction_movement() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	if _build_trip_state != BuildTripState.TO_BUILDING:
 		return
 
@@ -1288,6 +1303,9 @@ func _attempt_gather_stuck_recovery() -> void:
 
 
 func _try_repath_task_movement() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	if not _is_on_task_movement() or _task_nudge_active:
 		return
 

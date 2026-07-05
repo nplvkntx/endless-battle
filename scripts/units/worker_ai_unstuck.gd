@@ -24,6 +24,9 @@ static func reset_watch(worker: Worker) -> void:
 
 
 static func update_detection(worker: Worker, delta: float) -> void:
+	if not NodeSafety.is_alive_node(worker) or not worker.is_inside_tree():
+		return
+
 	if worker._ai_unstuck_cooldown > 0.0:
 		worker._ai_unstuck_cooldown = maxf(0.0, worker._ai_unstuck_cooldown - delta)
 
@@ -56,6 +59,9 @@ static func update_detection(worker: Worker, delta: float) -> void:
 
 
 static func process_movement(worker: Worker, delta: float) -> void:
+	if not NodeSafety.is_alive_node(worker) or not worker.is_inside_tree():
+		return
+
 	worker._ai_unstuck_time += delta
 
 	var arrived: bool = WorkerTaskNavigation.process_direct_movement(
@@ -250,22 +256,22 @@ static func _is_valid_nudge_point(worker: Worker, point: Vector3) -> bool:
 static func _is_inside_blocked_footprint(worker: Worker, point: Vector3) -> bool:
 	if worker._gather_state == Worker.GatherTripState.TO_SOURCE:
 		var source: GatherableResource = worker._get_valid_gather_source()
-		if source != null and _is_inside_body_footprint(point, source, worker):
-			return true
+		if NodeSafety.is_alive_node(source):
+			if _is_inside_body_footprint(point, source, worker):
+				return true
 
 	if worker._build_trip_state == Worker.BuildTripState.TO_BUILDING:
-		if (
-			worker._building_target != null
-			and _is_inside_body_footprint(point, worker._building_target, worker)
-		):
-			return true
+		if NodeSafety.is_alive_node(worker._building_target):
+			if _is_inside_body_footprint(point, worker._building_target, worker):
+				return true
 
 	if worker._gather_state == Worker.GatherTripState.TO_COMMAND_CENTER:
 		var dropoff: CommandCenter = worker._get_valid_cached_return_dropoff()
 		if dropoff == null:
 			dropoff = worker._assigned_dropoff
-		if dropoff != null and _is_inside_body_footprint(point, dropoff, worker):
-			return true
+		if NodeSafety.is_alive_node(dropoff):
+			if _is_inside_body_footprint(point, dropoff, worker):
+				return true
 
 	return false
 
@@ -273,6 +279,9 @@ static func _is_inside_blocked_footprint(worker: Worker, point: Vector3) -> bool
 static func _is_inside_body_footprint(
 	point: Vector3, body: CollisionObject3D, worker: Worker
 ) -> bool:
+	if not NodeSafety.is_alive_node(body):
+		return false
+
 	var offset: Vector3 = point - body.global_position
 	offset.y = 0.0
 	var radius: float = worker._get_collision_xz_radius(body) + 0.35

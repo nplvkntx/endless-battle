@@ -62,6 +62,10 @@ static func is_valid_combat_target(target: Variant) -> bool:
 	return _is_alive(target)
 
 
+static func is_valid_target(target: Variant) -> bool:
+	return is_valid_combat_target(target)
+
+
 static func clear_target_combat_state(target: Node) -> void:
 	if target == null or not is_instance_valid(target):
 		return
@@ -369,6 +373,9 @@ static func get_horizontal_attack_distance_to_surface(from: Node3D, target: Node
 
 
 static func get_horizontal_center_distance(from: Node3D, to: Node3D) -> float:
+	if not NodeSafety.is_alive_node(from) or not NodeSafety.is_alive_node(to):
+		return INF
+
 	var offset: Vector3 = from.global_position - to.global_position
 	offset.y = 0.0
 	return offset.length()

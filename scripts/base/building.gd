@@ -331,6 +331,9 @@ func is_position_in_construction_range(
 
 
 func is_position_inside_footprint(from_position: Vector3, padding: float = 0.0) -> bool:
+	if not is_inside_tree():
+		return false
+
 	var half_extents: Vector2 = _get_footprint_half_extents()
 	var local_position: Vector3 = global_transform.affine_inverse() * from_position
 	return (
@@ -340,6 +343,9 @@ func is_position_inside_footprint(from_position: Vector3, padding: float = 0.0) 
 
 
 func _is_within_xz_range_of_footprint(from_position: Vector3, range: float) -> bool:
+	if not is_inside_tree():
+		return false
+
 	var half_extents: Vector2 = _get_footprint_half_extents()
 	var local_position: Vector3 = global_transform.affine_inverse() * from_position
 	var dx: float = maxf(absf(local_position.x) - half_extents.x, 0.0)
@@ -386,6 +392,9 @@ func _get_footprint_half_extents() -> Vector2:
 
 
 func _footprint_offset_to_world(local_offset: Vector3) -> Vector3:
+	if not is_inside_tree():
+		return Vector3.ZERO
+
 	var world_offset: Vector3 = global_transform.basis * local_offset
 	return Vector3(
 		global_position.x + world_offset.x,

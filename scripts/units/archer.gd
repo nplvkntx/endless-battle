@@ -326,6 +326,9 @@ func _cache_base_stats() -> void:
 
 
 func _try_apply_blacksmith_upgrades() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
 	if CombatTargetValidation.is_enemy_faction(self):
 		UpgradeManager.apply_enemy_upgrades_to_unit(self)
 	else:

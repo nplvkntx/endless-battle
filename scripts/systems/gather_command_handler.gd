@@ -22,6 +22,9 @@ func _input(event: InputEvent) -> void:
 	if selection_manager.get("selected_building") != null:
 		return
 
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
 	var selected_units: Array = selection_manager.get("selected_units")
 	if selected_units.is_empty():
 		return

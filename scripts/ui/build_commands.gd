@@ -303,6 +303,10 @@ func _setup_production_icon_slots() -> void:
 
 func _create_production_icon_slot(train_id: StringName, parent: Control) -> ProductionIconSlot:
 	var slot: ProductionIconSlot = PRODUCTION_ICON_SLOT_SCENE.instantiate() as ProductionIconSlot
+	if slot == null:
+		push_warning("build_commands: failed to create production icon slot for %s" % train_id)
+		return null
+
 	slot.visible = false
 	slot.production_slot_clicked.connect(_on_production_slot_clicked)
 	parent.add_child(slot)
@@ -388,6 +392,10 @@ func _refresh_hero_altar_production_slot() -> void:
 	)
 
 
+func _should_use_legacy_train_button(slot: ProductionIconSlot) -> bool:
+	return not USE_PRODUCTION_ICON_SLOTS or slot == null
+
+
 func _set_production_icon_visibility(
 	show_barracks: bool,
 	show_town_center: bool,
@@ -405,10 +413,10 @@ func _set_production_icon_visibility(
 	if _hero_altar_slot != null:
 		_hero_altar_slot.visible = show_hero_altar
 
-	_train_swordsman_button.visible = show_barracks and not USE_PRODUCTION_ICON_SLOTS
-	_train_archer_button.visible = show_barracks and not USE_PRODUCTION_ICON_SLOTS
-	_train_worker_button.visible = show_town_center and not USE_PRODUCTION_ICON_SLOTS
-	_train_hero_button.visible = show_hero_altar and not USE_PRODUCTION_ICON_SLOTS
+	_train_swordsman_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_swordsman_slot)
+	_train_archer_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_archer_slot)
+	_train_worker_button.visible = show_town_center and _should_use_legacy_train_button(_town_center_worker_slot)
+	_train_hero_button.visible = show_hero_altar and _should_use_legacy_train_button(_hero_altar_slot)
 
 	if USE_PRODUCTION_ICON_SLOTS:
 		if show_barracks:
@@ -1604,6 +1612,9 @@ func _refresh_command_visibility() -> void:
 		visible = false
 		return
 
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
 	var selected_units: Array[Unit] = selection_manager.selected_units
 	var selected_building: Building = selection_manager.selected_building
 	if selected_building != null and not is_instance_valid(selected_building):
@@ -1662,11 +1673,17 @@ func _refresh_command_visibility() -> void:
 		visible = false
 		return
 
-	var single_worker: bool = selected_units.size() == 1 and selected_units[0] is Worker
-	var single_hero: bool = selected_units.size() == 1 and selected_units[0] is Hero
+	var single_unit: Unit = selected_units[0] if not selected_units.is_empty() else null
+	if not selected_units.is_empty() and not NodeSafety.is_alive_node(single_unit):
+		_set_tracked_hero(null)
+		visible = false
+		return
+
+	var single_worker: bool = selected_units.size() == 1 and single_unit is Worker
+	var single_hero: bool = selected_units.size() == 1 and single_unit is Hero
 	var single_combat_unit: bool = (
 		selected_units.size() == 1
-		and (selected_units[0] is Swordsman or selected_units[0] is Archer or selected_units[0] is Hero)
+		and (single_unit is Swordsman or single_unit is Archer or single_unit is Hero)
 	)
 
 	if single_worker:
@@ -1674,7 +1691,7 @@ func _refresh_command_visibility() -> void:
 		_set_tracked_hero(null)
 	elif single_hero:
 		_apply_hero_command_visibility()
-		_set_tracked_hero(selected_units[0] as Hero)
+		_set_tracked_hero(single_unit as Hero)
 	elif single_combat_unit:
 		_apply_combat_command_visibility()
 		_set_tracked_hero(null)
@@ -1686,6 +1703,12 @@ func _refresh_command_visibility() -> void:
 		_set_tracked_hero(null)
 	elif show_shop_items:
 		_apply_shop_command_visibility()
+		_set_tracked_hero(null)
+	elif show_barracks_training:
+		_apply_barracks_command_visibility()
+		_set_tracked_hero(null)
+	elif show_hero_altar_training:
+		_apply_hero_altar_command_visibility()
 		_set_tracked_hero(null)
 	else:
 		_apply_hidden_command_buttons()
@@ -1819,6 +1842,46 @@ func _apply_combat_command_visibility() -> void:
 	_blacksmith_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
+	_hero_panel.visible = false
+
+
+func _apply_barracks_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
+	_build_tower_button.visible = false
+	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = true
+	_barracks_training_row.visible = true
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
+	_hero_panel.visible = false
+
+
+func _apply_hero_altar_command_visibility() -> void:
+	_build_farm_button.visible = false
+	_build_barracks_button.visible = false
+	_build_blacksmith_button.visible = false
+	_build_shop_button.visible = false
+	_build_tower_button.visible = false
+	_build_hero_altar_button.visible = false
+	_build_command_center_button.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = true
+	_hero_altar_training_row.visible = true
+	_blacksmith_panel.visible = false
+	_shop_panel.visible = false
 	_hero_panel.visible = false
 
 

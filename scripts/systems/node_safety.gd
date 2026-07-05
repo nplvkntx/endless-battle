@@ -32,6 +32,10 @@ static func clean_node_array(arr: Array) -> Array:
 	return arr.filter(func(x: Variant) -> bool: return is_alive_node(x))
 
 
+static func clean_invalid_units(arr: Array) -> Array:
+	return clean_node_array(arr)
+
+
 static func clean_node_dict_keys(dict: Dictionary) -> void:
 	for key: Variant in dict.keys():
 		if not is_alive_node(key):
