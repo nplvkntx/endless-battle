@@ -332,6 +332,7 @@ static func evaluate_attack_gate(
 	var melee_count: int = int(composition.get("melee_count", 0))
 	var ranged_count: int = int(composition.get("ranged_count", 0))
 	var total_combat_count: int = int(composition.get("total_count", 0))
+	var large_army_ready: bool = non_hero_count >= MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK
 	var grouped_required: int = mini(non_hero_count, required_non_hero)
 	var army_grouped: bool = is_army_grouped_at_position(
 		evaluated_units,
@@ -362,7 +363,7 @@ static func evaluate_attack_gate(
 	var bypass_rebuilding: bool = (
 		match_elapsed_seconds >= ATTACK_TIMER_DESPERATE_SECONDS
 		and non_hero_count >= ATTACK_DESPERATE_MIN_NON_HERO_UNITS
-	)
+	) or large_army_ready
 	if rebuilding and not bypass_rebuilding:
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"rebuilding"},
@@ -430,7 +431,7 @@ static func evaluate_attack_gate(
 			match_elapsed_seconds
 		)
 
-	if known_player_power > 0 and wave_power < required_power:
+	if known_player_power > 0 and wave_power < required_power and not large_army_ready:
 		return _finalize_attack_gate(
 			{
 				"can_commit": false,
@@ -465,7 +466,7 @@ static func evaluate_attack_gate(
 				match_elapsed_seconds
 			)
 
-	if not army_grouped:
+	if not army_grouped and not large_army_ready:
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"not_grouped"},
 			debug_context,
