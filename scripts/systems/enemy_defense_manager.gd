@@ -110,5 +110,8 @@ func _should_recall_entire_army_for_threat(tree: SceneTree, threat: Dictionary) 
 	if threat.get("force_commit", false):
 		return true
 
+	if EnemyArmyCommand.is_finishing_mode_active():
+		return false
+
 	var reason: StringName = threat.get("reason", &"")
 	return reason == &"base" or reason == &"buildings" or reason == &"workers"

@@ -175,12 +175,16 @@ var _shop_item_button_handlers: Array[Callable] = []
 var _blacksmith_upgrade_button_handlers: Array[Callable] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 const PRODUCTION_ICON_SLOT_SCENE: PackedScene = preload("res://scenes/ui/production_icon_slot.tscn")
+const BUILD_ICON_SLOT_SCENE: PackedScene = preload("res://scenes/ui/build_icon_slot.tscn")
 const USE_PRODUCTION_ICON_SLOTS := true
+const USE_BUILD_ICON_SLOTS := true
+const BUILD_MANAGER_SCRIPT := preload("res://scripts/systems/build_manager.gd")
 
 var _barracks_swordsman_slot: ProductionIconSlot = null
 var _barracks_archer_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
 var _hero_altar_slot: ProductionIconSlot = null
+var _build_icon_slots: Dictionary = {}
 
 
 func _ready() -> void:
@@ -206,6 +210,8 @@ func _ready() -> void:
 	_setup_production_controls()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_setup_production_icon_slots()
+	if USE_BUILD_ICON_SLOTS:
+		_setup_build_icon_slots()
 	_setup_blacksmith_upgrade_controls()
 	_setup_shop_item_controls()
 	_set_town_center_button_labels()
@@ -299,6 +305,191 @@ func _setup_production_icon_slots() -> void:
 	_train_archer_button.visible = false
 	_train_worker_button.visible = false
 	_train_hero_button.visible = false
+
+
+func _setup_build_icon_slots() -> void:
+	var build_commands: Array[Array] = [
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_FARM,
+			_build_farm_button,
+			"B",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_BARRACKS,
+			_build_barracks_button,
+			"R",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH,
+			_build_blacksmith_button,
+			"",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP,
+			_build_shop_button,
+			"",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER,
+			_build_tower_button,
+			"T",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_HERO_ALTAR,
+			_build_hero_altar_button,
+			"H",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_COMMAND_CENTER,
+			_build_command_center_button,
+			"C",
+		],
+	]
+
+	for command: Array in build_commands:
+		var placement_id: StringName = command[0] as StringName
+		var legacy_button: Button = command[1] as Button
+		var hotkey: String = String(command[2])
+		var slot: BuildIconSlot = _create_build_icon_slot(placement_id, legacy_button, hotkey)
+		if slot != null:
+			_build_icon_slots[placement_id] = slot
+
+	_update_build_icon_slots()
+
+
+func _create_build_icon_slot(
+	placement_id: StringName,
+	legacy_button: Button,
+	hotkey: String
+) -> BuildIconSlot:
+	var slot: BuildIconSlot = BUILD_ICON_SLOT_SCENE.instantiate() as BuildIconSlot
+	if slot == null:
+		push_warning("build_commands: failed to create build icon slot for %s" % placement_id)
+		return null
+
+	slot.visible = false
+	slot.configure(placement_id, BuildingCommandIcons.get_icon_texture(placement_id), hotkey)
+	slot.build_slot_clicked.connect(_on_build_slot_clicked)
+	TooltipManager.bind_control(
+		slot,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				placement_id,
+				TooltipFormatter.get_build_blocked_reason(placement_id)
+			)
+	)
+
+	var parent: Node = legacy_button.get_parent()
+	if parent == null:
+		return slot
+
+	parent.add_child(slot)
+	parent.move_child(slot, legacy_button.get_index())
+	legacy_button.visible = false
+	return slot
+
+
+func _on_build_slot_clicked(placement_id: StringName) -> void:
+	match placement_id:
+		BUILD_MANAGER_SCRIPT.PLACEMENT_FARM:
+			_on_build_farm_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_BARRACKS:
+			_on_build_barracks_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH:
+			_on_build_blacksmith_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP:
+			_on_build_shop_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER:
+			_on_build_tower_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_HERO_ALTAR:
+			_on_build_hero_altar_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_COMMAND_CENTER:
+			_on_build_command_center_pressed()
+		_:
+			return
+
+
+func _should_use_legacy_build_button(placement_id: StringName) -> bool:
+	if not USE_BUILD_ICON_SLOTS:
+		return true
+
+	return not _build_icon_slots.has(placement_id)
+
+
+func _set_build_icon_visibility(show_worker_build: bool) -> void:
+	if not USE_BUILD_ICON_SLOTS:
+		return
+
+	for placement_id: StringName in _build_icon_slots:
+		var slot: BuildIconSlot = _build_icon_slots[placement_id] as BuildIconSlot
+		if slot == null:
+			continue
+
+		slot.visible = show_worker_build
+
+	_set_legacy_build_button_visibility(
+		_build_farm_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_FARM)
+	)
+	_set_legacy_build_button_visibility(
+		_build_barracks_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_BARRACKS)
+	)
+	_set_legacy_build_button_visibility(
+		_build_blacksmith_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH)
+	)
+	_set_legacy_build_button_visibility(
+		_build_shop_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP)
+	)
+	_set_legacy_build_button_visibility(
+		_build_tower_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER)
+	)
+	_set_legacy_build_button_visibility(
+		_build_hero_altar_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_HERO_ALTAR)
+	)
+	_set_legacy_build_button_visibility(
+		_build_command_center_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_COMMAND_CENTER)
+	)
+
+	if show_worker_build:
+		_update_build_icon_slots()
+
+
+func _set_legacy_build_button_visibility(button: Button, visible: bool) -> void:
+	if button == null:
+		return
+
+	button.visible = visible
+
+
+func _update_build_icon_slots() -> void:
+	if not USE_BUILD_ICON_SLOTS:
+		return
+
+	for placement_id: StringName in _build_icon_slots:
+		var slot: BuildIconSlot = _build_icon_slots[placement_id] as BuildIconSlot
+		if slot == null:
+			continue
+
+		var blocked_reason: String = TooltipFormatter.get_build_blocked_reason(placement_id)
+		slot.set_affordable(blocked_reason.is_empty())
+
+
+func _worker_build_icons_visible() -> bool:
+	if not USE_BUILD_ICON_SLOTS:
+		return false
+
+	for placement_id: StringName in _build_icon_slots:
+		var slot: BuildIconSlot = _build_icon_slots[placement_id] as BuildIconSlot
+		if slot != null and slot.visible:
+			return true
+
+	return false
 
 
 func _create_production_icon_slot(train_id: StringName, parent: Control) -> ProductionIconSlot:
@@ -744,6 +935,8 @@ func _on_resources_changed() -> void:
 		_update_blacksmith_upgrade_ui()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
+	if _worker_build_icons_visible():
+		_update_build_icon_slots()
 
 
 func _update_blacksmith_upgrade_ui() -> void:
@@ -1783,13 +1976,7 @@ func _sync_ui_process() -> void:
 
 
 func _apply_hero_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = true
 	_buttons_row.visible = true
@@ -1804,13 +1991,7 @@ func _apply_hero_command_visibility() -> void:
 
 
 func _apply_worker_command_visibility() -> void:
-	_build_farm_button.visible = true
-	_build_barracks_button.visible = true
-	_build_blacksmith_button.visible = true
-	_build_shop_button.visible = true
-	_build_tower_button.visible = true
-	_build_hero_altar_button.visible = true
-	_build_command_center_button.visible = true
+	_set_build_icon_visibility(true)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = true
@@ -1825,13 +2006,7 @@ func _apply_worker_command_visibility() -> void:
 
 
 func _apply_combat_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = true
 	_buttons_row.visible = true
@@ -1846,13 +2021,7 @@ func _apply_combat_command_visibility() -> void:
 
 
 func _apply_barracks_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
@@ -1866,13 +2035,7 @@ func _apply_barracks_command_visibility() -> void:
 
 
 func _apply_hero_altar_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
@@ -1886,13 +2049,7 @@ func _apply_hero_altar_command_visibility() -> void:
 
 
 func _apply_town_center_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = true
 	_attack_button.visible = false
 	_buttons_row.visible = true
@@ -1906,13 +2063,7 @@ func _apply_town_center_command_visibility() -> void:
 
 
 func _apply_blacksmith_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
@@ -1930,13 +2081,7 @@ func _apply_blacksmith_command_visibility() -> void:
 
 
 func _apply_shop_command_visibility() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false
@@ -1954,13 +2099,7 @@ func _apply_shop_command_visibility() -> void:
 
 
 func _apply_hidden_command_buttons() -> void:
-	_build_farm_button.visible = false
-	_build_barracks_button.visible = false
-	_build_blacksmith_button.visible = false
-	_build_shop_button.visible = false
-	_build_tower_button.visible = false
-	_build_hero_altar_button.visible = false
-	_build_command_center_button.visible = false
+	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
 	_buttons_row.visible = false

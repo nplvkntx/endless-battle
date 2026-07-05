@@ -34,6 +34,9 @@ var _creep_manager: EnemyCreepManager = null
 var _director: EnemyStrategicDirector = null
 var _large_army_ready_timer: float = 0.0
 var _cached_player_base_position: Vector3 = Vector3.ZERO
+var _finishing_reinforcement_timer: float = 0.0
+var _finishing_attack_retry_timer: float = 0.0
+var _was_finishing_mode_active: bool = false
 
 
 func _ready() -> void:
@@ -50,9 +53,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	EnemyArmyCommand.update_finishing_mode(get_tree(), delta)
 	_cache_player_base_position()
 	_process_wave_gather(delta)
 	_process_large_army_fallback(delta)
+	_process_finishing_mode(delta)
 
 	_hero_behavior_timer += delta
 	if _hero_behavior_timer >= HERO_BEHAVIOR_INTERVAL_SECONDS:
@@ -84,8 +89,9 @@ func _update_hero_army_behavior() -> void:
 		return
 
 	if EnemyArmyCommand.is_hero_isolated_near_player_threat(get_tree(), hero):
-		_abort_active_offensive_push(rally_position)
-		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		if not EnemyArmyCommand.is_finishing_mode_active():
+			_abort_active_offensive_push(rally_position)
+			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
@@ -94,12 +100,13 @@ func _update_hero_army_behavior() -> void:
 		max_hero_distance *= 0.75
 
 	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree())
+	var finishing_mode: bool = EnemyArmyCommand.is_finishing_mode_active()
 
 	if health_ratio < EnemyArmyCommand.HERO_RETREAT_HP_RATIO:
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
-	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+	if not finishing_mode and non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
 		_abort_active_offensive_push(rally_position)
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
@@ -115,6 +122,8 @@ func _update_hero_army_behavior() -> void:
 		return
 
 	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+		if finishing_mode:
+			return
 		var distance_to_rally: float = _horizontal_distance(hero.global_position, rally_position)
 		if distance_to_rally > EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY * 0.5:
 			_abort_active_offensive_push(rally_position)
@@ -167,10 +176,18 @@ func _process_wave_gather(delta: float) -> void:
 
 	if _wave_gather_pull_timer >= WAVE_GATHER_PULL_INTERVAL_SECONDS:
 		_wave_gather_pull_timer = 0.0
-		EnemyArmyCommand.pull_straggler_units_to_rally(get_tree(), rally_position)
-		EnemyArmyCommand.pull_reinforcement_units_to_rally(get_tree(), rally_position)
+		if EnemyArmyCommand.is_finishing_mode_active():
+			EnemyArmyCommand.pull_finishing_reinforcements_to_attack(get_tree())
+		else:
+			EnemyArmyCommand.pull_straggler_units_to_rally(get_tree(), rally_position)
+			EnemyArmyCommand.pull_reinforcement_units_to_rally(get_tree(), rally_position)
 
-	if _wave_gather_timer < EnemyArmyCommand.WAVE_REINFORCEMENT_WAIT_SECONDS:
+	var gather_wait_seconds: float = (
+		0.0
+		if EnemyArmyCommand.is_finishing_mode_active()
+		else EnemyArmyCommand.WAVE_REINFORCEMENT_WAIT_SECONDS
+	)
+	if _wave_gather_timer < gather_wait_seconds:
 		return
 
 	var refreshed_plan: Dictionary = EnemyArmyCommand.build_regrouped_attack_wave_units(
@@ -348,6 +365,11 @@ func _on_wave_timer() -> void:
 
 	if not _has_any_attack_target():
 		_wave_active = false
+		return
+
+	if EnemyArmyCommand.is_finishing_mode_active():
+		_try_launch_finishing_wave()
+		_schedule_next_wave()
 		return
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
@@ -568,6 +590,10 @@ func _enforce_army_regroup_when_waiting() -> void:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		return
 
+	if EnemyArmyCommand.is_finishing_mode_active():
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+			return
+
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	if rally_position == Vector3.ZERO:
 		return
@@ -583,6 +609,8 @@ func _enforce_army_regroup_when_waiting() -> void:
 	var should_hold: bool = (
 		_should_delay_offensive_wave(rally_position) or _rebuilding_army_after_wave
 	)
+	if EnemyArmyCommand.is_finishing_mode_active():
+		should_hold = false
 	if not should_hold and army_mode != EnemyArmyCommand.ArmyMode.REGROUPING:
 		return
 
@@ -816,3 +844,83 @@ func _is_living_command_center(command_center: CommandCenter) -> bool:
 
 func _on_player_command_center_destroyed(_building: Building) -> void:
 	_tracked_player_command_center = null
+
+
+func _process_finishing_mode(delta: float) -> void:
+	if not EnemyArmyCommand.is_finishing_mode_active():
+		_finishing_reinforcement_timer = 0.0
+		_finishing_attack_retry_timer = 0.0
+		_was_finishing_mode_active = false
+		return
+
+	if not _was_finishing_mode_active:
+		_was_finishing_mode_active = true
+		_try_launch_finishing_attack()
+
+	_rebuilding_army_after_wave = false
+	EnemyArmyCommand.set_rebuilding_army(false)
+
+	_finishing_reinforcement_timer += delta
+	if (
+		_finishing_reinforcement_timer
+		>= EnemyArmyCommand.FINISHING_MODE_REINFORCEMENT_PULL_INTERVAL
+	):
+		_finishing_reinforcement_timer = 0.0
+		EnemyArmyCommand.pull_finishing_reinforcements_to_attack(get_tree())
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+		_finishing_attack_retry_timer = 0.0
+		return
+
+	_finishing_attack_retry_timer += delta
+	if _finishing_attack_retry_timer < 3.0:
+		return
+
+	_finishing_attack_retry_timer = 0.0
+	_try_launch_finishing_attack()
+
+
+func _try_launch_finishing_wave() -> void:
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+		EnemyArmyCommand.pull_finishing_reinforcements_to_attack(get_tree())
+		return
+
+	_try_launch_finishing_attack()
+
+
+func _try_launch_finishing_attack() -> void:
+	if not EnemyArmyCommand.is_finishing_mode_active():
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		return
+
+	if _wave_gather_timer >= 0.0:
+		_cancel_pending_wave_gather()
+
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if rally_position == Vector3.ZERO:
+		return
+
+	var wave_units: Array = EnemyArmyCommand.collect_living_combat_units(get_tree())
+	if wave_units.size() < EnemyArmyCommand.FINISHING_MODE_MIN_PUSH_UNITS:
+		return
+
+	var objective: Dictionary = EnemyArmyCommand.resolve_attack_objective(
+		get_tree(),
+		rally_position
+	)
+	var attack_destination: Vector3 = objective.get("position", Vector3.ZERO)
+	if attack_destination == Vector3.ZERO:
+		return
+
+	_rebuilding_army_after_wave = false
+	EnemyArmyCommand.set_rebuilding_army(false)
+
+	if _director != null:
+		_director.set_attack_target_position(attack_destination)
+
+	_launch_attack_wave(wave_units, attack_destination)

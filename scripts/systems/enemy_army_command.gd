@@ -72,6 +72,21 @@ const WAVE_4_MIN_NON_HERO_UNITS := 24
 const WAVE_REGROUP_MAX_DISTANCE := 22.0
 const WAVE_REBUILD_ARMY_RATIO := 0.40
 
+const FINISHING_MODE_EVAL_INTERVAL := 2.0
+const FINISHING_MODE_EXIT_COOLDOWN := 8.0
+const FINISHING_MODE_OBJECTIVE_REISSUE_SECONDS := 1.5
+const FINISHING_MODE_REINFORCEMENT_PULL_INTERVAL := 2.0
+const FINISHING_MODE_MIN_AI_COMBAT_UNITS := 15
+const FINISHING_MODE_MAX_PLAYER_COMBAT_UNITS := 5
+const FINISHING_MODE_MAX_PLAYER_MILITARY_PRODUCTION := 1
+const FINISHING_MODE_WEAK_PLAYER_COMBAT_FOR_PRODUCTION := 8
+const FINISHING_MODE_IN_BASE_DISTANCE := 35.0
+const FINISHING_MODE_WEAK_RESISTANCE_POWER := 80
+const FINISHING_MODE_PLAYER_RECOVERY_RATIO := 0.65
+const FINISHING_MODE_ARMY_DESTROYED_RATIO := 0.25
+const FINISHING_MODE_MIN_PUSH_UNITS := 4
+const FINISHING_MODE_TOWER_THREAT_BUFFER := 2.0
+
 enum ArmyMode {
 	IDLE,
 	CREEPING,
@@ -88,6 +103,10 @@ static var _active_wave_objective_position: Vector3 = Vector3.ZERO
 static var _objective_reissue_timer: float = 0.0
 static var _objective_stuck_timer: float = 0.0
 static var _objective_last_building_health: int = -1
+static var _finishing_mode_active: bool = false
+static var _finishing_mode_exit_cooldown: float = 0.0
+static var _finishing_mode_eval_timer: float = 0.0
+static var _last_finishing_objective: Node3D = null
 
 
 static func get_army_mode() -> ArmyMode:
@@ -96,6 +115,34 @@ static func get_army_mode() -> ArmyMode:
 
 static func is_rebuilding_army() -> bool:
 	return _is_rebuilding_army
+
+
+static func is_finishing_mode_active() -> bool:
+	return _finishing_mode_active
+
+
+static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
+	if _finishing_mode_exit_cooldown > 0.0:
+		_finishing_mode_exit_cooldown = maxf(0.0, _finishing_mode_exit_cooldown - delta)
+
+	_finishing_mode_eval_timer += delta
+	if _finishing_mode_eval_timer < FINISHING_MODE_EVAL_INTERVAL:
+		return
+
+	_finishing_mode_eval_timer = 0.0
+
+	if _finishing_mode_active:
+		var exit_eval: Dictionary = _evaluate_finishing_exit(tree)
+		if exit_eval.get("should_exit", false):
+			_set_finishing_mode(false, String(exit_eval.get("reason", "unknown")))
+		return
+
+	if _finishing_mode_exit_cooldown > 0.0:
+		return
+
+	var enter_eval: Dictionary = _evaluate_finishing_activation(tree)
+	if enter_eval.get("should_enter", false):
+		_set_finishing_mode(true, String(enter_eval.get("reason", "unknown")))
 
 
 static func set_rebuilding_army(rebuilding: bool) -> void:
@@ -142,6 +189,10 @@ static func should_recall_offensive_for_defense(tree: SceneTree) -> bool:
 	if threat.get("force_commit", false):
 		return true
 
+	if _finishing_mode_active:
+		var reason: StringName = threat.get("reason", &"")
+		return reason == &"base"
+
 	var reason: StringName = threat.get("reason", &"")
 	if reason == &"base" or reason == &"buildings" or reason == &"workers":
 		return true
@@ -175,9 +226,20 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 	if get_army_mode() != ArmyMode.ATTACKING:
 		return
 
+	var reissue_interval: float = (
+		FINISHING_MODE_OBJECTIVE_REISSUE_SECONDS
+		if _finishing_mode_active
+		else ATTACK_OBJECTIVE_REISSUE_SECONDS
+	)
+
 	var fallback_position: Vector3 = _active_wave_objective_position
 	if fallback_position == Vector3.ZERO:
 		fallback_position = resolve_enemy_rally_position(tree)
+
+	var previous_objective: Node3D = _active_wave_objective
+	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective)
+	if previous_objective_alive and previous_objective is Building:
+		previous_objective_alive = _is_living_building(previous_objective as Building)
 
 	var objective: Dictionary = resolve_attack_objective(tree, fallback_position)
 	var objective_node: Node3D = objective.get("node") as Node3D
@@ -185,14 +247,27 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 	if objective_position == Vector3.ZERO:
 		return
 
+	var objective_died: bool = previous_objective != null and not previous_objective_alive
+	var objective_changed: bool = (
+		NodeSafety.is_alive_node(objective_node) and objective_node != previous_objective
+	)
+
 	if NodeSafety.is_alive_node(objective_node):
 		_active_wave_objective = objective_node
 	_active_wave_objective_position = objective_position
 
+	if _finishing_mode_active and NodeSafety.is_alive_node(objective_node):
+		if objective_died or objective_changed:
+			_log_finishing_objective(objective_node)
+
 	_update_objective_stuck_detection(tree, objective_node, delta)
 
 	_objective_reissue_timer += delta
-	var should_reissue: bool = _objective_reissue_timer >= ATTACK_OBJECTIVE_REISSUE_SECONDS
+	var should_reissue: bool = (
+		_objective_reissue_timer >= reissue_interval
+		or objective_died
+		or objective_changed
+	)
 	var should_unstick: bool = _objective_stuck_timer >= ATTACK_OBJECTIVE_STUCK_SECONDS
 	if not should_reissue and not should_unstick:
 		return
@@ -418,6 +493,20 @@ static func release_army_mode(mode: ArmyMode) -> bool:
 
 
 static func should_abort_offensive_push(tree: SceneTree) -> bool:
+	if _finishing_mode_active:
+		var living_wave_units: Array = _collect_living_offensive_wave_units(tree)
+		var living_count: int = living_wave_units.size()
+		if _active_wave_start_unit_count > 0:
+			var retreat_threshold: int = maxi(
+				FINISHING_MODE_MIN_PUSH_UNITS,
+				int(float(_active_wave_start_unit_count) * FINISHING_MODE_ARMY_DESTROYED_RATIO)
+			)
+			if living_count < retreat_threshold:
+				return true
+		elif living_count < FINISHING_MODE_MIN_PUSH_UNITS:
+			return true
+		return false
+
 	var hero: Hero = find_living_enemy_hero(tree)
 	if hero != null and get_health_ratio(hero) < HERO_RETREAT_HP_RATIO:
 		return true
@@ -615,6 +704,23 @@ static func evaluate_attack_gate(
 		"required_non_hero": required_non_hero,
 		"elapsed_seconds": match_elapsed_seconds,
 	}
+
+	if _finishing_mode_active:
+		if total_combat_count >= FINISHING_MODE_MIN_PUSH_UNITS:
+			return _finalize_attack_gate(
+				{
+					"can_commit": true,
+					"reason": &"finishing_mode",
+					"total_combat_count": total_combat_count,
+				},
+				debug_context,
+				match_elapsed_seconds
+			)
+		return _finalize_attack_gate(
+			{"can_commit": false, "reason": &"finishing_too_weak"},
+			debug_context,
+			match_elapsed_seconds
+		)
 
 	if non_hero_count < ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS:
 		return _finalize_attack_gate(
@@ -1033,6 +1139,10 @@ static func assign_reinforcement_regroup(tree: SceneTree, unit: Unit) -> void:
 	if not NodeSafety.is_alive_node(unit):
 		return
 
+	if _finishing_mode_active:
+		_assign_reinforcement_to_finishing_attack(tree, unit)
+		return
+
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
 		return
@@ -1067,6 +1177,54 @@ static func pull_reinforcement_units_to_rally(
 		return
 
 	command_hold_at_rally(reinforcements, rally_position, EnemyUnitMission.Mission.REGROUP)
+
+
+static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
+	if not _finishing_mode_active:
+		return
+
+	var objective_position: Vector3 = get_attack_objective_position()
+	if objective_position == Vector3.ZERO:
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		var objective: Dictionary = resolve_attack_objective(tree, rally_position)
+		objective_position = objective.get("position", Vector3.ZERO)
+		var objective_node: Node3D = objective.get("node") as Node3D
+		if NodeSafety.is_alive_node(objective_node):
+			set_attack_objective(objective_node, objective_position)
+
+	if objective_position == Vector3.ZERO:
+		return
+
+	var reinforcements: Array = []
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if mission == EnemyUnitMission.Mission.ATTACK:
+			continue
+
+		if mission != EnemyUnitMission.Mission.REGROUP and mission != EnemyUnitMission.Mission.IDLE:
+			continue
+
+		reinforcements.append(unit)
+
+	if reinforcements.is_empty():
+		return
+
+	var objective_node: Node3D = NodeSafety.safe_node(_active_wave_objective) as Node3D
+	if NodeSafety.is_alive_node(objective_node):
+		_command_focus_attack_objective(
+			reinforcements,
+			objective_node,
+			EnemyUnitMission.Mission.ATTACK
+		)
+	else:
+		command_attack_move(
+			reinforcements,
+			objective_position,
+			EnemyUnitMission.Mission.ATTACK
+		)
 
 
 static func build_regrouped_attack_wave_units(
@@ -1416,6 +1574,9 @@ static func has_player_attack_targets(tree: SceneTree, enemy_base_position: Vect
 
 
 static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3) -> Dictionary:
+	if _finishing_mode_active:
+		return resolve_finishing_attack_objective(tree, fallback_position)
+
 	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
 	if command_center != null:
 		return {
@@ -2222,3 +2383,374 @@ static func _horizontal_distance(from_position: Vector3, to_position: Vector3) -
 	var offset: Vector3 = from_position - to_position
 	offset.y = 0.0
 	return offset.length()
+
+
+static func resolve_finishing_attack_objective(
+	tree: SceneTree,
+	fallback_position: Vector3
+) -> Dictionary:
+	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
+	if command_center != null:
+		return {
+			"node": command_center,
+			"position": command_center.global_position,
+		}
+
+	var reference_position: Vector3 = fallback_position
+	if reference_position == Vector3.ZERO:
+		reference_position = _resolve_player_base_reference_position(tree, fallback_position)
+
+	var finishing_building: Node3D = _find_highest_priority_finishing_building(
+		tree,
+		reference_position
+	)
+	if finishing_building != null:
+		return {
+			"node": finishing_building,
+			"position": finishing_building.global_position,
+		}
+
+	var nearest_worker: Node3D = _find_nearest_living_player_worker(tree, reference_position)
+	if nearest_worker != null:
+		return {
+			"node": nearest_worker,
+			"position": nearest_worker.global_position,
+		}
+
+	if fallback_position != Vector3.ZERO:
+		return {"node": null, "position": fallback_position}
+
+	return {"node": null, "position": Vector3.ZERO}
+
+
+static func _set_finishing_mode(active: bool, reason: String) -> void:
+	if active == _finishing_mode_active:
+		return
+
+	_finishing_mode_active = active
+	_last_finishing_objective = null
+
+	if active:
+		print("[AI] ENTER FINISHING MODE reason=%s" % reason)
+	else:
+		print("[AI] EXIT FINISHING MODE reason=%s" % reason)
+		_finishing_mode_exit_cooldown = FINISHING_MODE_EXIT_COOLDOWN
+
+
+static func _evaluate_finishing_activation(tree: SceneTree) -> Dictionary:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return {"should_enter": false}
+
+	if not has_player_attack_targets(tree, rally_position):
+		return {"should_enter": false}
+
+	var ai_combat_count: int = collect_living_combat_units(tree).size()
+	var player_combat_count: int = _count_living_player_combat_units(tree)
+
+	if _resolve_living_player_command_center(tree) == null:
+		if ai_combat_count >= FINISHING_MODE_MIN_PUSH_UNITS:
+			return {
+				"should_enter": true,
+				"reason": "player_command_center_destroyed",
+			}
+
+	if (
+		player_combat_count <= FINISHING_MODE_MAX_PLAYER_COMBAT_UNITS
+		and ai_combat_count >= FINISHING_MODE_MIN_AI_COMBAT_UNITS
+	):
+		return {
+			"should_enter": true,
+			"reason": "player_army_crippled",
+		}
+
+	var military_production_count: int = _count_living_player_military_production_buildings(tree)
+	if (
+		military_production_count <= FINISHING_MODE_MAX_PLAYER_MILITARY_PRODUCTION
+		and player_combat_count <= FINISHING_MODE_WEAK_PLAYER_COMBAT_FOR_PRODUCTION
+		and ai_combat_count >= FINISHING_MODE_MIN_AI_COMBAT_UNITS
+	):
+		return {
+			"should_enter": true,
+			"reason": "player_production_crippled",
+		}
+
+	if ai_combat_count >= FINISHING_MODE_MIN_PUSH_UNITS and _is_finishing_army_inside_player_base(
+		tree
+	):
+		var base_reference: Vector3 = _resolve_player_base_reference_position(
+			tree,
+			rally_position
+		)
+		var player_power: int = estimate_player_threat_power_near(
+			tree,
+			base_reference,
+			FINISHING_MODE_IN_BASE_DISTANCE
+		)
+		if player_power <= FINISHING_MODE_WEAK_RESISTANCE_POWER:
+			return {
+				"should_enter": true,
+				"reason": "army_in_base_weak_resistance",
+			}
+
+	return {"should_enter": false}
+
+
+static func _evaluate_finishing_exit(tree: SceneTree) -> Dictionary:
+	var ai_units: Array = _collect_living_offensive_wave_units(tree)
+	if ai_units.is_empty():
+		ai_units = collect_living_combat_units(tree)
+
+	var ai_power: int = estimate_military_power(ai_units)
+	var player_units: Array = _collect_living_player_combat_unit_nodes(tree)
+	var player_power: int = estimate_military_power(player_units)
+	var player_combat_count: int = player_units.size()
+
+	if (
+		player_combat_count >= 3
+		and ai_power > 0
+		and player_power >= int(float(ai_power) * FINISHING_MODE_PLAYER_RECOVERY_RATIO)
+	):
+		return {"should_exit": true, "reason": "player_recovered_strength"}
+
+	var living_count: int = ai_units.size()
+	if _active_wave_start_unit_count > 0:
+		var retreat_threshold: int = maxi(
+			FINISHING_MODE_MIN_PUSH_UNITS,
+			int(float(_active_wave_start_unit_count) * FINISHING_MODE_ARMY_DESTROYED_RATIO)
+		)
+		if living_count < retreat_threshold:
+			return {"should_exit": true, "reason": "ai_army_destroyed"}
+	elif get_army_mode() == ArmyMode.ATTACKING and living_count < FINISHING_MODE_MIN_PUSH_UNITS:
+		return {"should_exit": true, "reason": "ai_army_destroyed"}
+
+	return {"should_exit": false}
+
+
+static func _assign_reinforcement_to_finishing_attack(tree: SceneTree, unit: Unit) -> void:
+	var objective_position: Vector3 = get_attack_objective_position()
+	var objective_node: Node3D = NodeSafety.safe_node(_active_wave_objective) as Node3D
+
+	if objective_position == Vector3.ZERO or not NodeSafety.is_alive_node(objective_node):
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		var objective: Dictionary = resolve_attack_objective(tree, rally_position)
+		objective_position = objective.get("position", Vector3.ZERO)
+		objective_node = objective.get("node") as Node3D
+		if NodeSafety.is_alive_node(objective_node):
+			set_attack_objective(objective_node, objective_position)
+
+	if objective_position == Vector3.ZERO:
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		if rally_position == Vector3.ZERO:
+			return
+
+		if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP):
+			return
+
+		command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.REGROUP)
+		return
+
+	if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.ATTACK):
+		return
+
+	if NodeSafety.is_alive_node(objective_node):
+		_command_unit_focus_attack(unit, objective_node)
+	else:
+		_issue_attack_move(unit, objective_position)
+
+	EnemyUnitMission.record_move_order(
+		unit,
+		objective_position,
+		EnemyUnitMission.Mission.ATTACK
+	)
+
+
+static func _log_finishing_objective(objective_node: Node3D) -> void:
+	if not NodeSafety.is_alive_node(objective_node):
+		return
+
+	if objective_node == _last_finishing_objective:
+		return
+
+	_last_finishing_objective = objective_node
+	print(
+		"[AI] FINISH OBJECTIVE %s"
+		% _get_finishing_objective_display_name(objective_node)
+	)
+
+
+static func _get_finishing_objective_display_name(node: Node) -> String:
+	if not NodeSafety.is_alive_node(node):
+		return "unknown"
+
+	if node is CommandCenter:
+		return "CommandCenter"
+	if node is Barracks:
+		return "Barracks"
+	if node is HeroAltar:
+		return "HeroAltar"
+	if node is Tower:
+		return "Tower"
+	if node is Blacksmith:
+		return "Blacksmith"
+	if node is Shop:
+		return "Shop"
+	if node is Worker:
+		return "Worker"
+	if node is Building:
+		return "Building"
+
+	return node.name
+
+
+static func _count_living_player_combat_units(tree: SceneTree) -> int:
+	return _collect_living_player_combat_unit_nodes(tree).size()
+
+
+static func _collect_living_player_combat_unit_nodes(tree: SceneTree) -> Array:
+	var units: Array = []
+	for group_name: StringName in [UNITS_GROUP, HEROES_GROUP]:
+		for node: Node in tree.get_nodes_in_group(group_name):
+			if not node is Node3D:
+				continue
+
+			if CombatTargetValidation.is_enemy_faction(node):
+				continue
+
+			if node is Worker:
+				continue
+
+			if not (node is Swordsman or node is Archer or node is Hero):
+				continue
+
+			if not CombatTargetValidation.is_valid_combat_target(node):
+				continue
+
+			units.append(node)
+
+	return units
+
+
+static func _count_living_player_military_production_buildings(tree: SceneTree) -> int:
+	var count: int = 0
+	for node: Node in tree.get_nodes_in_group(BUILDINGS_GROUP):
+		if not node is Building:
+			continue
+
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+
+		if not _is_living_building(node as Building):
+			continue
+
+		if node is Barracks or node is HeroAltar:
+			count += 1
+
+	return count
+
+
+static func _resolve_player_base_reference_position(
+	tree: SceneTree,
+	fallback_position: Vector3
+) -> Vector3:
+	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
+	if command_center != null:
+		return command_center.global_position
+
+	var nearest_building: Node3D = _find_nearest_living_player_building(
+		tree,
+		fallback_position
+	)
+	if nearest_building != null:
+		return nearest_building.global_position
+
+	return fallback_position
+
+
+static func _is_finishing_army_inside_player_base(tree: SceneTree) -> bool:
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	if wave_units.is_empty():
+		wave_units = collect_living_combat_units(tree)
+
+	var army_center: Vector3 = compute_army_center(wave_units)
+	if army_center == Vector3.ZERO:
+		return false
+
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	var base_reference: Vector3 = _resolve_player_base_reference_position(
+		tree,
+		rally_position
+	)
+	if base_reference == Vector3.ZERO:
+		return false
+
+	return (
+		horizontal_distance(army_center, base_reference)
+		<= FINISHING_MODE_IN_BASE_DISTANCE
+	)
+
+
+static func _find_highest_priority_finishing_building(
+	tree: SceneTree,
+	from_position: Vector3
+) -> Node3D:
+	var best_building: Node3D = null
+	var best_priority: int = 999
+	var best_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(BUILDINGS_GROUP):
+		if not node is Building:
+			continue
+
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+
+		if not _is_living_building(node as Building):
+			continue
+
+		var building: Building = node as Building
+		var priority: int = _get_finishing_building_priority(building, tree)
+		var building_position: Vector3 = (building as Node3D).global_position
+		var distance: float = _horizontal_distance(from_position, building_position)
+
+		if priority < best_priority or (priority == best_priority and distance < best_distance):
+			best_priority = priority
+			best_distance = distance
+			best_building = building as Node3D
+
+	return best_building
+
+
+static func _get_finishing_building_priority(building: Building, tree: SceneTree) -> int:
+	if building is Barracks:
+		return 1
+	if building is HeroAltar:
+		return 2
+	if building is Tower and _is_actively_dangerous_tower(building as Tower, tree):
+		return 3
+	if building is Blacksmith or building is Shop:
+		return 4
+	if building is Farm:
+		return 6
+	if building is Tower:
+		return 5
+
+	return 5
+
+
+static func _is_actively_dangerous_tower(tower: Tower, tree: SceneTree) -> bool:
+	if not NodeSafety.is_alive_node(tower):
+		return false
+
+	if tower.building_state != Building.STATE_COMPLETED:
+		return false
+
+	var threat_range: float = tower.attack_range + FINISHING_MODE_TOWER_THREAT_BUFFER
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		if horizontal_distance((unit as Node3D).global_position, tower.global_position) <= threat_range:
+			return true
+
+	return false

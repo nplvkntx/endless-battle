@@ -15,24 +15,26 @@ const UNIT_ROLE_DESCRIPTIONS: Dictionary = {
 }
 
 const BUILD_PLACEMENT_NAMES: Dictionary = {
-	_BUILD_MANAGER.PLACEMENT_FARM: "Build Farm",
-	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Build Barracks",
-	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Build Blacksmith",
-	_BUILD_MANAGER.PLACEMENT_SHOP: "Build Shop",
-	_BUILD_MANAGER.PLACEMENT_TOWER: "Build Tower",
-	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Build Hero Altar",
-	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Build Town Center",
+	_BUILD_MANAGER.PLACEMENT_FARM: "Farm",
+	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Barracks",
+	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Blacksmith",
+	_BUILD_MANAGER.PLACEMENT_SHOP: "Shop",
+	_BUILD_MANAGER.PLACEMENT_TOWER: "Tower",
+	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Hero Altar",
+	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Town Center",
 }
 
 const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
-	_BUILD_MANAGER.PLACEMENT_FARM: "Increases food supply.",
-	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Trains infantry units.",
-	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Researches military upgrades.",
-	_BUILD_MANAGER.PLACEMENT_SHOP: "Sells items to nearby heroes.",
-	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive structure.",
-	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains a hero unit.",
+	_BUILD_MANAGER.PLACEMENT_FARM: "Provides supply.",
+	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Trains Swordsmen and Archers.",
+	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Unlocks upgrades.",
+	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
+	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
+	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains/revives your Hero.",
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Expands your base.",
 }
+
+const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {}
 
 const TRAIN_DESCRIPTIONS: Dictionary = {
 	&"worker": "Gathers resources and constructs buildings.",
@@ -76,16 +78,29 @@ static func format_build_placement(placement_id: StringName, blocked_reason: Str
 		return ""
 
 	var lines: PackedStringArray = PackedStringArray()
-	lines.append(String(BUILD_PLACEMENT_NAMES.get(placement_id, placement_id)))
+	lines.append(get_placement_display_name(placement_id))
 
 	if costs.gold > 0:
 		lines.append("Gold: %d" % costs.gold)
+	elif costs.has("gold"):
+		lines.append("Gold: 0")
+
 	if costs.wood > 0:
 		lines.append("Wood: %d" % costs.wood)
+	elif costs.has("wood"):
+		lines.append("Wood: 0")
 
 	var build_time: float = get_placement_build_time(placement_id)
 	if build_time > 0.0:
-		lines.append("Time: %s" % _format_seconds(build_time))
+		lines.append("Build Time: %s" % _format_seconds(build_time))
+
+	var supply_bonus: int = get_placement_supply_bonus(placement_id)
+	if supply_bonus > 0:
+		lines.append("Supply: +%d" % supply_bonus)
+
+	var requirements: PackedStringArray = get_placement_requirement_labels(placement_id)
+	for requirement: String in requirements:
+		lines.append("Requires: %s" % requirement)
 
 	if not blocked_reason.is_empty():
 		lines.append(blocked_reason)
@@ -95,6 +110,30 @@ static func format_build_placement(placement_id: StringName, blocked_reason: Str
 		lines.append(description)
 
 	return "\n".join(lines)
+
+
+static func get_placement_display_name(placement_id: StringName) -> String:
+	return String(BUILD_PLACEMENT_NAMES.get(placement_id, placement_id))
+
+
+static func get_placement_supply_bonus(placement_id: StringName) -> int:
+	match placement_id:
+		_BUILD_MANAGER.PLACEMENT_FARM:
+			return Farm.FOOD_CAP_BONUS
+		_:
+			return 0
+
+
+static func get_placement_requirement_labels(placement_id: StringName) -> PackedStringArray:
+	var requirements: Variant = BUILD_PLACEMENT_REQUIREMENTS.get(placement_id, [])
+	if requirements is PackedStringArray:
+		return requirements
+	if requirements is Array:
+		var labels: PackedStringArray = PackedStringArray()
+		for entry: Variant in requirements:
+			labels.append(String(entry))
+		return labels
+	return PackedStringArray()
 
 
 static func format_train_command(

@@ -56,6 +56,9 @@ func has_safe_creep_camp_available() -> bool:
 
 
 func _update_creeping() -> void:
+	if EnemyArmyCommand.is_finishing_mode_active():
+		return
+
 	var tree: SceneTree = get_tree()
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
