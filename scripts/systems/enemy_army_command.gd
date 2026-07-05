@@ -57,7 +57,12 @@ const DEFENSE_POWER_DAMAGE_MULTIPLIER := 8.0
 const HERO_AOE_PLAYER_COUNT := 3
 const HERO_AOE_CHECK_RANGE := 10.0
 const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
-const HERO_EXECUTE_SEARCH_RANGE := 14.0
+const ATTACK_OBJECTIVE_REISSUE_SECONDS := 2.5
+const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
+const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
+const ATTACK_CLOSE_TO_WIN_CC_HEALTH_RATIO := 0.35
+const ATTACK_CLOSE_TO_WIN_ARMY_DISTANCE := 28.0
+const IMPORTANT_BUILDING_SEARCH_RANGE := 200.0
 
 const WAVE_1_MIN_NON_HERO_UNITS := 24
 const WAVE_2_MIN_NON_HERO_UNITS := 24
@@ -77,6 +82,11 @@ enum ArmyMode {
 static var _army_mode: ArmyMode = ArmyMode.IDLE
 static var _is_rebuilding_army: bool = false
 static var _active_wave_start_unit_count: int = 0
+static var _active_wave_objective: Node3D = null
+static var _active_wave_objective_position: Vector3 = Vector3.ZERO
+static var _objective_reissue_timer: float = 0.0
+static var _objective_stuck_timer: float = 0.0
+static var _objective_last_building_health: int = -1
 
 
 static func get_army_mode() -> ArmyMode:
@@ -98,10 +108,182 @@ static func get_active_wave_start_unit_count() -> int:
 static func begin_offensive_wave(wave_units: Array) -> void:
 	wave_units = NodeSafety.clean_node_array(wave_units)
 	_active_wave_start_unit_count = wave_units.size()
+	_objective_reissue_timer = 0.0
+	_objective_stuck_timer = 0.0
+	_objective_last_building_health = -1
+
+
+static func set_attack_objective(objective: Node3D, position: Vector3) -> void:
+	_active_wave_objective = NodeSafety.safe_node(objective) as Node3D
+	_active_wave_objective_position = position
+	_objective_reissue_timer = 0.0
+	_objective_stuck_timer = 0.0
+	_objective_last_building_health = -1
+
+
+static func get_attack_objective_position() -> Vector3:
+	return _active_wave_objective_position
+
+
+static func prepare_defense_recall(tree: SceneTree) -> void:
+	cancel_offensive_orders(tree)
+	clear_offensive_wave_tracking()
+
+
+static func should_recall_offensive_for_defense(tree: SceneTree) -> bool:
+	if get_army_mode() != ArmyMode.ATTACKING:
+		return false
+
+	if not is_enemy_base_threatened(tree):
+		return false
+
+	return not _is_attack_close_to_winning(tree)
+
+
+static func _is_attack_close_to_winning(tree: SceneTree) -> bool:
+	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
+	if command_center == null:
+		return true
+
+	if get_health_ratio(command_center) > ATTACK_CLOSE_TO_WIN_CC_HEALTH_RATIO:
+		return false
+
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	if wave_units.is_empty():
+		wave_units = collect_living_combat_units(tree)
+
+	var army_center: Vector3 = compute_army_center(wave_units)
+	if army_center == Vector3.ZERO:
+		return false
+
+	return (
+		horizontal_distance(army_center, command_center.global_position)
+		<= ATTACK_CLOSE_TO_WIN_ARMY_DISTANCE
+	)
+
+
+static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> void:
+	if get_army_mode() != ArmyMode.ATTACKING:
+		return
+
+	var fallback_position: Vector3 = _active_wave_objective_position
+	if fallback_position == Vector3.ZERO:
+		fallback_position = resolve_enemy_rally_position(tree)
+
+	var objective: Dictionary = resolve_attack_objective(tree, fallback_position)
+	var objective_node: Node3D = objective.get("node") as Node3D
+	var objective_position: Vector3 = objective.get("position", Vector3.ZERO)
+	if objective_position == Vector3.ZERO:
+		return
+
+	if NodeSafety.is_alive_node(objective_node):
+		_active_wave_objective = objective_node
+	_active_wave_objective_position = objective_position
+
+	_update_objective_stuck_detection(tree, objective_node, delta)
+
+	_objective_reissue_timer += delta
+	var should_reissue: bool = _objective_reissue_timer >= ATTACK_OBJECTIVE_REISSUE_SECONDS
+	var should_unstick: bool = _objective_stuck_timer >= ATTACK_OBJECTIVE_STUCK_SECONDS
+	if not should_reissue and not should_unstick:
+		return
+
+	_objective_reissue_timer = 0.0
+
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	if wave_units.is_empty():
+		wave_units = collect_living_combat_units(tree)
+	if wave_units.is_empty():
+		return
+
+	if should_unstick and NodeSafety.is_alive_node(objective_node):
+		_objective_stuck_timer = 0.0
+		_command_assault_objective(wave_units, objective_node)
+		return
+
+	command_attack_move(
+		wave_units,
+		objective_position,
+		EnemyUnitMission.Mission.ATTACK
+	)
+
+
+static func _update_objective_stuck_detection(
+	tree: SceneTree,
+	objective_node: Node3D,
+	delta: float
+) -> void:
+	if not NodeSafety.is_alive_node(objective_node) or not objective_node is Building:
+		_objective_stuck_timer = 0.0
+		_objective_last_building_health = -1
+		return
+
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	if wave_units.is_empty():
+		wave_units = collect_living_combat_units(tree)
+
+	var army_center: Vector3 = compute_army_center(wave_units)
+	if (
+		army_center == Vector3.ZERO
+		or horizontal_distance(army_center, objective_node.global_position)
+		> ATTACK_OBJECTIVE_NEAR_DISTANCE
+	):
+		_objective_stuck_timer = 0.0
+		return
+
+	var building: Building = objective_node as Building
+	var current_health: int = CombatTargetValidation.get_target_current_health(building)
+	if _objective_last_building_health >= 0 and current_health < _objective_last_building_health:
+		_objective_stuck_timer = 0.0
+	else:
+		_objective_stuck_timer += delta
+
+	_objective_last_building_health = current_health
+
+
+static func _command_assault_objective(units: Array, objective: Node3D) -> void:
+	if not NodeSafety.is_alive_node(objective):
+		return
+
+	command_attack_move(
+		units,
+		objective.global_position,
+		EnemyUnitMission.Mission.ATTACK
+	)
+
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		if not EnemyUnitMission.allows_combat_micro(unit as Node):
+			continue
+
+		var distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+			unit as Node3D,
+			objective
+		)
+		var weapon_range: float = 2.0
+		if "attack_range" in unit:
+			weapon_range = maxf(float(unit.get("attack_range")), weapon_range)
+
+		if distance > weapon_range * 1.25:
+			continue
+
+		if (unit as Object).has_method("command_attack"):
+			(unit as Object).call("command_attack", objective)
 
 
 static func clear_offensive_wave_tracking() -> void:
 	_active_wave_start_unit_count = 0
+	_reset_objective_tracking()
+
+
+static func _reset_objective_tracking() -> void:
+	_active_wave_objective = null
+	_active_wave_objective_position = Vector3.ZERO
+	_objective_reissue_timer = 0.0
+	_objective_stuck_timer = 0.0
+	_objective_last_building_health = -1
 
 
 ## Returns true when the requested mode owns the army for issuing orders.
@@ -1151,31 +1333,42 @@ static func has_player_attack_targets(tree: SceneTree, enemy_base_position: Vect
 	return false
 
 
-static func resolve_wave_attack_destination(tree: SceneTree, enemy_base_position: Vector3) -> Vector3:
-	var nearby_military: Node3D = _find_player_military_near_position(
-		tree,
-		enemy_base_position,
-		BASE_THREAT_DETECTION_RANGE
-	)
-	if nearby_military != null:
-		return nearby_military.global_position
-
+static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3) -> Dictionary:
 	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
 	if command_center != null:
-		return command_center.global_position
+		return {
+			"node": command_center,
+			"position": command_center.global_position,
+		}
+
+	var important_building: Node3D = _find_nearest_important_player_building(
+		tree,
+		fallback_position
+	)
+	if important_building != null:
+		return {
+			"node": important_building,
+			"position": important_building.global_position,
+		}
 
 	var nearest_building: Node3D = _find_nearest_living_player_building(
 		tree,
-		enemy_base_position
+		fallback_position
 	)
 	if nearest_building != null:
-		return nearest_building.global_position
+		return {
+			"node": nearest_building,
+			"position": nearest_building.global_position,
+		}
 
-	var nearest_unit: Node3D = _find_nearest_living_player_unit(tree, enemy_base_position)
-	if nearest_unit != null:
-		return nearest_unit.global_position
+	if fallback_position != Vector3.ZERO:
+		return {"node": null, "position": fallback_position}
 
-	return enemy_base_position
+	return {"node": null, "position": Vector3.ZERO}
+
+
+static func resolve_wave_attack_destination(tree: SceneTree, enemy_base_position: Vector3) -> Vector3:
+	return resolve_attack_objective(tree, enemy_base_position).get("position", Vector3.ZERO)
 
 
 static func is_hero_healthy_enough_for_wave(hero: Hero) -> bool:
@@ -1780,6 +1973,38 @@ static func _resolve_living_player_command_center(tree: SceneTree) -> CommandCen
 			return node as CommandCenter
 
 	return null
+
+
+static func _find_nearest_important_player_building(
+	tree: SceneTree,
+	from_position: Vector3
+) -> Node3D:
+	var closest_building: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(BUILDINGS_GROUP):
+		if not node is Building:
+			continue
+
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+
+		if not _is_living_building(node as Building):
+			continue
+
+		if node is Farm:
+			continue
+
+		var building: Node3D = node as Node3D
+		var distance: float = _horizontal_distance(from_position, building.global_position)
+		if distance > IMPORTANT_BUILDING_SEARCH_RANGE:
+			continue
+
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_building = building
+
+	return closest_building
 
 
 static func _find_nearest_living_player_building(

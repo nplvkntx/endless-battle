@@ -8,12 +8,24 @@ const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const NEUTRAL_CREEP_GROUP := &"neutral_creeps"
 const ENEMY_TEAM_ID: int = 1
 
-const ENEMY_ATTACK_PRIORITY_ENGAGED := 1
-const ENEMY_ATTACK_PRIORITY_WORKER := 2
-const ENEMY_ATTACK_PRIORITY_MILITARY := 3
-const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 4
-const ENEMY_ATTACK_PRIORITY_BUILDING := 5
+const ENEMY_ATTACK_PRIORITY_COMMAND_CENTER := 1
+const ENEMY_ATTACK_PRIORITY_PRODUCTION_BUILDING := 2
+const ENEMY_ATTACK_PRIORITY_SUPPORT_BUILDING := 3
+const ENEMY_ATTACK_PRIORITY_TOWER := 4
+const ENEMY_ATTACK_PRIORITY_ENGAGED_MILITARY := 5
+const ENEMY_ATTACK_PRIORITY_MILITARY := 6
+const ENEMY_ATTACK_PRIORITY_WORKER := 7
+const ENEMY_ATTACK_PRIORITY_LOW_VALUE_BUILDING := 8
+const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 9
 const ENEMY_ATTACK_PRIORITY_INVALID := 99
+
+const ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY := 1
+const ENEMY_DEFENSE_PRIORITY_HERO := 2
+const ENEMY_DEFENSE_PRIORITY_ATTACKING_WORKER := 3
+const ENEMY_DEFENSE_PRIORITY_INVALID := 99
+
+const BUILDINGS_GROUP := &"buildings"
+const ENEMY_WORKER_BUILDING_GUARD_RANGE := 48.0
 
 const ATTACK_SLOTS_PER_RING := 8
 const ATTACK_SLOT_ANGLE_STEP := TAU / float(ATTACK_SLOTS_PER_RING)
@@ -191,7 +203,9 @@ static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bo
 			return true
 		if target is Unit and not target is Building:
 			return true
-		return is_attackable_player_command_center(target)
+		if is_player_selectable_building(target):
+			return is_valid_combat_target(target)
+		return false
 
 	return is_player_unit_attack_target(target)
 
@@ -406,29 +420,62 @@ static func get_enemy_attack_target_priority(
 	if not is_attack_target_for_attacker(attacker, target):
 		return ENEMY_ATTACK_PRIORITY_INVALID
 
-	var retaliation_target: Node = CombatKillTracker.get_attacker(attacker)
-	if target == retaliation_target:
-		return ENEMY_ATTACK_PRIORITY_ENGAGED
+	var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(attacker)
+	if mission == EnemyUnitMission.Mission.DEFEND:
+		return get_enemy_defense_target_priority(attacker, target, distance)
+
+	var attack_range: float = _get_attacker_attack_range(attacker)
+
+	if target is Building:
+		if is_attackable_player_command_center(target):
+			return ENEMY_ATTACK_PRIORITY_COMMAND_CENTER
+		if target is Tower:
+			return ENEMY_ATTACK_PRIORITY_TOWER
+		if target is Barracks:
+			return ENEMY_ATTACK_PRIORITY_PRODUCTION_BUILDING
+		if target is HeroAltar or target is Shop or target is Blacksmith:
+			return ENEMY_ATTACK_PRIORITY_SUPPORT_BUILDING
+		if target is Farm:
+			return ENEMY_ATTACK_PRIORITY_LOW_VALUE_BUILDING
+		if is_player_selectable_building(target):
+			return ENEMY_ATTACK_PRIORITY_SUPPORT_BUILDING
+		return ENEMY_ATTACK_PRIORITY_LOW_VALUE_BUILDING
 
 	if target is Worker:
+		if not _can_enemy_target_worker(attacker, distance, attack_range):
+			return ENEMY_ATTACK_PRIORITY_INVALID
 		return ENEMY_ATTACK_PRIORITY_WORKER
 
 	if target is Swordsman or target is Archer or target is Hero:
-		var attack_range: float = _get_attacker_attack_range(attacker)
-		if distance <= attack_range:
-			return ENEMY_ATTACK_PRIORITY_ENGAGED
+		var retaliation_target: Node = CombatKillTracker.get_attacker(attacker)
+		if target == retaliation_target or distance <= attack_range:
+			return ENEMY_ATTACK_PRIORITY_ENGAGED_MILITARY
 		return ENEMY_ATTACK_PRIORITY_MILITARY
 
 	if is_neutral_creep(target):
-		var creep_attack_range: float = _get_attacker_attack_range(attacker)
-		if distance <= creep_attack_range:
-			return ENEMY_ATTACK_PRIORITY_ENGAGED
+		if distance <= attack_range:
+			return ENEMY_ATTACK_PRIORITY_ENGAGED_MILITARY
 		return ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP
 
-	if is_attackable_player_command_center(target):
-		return ENEMY_ATTACK_PRIORITY_BUILDING
-
 	return ENEMY_ATTACK_PRIORITY_INVALID
+
+
+static func get_enemy_defense_target_priority(
+	attacker: Node3D, target: Node3D, _distance: float
+) -> int:
+	if not is_attack_target_for_attacker(attacker, target):
+		return ENEMY_DEFENSE_PRIORITY_INVALID
+
+	if target is Swordsman or target is Archer:
+		return ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY
+
+	if target is Hero:
+		return ENEMY_DEFENSE_PRIORITY_HERO
+
+	if target is Worker and _is_worker_attacking_enemy_buildings(attacker.get_tree(), target):
+		return ENEMY_DEFENSE_PRIORITY_ATTACKING_WORKER
+
+	return ENEMY_DEFENSE_PRIORITY_INVALID
 
 
 static func _find_best_enemy_faction_attack_target(
@@ -437,7 +484,12 @@ static func _find_best_enemy_faction_attack_target(
 	var best_target: Node3D = null
 	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
 	var best_distance: float = INF
-	var groups_to_search: Array[StringName] = [&"units", PLAYER_COMMAND_CENTER_GROUP]
+	var groups_to_search: Array[StringName] = [
+		PLAYER_COMMAND_CENTER_GROUP,
+		BUILDINGS_GROUP,
+		&"units",
+		&"heroes",
+	]
 
 	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
@@ -501,6 +553,72 @@ static func _find_closest_hostile_attack_target_in_range(
 				closest_target = target
 
 	return closest_target
+
+
+static func _can_enemy_target_worker(
+	attacker: Node3D, distance: float, attack_range: float
+) -> bool:
+	if distance <= attack_range:
+		return true
+
+	var tree: SceneTree = attacker.get_tree()
+	if tree == null:
+		return false
+
+	if _has_living_player_buildings_near(attacker, ENEMY_WORKER_BUILDING_GUARD_RANGE):
+		return false
+
+	return not _has_any_living_player_building(tree)
+
+
+static func _has_living_player_buildings_near(attacker: Node3D, search_range: float) -> bool:
+	var tree: SceneTree = attacker.get_tree()
+	if tree == null:
+		return false
+
+	for node_variant: Variant in get_cached_group_nodes(tree, BUILDINGS_GROUP):
+		if not _is_living_player_building(node_variant):
+			continue
+
+		var building: Node3D = node_variant as Node3D
+		if get_horizontal_center_distance(attacker, building) <= search_range:
+			return true
+
+	return false
+
+
+static func _has_any_living_player_building(tree: SceneTree) -> bool:
+	for node_variant: Variant in get_cached_group_nodes(tree, BUILDINGS_GROUP):
+		if _is_living_player_building(node_variant):
+			return true
+
+	return false
+
+
+static func _is_living_player_building(target: Variant) -> bool:
+	if not is_player_selectable_building(target):
+		return false
+
+	return is_valid_combat_target(target)
+
+
+static func _is_worker_attacking_enemy_buildings(tree: SceneTree, worker: Node) -> bool:
+	if tree == null or not NodeSafety.is_alive_node(worker):
+		return false
+
+	for node: Node in tree.get_nodes_in_group(EnemyArmyCommand.ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building:
+			continue
+
+		var building: Building = node as Building
+		if building.building_state != Building.STATE_COMPLETED:
+			continue
+
+		var attacker: Node = CombatKillTracker.get_attacker(building)
+		if attacker == worker:
+			return true
+
+	return false
 
 
 static func _get_attacker_attack_range(attacker: Node3D) -> float:

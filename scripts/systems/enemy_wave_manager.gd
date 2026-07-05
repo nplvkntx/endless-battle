@@ -12,6 +12,7 @@ const ARMY_REGROUP_INTERVAL_SECONDS: float = 5.0
 const WAVE_GATHER_PULL_INTERVAL_SECONDS: float = 1.0
 const FALLBACK_ATTACK_MIN_COMBAT_UNITS: int = 25
 const FALLBACK_ATTACK_READY_SECONDS: float = 10.0
+const HERO_EXECUTE_SEARCH_RANGE := 14.0
 
 @export var player_command_center_path: NodePath
 @export var wave_interval_seconds: float = 35.0
@@ -59,6 +60,7 @@ func _process(delta: float) -> void:
 		_update_hero_army_behavior()
 
 	_monitor_active_offensive_push()
+	EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), delta)
 
 	_regroup_timer += delta
 	if _regroup_timer >= ARMY_REGROUP_INTERVAL_SECONDS:
@@ -204,6 +206,17 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 	):
 		return
 
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	var objective: Dictionary = EnemyArmyCommand.resolve_attack_objective(
+		get_tree(),
+		attack_destination if attack_destination != Vector3.ZERO else rally_position
+	)
+	attack_destination = objective.get("position", attack_destination)
+	EnemyArmyCommand.set_attack_objective(
+		objective.get("node") as Node3D,
+		attack_destination
+	)
+
 	EnemyArmyCommand.begin_offensive_wave(wave_units)
 	EnemyArmyCommand.set_rebuilding_army(false)
 	EnemyArmyCommand.command_attack_move(
@@ -249,7 +262,7 @@ func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
 		hero.try_divine_protection()
 
 	if hero.has_method("can_use_execute") and hero.can_use_execute(
-		EnemyArmyCommand.HERO_EXECUTE_SEARCH_RANGE
+		HERO_EXECUTE_SEARCH_RANGE
 	):
 		hero.try_execute()
 	elif hero.has_method("can_use_power_strike") and hero.can_use_power_strike(
@@ -758,14 +771,10 @@ func _try_launch_fallback_attack() -> void:
 
 
 func _resolve_fallback_attack_destination(rally_position: Vector3) -> Vector3:
-	var command_center: CommandCenter = _resolve_player_command_center()
-	if command_center != null:
-		return command_center.global_position
-
-	if _cached_player_base_position != Vector3.ZERO:
-		return _cached_player_base_position
-
-	return EnemyArmyCommand.resolve_wave_attack_destination(get_tree(), rally_position)
+	return EnemyArmyCommand.resolve_attack_objective(get_tree(), rally_position).get(
+		"position",
+		Vector3.ZERO
+	)
 
 
 func _resolve_player_command_center() -> CommandCenter:
