@@ -83,6 +83,22 @@ func _update_hero_army_behavior() -> void:
 
 	_try_enemy_hero_abilities(hero, health_ratio)
 
+	if EnemyArmyCommand.is_emergency_defense_active():
+		var emergency_objective: Vector3 = EnemyArmyCommand.get_emergency_defense_objective()
+		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
+			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+			return
+		if (
+			emergency_objective != Vector3.ZERO
+			and health_ratio >= EnemyArmyCommand.EMERGENCY_HERO_JOIN_HP_RATIO
+		):
+			EnemyArmyCommand.command_attack_move(
+				[hero],
+				emergency_objective,
+				EnemyUnitMission.Mission.DEFEND
+			)
+		return
+
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
@@ -853,6 +869,9 @@ func _process_finishing_mode(delta: float) -> void:
 		_was_finishing_mode_active = false
 		return
 
+	if EnemyArmyCommand.is_emergency_defense_active():
+		return
+
 	if not _was_finishing_mode_active:
 		_was_finishing_mode_active = true
 		_try_launch_finishing_attack()
@@ -893,6 +912,9 @@ func _try_launch_finishing_wave() -> void:
 
 func _try_launch_finishing_attack() -> void:
 	if not EnemyArmyCommand.is_finishing_mode_active():
+		return
+
+	if EnemyArmyCommand.is_emergency_defense_active():
 		return
 
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:

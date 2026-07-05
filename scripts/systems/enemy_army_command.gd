@@ -50,6 +50,12 @@ const DEFENSE_GATHER_MAX_DISTANCE := 42.0
 const DEFENSE_HERO_EXTRA_GATHER_DISTANCE := 14.0
 const DEFENSE_THREAT_POWER_RANGE := 34.0
 const DEFENSE_HOLD_FORWARD_DISTANCE := 10.0
+const CORE_BASE_DEFENSE_RADIUS := BASE_THREAT_DETECTION_RANGE
+const EMERGENCY_GATHER_WAIT_SECONDS := 3.0
+const EMERGENCY_CLEAR_SECONDS := 5.0
+const EMERGENCY_SERIOUS_THREAT_POWER := 120
+const EMERGENCY_SCOUT_IGNORE_BUILDING_DISTANCE := 28.0
+const EMERGENCY_HERO_JOIN_HP_RATIO := 0.35
 const DEFENSE_POWER_HERO_BASE := 220
 const DEFENSE_POWER_MELEE_HEALTH := 1.0
 const DEFENSE_POWER_RANGED_HEALTH := 0.85
@@ -107,6 +113,9 @@ static var _finishing_mode_active: bool = false
 static var _finishing_mode_exit_cooldown: float = 0.0
 static var _finishing_mode_eval_timer: float = 0.0
 static var _last_finishing_objective: Node3D = null
+static var _emergency_defense_active: bool = false
+static var _emergency_threat_position: Vector3 = Vector3.ZERO
+static var _emergency_reason: StringName = &""
 
 
 static func get_army_mode() -> ArmyMode:
@@ -119,6 +128,55 @@ static func is_rebuilding_army() -> bool:
 
 static func is_finishing_mode_active() -> bool:
 	return _finishing_mode_active
+
+
+static func is_emergency_defense_active() -> bool:
+	return _emergency_defense_active
+
+
+static func get_emergency_defense_objective() -> Vector3:
+	return _emergency_threat_position
+
+
+static func activate_emergency_defense(threat: Dictionary) -> void:
+	var reason: StringName = threat.get("reason", &"")
+	var intercept_position: Vector3 = threat.get("intercept_position", Vector3.ZERO)
+
+	if _emergency_defense_active:
+		_emergency_reason = reason
+		_emergency_threat_position = intercept_position
+		return
+
+	_emergency_defense_active = true
+	_emergency_reason = reason
+	_emergency_threat_position = intercept_position
+	EnemyUnitMission.set_main_army_mission(
+		EnemyUnitMission.Mission.DEFEND,
+		"emergency defense"
+	)
+	print("[AI] EMERGENCY DEFENSE START threat=%s" % String(reason))
+
+
+static func update_emergency_defense_threat(threat: Dictionary) -> void:
+	if not _emergency_defense_active:
+		return
+
+	_emergency_reason = threat.get("reason", &"")
+	_emergency_threat_position = threat.get("intercept_position", Vector3.ZERO)
+
+
+static func deactivate_emergency_defense() -> void:
+	if not _emergency_defense_active:
+		return
+
+	_emergency_defense_active = false
+	_emergency_threat_position = Vector3.ZERO
+	_emergency_reason = &""
+	EnemyUnitMission.set_main_army_mission(
+		EnemyUnitMission.Mission.REGROUP,
+		"emergency ended"
+	)
+	print("[AI] EMERGENCY DEFENSE END")
 
 
 static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
@@ -181,6 +239,23 @@ static func prepare_defense_recall(tree: SceneTree) -> void:
 static func should_recall_offensive_for_defense(tree: SceneTree) -> bool:
 	if get_army_mode() != ArmyMode.ATTACKING:
 		return false
+
+	var emergency_threat: Dictionary = evaluate_emergency_defense_threat(tree)
+	if emergency_threat.get("threatened", false):
+		var emergency_reason: StringName = emergency_threat.get("reason", &"")
+		if emergency_reason == &"town_center":
+			return true
+
+		if _finishing_mode_active and should_allow_finishing_during_emergency(
+			tree,
+			emergency_threat
+		):
+			return false
+
+		return (
+			emergency_threat.get("force_recall", false)
+			or is_emergency_threat_serious(tree, emergency_threat)
+		)
 
 	var threat: Dictionary = evaluate_defense_threat(tree)
 	if not threat.get("threatened", false):
@@ -1139,6 +1214,10 @@ static func assign_reinforcement_regroup(tree: SceneTree, unit: Unit) -> void:
 	if not NodeSafety.is_alive_node(unit):
 		return
 
+	if _emergency_defense_active:
+		_assign_reinforcement_to_emergency_defense(tree, unit)
+		return
+
 	if _finishing_mode_active:
 		_assign_reinforcement_to_finishing_attack(tree, unit)
 		return
@@ -1373,6 +1452,125 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 		)
 
 	return {"threatened": false}
+
+
+static func evaluate_emergency_defense_threat(tree: SceneTree) -> Dictionary:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return {"threatened": false}
+
+	var command_center_threat: Dictionary = _evaluate_emergency_command_center_threat(tree)
+	if command_center_threat.get("threatened", false):
+		return command_center_threat
+
+	var production_threat: Dictionary = _evaluate_emergency_production_building_threat(tree)
+	if production_threat.get("threatened", false):
+		return production_threat
+
+	var hero_threat: Dictionary = _evaluate_emergency_player_hero_threat(tree, rally_position)
+	if hero_threat.get("threatened", false):
+		return hero_threat
+
+	var core_base_threat: Dictionary = _evaluate_emergency_core_base_threat(tree, rally_position)
+	if core_base_threat.get("threatened", false):
+		return core_base_threat
+
+	var worker_threat: Dictionary = _evaluate_emergency_worker_attack_threat(tree)
+	if worker_threat.get("threatened", false):
+		return worker_threat
+
+	return {"threatened": false}
+
+
+static func has_meaningful_core_base_threat(tree: SceneTree) -> bool:
+	var threat: Dictionary = evaluate_emergency_defense_threat(tree)
+	if not threat.get("threatened", false):
+		return false
+
+	var reason: StringName = threat.get("reason", &"")
+	return reason != &"worker_attack"
+
+
+static func is_emergency_threat_serious(tree: SceneTree, threat: Dictionary) -> bool:
+	if not threat.get("threatened", false):
+		return false
+
+	var reason: StringName = threat.get("reason", &"")
+	if reason == &"town_center" or reason == &"production" or reason == &"player_hero":
+		return true
+
+	var intercept_position: Vector3 = threat.get("intercept_position", Vector3.ZERO)
+	if intercept_position == Vector3.ZERO:
+		return false
+
+	var threat_power: int = estimate_player_threat_power_near(
+		tree,
+		intercept_position,
+		DEFENSE_THREAT_POWER_RANGE
+	)
+	if threat_power >= EMERGENCY_SERIOUS_THREAT_POWER:
+		return true
+
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	return (
+		collect_player_military_near(tree, rally_position, CORE_BASE_DEFENSE_RADIUS).size()
+		>= 3
+	)
+
+
+static func should_allow_finishing_during_emergency(
+	tree: SceneTree,
+	threat: Dictionary
+) -> bool:
+	if not _finishing_mode_active:
+		return false
+
+	var reason: StringName = threat.get("reason", &"")
+	if reason == &"town_center" or reason == &"production":
+		return false
+
+	if not _is_attack_close_to_winning(tree):
+		return false
+
+	return not is_emergency_threat_serious(tree, threat)
+
+
+static func pull_emergency_defense_reinforcements(
+	tree: SceneTree,
+	intercept_position: Vector3
+) -> void:
+	if intercept_position == Vector3.ZERO:
+		return
+
+	var reinforcements: Array = []
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		if is_hero_unit(unit as Node):
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if (
+			mission == EnemyUnitMission.Mission.RETREAT
+			or mission == EnemyUnitMission.Mission.BUILD
+			or mission == EnemyUnitMission.Mission.ECONOMY
+		):
+			continue
+
+		reinforcements.append(unit)
+
+	if reinforcements.is_empty():
+		return
+
+	command_attack_move(
+		reinforcements,
+		intercept_position,
+		EnemyUnitMission.Mission.DEFEND
+	)
 
 
 static func build_defense_army(
@@ -1927,6 +2125,262 @@ static func _build_defense_threat_result(
 		"intercept_position": intercept_position,
 		"reason": reason,
 		"force_commit": force_commit,
+	}
+
+
+static func _assign_reinforcement_to_emergency_defense(tree: SceneTree, unit: Unit) -> void:
+	var objective_position: Vector3 = get_emergency_defense_objective()
+	if objective_position == Vector3.ZERO:
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		if rally_position == Vector3.ZERO:
+			return
+		if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP):
+			return
+		command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.REGROUP)
+		return
+
+	if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.DEFEND):
+		return
+
+	command_attack_move([unit], objective_position, EnemyUnitMission.Mission.DEFEND)
+
+
+static func _is_important_enemy_production_building(building: Building) -> bool:
+	return (
+		building is Barracks
+		or building is HeroAltar
+		or building is Blacksmith
+		or building is Shop
+	)
+
+
+static func _is_important_enemy_building(building: Building) -> bool:
+	return building is CommandCenter or _is_important_enemy_production_building(building)
+
+
+static func _evaluate_emergency_command_center_threat(tree: SceneTree) -> Dictionary:
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is CommandCenter or not _is_living_building(node as Building):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var building: CommandCenter = node as CommandCenter
+		var building_position: Vector3 = (node as Node3D).global_position
+		var attacker: Node = CombatKillTracker.get_attacker(building)
+		if _is_player_military_unit(attacker) and attacker is Node3D:
+			return _build_emergency_threat_result(
+				_resolve_player_threat_cluster_position(
+					tree,
+					(attacker as Node3D).global_position
+				),
+				&"town_center",
+				true
+			)
+
+		var nearby_threat: Node3D = _find_player_military_near_position(
+			tree,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if nearby_threat != null:
+			return _build_emergency_threat_result(
+				_resolve_player_threat_cluster_position(tree, nearby_threat.global_position),
+				&"town_center",
+				true
+			)
+
+	return {"threatened": false}
+
+
+static func _evaluate_emergency_production_building_threat(tree: SceneTree) -> Dictionary:
+	var closest_attacker: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building or not _is_living_building(node as Building):
+			continue
+
+		if not _is_important_enemy_production_building(node as Building):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var building: Building = node as Building
+		var building_position: Vector3 = (node as Node3D).global_position
+		var attacker: Node = CombatKillTracker.get_attacker(building)
+		if _is_player_military_unit(attacker) and attacker is Node3D:
+			var distance: float = _horizontal_distance(
+				building_position,
+				(attacker as Node3D).global_position
+			)
+			if distance < closest_distance:
+				closest_distance = distance
+				closest_attacker = attacker as Node3D
+			continue
+
+		var nearby_threat: Node3D = _find_player_military_near_position(
+			tree,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if nearby_threat == null:
+			continue
+
+		var nearby_distance: float = _horizontal_distance(
+			building_position,
+			nearby_threat.global_position
+		)
+		if nearby_distance < closest_distance:
+			closest_distance = nearby_distance
+			closest_attacker = nearby_threat
+
+	if closest_attacker != null:
+		return _build_emergency_threat_result(
+			_resolve_player_threat_cluster_position(tree, closest_attacker.global_position),
+			&"production",
+			true
+		)
+
+	return {"threatened": false}
+
+
+static func _evaluate_emergency_player_hero_threat(
+	tree: SceneTree,
+	rally_position: Vector3
+) -> Dictionary:
+	for node: Node in tree.get_nodes_in_group(HEROES_GROUP):
+		if not node is Hero or not _is_player_military_unit(node):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var hero_position: Vector3 = (node as Node3D).global_position
+		if _horizontal_distance(rally_position, hero_position) > CORE_BASE_DEFENSE_RADIUS:
+			continue
+
+		return _build_emergency_threat_result(
+			_resolve_player_threat_cluster_position(tree, hero_position),
+			&"player_hero",
+			true
+		)
+
+	return {"threatened": false}
+
+
+static func _evaluate_emergency_core_base_threat(
+	tree: SceneTree,
+	rally_position: Vector3
+) -> Dictionary:
+	var units_in_base: Array = collect_player_military_near(
+		tree,
+		rally_position,
+		CORE_BASE_DEFENSE_RADIUS
+	)
+	if units_in_base.is_empty():
+		return {"threatened": false}
+
+	if _is_irrelevant_lone_scout(tree, units_in_base):
+		return {"threatened": false}
+
+	var anchor: Node3D = units_in_base[0] as Node3D
+	if anchor == null:
+		return {"threatened": false}
+
+	var intercept_position: Vector3 = _resolve_player_threat_cluster_position(
+		tree,
+		anchor.global_position
+	)
+	return _build_emergency_threat_result(
+		intercept_position,
+		&"core_base",
+		is_emergency_threat_serious(
+			tree,
+			_build_emergency_threat_result(intercept_position, &"core_base")
+		)
+	)
+
+
+static func _evaluate_emergency_worker_attack_threat(tree: SceneTree) -> Dictionary:
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building or not _is_living_building(node as Building):
+			continue
+
+		if not _is_important_enemy_building(node as Building):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		var building: Building = node as Building
+		var attacker: Node = CombatKillTracker.get_attacker(building)
+		if not NodeSafety.is_alive_node(attacker):
+			continue
+
+		if not attacker is Worker:
+			continue
+
+		if CombatTargetValidation.is_enemy_faction(attacker):
+			continue
+
+		return _build_emergency_threat_result(
+			_resolve_player_threat_cluster_position(
+				tree,
+				(node as Node3D).global_position
+			),
+			&"worker_attack"
+		)
+
+	return {"threatened": false}
+
+
+static func _is_irrelevant_lone_scout(tree: SceneTree, units_in_base: Array) -> bool:
+	if units_in_base.size() != 1:
+		return false
+
+	var unit: Node = units_in_base[0] as Node
+	if not NodeSafety.is_alive_node(unit):
+		return false
+
+	if unit is Hero:
+		return false
+
+	if not unit is Node3D:
+		return false
+
+	var unit_position: Vector3 = (unit as Node3D).global_position
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building or not _is_living_building(node as Building):
+			continue
+
+		if not _is_important_enemy_building(node as Building):
+			continue
+
+		if not node is Node3D:
+			continue
+
+		if (
+			_horizontal_distance(unit_position, (node as Node3D).global_position)
+			<= EMERGENCY_SCOUT_IGNORE_BUILDING_DISTANCE
+		):
+			return false
+
+	return true
+
+
+static func _build_emergency_threat_result(
+	intercept_position: Vector3,
+	reason: StringName,
+	force_recall: bool = false
+) -> Dictionary:
+	return {
+		"threatened": true,
+		"intercept_position": intercept_position,
+		"reason": reason,
+		"force_recall": force_recall,
 	}
 
 
