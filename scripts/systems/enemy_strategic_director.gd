@@ -317,12 +317,14 @@ func _update_desires_from_snapshot() -> void:
 
 	if (
 		not hero_alive
-		or army_power < EnemyArmyCommand.MIN_ATTACK_ARMY_POWER
+		or EnemyArmyCommand.is_rebuilding_army()
 		or _recent_loss_timer > 0.0
 		or _recent_attack_failed
 	):
 		desires["attack"] = DESIRE_LOW
-	elif visible_enemy_power > 0 and army_power >= visible_enemy_power:
+	elif not _can_launch_offensive_attack():
+		desires["attack"] = DESIRE_LOW
+	elif visible_enemy_power > 0 and army_power >= int(float(visible_enemy_power) * EnemyArmyCommand.PLAYER_ARMY_STRENGTH_RATIO):
 		desires["attack"] = clampf(
 			0.5 + float(army_power - visible_enemy_power) / 600.0,
 			DESIRE_MEDIUM,
@@ -382,6 +384,13 @@ func _recommend_main_army_mission() -> void:
 		return
 
 	if should_prioritize_attack():
+		if not _can_launch_offensive_attack():
+			_set_main_mission(
+				EnemyUnitMission.Mission.REGROUP,
+				"attack gate not met, army power %d" % int(snapshot.get("army_power", 0))
+			)
+			return
+
 		_set_main_mission(
 			EnemyUnitMission.Mission.ATTACK,
 			"attack desire %.2f, hero %s" % [
@@ -529,3 +538,12 @@ func _count_barracks(tree: SceneTree) -> int:
 
 func _get_match_elapsed_seconds() -> float:
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _can_launch_offensive_attack() -> bool:
+	var tree: SceneTree = get_tree()
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	return EnemyArmyCommand.evaluate_attack_gate(tree, rally_position).get("can_commit", false)

@@ -22,8 +22,15 @@ const FORMATION_SPACING := 2.0
 const RANGED_ROW_DEPTH_MULTIPLIER := 1.5
 const HERO_ROW_DEPTH_MULTIPLIER := 1.25
 
-const MIN_NON_HERO_FOR_HERO_JOIN := 5
-const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 5
+const MIN_NON_HERO_FOR_HERO_JOIN := 24
+const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 10
+const MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK := 25
+const MIN_MELEE_UNITS_FOR_ATTACK := 8
+const MIN_RANGED_UNITS_FOR_ATTACK := 6
+const PLAYER_ARMY_STRENGTH_RATIO := 0.8
+const KNOWN_PLAYER_SCOUT_RANGE := 55.0
+const ARMY_GROUP_MAX_RADIUS := 24.0
+const WAVE_REINFORCEMENT_WAIT_SECONDS := 5.0
 const MIN_ATTACK_ARMY_POWER := 350
 const HERO_ALONE_PLAYER_THREAT_RANGE := 18.0
 const HERO_MAX_DISTANCE_FROM_ARMY := 16.0
@@ -44,12 +51,12 @@ const HERO_AOE_CHECK_RANGE := 10.0
 const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
 const HERO_EXECUTE_SEARCH_RANGE := 14.0
 
-const WAVE_1_MIN_NON_HERO_UNITS := 5
-const WAVE_2_MIN_NON_HERO_UNITS := 8
-const WAVE_3_MIN_NON_HERO_UNITS := 12
-const WAVE_4_MIN_NON_HERO_UNITS := 16
+const WAVE_1_MIN_NON_HERO_UNITS := 24
+const WAVE_2_MIN_NON_HERO_UNITS := 24
+const WAVE_3_MIN_NON_HERO_UNITS := 24
+const WAVE_4_MIN_NON_HERO_UNITS := 24
 const WAVE_REGROUP_MAX_DISTANCE := 22.0
-const WAVE_REBUILD_ARMY_RATIO := 0.65
+const WAVE_REBUILD_ARMY_RATIO := 0.40
 
 enum ArmyMode {
 	IDLE,
@@ -60,10 +67,33 @@ enum ArmyMode {
 }
 
 static var _army_mode: ArmyMode = ArmyMode.IDLE
+static var _is_rebuilding_army: bool = false
+static var _active_wave_start_unit_count: int = 0
 
 
 static func get_army_mode() -> ArmyMode:
 	return _army_mode
+
+
+static func is_rebuilding_army() -> bool:
+	return _is_rebuilding_army
+
+
+static func set_rebuilding_army(rebuilding: bool) -> void:
+	_is_rebuilding_army = rebuilding
+
+
+static func get_active_wave_start_unit_count() -> int:
+	return _active_wave_start_unit_count
+
+
+static func begin_offensive_wave(wave_units: Array) -> void:
+	wave_units = NodeSafety.clean_node_array(wave_units)
+	_active_wave_start_unit_count = wave_units.size()
+
+
+static func clear_offensive_wave_tracking() -> void:
+	_active_wave_start_unit_count = 0
 
 
 ## Returns true when the requested mode owns the army for issuing orders.
@@ -117,11 +147,43 @@ static func release_army_mode(mode: ArmyMode) -> bool:
 
 
 static func should_abort_offensive_push(tree: SceneTree) -> bool:
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null and get_health_ratio(hero) < HERO_RETREAT_HP_RATIO:
+		return true
+
+	var living_wave_units: Array = _collect_living_offensive_wave_units(tree)
+	var living_count: int = living_wave_units.size()
+	if _active_wave_start_unit_count > 0:
+		var retreat_threshold: int = maxi(
+			MIN_ARMY_UNITS_TO_CONTINUE_ATTACK,
+			int(float(_active_wave_start_unit_count) * WAVE_REBUILD_ARMY_RATIO)
+		)
+		if living_count < retreat_threshold:
+			return true
+	else:
+		if living_count < MIN_ARMY_UNITS_TO_CONTINUE_ATTACK:
+			return true
+
 	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
-	if non_hero_units.size() < MIN_ARMY_UNITS_TO_CONTINUE_ATTACK:
+	if non_hero_units.size() < MIN_NON_HERO_FOR_HERO_JOIN:
 		return true
 
 	return estimate_military_power(non_hero_units) < MIN_ATTACK_ARMY_POWER
+
+
+static func _collect_living_offensive_wave_units(tree: SceneTree) -> Array:
+	var units: Array = []
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if mission != EnemyUnitMission.Mission.ATTACK:
+			continue
+
+		units.append(unit)
+
+	return units
 
 
 static func abort_offensive_and_regroup(tree: SceneTree) -> bool:
@@ -132,14 +194,20 @@ static func abort_offensive_and_regroup(tree: SceneTree) -> bool:
 	if rally_position == Vector3.ZERO:
 		release_army_mode(ArmyMode.ATTACKING)
 		cancel_offensive_orders(tree)
+		clear_offensive_wave_tracking()
+		set_rebuilding_army(true)
 		return true
 
 	cancel_offensive_orders(tree)
 	if try_claim_army_mode(ArmyMode.REGROUPING):
 		command_regroup_at_rally(tree, rally_position)
+		clear_offensive_wave_tracking()
+		set_rebuilding_army(true)
 		return true
 
 	release_army_mode(ArmyMode.ATTACKING)
+	clear_offensive_wave_tracking()
+	set_rebuilding_army(true)
 	return true
 
 
@@ -202,62 +270,199 @@ static func can_commit_attack_wave(
 	rally_position: Vector3,
 	min_non_hero_units: int
 ) -> Dictionary:
-	var non_hero_count: int = 0
-	var hero_in_wave: Hero = null
+	return evaluate_attack_gate(tree, rally_position, wave_units, min_non_hero_units)
 
-	for unit: Variant in wave_units:
-		if not NodeSafety.is_alive_node(unit):
-			continue
 
-		if unit is Hero:
-			hero_in_wave = unit as Hero
-		elif is_non_hero_combat_unit(unit as Node):
-			non_hero_count += 1
+static func evaluate_attack_gate(
+	tree: SceneTree,
+	rally_position: Vector3,
+	wave_units: Array = [],
+	min_non_hero_units: int = WAVE_1_MIN_NON_HERO_UNITS
+) -> Dictionary:
+	if rally_position == Vector3.ZERO:
+		return {"can_commit": false, "reason": &"no_rally"}
 
-	if non_hero_count <= 0:
+	if _is_rebuilding_army:
+		return {"can_commit": false, "reason": &"rebuilding"}
+
+	if get_army_mode() == ArmyMode.REGROUPING:
+		return {"can_commit": false, "reason": &"regrouping"}
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero == null:
+		return {"can_commit": false, "reason": &"no_hero"}
+
+	var evaluated_units: Array = (
+		NodeSafety.clean_node_array(wave_units)
+		if not wave_units.is_empty()
+		else collect_living_combat_units(tree)
+	)
+	var composition: Dictionary = _count_wave_composition(evaluated_units)
+	var non_hero_count: int = int(composition.get("non_hero_count", 0))
+	var melee_count: int = int(composition.get("melee_count", 0))
+	var ranged_count: int = int(composition.get("ranged_count", 0))
+	var total_combat_count: int = int(composition.get("total_count", 0))
+	var hero_in_wave: Hero = composition.get("hero", null) as Hero
+
+	if non_hero_count <= 0 or hero_in_wave != null and non_hero_count < MIN_NON_HERO_FOR_HERO_JOIN:
 		return {"can_commit": false, "reason": &"hero_only"}
 
 	if non_hero_count < min_non_hero_units:
 		return {"can_commit": false, "reason": &"army_too_small"}
 
-	if hero_in_wave != null and non_hero_count < MIN_NON_HERO_FOR_HERO_JOIN:
-		return {"can_commit": false, "reason": &"hero_isolated"}
+	var wave_power: int = estimate_military_power(evaluated_units)
+	var known_player_power: int = estimate_known_player_army_strength(tree, rally_position)
+	var required_power: int = (
+		int(float(known_player_power) * PLAYER_ARMY_STRENGTH_RATIO)
+		if known_player_power > 0
+		else 0
+	)
+	var count_ready: bool = total_combat_count >= MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK
+	var power_ready: bool = known_player_power > 0 and wave_power >= required_power
 
-	var wave_power: int = estimate_military_power(wave_units)
-	if wave_power < MIN_ATTACK_ARMY_POWER:
+	if not count_ready and not power_ready:
+		return {
+			"can_commit": false,
+			"reason": &"army_not_ready",
+			"wave_power": wave_power,
+			"known_player_power": known_player_power,
+			"total_combat_count": total_combat_count,
+		}
+
+	if known_player_power > 0 and wave_power < required_power:
+		return {
+			"can_commit": false,
+			"reason": &"outpowered",
+			"wave_power": wave_power,
+			"known_player_power": known_player_power,
+		}
+
+	if melee_count < MIN_MELEE_UNITS_FOR_ATTACK:
+		return {"can_commit": false, "reason": &"not_enough_melee", "melee_count": melee_count}
+
+	if _enemy_has_archer_capability(tree) and ranged_count < MIN_RANGED_UNITS_FOR_ATTACK:
+		return {
+			"can_commit": false,
+			"reason": &"not_enough_ranged",
+			"ranged_count": ranged_count,
+		}
+
+	if not is_army_grouped_at_position(evaluated_units, rally_position, ARMY_GROUP_MAX_RADIUS):
+		return {"can_commit": false, "reason": &"not_grouped"}
+
+	if wave_power < MIN_ATTACK_ARMY_POWER and not power_ready:
 		return {
 			"can_commit": false,
 			"reason": &"army_power_too_low",
 			"wave_power": wave_power,
 		}
 
-	var attack_destination: Vector3 = resolve_wave_attack_destination(tree, rally_position)
-	var visible_power: int = estimate_player_threat_power_near(
-		tree,
-		rally_position,
-		BASE_THREAT_DETECTION_RANGE
-	)
-	var path_power: int = estimate_player_threat_power_near(
-		tree,
-		attack_destination,
-		APPROACH_DETECTION_RANGE
-	)
-	var combined_visible_power: int = maxi(visible_power, path_power)
-
-	if combined_visible_power > 0 and wave_power < combined_visible_power:
-		return {
-			"can_commit": false,
-			"reason": &"outpowered",
-			"wave_power": wave_power,
-			"visible_power": combined_visible_power,
-		}
-
 	return {
 		"can_commit": true,
 		"reason": &"ready",
 		"wave_power": wave_power,
-		"visible_power": combined_visible_power,
+		"known_player_power": known_player_power,
+		"total_combat_count": total_combat_count,
 	}
+
+
+static func estimate_known_player_army_strength(tree: SceneTree, rally_position: Vector3) -> int:
+	var attack_destination: Vector3 = resolve_wave_attack_destination(tree, rally_position)
+	var rally_visible: Array = collect_player_military_near(
+		tree,
+		rally_position,
+		KNOWN_PLAYER_SCOUT_RANGE
+	)
+	var path_visible: Array = collect_player_military_near(
+		tree,
+		attack_destination,
+		APPROACH_DETECTION_RANGE
+	)
+	var combined: Array = rally_visible.duplicate()
+	for unit: Variant in path_visible:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		if combined.has(unit):
+			continue
+
+		combined.append(unit)
+
+	return estimate_military_power(combined)
+
+
+static func is_army_grouped_at_position(
+	units: Array,
+	anchor_position: Vector3,
+	max_radius: float = ARMY_GROUP_MAX_RADIUS
+) -> bool:
+	units = NodeSafety.clean_node_array(units)
+	var grouped_units: Array = filter_units_near_rally(units, anchor_position, max_radius)
+	var non_hero_grouped: int = 0
+	for unit: Variant in grouped_units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		if is_non_hero_combat_unit(unit as Node):
+			non_hero_grouped += 1
+
+	var non_hero_total: int = 0
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		if is_non_hero_combat_unit(unit as Node):
+			non_hero_total += 1
+
+	if non_hero_total <= 0:
+		return false
+
+	return non_hero_grouped >= mini(non_hero_total, MIN_NON_HERO_FOR_HERO_JOIN)
+
+
+static func _count_wave_composition(units: Array) -> Dictionary:
+	var non_hero_count: int = 0
+	var melee_count: int = 0
+	var ranged_count: int = 0
+	var total_count: int = 0
+	var hero_in_wave: Hero = null
+
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		if not is_living_combat_unit(unit as Node):
+			continue
+
+		total_count += 1
+		if unit is Hero:
+			hero_in_wave = unit as Hero
+			continue
+
+		if not is_non_hero_combat_unit(unit as Node):
+			continue
+
+		non_hero_count += 1
+		if unit is Archer:
+			ranged_count += 1
+		else:
+			melee_count += 1
+
+	return {
+		"non_hero_count": non_hero_count,
+		"melee_count": melee_count,
+		"ranged_count": ranged_count,
+		"total_count": total_count,
+		"hero": hero_in_wave,
+	}
+
+
+static func _enemy_has_archer_capability(tree: SceneTree) -> bool:
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+		if is_living_combat_unit(node) and node is Archer:
+			return true
+
+	return false
 
 
 static func is_combat_unit(node: Node) -> bool:

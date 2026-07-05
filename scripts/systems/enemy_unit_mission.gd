@@ -159,10 +159,10 @@ static func allows_combat_micro(unit: Node) -> bool:
 		return true
 
 	match get_unit_mission(unit):
-		Mission.RETREAT, Mission.REGROUP, Mission.ECONOMY, Mission.BUILD:
-			return false
-		_:
+		Mission.ATTACK, Mission.DEFEND, Mission.CREEP:
 			return true
+		_:
+			return false
 
 
 static func should_reissue_move_order(

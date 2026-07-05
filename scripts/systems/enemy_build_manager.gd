@@ -19,11 +19,12 @@ const WORKER_TRAIN_GOLD_COST: int = 50
 const FOOD_RESERVE: int = 5
 const MAX_FARMS: int = 5
 const DEFAULT_MAX_BARRACKS: int = 3
-const DESIRED_ARMY_EARLY: int = 12
-const DESIRED_ARMY_MID: int = 22
-const DESIRED_ARMY_LATE: int = 32
-const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 2
-const MILITARY_LOW_ARMY_DEFICIT: int = 6
+const DESIRED_ARMY_EARLY: int = 28
+const DESIRED_ARMY_MID: int = 40
+const DESIRED_ARMY_LATE: int = 55
+const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 3
+const MILITARY_TRAINS_PER_BARRACKS_SUSTAIN: int = 3
+const MILITARY_LOW_ARMY_DEFICIT: int = 8
 const MILITARY_DEFENSE_EXTRA_DESIRED: int = 6
 const MILITARY_DEFENSE_TRAINS_PER_BARRACKS: int = 2
 const ARMY_SIZE_MID_AFTER_SECONDS: float = 300.0
@@ -135,6 +136,10 @@ func _run_build_order() -> void:
 	if _needs_barracks() and _try_place_building(PLACEMENT_BARRACKS):
 		return
 
+	if _count_barracks() <= 1 and _should_build_expansion_barracks():
+		if _try_place_building(PLACEMENT_BARRACKS):
+			return
+
 	if _needs_farm() and not _should_defer_gold_spending_for_workers():
 		if _try_place_building(PLACEMENT_FARM):
 			return
@@ -216,6 +221,15 @@ func _should_build_hero_altar() -> bool:
 func _should_build_expansion_barracks() -> bool:
 	if _count_barracks() >= max_barracks:
 		return false
+
+	if _count_barracks() == 0:
+		return _count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
+
+	if _count_barracks() == 1:
+		return (
+			_count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
+			and EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
+		)
 
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
@@ -515,9 +529,6 @@ func _try_sustain_military_production() -> void:
 	if not _can_train_military_units():
 		return
 
-	if not _needs_more_military_units():
-		return
-
 	if not EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST):
 		if _count_farms() < MAX_FARMS:
 			_try_place_building(PLACEMENT_FARM)
@@ -531,22 +542,34 @@ func _try_sustain_military_production() -> void:
 	var defending: bool = (
 		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING
 	)
+	var sustain_pressure: bool = (
+		army_deficit > 0
+		or _director != null and _director.should_boost_army_production()
+		or EnemyArmyCommand.is_rebuilding_army()
+	)
+	if not sustain_pressure:
+		return
+
 	var trains_per_barracks: int = (
 		MILITARY_DEFENSE_TRAINS_PER_BARRACKS
 		if defending
 		else (
 			MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
 			if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
-			else 1
+			else MILITARY_TRAINS_PER_BARRACKS_SUSTAIN
 		)
 	)
 
 	for barracks: Barracks in _find_all_completed_enemy_barracks():
-		for _train_attempt: int in trains_per_barracks:
-			if not _needs_more_military_units():
+		var queue_attempts: int = trains_per_barracks
+		while queue_attempts > 0:
+			if barracks.get_enemy_pending_unit_count() >= Barracks.MAX_ENEMY_UNIT_QUEUE:
 				break
 
-			_try_train_military(barracks)
+			if not _try_train_military(barracks):
+				break
+
+			queue_attempts -= 1
 
 
 func _get_desired_army_size() -> int:
@@ -576,7 +599,9 @@ func _get_effective_desired_army_size() -> int:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		desired += MILITARY_DEFENSE_EXTRA_DESIRED
 	elif _director != null and _director.should_boost_army_production():
-		desired += 4
+		desired += 8
+	elif EnemyArmyCommand.is_rebuilding_army():
+		desired += 6
 
 	return desired
 
@@ -588,20 +613,23 @@ func _needs_more_military_units() -> bool:
 	)
 
 
-func _try_train_military(barracks: Barracks) -> void:
+func _try_train_military(barracks: Barracks) -> bool:
 	if _train_swordsman_next:
 		if barracks.try_train_enemy_swordsman():
 			_train_swordsman_next = false
-			return
+			return true
 		if barracks.try_train_enemy_archer():
 			_train_swordsman_next = true
-			return
+			return true
 	else:
 		if barracks.try_train_enemy_archer():
 			_train_swordsman_next = true
-			return
+			return true
 		if barracks.try_train_enemy_swordsman():
 			_train_swordsman_next = false
+			return true
+
+	return false
 
 
 func _try_place_expansion_command_center() -> bool:

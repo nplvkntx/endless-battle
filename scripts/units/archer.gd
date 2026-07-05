@@ -208,6 +208,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
+	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
+		return
+
 	var closest_target: Node3D = _find_closest_attack_target_in_range()
 	if closest_target != null:
 		command_attack(closest_target)
@@ -388,6 +391,9 @@ func _begin_chase() -> void:
 
 
 func _try_attack_move_engagement() -> void:
+	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
+		return
+
 	var closest_target: Node3D = null
 	if CombatTargetValidation.is_enemy_faction(self):
 		closest_target = _find_engagement_target_in_range()
