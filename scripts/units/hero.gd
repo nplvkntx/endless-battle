@@ -665,7 +665,8 @@ func can_use_execute(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> bool
 	if current_mana < get_execute_mana_cost():
 		return false
 
-	return _resolve_execute_target(search_range) != null
+	var target: Node3D = _resolve_execute_target(search_range)
+	return NodeSafety.is_alive_node(target)
 
 
 func try_execute() -> bool:
@@ -703,10 +704,12 @@ func try_execute() -> bool:
 
 
 func _resolve_execute_target(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> Node3D:
-	if CombatTargetValidation.is_enemy_faction(self):
-		return find_execute_target(search_range)
+	_sanitize_ability_targets()
 
-	return _resolve_ability_target()
+	if CombatTargetValidation.is_enemy_faction(self):
+		return NodeSafety.safe_node(find_execute_target(search_range)) as Node3D
+
+	return NodeSafety.safe_node(_resolve_ability_target()) as Node3D
 
 
 func find_execute_target(search_range: float) -> Node3D:
@@ -719,15 +722,28 @@ func find_execute_target(search_range: float) -> Node3D:
 	var best_unit_distance: float = INF
 
 	for group_name: StringName in [&"units", &"heroes"]:
-		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
+		var candidates: Array = NodeSafety.clean_node_array(
+			CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name)
+		)
+		for node_variant: Variant in candidates:
+			if not NodeSafety.is_alive_node(node_variant):
+				continue
+			if not node_variant is Node:
+				continue
+
+			var node: Node = node_variant as Node
 			if not _is_player_military_unit(node):
 				continue
 
 			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
 				continue
+			if not node is Node3D:
+				continue
 
 			var target: Node3D = node as Node3D
-			if not is_instance_valid(target):
+			if not NodeSafety.is_alive_node(target):
+				continue
+			if not CombatTargetValidation.is_valid_combat_target(target):
 				continue
 
 			var distance: float = _horizontal_distance_to(target)
@@ -737,18 +753,25 @@ func find_execute_target(search_range: float) -> Node3D:
 			if not _can_execute_target(target):
 				continue
 
+			var safe_target: Node3D = NodeSafety.safe_node(target) as Node3D
+			if safe_target == null:
+				continue
+
 			if node is Hero:
 				if distance < best_hero_distance:
-					best_hero = target
+					best_hero = safe_target
 					best_hero_distance = distance
 			elif distance < best_unit_distance:
-				best_unit = target
+				best_unit = safe_target
 				best_unit_distance = distance
 
-	if best_hero != null:
+	if NodeSafety.is_alive_node(best_hero):
 		return best_hero
 
-	return best_unit
+	if NodeSafety.is_alive_node(best_unit):
+		return best_unit
+
+	return null
 
 
 func _is_player_military_unit(node: Node) -> bool:
@@ -802,6 +825,9 @@ func _process_execute(_delta: float) -> void:
 
 
 func _get_target_health_ratio(target: Node3D) -> float:
+	if not NodeSafety.is_alive_node(target):
+		return 1.0
+
 	var health_component: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
 	if health_component == null or health_component.max_health <= 0:
 		return 1.0
@@ -810,6 +836,11 @@ func _get_target_health_ratio(target: Node3D) -> float:
 
 
 func _can_execute_target(target: Node3D) -> bool:
+	if not NodeSafety.is_alive_node(target):
+		return false
+	if not CombatTargetValidation.is_valid_combat_target(target):
+		return false
+
 	return _get_target_health_ratio(target) < get_execute_health_threshold()
 
 

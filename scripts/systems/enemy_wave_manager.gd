@@ -129,6 +129,8 @@ func _abort_active_offensive_push(rally_position: Vector3) -> void:
 
 
 func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
+	if not NodeSafety.is_alive_node(hero):
+		return
 	if not CombatTargetValidation.is_enemy_faction(hero):
 		return
 
