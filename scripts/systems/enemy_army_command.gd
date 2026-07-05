@@ -60,6 +60,7 @@ const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
 const ATTACK_OBJECTIVE_REISSUE_SECONDS := 2.5
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
+const ATTACK_OBJECTIVE_SPREAD_MULTIPLIER := 1.35
 const ATTACK_CLOSE_TO_WIN_CC_HEALTH_RATIO := 0.35
 const ATTACK_CLOSE_TO_WIN_ARMY_DISTANCE := 28.0
 const IMPORTANT_BUILDING_SEARCH_RANGE := 200.0
@@ -134,8 +135,16 @@ static func should_recall_offensive_for_defense(tree: SceneTree) -> bool:
 	if get_army_mode() != ArmyMode.ATTACKING:
 		return false
 
-	if not is_enemy_base_threatened(tree):
+	var threat: Dictionary = evaluate_defense_threat(tree)
+	if not threat.get("threatened", false):
 		return false
+
+	if threat.get("force_commit", false):
+		return true
+
+	var reason: StringName = threat.get("reason", &"")
+	if reason == &"base" or reason == &"buildings" or reason == &"workers":
+		return true
 
 	return not _is_attack_close_to_winning(tree)
 
@@ -198,7 +207,15 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 
 	if should_unstick and NodeSafety.is_alive_node(objective_node):
 		_objective_stuck_timer = 0.0
-		_command_assault_objective(wave_units, objective_node)
+		_command_assault_objective(wave_units, objective_node, true)
+		return
+
+	if NodeSafety.is_alive_node(objective_node):
+		_command_focus_attack_objective(
+			wave_units,
+			objective_node,
+			EnemyUnitMission.Mission.ATTACK
+		)
 		return
 
 	command_attack_move(
@@ -241,36 +258,100 @@ static func _update_objective_stuck_detection(
 	_objective_last_building_health = current_health
 
 
-static func _command_assault_objective(units: Array, objective: Node3D) -> void:
+static func _command_focus_attack_objective(
+	units: Array,
+	objective: Node3D,
+	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
+) -> void:
 	if not NodeSafety.is_alive_node(objective):
 		return
 
-	command_attack_move(
-		units,
-		objective.global_position,
-		EnemyUnitMission.Mission.ATTACK
-	)
-
+	units = NodeSafety.clean_node_array(units)
 	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+		if not NodeSafety.is_alive_node(unit):
 			continue
 
-		if not EnemyUnitMission.allows_combat_micro(unit as Node):
+		if not _should_focus_unit_on_objective(unit as Node3D, objective):
 			continue
 
-		var distance: float = CombatTargetValidation.get_horizontal_attack_distance(
-			unit as Node3D,
-			objective
+		_command_unit_focus_attack(unit, objective)
+		EnemyUnitMission.try_set_mission(unit as Node, mission)
+		EnemyUnitMission.record_move_order(
+			unit as Node,
+			objective.global_position,
+			mission
 		)
-		var weapon_range: float = 2.0
-		if "attack_range" in unit:
-			weapon_range = maxf(float(unit.get("attack_range")), weapon_range)
 
-		if distance > weapon_range * 1.25:
-			continue
 
-		if (unit as Object).has_method("command_attack"):
-			(unit as Object).call("command_attack", objective)
+static func _command_assault_objective(
+	units: Array,
+	objective: Node3D,
+	use_spread: bool = false
+) -> void:
+	if not NodeSafety.is_alive_node(objective):
+		return
+
+	units = NodeSafety.clean_node_array(units)
+	if use_spread and not units.is_empty():
+		var spread_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+			objective.global_position,
+			units.size(),
+			FORMATION_SPACING * ATTACK_OBJECTIVE_SPREAD_MULTIPLIER
+		)
+		for index: int in units.size():
+			var unit: Variant = units[index]
+			if not NodeSafety.is_alive_node(unit):
+				continue
+
+			if not EnemyUnitMission.should_reissue_move_order(
+				unit as Node,
+				spread_targets[index],
+				EnemyUnitMission.Mission.ATTACK
+			):
+				continue
+
+			_issue_attack_move(unit, spread_targets[index])
+			EnemyUnitMission.try_set_mission(unit as Node, EnemyUnitMission.Mission.ATTACK)
+			EnemyUnitMission.record_move_order(
+				unit as Node,
+				spread_targets[index],
+				EnemyUnitMission.Mission.ATTACK
+			)
+
+	_command_focus_attack_objective(units, objective, EnemyUnitMission.Mission.ATTACK)
+
+
+static func _command_unit_focus_attack(unit: Variant, objective: Node3D) -> void:
+	if not NodeSafety.is_alive_node(unit) or not NodeSafety.is_alive_node(objective):
+		return
+
+	if not is_living_combat_unit(unit as Node):
+		return
+
+	if not EnemyUnitMission.allows_combat_micro(unit as Node):
+		return
+
+	if objective is Building and not _is_living_building(objective as Building):
+		return
+
+	if (unit as Object).has_method("command_attack"):
+		(unit as Object).call("command_attack", objective)
+
+
+static func _should_focus_unit_on_objective(unit: Node3D, objective: Node3D) -> bool:
+	if not NodeSafety.is_alive_node(unit) or not NodeSafety.is_alive_node(objective):
+		return false
+
+	if not is_living_combat_unit(unit):
+		return false
+
+	if not EnemyUnitMission.allows_combat_micro(unit):
+		return false
+
+	if objective is Building and not _is_living_building(objective as Building):
+		return false
+
+	return true
 
 
 static func clear_offensive_wave_tracking() -> void:
@@ -1111,7 +1192,8 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 	if base_threat != null:
 		return _build_defense_threat_result(
 			_resolve_player_threat_cluster_position(tree, base_threat.global_position),
-			&"base"
+			&"base",
+			true
 		)
 
 	var economy_threat: Node3D = _find_player_military_in_enemy_economy_area(tree)
@@ -1361,6 +1443,13 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 			"position": nearest_building.global_position,
 		}
 
+	var nearest_worker: Node3D = _find_nearest_living_player_worker(tree, fallback_position)
+	if nearest_worker != null:
+		return {
+			"node": nearest_worker,
+			"position": nearest_worker.global_position,
+		}
+
 	if fallback_position != Vector3.ZERO:
 		return {"node": null, "position": fallback_position}
 
@@ -1484,6 +1573,16 @@ static func _issue_spaced_group_orders(
 
 		var target: Vector3 = move_targets[index]
 		if not EnemyUnitMission.should_reissue_move_order(unit as Node, target, mission):
+			continue
+
+		if (
+			use_attack_move
+			and mission == EnemyUnitMission.Mission.ATTACK
+			and _has_living_attack_building_objective()
+		):
+			_command_unit_focus_attack(unit, _active_wave_objective)
+			EnemyUnitMission.try_set_mission(unit as Node, mission)
+			EnemyUnitMission.record_move_order(unit as Node, target, mission)
 			continue
 
 		if use_attack_move:
@@ -2061,6 +2160,42 @@ static func _find_nearest_living_player_unit(
 				closest_unit = target
 
 	return closest_unit
+
+
+static func _find_nearest_living_player_worker(
+	tree: SceneTree,
+	from_position: Vector3
+) -> Node3D:
+	var closest_worker: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Node in tree.get_nodes_in_group(UNITS_GROUP):
+		if not node is Worker or not node is Node3D:
+			continue
+
+		if CombatTargetValidation.is_enemy_faction(node):
+			continue
+
+		if not CombatTargetValidation.is_valid_combat_target(node):
+			continue
+
+		var worker: Node3D = node as Node3D
+		var distance: float = _horizontal_distance(from_position, worker.global_position)
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_worker = worker
+
+	return closest_worker
+
+
+static func _has_living_attack_building_objective() -> bool:
+	if not NodeSafety.is_alive_node(_active_wave_objective):
+		return false
+
+	if not _active_wave_objective is Building:
+		return false
+
+	return _is_living_building(_active_wave_objective as Building)
 
 
 static func _is_living_building(building: Building) -> bool:
