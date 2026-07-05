@@ -1205,7 +1205,7 @@ func _disconnect_tracked_hero_signals() -> void:
 		_tracked_hero.level_changed.disconnect(_on_tracked_hero_progression_changed)
 
 
-func _on_tracked_hero_progression_changed() -> void:
+func _on_tracked_hero_progression_changed(_unused = null) -> void:
 	_update_hero_abilities_ui()
 
 
