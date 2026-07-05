@@ -114,12 +114,19 @@ func _refresh_entities() -> void:
 
 
 func _collect_group_dots(tree: SceneTree, group_name: StringName, seen: Dictionary) -> void:
-	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
-		_add_entity_dot(node, seen)
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+
+		_add_entity_dot(node_variant as Node, seen)
 
 
 func _collect_resource_dots(tree: SceneTree, seen: Dictionary) -> void:
-	for node: Node in CombatTargetValidation.get_cached_group_nodes(tree, &"resource_nodes"):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"resource_nodes"):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+
+		var node: Node = node_variant as Node
 		if not _mark_seen(node, seen):
 			continue
 		if not node is Node3D:

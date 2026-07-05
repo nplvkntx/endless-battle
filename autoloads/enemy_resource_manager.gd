@@ -4,10 +4,12 @@ extends Node
 
 signal resources_changed()
 
+const STARTING_GOLD: int = 20000
+const STARTING_WOOD: int = 20000
 const STARTING_FOOD_MAX: int = 15
 
-var gold: int = ResourceManager.STARTING_GOLD
-var wood: int = ResourceManager.STARTING_WOOD
+var gold: int = STARTING_GOLD
+var wood: int = STARTING_WOOD
 var food_current: int = 0
 var food_max: int = STARTING_FOOD_MAX
 
@@ -17,8 +19,8 @@ func _ready() -> void:
 
 
 func reset_to_starting_values() -> void:
-	gold = ResourceManager.STARTING_GOLD
-	wood = ResourceManager.STARTING_WOOD
+	gold = STARTING_GOLD
+	wood = STARTING_WOOD
 	food_current = 0
 	food_max = STARTING_FOOD_MAX
 	resources_changed.emit()
