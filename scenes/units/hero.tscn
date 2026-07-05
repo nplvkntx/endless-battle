@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/units/hero.gd" id="1_hero"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+[ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="3_selection_glow"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gold"]
 albedo_color = Color(0.82, 0.62, 0.14, 1)
@@ -22,19 +23,10 @@ emission = Color(0.55, 0.45, 0.08, 1)
 albedo_color = Color(0.88, 0.9, 0.95, 1)
 metallic = 0.55
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_ring"]
-shading_mode = 0
-transparency = 1
-albedo_color = Color(0.18, 0.92, 0.32, 0.6)
-emission_enabled = true
-emission = Color(0.12, 0.72, 0.22, 1)
-cull_mode = 2
-
-[sub_resource type="TorusMesh" id="TorusMesh_sel_ring"]
-inner_radius = 0.58
-outer_radius = 0.66
-rings = 8
-ring_segments = 24
+[sub_resource type="CylinderMesh" id="CylinderMesh_sel_glow"]
+top_radius = 0.42
+bottom_radius = 0.42
+height = 0.02
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
 radius = 0.32
@@ -115,9 +107,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, 0)
 
 [node name="Ring" type="MeshInstance3D" parent="SelectionIndicator"]
 visible = false
-transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0.03, 0)
-mesh = SubResource("TorusMesh_sel_ring")
-surface_material_override/0 = SubResource("StandardMaterial3D_sel_ring")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, 0)
+mesh = SubResource("CylinderMesh_sel_glow")
+surface_material_override/0 = ExtResource("3_selection_glow")
 
 [node name="HealthBar" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.88, 0)

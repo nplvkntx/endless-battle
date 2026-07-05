@@ -19,7 +19,7 @@ const FOOTPRINT_RADIUS_SCALE := 0.48
 const DEFAULT_FOOTPRINT_RADIUS := 0.42
 
 
-static func set_selection_glow_selected(entity: Node, _selected: bool) -> void:
+static func set_selection_glow_selected(entity: Node, selected: bool) -> void:
 	if entity == null or not is_instance_valid(entity):
 		return
 
@@ -27,11 +27,21 @@ static func set_selection_glow_selected(entity: Node, _selected: bool) -> void:
 	if indicator == null:
 		return
 
-	indicator.visible = false
+	if selected:
+		_apply_team_glow(entity, indicator)
+		_hide_team_accent_marker(entity)
+
+	indicator.visible = selected
 
 	var ring := indicator.get_node_or_null(str(RING_NODE_NAME)) as MeshInstance3D
 	if ring != null:
-		ring.visible = false
+		ring.visible = selected
+
+
+static func _hide_team_accent_marker(entity: Node) -> void:
+	var accent_marker := entity.get_node_or_null(str(TeamVisuals.TEAM_ACCENT_MARKER_NAME)) as MeshInstance3D
+	if accent_marker != null:
+		accent_marker.visible = false
 
 
 static func _apply_team_glow(entity: Node, indicator: Node3D) -> void:

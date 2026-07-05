@@ -56,7 +56,7 @@ static func apply_to_entity(owner: Node3D, team_id: int) -> void:
 		return
 
 	var accent: Color = get_accent_color(team)
-	_ensure_accent_marker(owner, accent)
+	_remove_accent_marker(owner)
 	_apply_body_accent(owner, accent)
 
 
