@@ -130,6 +130,8 @@ func get_attack_facing_direction() -> Vector3:
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
+	if not is_instance_valid(target):
+		return
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 

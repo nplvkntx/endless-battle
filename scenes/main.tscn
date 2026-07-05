@@ -1,21 +1,21 @@
 [gd_scene format=3 uid="uid://cpee3usuf6htk"]
 
-[ext_resource type="Script" path="res://scripts/systems/match_bootstrap.gd" id="1_match_bootstrap"]
+[ext_resource type="Script" uid="uid://cbag7i27385dr" path="res://scripts/systems/match_bootstrap.gd" id="1_match_bootstrap"]
 [ext_resource type="Script" uid="uid://bfyiykcfpyqqw" path="res://scripts/systems/camera_controller.gd" id="3_camera_controller"]
 [ext_resource type="Script" uid="uid://ddrhrhwkyxb6r" path="res://scripts/ui/selection_box.gd" id="6_selection_box"]
-[ext_resource type="PackedScene" uid="uid://c5n8k3m7w2x9pud" path="res://scenes/ui/player_hud.tscn" id="7_player_hud"]
+[ext_resource type="PackedScene" uid="uid://c2pbeet6gdndv" path="res://scenes/ui/player_hud.tscn" id="7_player_hud"]
 [ext_resource type="Script" uid="uid://e41sl48iy1bk" path="res://scripts/systems/navigation_region_setup.gd" id="25_navigation_region_setup"]
-[ext_resource type="PackedScene" uid="uid://b7k3m9n4w2x8paf" path="res://scenes/maps/battlefield_1v1.tscn" id="29_battlefield_1v1"]
-[ext_resource type="PackedScene" uid="uid://dq8n2k5m7w3xpa" path="res://scenes/world/neutral_creep_camps.tscn" id="30_neutral_creep_camps"]
-[ext_resource type="PackedScene" uid="uid://c7k4m9n3w6xprb" path="res://scenes/world/map_resources.tscn" id="31_map_resources"]
-[ext_resource type="PackedScene" uid="uid://dp7k3m2n8w5xqb" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
-[ext_resource type="PackedScene" uid="uid://bq8n4m3w7x6xrc" path="res://scenes/match/enemy_starting_base.tscn" id="33_enemy_starting_base"]
-[ext_resource type="PackedScene" uid="uid://bqm8k4n2w7x3ms" path="res://scenes/match/match_systems.tscn" id="34_match_systems"]
+[ext_resource type="PackedScene" uid="uid://btsvq717pdghl" path="res://scenes/maps/battlefield_1v1.tscn" id="29_battlefield_1v1"]
+[ext_resource type="PackedScene" uid="uid://dbfxvg2ny1oyc" path="res://scenes/world/neutral_creep_camps.tscn" id="30_neutral_creep_camps"]
+[ext_resource type="PackedScene" uid="uid://dxwvi84m2vts6" path="res://scenes/world/map_resources.tscn" id="31_map_resources"]
+[ext_resource type="PackedScene" uid="uid://cacyxd3oy3o0d" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
+[ext_resource type="PackedScene" uid="uid://0dsydyxmkkwe" path="res://scenes/match/enemy_starting_base.tscn" id="33_enemy_starting_base"]
+[ext_resource type="PackedScene" uid="uid://exagw4nvcpru" path="res://scenes/match/match_systems.tscn" id="34_match_systems"]
 
 [node name="Main" type="Node3D" unique_id=1133004476]
 script = ExtResource("1_match_bootstrap")
 
-[node name="MatchSystems" parent="." instance=ExtResource("34_match_systems")]
+[node name="MatchSystems" parent="." unique_id=244316930 instance=ExtResource("34_match_systems")]
 
 [node name="SelectionUI" type="CanvasLayer" parent="." unique_id=370040247]
 
@@ -29,9 +29,9 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("6_selection_box")
 
-[node name="GameUI" parent="." instance=ExtResource("7_player_hud")]
+[node name="GameUI" parent="." unique_id=563949708 instance=ExtResource("7_player_hud")]
 
-[node name="Battlefield1v1" parent="." instance=ExtResource("29_battlefield_1v1")]
+[node name="Battlefield1v1" parent="." unique_id=1376034106 instance=ExtResource("29_battlefield_1v1")]
 
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=2094222557]
 script = ExtResource("25_navigation_region_setup")
@@ -46,10 +46,10 @@ script = ExtResource("3_camera_controller")
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 10, 0)
 shadow_enabled = true
 
-[node name="NeutralCreepCamps" parent="." instance=ExtResource("30_neutral_creep_camps")]
+[node name="NeutralCreepCamps" parent="." unique_id=1386075481 instance=ExtResource("30_neutral_creep_camps")]
 
-[node name="PlayerStartingBase" parent="." instance=ExtResource("32_player_starting_base")]
+[node name="PlayerStartingBase" parent="." unique_id=710535234 instance=ExtResource("32_player_starting_base")]
 
-[node name="EnemyStartingBase" parent="." instance=ExtResource("33_enemy_starting_base")]
+[node name="EnemyStartingBase" parent="." unique_id=1888601700 instance=ExtResource("33_enemy_starting_base")]
 
-[node name="MapResources" parent="." instance=ExtResource("31_map_resources")]
+[node name="MapResources" parent="." unique_id=1493597898 instance=ExtResource("31_map_resources")]

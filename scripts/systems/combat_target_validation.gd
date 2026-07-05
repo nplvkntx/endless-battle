@@ -494,7 +494,7 @@ static func claim_attack_approach_slot(target: Node) -> int:
 
 
 static func clear_attack_approach_slots(target: Node) -> void:
-	if target == null:
+	if target == null or not is_instance_valid(target):
 		return
 
 	_attack_slot_counter_by_target.erase(target.get_instance_id())

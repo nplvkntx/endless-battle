@@ -27,6 +27,8 @@ var inspected_unit: Unit = null
 var inspected_building: Building = null
 var inspected_resource: GatherableResource = null
 var _unit_tree_exiting_handlers: Dictionary = {}
+var _selection_purge_timer: float = 0.0
+const SELECTION_PURGE_INTERVAL := 0.1
 
 
 func get_multi_unit_selection_category() -> StringName:
@@ -593,6 +595,9 @@ func _set_selected_building(building: Building) -> void:
 	_clear_inspection_without_signal()
 	_clear_selection_without_signal()
 	_clear_building_selection_without_signal()
+	if not is_instance_valid(building):
+		return
+
 	selected_building = building
 	if _is_selectable_building(selected_building):
 		_safe_set_building_selected(selected_building, true)
@@ -642,6 +647,8 @@ func _on_selected_unit_tree_exiting(unit: Unit) -> void:
 func _remove_unit_from_selection(unit: Unit, emit_signal: bool) -> void:
 	_untrack_unit_selection(unit)
 	selected_units.erase(unit)
+	if _last_clicked_unit == unit:
+		_reset_click_tracking()
 
 	if emit_signal:
 		selection_changed.emit(selected_units)
@@ -697,6 +704,7 @@ func _purge_invalid_selection() -> void:
 	_purge_invalid_selected_units()
 	_purge_invalid_selected_building()
 	_purge_invalid_inspection()
+	_purge_invalid_last_clicked_unit()
 
 
 func _purge_invalid_selected_units() -> void:
@@ -763,6 +771,9 @@ func _set_inspected_unit(unit: Unit) -> void:
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
 	inspected_resource = null
+	if not is_instance_valid(unit):
+		return
+
 	inspected_unit = unit
 	_safe_set_unit_inspected(unit, true)
 	inspection_changed.emit(inspected_unit, null)
@@ -785,6 +796,9 @@ func _set_inspected_building(building: Building) -> void:
 	if inspected_building != null and inspected_building != building:
 		_safe_set_building_inspected(inspected_building, false)
 	inspected_resource = null
+	if not is_instance_valid(building):
+		return
+
 	inspected_building = building
 	_safe_set_building_inspected(building, true)
 	inspection_changed.emit(null, inspected_building)
@@ -811,6 +825,9 @@ func _set_inspected_resource(resource: GatherableResource) -> void:
 	if inspected_building != null:
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
+	if not is_instance_valid(resource):
+		return
+
 	inspected_resource = resource
 	inspection_changed.emit(null, null)
 	selection_changed.emit(selected_units)
@@ -1040,7 +1057,10 @@ func _is_double_click(unit: Unit) -> bool:
 
 
 func _record_click(unit: Unit) -> void:
-	_last_clicked_unit = unit
+	if is_instance_valid(unit):
+		_last_clicked_unit = unit
+	else:
+		_last_clicked_unit = null
 	_last_click_time_msec = Time.get_ticks_msec()
 
 
@@ -1164,8 +1184,23 @@ func _ready() -> void:
 	set_process(true)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_selection_purge_timer += delta
+	if _selection_purge_timer >= SELECTION_PURGE_INTERVAL:
+		_selection_purge_timer = 0.0
+		_purge_invalid_selection()
+
 	_update_world_tooltip()
+
+
+func _purge_invalid_last_clicked_unit() -> void:
+	if _last_clicked_unit == null:
+		return
+
+	if _is_selectable_unit(_last_clicked_unit):
+		return
+
+	_last_clicked_unit = null
 
 
 func _update_world_tooltip() -> void:

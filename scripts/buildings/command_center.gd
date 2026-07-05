@@ -111,6 +111,7 @@ func _on_health_depleted() -> void:
 	_repeat_enabled = false
 	_invalidate_training_session()
 	_is_training = false
+	_rally_resource = null
 
 	if _rally_marker != null and is_instance_valid(_rally_marker):
 		_rally_marker.queue_free()
@@ -434,6 +435,9 @@ func _notify_enemy_worker_spawned(worker: Worker) -> void:
 func _apply_worker_rally(worker: Worker) -> void:
 	if worker == null:
 		return
+
+	if _rally_target_type == RallyTargetType.RESOURCE and not _is_valid_rally_resource(_rally_resource):
+		_rally_resource = null
 
 	match _rally_target_type:
 		RallyTargetType.GROUND:

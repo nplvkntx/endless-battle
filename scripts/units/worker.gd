@@ -601,6 +601,9 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 		source = wood_tree
 		_lock_to_wood_tree(wood_tree)
 
+	if not _is_valid_gather_source(source):
+		return
+
 	_gather_source = source
 	_assigned_resource_id = source.get_resource_id()
 	_carried_amount = 0
@@ -1487,7 +1490,7 @@ func _try_reassign_gather_source() -> bool:
 			null,
 			false
 		)
-		if replacement == null or not replacement is GoldMine:
+		if replacement == null or not is_instance_valid(replacement) or not replacement is GoldMine:
 			return false
 
 		var gold_mine: GoldMine = replacement as GoldMine
@@ -1518,7 +1521,7 @@ func _try_reassign_gather_source() -> bool:
 			_get_valid_gather_source(),
 			false
 		)
-		if replacement == null:
+		if replacement == null or not is_instance_valid(replacement):
 			return false
 
 		_lock_to_wood_tree(replacement)

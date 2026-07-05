@@ -219,6 +219,8 @@ func get_attack_facing_direction() -> Vector3:
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
+	if not is_instance_valid(target):
+		return
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
@@ -248,6 +250,7 @@ func cancel_attack_move() -> void:
 func cancel_attack() -> void:
 	if (
 		_attack_target != null
+		and is_instance_valid(_attack_target)
 		and not CombatTargetValidation.is_valid_combat_target(_attack_target)
 	):
 		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
@@ -468,6 +471,8 @@ func _resolve_ability_target() -> Node3D:
 
 
 func _begin_power_strike(target: Node3D) -> void:
+	if not is_instance_valid(target):
+		return
 	cancel_attack_move()
 	cancel_attack()
 	_power_strike_target = target
@@ -740,6 +745,8 @@ func _is_player_military_unit(node: Node) -> bool:
 
 
 func _begin_execute(target: Node3D) -> void:
+	if not is_instance_valid(target):
+		return
 	cancel_attack_move()
 	cancel_attack()
 	_cancel_power_strike()

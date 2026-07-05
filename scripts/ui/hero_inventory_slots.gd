@@ -20,7 +20,10 @@ func _ready() -> void:
 
 func bind_hero(hero: Hero) -> void:
 	_disconnect_tracked_hero()
-	_tracked_hero = hero
+	if hero != null and is_instance_valid(hero):
+		_tracked_hero = hero
+	else:
+		_tracked_hero = null
 
 	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
 		_refresh_slots()

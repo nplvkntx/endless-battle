@@ -287,6 +287,8 @@ func _get_selected_workers() -> Array[Worker]:
 		return workers
 
 	for unit: Unit in selection_manager.selected_units:
+		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+			continue
 		if unit is Worker:
 			workers.append(unit as Worker)
 
@@ -325,6 +327,8 @@ func _can_use_worker_build_hotkeys() -> bool:
 		return false
 
 	for unit: Unit in selected_units:
+		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+			continue
 		if not unit is Worker:
 			return false
 

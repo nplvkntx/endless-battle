@@ -17,8 +17,8 @@ var _lifetime: float = 0.0
 
 
 func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Node = null) -> void:
-	_attacker = attacker
-	_target = target
+	_target = target if is_instance_valid(target) else null
+	_attacker = attacker if is_instance_valid(attacker) else null
 	_damage = damage
 	global_position = spawn_position
 

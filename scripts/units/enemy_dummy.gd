@@ -65,6 +65,7 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 
 func _on_health_depleted() -> void:
+	_attack_target = null
 	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
 	queue_free()
@@ -134,6 +135,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _set_attack_target(target: Unit) -> void:
+	if not is_instance_valid(target):
+		return
 	if not _is_valid_attack_target(target):
 		return
 
@@ -196,6 +199,10 @@ func _play_attack_animation() -> void:
 
 func _clear_invalid_attack_target() -> void:
 	if _attack_target == null:
+		return
+
+	if not is_instance_valid(_attack_target):
+		_attack_target = null
 		return
 
 	if _is_valid_attack_target(_attack_target):

@@ -841,10 +841,13 @@ func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bo
 
 
 func _get_barracks_for_queue_cancel() -> Barracks:
-	if _selected_barracks != null:
+	if _selected_barracks != null and is_instance_valid(_selected_barracks):
 		return _selected_barracks
 
-	return _tracked_barracks
+	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
+		return _tracked_barracks
+
+	return null
 
 
 func _on_selection_changed(_units: Array[Unit]) -> void:
@@ -853,7 +856,10 @@ func _on_selection_changed(_units: Array[Unit]) -> void:
 
 func _set_tracked_hero(hero: Hero) -> void:
 	_disconnect_tracked_hero_signals()
-	_tracked_hero = hero
+	if hero != null and is_instance_valid(hero):
+		_tracked_hero = hero
+	else:
+		_tracked_hero = null
 	if _tracked_hero != null and is_instance_valid(_tracked_hero):
 		if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 			_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_progression_changed)
@@ -1183,7 +1189,10 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_shop_signals()
 	_selected_command_center = null
 
-	if building is CommandCenter:
+	if building != null and not is_instance_valid(building):
+		building = null
+
+	if building is CommandCenter and is_instance_valid(building):
 		_selected_command_center = building as CommandCenter
 		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
 		_selected_command_center.repeat_state_changed.connect(_on_production_repeat_state_changed)
@@ -1193,7 +1202,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_clear_queue_row(_worker_queue_row)
 
-	if building is Barracks:
+	if building is Barracks and is_instance_valid(building):
 		_tracked_barracks = building as Barracks
 		_tracked_barracks.building_state_changed.connect(_on_barracks_state_changed)
 		_tracked_barracks.swordsman_queue_changed.connect(_on_swordsman_queue_changed)
@@ -1207,7 +1216,7 @@ func _on_building_selection_changed(building: Building) -> void:
 		_clear_queue_row(_swordsman_queue_row)
 		_clear_queue_row(_archer_queue_row)
 
-	if building is HeroAltar:
+	if building is HeroAltar and is_instance_valid(building):
 		_tracked_hero_altar = building as HeroAltar
 		_tracked_hero_altar.building_state_changed.connect(_on_hero_altar_state_changed)
 		_tracked_hero_altar.hero_altar_state_changed.connect(_on_hero_altar_state_changed)

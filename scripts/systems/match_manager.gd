@@ -81,10 +81,12 @@ func _connect_command_center(command_center: CommandCenter, callback: Callable) 
 
 
 func _on_player_command_center_destroyed(_building: Building) -> void:
+	_player_command_center = null
 	_end_match(MatchState.DEFEAT, DEFEAT_MESSAGE)
 
 
 func _on_enemy_command_center_destroyed(_building: Building) -> void:
+	_enemy_command_center = null
 	_end_match(MatchState.VICTORY, VICTORY_MESSAGE)
 
 
