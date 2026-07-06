@@ -62,6 +62,10 @@ const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const COMMAND_CENTER_GOLD_COST: int = 200
 const COMMAND_CENTER_WOOD_COST: int = 400
+const TIER_2_GOLD_COST: int = CommandCenter.TIER_2_GOLD_COST
+const TIER_2_WOOD_COST: int = CommandCenter.TIER_2_WOOD_COST
+const TIER_UPGRADE_STABLE_GOLD_BUFFER: int = 250
+const TIER_UPGRADE_STABLE_WOOD_BUFFER: int = 150
 
 const CONSTRUCTION_DURATION: float = 4.0
 const BARRACKS_MAX_HEALTH: int = 300
@@ -153,6 +157,8 @@ func _run_build_order() -> void:
 	if _should_build_expansion_barracks():
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
+
+	_try_upgrade_command_center_tier()
 
 	if _should_build_blacksmith():
 		if _try_place_building(PLACEMENT_BLACKSMITH):
@@ -257,6 +263,61 @@ func _should_build_blacksmith() -> bool:
 		return false
 
 	return EnemyResourceManager.can_afford(BLACKSMITH_GOLD_COST, BLACKSMITH_WOOD_COST)
+
+
+func _should_upgrade_command_center_tier() -> bool:
+	if TechTree.player_has_tier_2(ENEMY_TEAM_ID):
+		return false
+
+	if _is_any_enemy_command_center_upgrading():
+		return false
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	if command_center.command_center_tier >= 2:
+		return false
+
+	if not _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+		return false
+
+	if not _has_stable_enemy_economy_for_tier_upgrade():
+		return false
+
+	return command_center.can_try_enemy_upgrade_tier(2)
+
+
+func _has_stable_enemy_economy_for_tier_upgrade() -> bool:
+	return (
+		EnemyResourceManager.gold >= TIER_2_GOLD_COST + TIER_UPGRADE_STABLE_GOLD_BUFFER
+		and EnemyResourceManager.wood >= TIER_2_WOOD_COST + TIER_UPGRADE_STABLE_WOOD_BUFFER
+	)
+
+
+func _try_upgrade_command_center_tier() -> void:
+	if not _should_upgrade_command_center_tier():
+		return
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or not is_instance_valid(command_center):
+		return
+
+	command_center.try_upgrade_enemy_tier(2)
+
+
+func _is_any_enemy_command_center_upgrading() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is CommandCenter or not _is_living_building(node as Building):
+			continue
+
+		if (node as CommandCenter).is_upgrading_tier():
+			return true
+
+	return false
 
 
 func _try_sustain_blacksmith_research() -> void:
@@ -617,25 +678,28 @@ func _needs_more_military_units() -> bool:
 
 
 func _try_train_military(barracks: Barracks) -> bool:
-	if not TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
+	if not is_instance_valid(barracks):
 		return false
 
-	if _train_swordsman_next:
-		if barracks.try_train_enemy_swordsman():
-			_train_swordsman_next = false
-			return true
-		if barracks.try_train_enemy_archer():
-			_train_swordsman_next = true
-			return true
-	else:
-		if barracks.try_train_enemy_archer():
-			_train_swordsman_next = true
-			return true
-		if barracks.try_train_enemy_swordsman():
-			_train_swordsman_next = false
-			return true
+	if TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
+		if _train_swordsman_next:
+			if barracks.try_train_enemy_swordsman():
+				_train_swordsman_next = false
+				return true
+			if barracks.try_train_enemy_archer():
+				_train_swordsman_next = true
+				return true
+		else:
+			if barracks.try_train_enemy_archer():
+				_train_swordsman_next = true
+				return true
+			if barracks.try_train_enemy_swordsman():
+				_train_swordsman_next = false
+				return true
 
-	return false
+		return barracks.try_train_enemy_spearman()
+
+	return barracks.try_train_enemy_spearman()
 
 
 func _try_place_expansion_command_center() -> bool:

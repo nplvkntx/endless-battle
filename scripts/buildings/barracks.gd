@@ -119,14 +119,19 @@ func _on_enemy_production_tick() -> void:
 		_schedule_enemy_production_tick()
 		return
 
-	if _enemy_production_spawn_swordsman_next:
-		if not try_train_enemy_swordsman():
-			try_train_enemy_archer()
-	else:
-		if not try_train_enemy_archer():
-			try_train_enemy_swordsman()
+	if TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
+		if _enemy_production_spawn_swordsman_next:
+			if not try_train_enemy_swordsman():
+				if not try_train_enemy_archer():
+					try_train_enemy_spearman()
+		else:
+			if not try_train_enemy_archer():
+				if not try_train_enemy_swordsman():
+					try_train_enemy_spearman()
 
-	_enemy_production_spawn_swordsman_next = not _enemy_production_spawn_swordsman_next
+		_enemy_production_spawn_swordsman_next = not _enemy_production_spawn_swordsman_next
+	else:
+		try_train_enemy_spearman()
 	_schedule_enemy_production_tick()
 
 
@@ -136,6 +141,10 @@ func is_enemy_training_busy() -> bool:
 
 func get_enemy_pending_unit_count() -> int:
 	return _training_queue.size()
+
+
+func try_train_enemy_spearman() -> bool:
+	return _try_train_enemy_unit(TRAIN_ID_SPEARMAN)
 
 
 func try_train_enemy_swordsman() -> bool:
@@ -156,7 +165,8 @@ func _try_train_enemy_unit(train_id: StringName) -> bool:
 	if _training_queue.size() >= MAX_ENEMY_UNIT_QUEUE:
 		return false
 
-	if not EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+	var gold_cost: int = get_unit_train_gold_cost(train_id)
+	if not EnemyResourceManager.try_pay_training(gold_cost, TRAIN_FOOD_COST):
 		return false
 
 	_enqueue_training(train_id)

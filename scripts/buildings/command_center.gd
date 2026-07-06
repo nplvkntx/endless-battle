@@ -566,6 +566,51 @@ func try_train_enemy_worker() -> bool:
 	return true
 
 
+func can_try_enemy_upgrade_tier(max_target_tier: int = 2) -> bool:
+	if not is_in_group(&"enemy_command_center"):
+		return false
+
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if _health_component != null and _health_component.current_health <= 0:
+		return false
+
+	if _is_upgrading:
+		return false
+
+	if _is_training or _worker_queue_count > 0:
+		return false
+
+	var target_tier: int = get_next_upgrade_tier()
+	if target_tier <= command_center_tier or target_tier > MAX_TIER:
+		return false
+
+	if target_tier > max_target_tier:
+		return false
+
+	var costs: Dictionary = get_upgrade_costs(target_tier)
+	return EnemyResourceManager.can_afford(int(costs.gold), int(costs.wood))
+
+
+func try_upgrade_enemy_tier(max_target_tier: int = 2) -> bool:
+	if not can_try_enemy_upgrade_tier(max_target_tier):
+		return false
+
+	var target_tier: int = get_next_upgrade_tier()
+	if target_tier > max_target_tier:
+		return false
+
+	var costs: Dictionary = get_upgrade_costs(target_tier)
+	var gold_cost: int = int(costs.gold)
+	var wood_cost: int = int(costs.wood)
+	if not EnemyResourceManager.try_spend(gold_cost, wood_cost):
+		return false
+
+	_begin_tier_upgrade(target_tier)
+	return true
+
+
 func _is_enemy_worker_training_allowed() -> bool:
 	if (
 		building_state == STATE_UNDER_CONSTRUCTION
