@@ -5,8 +5,10 @@ extends Building
 
 signal worker_queue_changed(queue_count: int)
 signal repeat_state_changed()
+signal tier_state_changed()
 
 const TRAIN_ID_WORKER: StringName = &"worker"
+const UPGRADE_ID_TIER: StringName = &"cc_tier_upgrade"
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
@@ -15,6 +17,15 @@ const MAX_ENEMY_WORKER_QUEUE: int = 5
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
 const ENEMY_TEAM_ID: int = 1
+
+const MIN_TIER: int = 1
+const MAX_TIER: int = 3
+const TIER_2_GOLD_COST: int = 800
+const TIER_2_WOOD_COST: int = 500
+const TIER_2_UPGRADE_SECONDS: float = 60.0
+const TIER_3_GOLD_COST: int = 2000
+const TIER_3_WOOD_COST: int = 1200
+const TIER_3_UPGRADE_SECONDS: float = 120.0
 
 @export var worker_spawn_offset: Vector3 = Vector3(0.0, -0.75, -2.8)
 
@@ -36,6 +47,14 @@ var _rally_resource: GatherableResource = null
 var _rally_marker: MeshInstance3D = null
 var _rally_next_slot: int = 0
 
+var command_center_tier: int = MIN_TIER
+var _is_upgrading: bool = false
+var _upgrade_target_tier: int = 0
+var _upgrade_session: int = 0
+var _upgrade_started_at: float = 0.0
+var _tier2_marker: MeshInstance3D = null
+var _tier3_marker: MeshInstance3D = null
+
 @onready var _health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 
 
@@ -44,6 +63,8 @@ func _ready() -> void:
 	if building_state.is_empty():
 		set_completed()
 	_ensure_dropoff_registration()
+	_ensure_tier_markers()
+	_apply_tier_visuals()
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
 
@@ -76,6 +97,7 @@ func _clear_imported_mesh_overrides(node: Node) -> void:
 func complete_construction() -> void:
 	super.complete_construction()
 	_ensure_dropoff_registration()
+	_apply_tier_visuals()
 
 
 func _ensure_dropoff_registration() -> void:
@@ -111,6 +133,7 @@ func _on_health_depleted() -> void:
 	_repeat_enabled = false
 	_invalidate_training_session()
 	_is_training = false
+	_invalidate_tier_upgrade()
 	_rally_resource = null
 
 	if _rally_marker != null and is_instance_valid(_rally_marker):
@@ -175,6 +198,227 @@ func get_active_unit_training_progress() -> float:
 
 func get_active_unit_training_name() -> String:
 	return "Worker"
+
+
+func is_upgrading_tier() -> bool:
+	return _is_upgrading
+
+
+func get_next_upgrade_tier() -> int:
+	if _is_upgrading:
+		return 0
+
+	if command_center_tier >= MAX_TIER:
+		return 0
+
+	return command_center_tier + 1
+
+
+func get_tier_upgrade_progress() -> float:
+	if not _is_upgrading:
+		return 0.0
+
+	var duration: float = _get_upgrade_duration_for_tier(_upgrade_target_tier)
+	if duration <= 0.0:
+		return 0.0
+
+	var elapsed: float = _get_time_seconds() - _upgrade_started_at
+	return clampf(elapsed / duration, 0.0, 1.0)
+
+
+func get_tier_upgrade_activity_label() -> String:
+	if not _is_upgrading:
+		return ""
+
+	return "Upgrading to Tier %d" % _upgrade_target_tier
+
+
+func can_show_tier_upgrade_button() -> bool:
+	if not _can_player_upgrade_tier():
+		return false
+
+	return get_next_upgrade_tier() > 0
+
+
+func can_upgrade_tier() -> bool:
+	if not _can_player_upgrade_tier():
+		return false
+
+	if _is_upgrading:
+		return false
+
+	if _is_training or _worker_queue_count > 0:
+		return false
+
+	var target_tier: int = get_next_upgrade_tier()
+	if target_tier <= command_center_tier:
+		return false
+
+	var costs: Dictionary = get_upgrade_costs(target_tier)
+	return ResourceManager.can_afford(int(costs.gold), int(costs.wood))
+
+
+func try_upgrade_tier() -> bool:
+	if not _can_player_upgrade_tier():
+		return false
+
+	if _is_upgrading:
+		return false
+
+	if _is_training or _worker_queue_count > 0:
+		return false
+
+	var target_tier: int = get_next_upgrade_tier()
+	if target_tier <= command_center_tier or target_tier > MAX_TIER:
+		return false
+
+	var costs: Dictionary = get_upgrade_costs(target_tier)
+	var gold_cost: int = int(costs.gold)
+	var wood_cost: int = int(costs.wood)
+	if not ResourceManager.can_afford(gold_cost, wood_cost):
+		if gold_cost > ResourceManager.gold:
+			ResourceManager.show_feedback("Not enough gold")
+		elif wood_cost > ResourceManager.wood:
+			ResourceManager.show_feedback("Not enough wood")
+		else:
+			ResourceManager.show_feedback("Not enough resources")
+		return false
+
+	if not ResourceManager.try_spend(gold_cost, wood_cost):
+		return false
+
+	_begin_tier_upgrade(target_tier)
+	return true
+
+
+static func get_upgrade_costs(target_tier: int) -> Dictionary:
+	match target_tier:
+		2:
+			return {
+				"gold": TIER_2_GOLD_COST,
+				"wood": TIER_2_WOOD_COST,
+				"seconds": TIER_2_UPGRADE_SECONDS,
+			}
+		3:
+			return {
+				"gold": TIER_3_GOLD_COST,
+				"wood": TIER_3_WOOD_COST,
+				"seconds": TIER_3_UPGRADE_SECONDS,
+			}
+		_:
+			return {}
+
+
+func _get_upgrade_duration_for_tier(target_tier: int) -> float:
+	var costs: Dictionary = get_upgrade_costs(target_tier)
+	return float(costs.get("seconds", 0.0))
+
+
+func _can_player_upgrade_tier() -> bool:
+	if is_in_group(&"enemy_command_center") or team_id == ENEMY_TEAM_ID:
+		return false
+
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if _health_component != null and _health_component.current_health <= 0:
+		return false
+
+	return true
+
+
+func _begin_tier_upgrade(target_tier: int) -> void:
+	_upgrade_session += 1
+	var session: int = _upgrade_session
+	_is_upgrading = true
+	_upgrade_target_tier = target_tier
+	_upgrade_started_at = _get_time_seconds()
+	tier_state_changed.emit()
+
+	var duration: float = _get_upgrade_duration_for_tier(target_tier)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(duration)
+	wait_timer.timeout.connect(func() -> void:
+		_on_tier_upgrade_finished(session)
+	, CONNECT_ONE_SHOT)
+
+
+func _on_tier_upgrade_finished(session: int) -> void:
+	if session != _upgrade_session:
+		return
+
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
+
+	_is_upgrading = false
+	command_center_tier = clampi(_upgrade_target_tier, MIN_TIER, MAX_TIER)
+	_upgrade_target_tier = 0
+	_apply_tier_visuals()
+	tier_state_changed.emit()
+
+
+func _invalidate_tier_upgrade() -> void:
+	_upgrade_session += 1
+	_is_upgrading = false
+	_upgrade_target_tier = 0
+	tier_state_changed.emit()
+
+
+func _ensure_tier_markers() -> void:
+	if _tier2_marker != null and is_instance_valid(_tier2_marker):
+		return
+
+	_tier2_marker = _create_tier_marker(
+		"Tier2Marker",
+		Vector3(-1.2, 2.4, 1.4),
+		Color(0.2, 0.55, 0.95, 1),
+		0.35,
+		1.2
+	)
+	_tier3_marker = _create_tier_marker(
+		"Tier3Marker",
+		Vector3(1.2, 2.8, 1.4),
+		Color(0.95, 0.75, 0.15, 1),
+		0.45,
+		1.6
+	)
+
+
+func _create_tier_marker(
+	marker_name: String,
+	local_position: Vector3,
+	color: Color,
+	radius: float,
+	height: float
+) -> MeshInstance3D:
+	var marker := MeshInstance3D.new()
+	marker.name = marker_name
+	marker.position = local_position
+	marker.visible = false
+
+	var marker_mesh := CylinderMesh.new()
+	marker_mesh.top_radius = radius
+	marker_mesh.bottom_radius = radius
+	marker_mesh.height = height
+	marker.mesh = marker_mesh
+
+	var marker_material := StandardMaterial3D.new()
+	marker_material.albedo_color = color
+	marker_material.emission_enabled = true
+	marker_material.emission = color.darkened(0.25)
+	marker.material_override = marker_material
+
+	add_child(marker)
+	return marker
+
+
+func _apply_tier_visuals() -> void:
+	_ensure_tier_markers()
+
+	if _tier2_marker != null and is_instance_valid(_tier2_marker):
+		_tier2_marker.visible = command_center_tier >= 2
+
+	if _tier3_marker != null and is_instance_valid(_tier3_marker):
+		_tier3_marker.visible = command_center_tier >= 3
 
 
 func _get_time_seconds() -> float:
@@ -277,6 +521,9 @@ func _update_rally_marker(marker_position: Vector3) -> void:
 
 
 func try_train_worker() -> void:
+	if _is_upgrading:
+		return
+
 	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
 		ResourceManager.show_feedback(
 			ResourceManager.get_training_failure_message(TRAIN_GOLD_COST, TRAIN_FOOD_COST)

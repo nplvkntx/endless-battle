@@ -188,6 +188,7 @@ var _barracks_spearman_slot: ProductionIconSlot = null
 var _barracks_swordsman_slot: ProductionIconSlot = null
 var _barracks_archer_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
+var _town_center_upgrade_slot: ProductionIconSlot = null
 var _hero_altar_slot: ProductionIconSlot = null
 var _build_icon_slots: Dictionary = {}
 
@@ -307,6 +308,9 @@ func _setup_production_icon_slots() -> void:
 	_barracks_archer_slot = _create_production_icon_slot(Barracks.TRAIN_ID_ARCHER, _barracks_training_row)
 	_town_center_worker_slot = _create_production_icon_slot(
 		CommandCenter.TRAIN_ID_WORKER, _buttons_row
+	)
+	_town_center_upgrade_slot = _create_production_icon_slot(
+		CommandCenter.UPGRADE_ID_TIER, _buttons_row
 	)
 	_hero_altar_slot = _create_production_icon_slot(&"hero", _hero_altar_training_row)
 
@@ -525,6 +529,7 @@ func _production_icons_visible() -> bool:
 		(_barracks_spearman_slot != null and _barracks_spearman_slot.visible)
 		or (_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
 		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
+		or (_town_center_upgrade_slot != null and _town_center_upgrade_slot.visible)
 		or (_hero_altar_slot != null and _hero_altar_slot.visible)
 	)
 
@@ -582,6 +587,10 @@ func _refresh_town_center_production_slot() -> void:
 	if _town_center_worker_slot == null or _selected_command_center == null:
 		return
 
+	if not is_instance_valid(_selected_command_center):
+		_selected_command_center = null
+		return
+
 	var command_center: CommandCenter = _selected_command_center
 	_town_center_worker_slot.set_queue_count(command_center.get_worker_queue_count())
 	_town_center_worker_slot.set_infinite_enabled(
@@ -589,7 +598,31 @@ func _refresh_town_center_production_slot() -> void:
 	)
 	_town_center_worker_slot.set_training_progress(
 		command_center.get_active_unit_training_progress(),
-		command_center.is_training_worker()
+		command_center.is_training_worker() and not command_center.is_upgrading_tier()
+	)
+	_refresh_town_center_upgrade_slot()
+
+
+func _refresh_town_center_upgrade_slot() -> void:
+	if _town_center_upgrade_slot == null or _selected_command_center == null:
+		return
+
+	if not is_instance_valid(_selected_command_center):
+		_selected_command_center = null
+		return
+
+	var command_center: CommandCenter = _selected_command_center
+	var show_upgrade: bool = command_center.can_show_tier_upgrade_button()
+	_town_center_upgrade_slot.visible = show_upgrade
+
+	if not show_upgrade:
+		return
+
+	_town_center_upgrade_slot.set_queue_count(0)
+	_town_center_upgrade_slot.set_infinite_enabled(false)
+	_town_center_upgrade_slot.set_training_progress(
+		command_center.get_tier_upgrade_progress(),
+		command_center.is_upgrading_tier()
 	)
 
 
@@ -627,6 +660,8 @@ func _set_production_icon_visibility(
 		_barracks_archer_slot.visible = show_barracks
 	if _town_center_worker_slot != null:
 		_town_center_worker_slot.visible = show_town_center
+	if _town_center_upgrade_slot != null:
+		_town_center_upgrade_slot.visible = false
 	if _hero_altar_slot != null:
 		_hero_altar_slot.visible = show_hero_altar
 
@@ -661,6 +696,8 @@ func _on_production_slot_clicked(train_id: StringName, event: InputEventMouseBut
 
 func _handle_production_left_click(train_id: StringName, event: InputEventMouseButton) -> void:
 	if event.ctrl_pressed:
+		if train_id == CommandCenter.UPGRADE_ID_TIER:
+			return
 		_handle_production_toggle_repeat(train_id)
 		_after_production_action()
 		return
@@ -691,6 +728,11 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 
 		for _unused: int in queue_amount:
 			_selected_command_center.try_train_worker()
+	elif train_id == CommandCenter.UPGRADE_ID_TIER:
+		if _selected_command_center == null or not is_instance_valid(_selected_command_center):
+			return
+
+		_selected_command_center.try_upgrade_tier()
 	elif train_id == &"hero":
 		if _selected_hero_altar == null:
 			return
@@ -703,6 +745,9 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 
 
 func _handle_production_right_click(train_id: StringName, event: InputEventMouseButton) -> void:
+	if train_id == CommandCenter.UPGRADE_ID_TIER:
+		return
+
 	if event.ctrl_pressed:
 		_disable_production_repeat(train_id)
 		_after_production_action()
@@ -819,6 +864,8 @@ func _get_production_slot_tooltip(train_id: StringName) -> String:
 			base_tooltip = _get_train_archer_tooltip()
 		CommandCenter.TRAIN_ID_WORKER:
 			base_tooltip = _get_train_worker_tooltip()
+		CommandCenter.UPGRADE_ID_TIER:
+			base_tooltip = _get_town_center_upgrade_tooltip()
 		&"hero":
 			base_tooltip = _get_train_hero_tooltip()
 		_:
@@ -829,6 +876,9 @@ func _get_production_slot_tooltip(train_id: StringName) -> String:
 
 	if train_id == &"hero":
 		return "%s\nLeft-click: train\nRight-click: cancel" % base_tooltip
+
+	if train_id == CommandCenter.UPGRADE_ID_TIER:
+		return "%s\nLeft-click: start upgrade" % base_tooltip
 
 	return (
 		"%s\nLeft-click: queue +1 | Shift: +5 | Ctrl: infinite\n"
@@ -1775,6 +1825,8 @@ func _on_building_selection_changed(building: Building) -> void:
 		_selected_command_center = building as CommandCenter
 		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
 		_selected_command_center.repeat_state_changed.connect(_on_production_repeat_state_changed)
+		if not _selected_command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
+			_selected_command_center.tier_state_changed.connect(_on_command_center_tier_state_changed)
 		_on_worker_queue_changed(_selected_command_center.get_worker_queue_count())
 		_set_town_center_button_labels()
 		_update_town_center_button_labels()
@@ -2184,6 +2236,14 @@ func _on_worker_queue_changed(_queue_count: int) -> void:
 		_rebuild_worker_queue_slots()
 
 
+func _on_command_center_tier_state_changed() -> void:
+	if _selected_command_center == null or not is_instance_valid(_selected_command_center):
+		_selected_command_center = null
+		return
+
+	_refresh_town_center_production_slot()
+
+
 func _on_swordsman_queue_changed(_queue_count: int) -> void:
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_barracks_production_slots()
@@ -2220,6 +2280,9 @@ func _disconnect_worker_queue_signal() -> void:
 
 		if _selected_command_center.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
 			_selected_command_center.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+
+		if _selected_command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
+			_selected_command_center.tier_state_changed.disconnect(_on_command_center_tier_state_changed)
 
 	_selected_command_center = null
 
@@ -2563,6 +2626,32 @@ func _get_train_worker_tooltip() -> String:
 		TooltipFormatter.get_train_blocked_reason(
 			CommandCenter.TRAIN_GOLD_COST, CommandCenter.TRAIN_FOOD_COST
 		)
+	)
+
+
+func _get_town_center_upgrade_tooltip() -> String:
+	if _selected_command_center == null or not is_instance_valid(_selected_command_center):
+		return ""
+
+	var target_tier: int = _selected_command_center.get_next_upgrade_tier()
+	if target_tier <= 0:
+		return ""
+
+	var costs: Dictionary = CommandCenter.get_upgrade_costs(target_tier)
+	var blocked_reason: String = ""
+	if _selected_command_center.is_upgrading_tier():
+		blocked_reason = "Upgrade in progress"
+	elif _selected_command_center.is_training_worker() or _selected_command_center.get_worker_queue_count() > 0:
+		blocked_reason = "Finish or cancel worker training first"
+	elif not ResourceManager.can_afford(int(costs.gold), int(costs.wood)):
+		blocked_reason = "Not enough resources"
+
+	return TooltipFormatter.format_command_center_tier_upgrade(
+		target_tier,
+		int(costs.gold),
+		int(costs.wood),
+		float(costs.seconds),
+		blocked_reason
 	)
 
 

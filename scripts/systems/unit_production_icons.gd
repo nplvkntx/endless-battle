@@ -13,6 +13,7 @@ static var _PORTRAIT_COLORS: Dictionary = {
 	&"swordsman": Color(0.35, 0.45, 0.75, 1),
 	&"archer": Color(0.15, 0.65, 0.25, 1),
 	&"hero": Color(0.85, 0.65, 0.15, 1),
+	CommandCenter.UPGRADE_ID_TIER: Color(0.72, 0.55, 0.18, 1),
 }
 
 
@@ -35,6 +36,8 @@ static func get_icon_texture(train_id: StringName) -> Texture2D:
 			_draw_archer(image, base_color)
 		&"hero":
 			_draw_hero(image, base_color)
+		CommandCenter.UPGRADE_ID_TIER:
+			_draw_tier_upgrade(image, base_color)
 		_:
 			image.fill(base_color)
 
@@ -95,3 +98,11 @@ static func _draw_hero(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(18, 4, 4, 4), crown.lightened(0.15))
 	_fill_rect(image, Rect2i(26, 4, 4, 4), crown.lightened(0.15))
 	_fill_rect(image, Rect2i(16, 32, 16, 10), color.darkened(0.2))
+
+
+static func _draw_tier_upgrade(image: Image, color: Color) -> void:
+	var arrow := color.lightened(0.25)
+	_fill_rect(image, Rect2i(20, 30, 8, 10), color.darkened(0.15))
+	_fill_rect(image, Rect2i(16, 18, 16, 8), arrow)
+	_fill_rect(image, Rect2i(18, 10, 12, 10), arrow)
+	_fill_rect(image, Rect2i(20, 4, 8, 8), arrow.lightened(0.1))

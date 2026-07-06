@@ -687,6 +687,14 @@ func _configure_activity_tracking(building: Building) -> void:
 	if _tracked_activity_building.has_signal("construction_progress_changed"):
 		_tracked_activity_building.construction_progress_changed.connect(_on_activity_state_changed)
 
+	if _tracked_activity_building is CommandCenter:
+		var command_center: CommandCenter = _tracked_activity_building as CommandCenter
+		if (
+			command_center.has_signal("tier_state_changed")
+			and not command_center.tier_state_changed.is_connected(_on_activity_state_changed)
+		):
+			command_center.tier_state_changed.connect(_on_activity_state_changed)
+
 
 func _disconnect_activity_building_signals() -> void:
 	if _tracked_activity_building == null or not is_instance_valid(_tracked_activity_building):
@@ -698,6 +706,14 @@ func _disconnect_activity_building_signals() -> void:
 		and _tracked_activity_building.construction_progress_changed.is_connected(_on_activity_state_changed)
 	):
 		_tracked_activity_building.construction_progress_changed.disconnect(_on_activity_state_changed)
+
+	if _tracked_activity_building is CommandCenter:
+		var command_center: CommandCenter = _tracked_activity_building as CommandCenter
+		if (
+			command_center.has_signal("tier_state_changed")
+			and command_center.tier_state_changed.is_connected(_on_activity_state_changed)
+		):
+			command_center.tier_state_changed.disconnect(_on_activity_state_changed)
 
 	_tracked_activity_building = null
 
@@ -751,6 +767,13 @@ func _query_active_activity() -> Dictionary:
 
 	if building is CommandCenter:
 		var command_center: CommandCenter = building as CommandCenter
+		if command_center.is_upgrading_tier():
+			return {
+				"active": true,
+				"progress": command_center.get_tier_upgrade_progress(),
+				"label": command_center.get_tier_upgrade_activity_label(),
+				"detail": "",
+			}
 		if command_center.has_active_unit_training():
 			return {
 				"active": true,
@@ -821,6 +844,11 @@ func _configure_production_display(building: Building) -> void:
 		_tracked_command_center = building as CommandCenter
 		if _tracked_command_center.has_signal("worker_queue_changed"):
 			_tracked_command_center.worker_queue_changed.connect(_on_production_changed)
+		if (
+			_tracked_command_center.has_signal("tier_state_changed")
+			and not _tracked_command_center.tier_state_changed.is_connected(_on_production_changed)
+		):
+			_tracked_command_center.tier_state_changed.connect(_on_production_changed)
 		_update_command_center_production()
 		return
 
@@ -872,6 +900,9 @@ func _on_production_changed(_value: Variant = null) -> void:
 func _update_command_center_production() -> void:
 	if _tracked_command_center == null or not is_instance_valid(_tracked_command_center):
 		_hide_production_display()
+		return
+
+	if _tracked_command_center.is_upgrading_tier():
 		return
 
 	var queue_count: int = -1
@@ -976,6 +1007,11 @@ func _clear_production_tracking() -> void:
 			and _tracked_command_center.worker_queue_changed.is_connected(_on_production_changed)
 		):
 			_tracked_command_center.worker_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_command_center.has_signal("tier_state_changed")
+			and _tracked_command_center.tier_state_changed.is_connected(_on_production_changed)
+		):
+			_tracked_command_center.tier_state_changed.disconnect(_on_production_changed)
 
 	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
 		if (
@@ -1059,7 +1095,12 @@ func _get_enemy_building_info(building: Building) -> Dictionary:
 
 func _get_building_info(building: Building) -> Dictionary:
 	if building is CommandCenter:
-		return {"name": "Town Center", "type": "Building", "portrait_key": "town_center"}
+		var tier: int = (building as CommandCenter).command_center_tier
+		return {
+			"name": "Command Center — Tier %d" % tier,
+			"type": "Building",
+			"portrait_key": "town_center",
+		}
 	if building is Barracks:
 		return {"name": "Barracks", "type": "Building", "portrait_key": "barracks"}
 	if building is Blacksmith:

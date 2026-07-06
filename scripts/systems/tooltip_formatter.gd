@@ -170,6 +170,30 @@ static func format_train_command(
 	return "\n".join(lines)
 
 
+static func format_command_center_tier_upgrade(
+	target_tier: int,
+	gold_cost: int,
+	wood_cost: int,
+	upgrade_seconds: float,
+	blocked_reason: String = ""
+) -> String:
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("Upgrade to Tier %d" % target_tier)
+	lines.append("Cost:")
+	lines.append("%d Gold" % gold_cost)
+	lines.append("%d Wood" % wood_cost)
+	lines.append("Time:")
+	if is_equal_approx(fmod(upgrade_seconds, 1.0), 0.0):
+		lines.append("%d seconds" % int(upgrade_seconds))
+	else:
+		lines.append("%s" % _format_seconds(upgrade_seconds))
+
+	if not blocked_reason.is_empty():
+		lines.append(blocked_reason)
+
+	return "\n".join(lines)
+
+
 static func format_upgrade_research(
 	upgrade_id: StringName,
 	blocked_reason: String = "",

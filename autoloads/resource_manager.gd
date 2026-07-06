@@ -8,8 +8,9 @@ signal food_changed(current: int, maximum: int)
 signal resource_spent_failed(resource_id: StringName, amount: float)
 signal feedback_message(message: String)
 
-const STARTING_GOLD: int = 500
-const STARTING_WOOD: int = 300
+# Temporary dev-test values for human player — rebalance before release.
+const STARTING_GOLD: int = 10000
+const STARTING_WOOD: int = 10000
 const STARTING_FOOD: int = 5
 const STARTING_FOOD_MAX: int = 15
 
