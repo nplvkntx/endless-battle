@@ -150,6 +150,9 @@ func _try_train_enemy_unit(train_id: StringName) -> bool:
 	if building_state != STATE_COMPLETED:
 		return false
 
+	if not _is_unit_unlocked_for_team(train_id):
+		return false
+
 	if _training_queue.size() >= MAX_ENEMY_UNIT_QUEUE:
 		return false
 
@@ -525,6 +528,11 @@ func _try_train_player_unit(train_id: StringName) -> void:
 	if building_state != STATE_COMPLETED:
 		return
 
+	if not _is_unit_unlocked_for_team(train_id):
+		if train_id == TRAIN_ID_SWORDSMAN or train_id == TRAIN_ID_ARCHER:
+			ResourceManager.show_feedback(TechTree.ADVANCED_UNIT_REQUIRES_BLACKSMITH_MESSAGE)
+		return
+
 	var gold_cost: int = get_unit_train_gold_cost(train_id)
 	if not ResourceManager.try_pay_worker_training(gold_cost, TRAIN_FOOD_COST):
 		ResourceManager.show_feedback(
@@ -533,6 +541,20 @@ func _try_train_player_unit(train_id: StringName) -> void:
 		return
 
 	_enqueue_training(train_id)
+
+
+func _is_unit_unlocked_for_team(train_id: StringName) -> bool:
+	if train_id == TRAIN_ID_SPEARMAN:
+		return true
+
+	if train_id == TRAIN_ID_SWORDSMAN or train_id == TRAIN_ID_ARCHER:
+		return TechTree.can_train_swordsman_or_archer(_get_owner_team_id())
+
+	return true
+
+
+func _get_owner_team_id() -> int:
+	return TeamVisuals.resolve_team(self, team_id)
 
 
 func _enqueue_training(train_id: StringName) -> void:
@@ -594,6 +616,10 @@ func _try_repeat_training() -> void:
 		return
 
 	if not is_instance_valid(self) or is_queued_for_deletion() or building_state != STATE_COMPLETED:
+		set_repeat_training(false)
+		return
+
+	if not _is_unit_unlocked_for_team(_repeat_unit_type):
 		set_repeat_training(false)
 		return
 

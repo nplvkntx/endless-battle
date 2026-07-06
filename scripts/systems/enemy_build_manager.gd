@@ -241,6 +241,9 @@ func _should_build_expansion_barracks() -> bool:
 
 
 func _should_build_blacksmith() -> bool:
+	if not TechTree.can_build_blacksmith(ENEMY_TEAM_ID):
+		return false
+
 	if _has_completed_building(PLACEMENT_BLACKSMITH):
 		return false
 
@@ -614,6 +617,9 @@ func _needs_more_military_units() -> bool:
 
 
 func _try_train_military(barracks: Barracks) -> bool:
+	if not TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
+		return false
+
 	if _train_swordsman_next:
 		if barracks.try_train_enemy_swordsman():
 			_train_swordsman_next = false

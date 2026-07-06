@@ -107,5 +107,8 @@ func _on_gui_input(event: InputEvent) -> void:
 	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
 		return
 
+	if not _affordable:
+		return
+
 	accept_event()
 	build_slot_clicked.emit(placement_id)

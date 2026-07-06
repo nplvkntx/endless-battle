@@ -140,6 +140,10 @@ func start_barracks_placement() -> void:
 
 
 func start_blacksmith_placement() -> void:
+	if not TechTree.can_build_blacksmith():
+		ResourceManager.show_feedback(TechTree.BLACKSMITH_REQUIRES_TIER_2_MESSAGE)
+		return
+
 	_start_placement(PLACEMENT_BLACKSMITH)
 
 
@@ -208,6 +212,10 @@ func _place_building() -> void:
 
 	if not _is_current_placement_valid():
 		print("Invalid placement")
+		return
+
+	if _active_placement == PLACEMENT_BLACKSMITH and not TechTree.can_build_blacksmith():
+		ResourceManager.show_feedback(TechTree.BLACKSMITH_REQUIRES_TIER_2_MESSAGE)
 		return
 
 	var gold_cost: int = 0
@@ -407,6 +415,9 @@ func _is_current_placement_valid() -> bool:
 
 
 func _is_placement_valid_at(position: Vector3) -> bool:
+	if _active_placement == PLACEMENT_BLACKSMITH and not TechTree.can_build_blacksmith():
+		return false
+
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
 	if buildings_parent == null:
 		return false

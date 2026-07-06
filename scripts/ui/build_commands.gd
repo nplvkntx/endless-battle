@@ -253,6 +253,8 @@ func _ready() -> void:
 		UpgradeManager.upgrade_levels_changed.connect(_on_upgrade_levels_changed)
 	if not ResourceManager.resources_changed.is_connected(_on_resources_changed):
 		ResourceManager.resources_changed.connect(_on_resources_changed)
+	if not TechTree.progression_changed.is_connected(_on_tech_progression_changed):
+		TechTree.progression_changed.connect(_on_tech_progression_changed)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -563,6 +565,13 @@ func _refresh_barracks_production_slots() -> void:
 		barracks.get_active_unit_training_progress(),
 		barracks.is_training_spearman()
 	)
+	_barracks_spearman_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason_for_unit(
+			Barracks.TRAIN_ID_SPEARMAN,
+			Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
+			Barracks.TRAIN_FOOD_COST
+		).is_empty()
+	)
 
 	_barracks_swordsman_slot.set_queue_count(barracks.get_swordsman_queue_count())
 	_barracks_swordsman_slot.set_infinite_enabled(
@@ -571,6 +580,13 @@ func _refresh_barracks_production_slots() -> void:
 	_barracks_swordsman_slot.set_training_progress(
 		barracks.get_active_unit_training_progress(),
 		barracks.is_training_swordsman()
+	)
+	_barracks_swordsman_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason_for_unit(
+			Barracks.TRAIN_ID_SWORDSMAN,
+			Barracks.TRAIN_GOLD_COST,
+			Barracks.TRAIN_FOOD_COST
+		).is_empty()
 	)
 
 	_barracks_archer_slot.set_queue_count(barracks.get_archer_queue_count())
@@ -581,6 +597,15 @@ func _refresh_barracks_production_slots() -> void:
 		barracks.get_active_unit_training_progress(),
 		barracks.is_training_archer()
 	)
+	_barracks_archer_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason_for_unit(
+			Barracks.TRAIN_ID_ARCHER,
+			Barracks.TRAIN_GOLD_COST,
+			Barracks.TRAIN_FOOD_COST
+		).is_empty()
+	)
+
+	_update_barracks_train_button_states()
 
 
 func _refresh_town_center_production_slot() -> void:
@@ -1028,6 +1053,36 @@ func _on_upgrade_levels_changed() -> void:
 	_update_blacksmith_upgrade_ui()
 
 
+func _update_barracks_train_button_states() -> void:
+	_train_spearman_button.disabled = not TooltipFormatter.get_train_blocked_reason_for_unit(
+		Barracks.TRAIN_ID_SPEARMAN,
+		Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
+		Barracks.TRAIN_FOOD_COST
+	).is_empty()
+	_train_swordsman_button.disabled = not TooltipFormatter.get_train_blocked_reason_for_unit(
+		Barracks.TRAIN_ID_SWORDSMAN,
+		Barracks.TRAIN_GOLD_COST,
+		Barracks.TRAIN_FOOD_COST
+	).is_empty()
+	_train_archer_button.disabled = not TooltipFormatter.get_train_blocked_reason_for_unit(
+		Barracks.TRAIN_ID_ARCHER,
+		Barracks.TRAIN_GOLD_COST,
+		Barracks.TRAIN_FOOD_COST
+	).is_empty()
+
+
+func _on_tech_progression_changed(team_id: int) -> void:
+	if team_id != TechTree.PLAYER_TEAM_ID:
+		return
+
+	if _worker_build_icons_visible():
+		_update_build_icon_slots()
+
+	if _barracks_training_row.visible:
+		_refresh_barracks_production_slots()
+		_update_barracks_button_labels()
+
+
 func _on_resources_changed() -> void:
 	if _blacksmith_panel.visible:
 		_update_blacksmith_upgrade_ui()
@@ -1035,6 +1090,8 @@ func _on_resources_changed() -> void:
 		_update_shop_item_ui()
 	if _worker_build_icons_visible():
 		_update_build_icon_slots()
+	if _barracks_training_row.visible:
+		_refresh_barracks_production_slots()
 
 
 func _update_blacksmith_upgrade_ui() -> void:
@@ -1880,6 +1937,8 @@ func _on_barracks_state_changed(_state: StringName) -> void:
 func _on_blacksmith_state_changed(_state: StringName) -> void:
 	_refresh_command_visibility()
 	_update_blacksmith_upgrade_ui()
+	if _barracks_training_row.visible:
+		_refresh_barracks_production_slots()
 
 
 func _on_blacksmith_research_state_changed() -> void:
@@ -2049,6 +2108,7 @@ func _refresh_command_visibility() -> void:
 		if not USE_PRODUCTION_ICON_SLOTS:
 			_rebuild_swordsman_queue_slots()
 			_rebuild_archer_queue_slots()
+		_update_barracks_train_button_states()
 	if show_hero_altar_training:
 		if not USE_PRODUCTION_ICON_SLOTS:
 			_rebuild_hero_queue_slots()
@@ -2242,6 +2302,8 @@ func _on_command_center_tier_state_changed() -> void:
 		return
 
 	_refresh_town_center_production_slot()
+	if _worker_build_icons_visible():
+		_update_build_icon_slots()
 
 
 func _on_swordsman_queue_changed(_queue_count: int) -> void:
@@ -2678,7 +2740,11 @@ func _get_train_swordsman_tooltip() -> String:
 		Barracks.TRAIN_FOOD_COST,
 		Barracks.TRAIN_SECONDS,
 		Barracks.TRAIN_ID_SWORDSMAN,
-		TooltipFormatter.get_train_blocked_reason(Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST)
+		TooltipFormatter.get_train_blocked_reason_for_unit(
+			Barracks.TRAIN_ID_SWORDSMAN,
+			Barracks.TRAIN_GOLD_COST,
+			Barracks.TRAIN_FOOD_COST
+		)
 	)
 
 
@@ -2690,7 +2756,11 @@ func _get_train_archer_tooltip() -> String:
 		Barracks.TRAIN_FOOD_COST,
 		Barracks.TRAIN_SECONDS,
 		Barracks.TRAIN_ID_ARCHER,
-		TooltipFormatter.get_train_blocked_reason(Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST)
+		TooltipFormatter.get_train_blocked_reason_for_unit(
+			Barracks.TRAIN_ID_ARCHER,
+			Barracks.TRAIN_GOLD_COST,
+			Barracks.TRAIN_FOOD_COST
+		)
 	)
 
 

@@ -7,13 +7,17 @@ signal production_slot_clicked(train_id: StringName, event: InputEventMouseButto
 
 const SLOT_SIZE := Vector2(48, 48)
 
+const DISABLED_MODULATE := Color(0.42, 0.42, 0.46, 1)
+
 @onready var _icon_rect: TextureRect = $IconLayer/IconRect
 @onready var _progress_fill: ColorRect = $IconLayer/ProgressFill
 @onready var _queue_label: Label = $IconLayer/QueueLabel
 @onready var _infinite_label: Label = $IconLayer/InfiniteLabel
+@onready var _icon_layer: Control = $IconLayer
 
 var train_id: StringName = &""
 var _pending_icon_texture: Texture2D = null
+var _affordable: bool = true
 
 
 func _ready() -> void:
@@ -31,6 +35,21 @@ func _ready() -> void:
 	if _pending_icon_texture != null:
 		_apply_icon_texture(_pending_icon_texture)
 		_pending_icon_texture = null
+
+	_refresh_modulate()
+
+
+func set_affordable(affordable: bool) -> void:
+	_affordable = affordable
+	_refresh_modulate()
+
+
+func _refresh_modulate() -> void:
+	_ensure_child_refs()
+	if _icon_layer == null:
+		return
+
+	_icon_layer.modulate = Color.WHITE if _affordable else DISABLED_MODULATE
 
 
 func configure(p_train_id: StringName, icon_texture: Texture2D) -> void:
@@ -50,6 +69,8 @@ func _ensure_child_refs() -> void:
 		_queue_label = get_node_or_null("IconLayer/QueueLabel") as Label
 	if _infinite_label == null:
 		_infinite_label = get_node_or_null("IconLayer/InfiniteLabel") as Label
+	if _icon_layer == null:
+		_icon_layer = get_node_or_null("IconLayer") as Control
 
 
 func _apply_icon_texture(icon_texture: Texture2D) -> void:
@@ -104,6 +125,9 @@ func _on_gui_input(event: InputEvent) -> void:
 		mouse_event.button_index != MOUSE_BUTTON_LEFT
 		and mouse_event.button_index != MOUSE_BUTTON_RIGHT
 	):
+		return
+
+	if mouse_event.button_index == MOUSE_BUTTON_LEFT and not _affordable:
 		return
 
 	accept_event()

@@ -35,7 +35,9 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Expands your base.",
 }
 
-const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {}
+const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {
+	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: ["Command Center Tier 2"],
+}
 
 const TRAIN_DESCRIPTIONS: Dictionary = {
 	&"worker": "Gathers resources and constructs buildings.",
@@ -396,6 +398,10 @@ static func get_build_blocked_reason(placement_id: StringName) -> String:
 	if costs.is_empty():
 		return ""
 
+	if placement_id == _BUILD_MANAGER.PLACEMENT_BLACKSMITH:
+		if not TechTree.can_build_blacksmith():
+			return TechTree.BLACKSMITH_REQUIRES_TIER_2_MESSAGE
+
 	if ResourceManager.gold < costs.gold and ResourceManager.wood < costs.wood:
 		return "Need more gold and wood"
 	if ResourceManager.gold < costs.gold:
@@ -403,6 +409,21 @@ static func get_build_blocked_reason(placement_id: StringName) -> String:
 	if ResourceManager.wood < costs.wood:
 		return "Need more wood"
 	return ""
+
+
+static func get_train_blocked_reason_for_unit(
+	train_id: StringName,
+	gold_cost: int,
+	food_cost: int
+) -> String:
+	if (
+		train_id == Barracks.TRAIN_ID_SWORDSMAN
+		or train_id == Barracks.TRAIN_ID_ARCHER
+	):
+		if not TechTree.can_train_swordsman_or_archer():
+			return TechTree.ADVANCED_UNIT_REQUIRES_BLACKSMITH_MESSAGE
+
+	return get_train_blocked_reason(gold_cost, food_cost)
 
 
 static func get_train_blocked_reason(gold_cost: int, food_cost: int) -> String:
