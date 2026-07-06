@@ -7,6 +7,7 @@ const _BUILD_MANAGER := preload("res://scripts/systems/build_manager.gd")
 
 const UNIT_ROLE_DESCRIPTIONS: Dictionary = {
 	&"worker": "Gathers resources and constructs buildings.",
+	&"spearman": "Basic melee infantry with reach.",
 	&"swordsman": "Basic melee infantry.",
 	&"archer": "Ranged damage dealer.",
 	&"hero": "Powerful leader with abilities.",
@@ -26,7 +27,7 @@ const BUILD_PLACEMENT_NAMES: Dictionary = {
 
 const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: "Provides supply.",
-	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Trains Swordsmen and Archers.",
+	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Trains Spearmen, Swordsmen, and Archers.",
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Unlocks upgrades.",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
@@ -38,6 +39,7 @@ const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {}
 
 const TRAIN_DESCRIPTIONS: Dictionary = {
 	&"worker": "Gathers resources and constructs buildings.",
+	&"spearman": "Basic melee infantry with reach.",
 	&"swordsman": "Basic melee infantry.",
 	&"archer": "Ranged damage dealer.",
 	&"hero": "Powerful leader with abilities.",
@@ -523,6 +525,8 @@ static func _format_building_stats(building: Building) -> String:
 static func _get_unit_display_name(unit: Unit) -> String:
 	if unit is Worker:
 		return "Worker"
+	if unit is Spearman:
+		return "Spearman"
 	if unit is Swordsman:
 		return "Swordsman"
 	if unit is Archer:
@@ -557,6 +561,8 @@ static func _get_building_display_name(building: Building) -> String:
 static func _get_unit_role_description(unit: Unit) -> String:
 	if unit is Worker:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"worker"])
+	if unit is Spearman:
+		return String(UNIT_ROLE_DESCRIPTIONS[&"spearman"])
 	if unit is Swordsman:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"swordsman"])
 	if unit is Archer:
@@ -573,7 +579,7 @@ static func _get_unit_role_description(unit: Unit) -> String:
 static func _get_unit_food_cost(unit: Unit) -> int:
 	if unit is Worker:
 		return CommandCenter.TRAIN_FOOD_COST
-	if unit is Swordsman or unit is Archer:
+	if unit is Spearman or unit is Swordsman or unit is Archer:
 		return Barracks.TRAIN_FOOD_COST
 	if unit is Hero:
 		return HeroAltar.TRAIN_FOOD_COST

@@ -10,6 +10,7 @@ const DRAG_THRESHOLD_PIXELS: float = 4.0
 const DOUBLE_CLICK_TIME_SECONDS: float = 0.3
 const UNIT_GROUP: StringName = &"units"
 const SELECTION_TYPE_WORKER: StringName = &"worker"
+const SELECTION_TYPE_SPEARMAN: StringName = &"spearman"
 const SELECTION_TYPE_SWORDSMAN: StringName = &"swordsman"
 const SELECTION_TYPE_ARCHER: StringName = &"archer"
 const SELECTION_TYPE_HERO: StringName = &"hero"
@@ -53,7 +54,7 @@ func get_multi_selection_ui_info() -> Dictionary:
 			continue
 		if unit is Worker:
 			has_worker = true
-		elif unit is Swordsman or unit is Archer or unit is Hero:
+		elif unit is Spearman or unit is Swordsman or unit is Archer or unit is Hero:
 			has_combat = true
 		else:
 			category = MULTI_SELECTION_OTHER
@@ -324,6 +325,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		var unit: Unit = commandable_units[index]
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
+		if unit is Spearman:
+			(unit as Spearman).cancel_attack()
 		if unit is Swordsman:
 			(unit as Swordsman).cancel_attack()
 		if unit is Archer:
@@ -343,7 +346,7 @@ func _dispatch_attack_command(target: Node3D) -> void:
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
-		if unit is Swordsman or unit is Archer or unit is Hero:
+		if unit is Spearman or unit is Swordsman or unit is Archer or unit is Hero:
 			military_units.append(unit)
 
 	if military_units.is_empty():
@@ -351,7 +354,9 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
-		if unit is Swordsman:
+		if unit is Spearman:
+			(unit as Spearman).command_attack(target, index)
+		elif unit is Swordsman:
 			(unit as Swordsman).command_attack(target, index)
 		elif unit is Archer:
 			(unit as Archer).command_attack(target, index)
@@ -374,7 +379,9 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 	)
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
-		if unit is Swordsman:
+		if unit is Spearman:
+			(unit as Spearman).command_attack_move(move_targets[index])
+		elif unit is Swordsman:
 			(unit as Swordsman).command_attack_move(move_targets[index])
 		elif unit is Archer:
 			(unit as Archer).command_attack_move(move_targets[index])
@@ -402,6 +409,8 @@ func _dispatch_construction_command(building: Building) -> void:
 		if unit is Worker:
 			(unit as Worker).start_construction_order(building)
 			dispatched_to_worker = true
+		elif unit is Spearman:
+			(unit as Spearman).cancel_attack()
 		elif unit is Swordsman:
 			(unit as Swordsman).cancel_attack()
 		elif unit is Archer:
@@ -1077,6 +1086,8 @@ func _is_same_unit_type(first_unit: Unit, second_unit: Unit) -> bool:
 func _get_unit_selection_group(unit: Unit) -> StringName:
 	if unit is Worker:
 		return SELECTION_TYPE_WORKER
+	if unit is Spearman:
+		return SELECTION_TYPE_SPEARMAN
 	if unit is Swordsman:
 		return SELECTION_TYPE_SWORDSMAN
 	if unit is Archer:

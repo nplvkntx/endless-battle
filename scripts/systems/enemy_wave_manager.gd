@@ -332,7 +332,7 @@ func _count_player_military_near_hero(hero: Hero) -> int:
 			if CombatTargetValidation.is_enemy_faction(node):
 				continue
 
-			if not (node is Swordsman or node is Archer or node is Hero):
+			if not (node is Spearman or node is Swordsman or node is Archer or node is Hero):
 				continue
 
 			if node is Worker:

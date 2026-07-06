@@ -67,7 +67,7 @@ static func get_xp_amount_for_victim(victim: Node) -> int:
 			return ENEMY_HERO_XP
 		return 0
 
-	if victim is Swordsman or victim is Archer:
+	if victim is Spearman or victim is Swordsman or victim is Archer:
 		if CombatTargetValidation.is_enemy_faction(victim):
 			return MILITARY_XP
 		return 0
@@ -95,7 +95,7 @@ static func get_gold_amount_for_victim(victim: Node) -> int:
 			return ENEMY_HERO_GOLD
 		return 0
 
-	if victim is Swordsman or victim is Archer:
+	if victim is Spearman or victim is Swordsman or victim is Archer:
 		if CombatTargetValidation.is_enemy_faction(victim):
 			return MILITARY_GOLD
 		return 0
@@ -154,7 +154,7 @@ static func _is_enemy_army_victim(victim: Node) -> bool:
 	if victim == null or not is_instance_valid(victim):
 		return false
 
-	if victim is Worker or victim is Swordsman or victim is Archer or victim is Hero:
+	if victim is Worker or victim is Spearman or victim is Swordsman or victim is Archer or victim is Hero:
 		return CombatTargetValidation.is_enemy_faction(victim)
 
 	if victim is EnemyDummy and not CombatTargetValidation.is_neutral_creep(victim):
@@ -258,7 +258,7 @@ static func _is_player_controlled_unit(node: Node) -> bool:
 	if node is Hero:
 		return _is_player_hero(node)
 
-	if node is Swordsman or node is Archer or node is Worker:
+	if node is Spearman or node is Swordsman or node is Archer or node is Worker:
 		return (node as Node).is_in_group(&"units")
 
 	return false

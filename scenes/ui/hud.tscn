@@ -524,6 +524,11 @@ text = "Attack"
 layout_mode = 2
 theme_override_constants/separation = 4
 
+[node name="TrainSpearmanButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Train Spearman"
+
 [node name="TrainSwordsmanButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2

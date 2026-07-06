@@ -1,0 +1,91 @@
+[gd_scene format=3 uid="uid://pxh1nciana53"]
+
+[ext_resource type="Script" path="res://scripts/units/spearman.gd" id="1_spearman"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+[ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="3_selection_glow"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.32
+height = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.62, 0.48, 0.28, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_spear"]
+top_radius = 0.035
+bottom_radius = 0.035
+height = 1.35
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spear_shaft"]
+albedo_color = Color(0.45, 0.3, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spear_tip"]
+albedo_color = Color(0.72, 0.74, 0.78, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_sel_glow"]
+top_radius = 0.42
+bottom_radius = 0.42
+height = 0.02
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_bg"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_fill"]
+albedo_color = Color(0.85, 0.15, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_health_bar"]
+size = Vector3(1.2, 0.08, 0.02)
+
+[node name="Spearman" type="CharacterBody3D" groups=["units"]]
+move_speed = 4.25
+script = ExtResource("1_spearman")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
+
+[node name="Body" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.42, 0)
+mesh = SubResource("CapsuleMesh_body")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="Spear" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0.55, 0.55, 0)
+mesh = SubResource("CylinderMesh_spear")
+surface_material_override/0 = SubResource("StandardMaterial3D_spear_shaft")
+
+[node name="SpearTip" type="MeshInstance3D" parent="MeshInstance3D/Spear"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
+mesh = SubResource("CylinderMesh_spear")
+surface_material_override/0 = SubResource("StandardMaterial3D_spear_tip")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.44, 0)
+
+[node name="Ring" type="MeshInstance3D" parent="SelectionIndicator"]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, 0)
+mesh = SubResource("CylinderMesh_sel_glow")
+surface_material_override/0 = ExtResource("3_selection_glow")
+
+[node name="HealthBar" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
+
+[node name="Background" type="MeshInstance3D" parent="HealthBar"]
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_bg")
+
+[node name="Fill" type="MeshInstance3D" parent="HealthBar"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.015)
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_fill")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_body")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 70

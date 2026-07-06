@@ -195,7 +195,7 @@ static func _estimate_player_or_enemy_power(units: Array) -> int:
 		if not unit is Node:
 			continue
 
-		if unit is Hero or unit is Swordsman or unit is Archer:
+		if unit is Hero or unit is Spearman or unit is Swordsman or unit is Archer:
 			if CombatTargetValidation.is_enemy_faction(unit as Node):
 				if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
 					continue
@@ -291,7 +291,7 @@ static func _is_player_military_unit(node: Node) -> bool:
 	if CombatTargetValidation.is_enemy_faction(node):
 		return false
 
-	if not (node is Swordsman or node is Archer or node is Hero):
+	if not (node is Spearman or node is Swordsman or node is Archer or node is Hero):
 		return false
 
 	if node is Worker:

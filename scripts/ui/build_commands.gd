@@ -21,6 +21,9 @@ extends PanelContainer
 )
 @onready var _train_worker_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/TrainWorkerButton
 @onready var _attack_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/AttackButton
+@onready var _train_spearman_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow/TrainSpearmanButton
+)
 @onready var _train_swordsman_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow/TrainSwordsmanButton
 )
@@ -153,6 +156,7 @@ var _ui_refresh_timer: float = 0.0
 const UI_REFRESH_INTERVAL := 0.1
 var _auto_training_label: Label = null
 var _train_worker_base_label: String = ""
+var _train_spearman_base_label: String = ""
 var _train_swordsman_base_label: String = ""
 var _train_archer_base_label: String = ""
 var _worker_queue_row: HBoxContainer = null
@@ -180,6 +184,7 @@ const USE_PRODUCTION_ICON_SLOTS := true
 const USE_BUILD_ICON_SLOTS := true
 const BUILD_MANAGER_SCRIPT := preload("res://scripts/systems/build_manager.gd")
 
+var _barracks_spearman_slot: ProductionIconSlot = null
 var _barracks_swordsman_slot: ProductionIconSlot = null
 var _barracks_archer_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
@@ -226,6 +231,7 @@ func _ready() -> void:
 	_build_command_center_button.pressed.connect(_on_build_command_center_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
 	_train_swordsman_button.pressed.connect(_on_train_swordsman_pressed)
+	_train_spearman_button.pressed.connect(_on_train_spearman_pressed)
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
@@ -292,6 +298,9 @@ func _setup_production_controls() -> void:
 
 
 func _setup_production_icon_slots() -> void:
+	_barracks_spearman_slot = _create_production_icon_slot(
+		Barracks.TRAIN_ID_SPEARMAN, _barracks_training_row
+	)
 	_barracks_swordsman_slot = _create_production_icon_slot(
 		Barracks.TRAIN_ID_SWORDSMAN, _barracks_training_row
 	)
@@ -301,6 +310,7 @@ func _setup_production_icon_slots() -> void:
 	)
 	_hero_altar_slot = _create_production_icon_slot(&"hero", _hero_altar_training_row)
 
+	_train_spearman_button.visible = false
 	_train_swordsman_button.visible = false
 	_train_archer_button.visible = false
 	_train_worker_button.visible = false
@@ -512,7 +522,8 @@ func _production_icons_visible() -> bool:
 		return false
 
 	return (
-		(_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
+		(_barracks_spearman_slot != null and _barracks_spearman_slot.visible)
+		or (_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
 		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
 		or (_hero_altar_slot != null and _hero_altar_slot.visible)
 	)
@@ -528,13 +539,26 @@ func _refresh_all_production_slots() -> void:
 
 
 func _refresh_barracks_production_slots() -> void:
-	if _barracks_swordsman_slot == null or _barracks_archer_slot == null:
+	if (
+		_barracks_spearman_slot == null
+		or _barracks_swordsman_slot == null
+		or _barracks_archer_slot == null
+	):
 		return
 
 	if _selected_barracks == null or not is_instance_valid(_selected_barracks):
 		return
 
 	var barracks: Barracks = _selected_barracks
+	_barracks_spearman_slot.set_queue_count(barracks.get_spearman_queue_count())
+	_barracks_spearman_slot.set_infinite_enabled(
+		barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN)
+	)
+	_barracks_spearman_slot.set_training_progress(
+		barracks.get_active_unit_training_progress(),
+		barracks.is_training_spearman()
+	)
+
 	_barracks_swordsman_slot.set_queue_count(barracks.get_swordsman_queue_count())
 	_barracks_swordsman_slot.set_infinite_enabled(
 		barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN)
@@ -595,6 +619,8 @@ func _set_production_icon_visibility(
 	if not USE_PRODUCTION_ICON_SLOTS:
 		return
 
+	if _barracks_spearman_slot != null:
+		_barracks_spearman_slot.visible = show_barracks
 	if _barracks_swordsman_slot != null:
 		_barracks_swordsman_slot.visible = show_barracks
 	if _barracks_archer_slot != null:
@@ -604,6 +630,7 @@ func _set_production_icon_visibility(
 	if _hero_altar_slot != null:
 		_hero_altar_slot.visible = show_hero_altar
 
+	_train_spearman_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_spearman_slot)
 	_train_swordsman_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_swordsman_slot)
 	_train_archer_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_archer_slot)
 	_train_worker_button.visible = show_town_center and _should_use_legacy_train_button(_town_center_worker_slot)
@@ -640,7 +667,13 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 
 	var queue_amount: int = 5 if event.shift_pressed else 1
 
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+	if train_id == Barracks.TRAIN_ID_SPEARMAN:
+		if _selected_barracks == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_barracks.try_train_spearman()
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
 		if _selected_barracks == null:
 			return
 
@@ -681,7 +714,9 @@ func _handle_production_right_click(train_id: StringName, event: InputEventMouse
 
 
 func _handle_production_toggle_repeat(train_id: StringName) -> void:
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
+	if train_id == Barracks.TRAIN_ID_SPEARMAN and _selected_barracks != null:
+		_selected_barracks.try_train_spearman_with_repeat(true)
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
 		_selected_barracks.try_train_swordsman_with_repeat(true)
 	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
 		_selected_barracks.try_train_archer_with_repeat(true)
@@ -690,7 +725,10 @@ func _handle_production_toggle_repeat(train_id: StringName) -> void:
 
 
 func _disable_production_repeat(train_id: StringName) -> void:
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
+	if train_id == Barracks.TRAIN_ID_SPEARMAN and _selected_barracks != null:
+		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
+			_selected_barracks.set_repeat_training(false)
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
 		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
 			_selected_barracks.set_repeat_training(false)
 	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
@@ -702,7 +740,9 @@ func _disable_production_repeat(train_id: StringName) -> void:
 
 
 func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+	if train_id == Barracks.TRAIN_ID_SPEARMAN:
+		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
 		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
 	elif train_id == Barracks.TRAIN_ID_ARCHER:
 		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
@@ -718,20 +758,26 @@ func _cancel_barracks_unit_type(barracks: Barracks, train_id: StringName, cancel
 		return
 
 	for _unused: int in cancel_amount:
-		var type_count: int = (
-			barracks.get_swordsman_queue_count()
-			if train_id == Barracks.TRAIN_ID_SWORDSMAN
-			else barracks.get_archer_queue_count()
-		)
+		var type_count: int = 0
+		match train_id:
+			Barracks.TRAIN_ID_SPEARMAN:
+				type_count = barracks.get_spearman_queue_count()
+			Barracks.TRAIN_ID_SWORDSMAN:
+				type_count = barracks.get_swordsman_queue_count()
+			Barracks.TRAIN_ID_ARCHER:
+				type_count = barracks.get_archer_queue_count()
 		if type_count <= 0:
 			break
 
 		var type_slot_index: int = type_count - 1
-		var cancelled: bool = (
-			barracks.cancel_swordsman_training_at(type_slot_index)
-			if train_id == Barracks.TRAIN_ID_SWORDSMAN
-			else barracks.cancel_archer_training_at(type_slot_index)
-		)
+		var cancelled: bool = false
+		match train_id:
+			Barracks.TRAIN_ID_SPEARMAN:
+				cancelled = barracks.cancel_spearman_training_at(type_slot_index)
+			Barracks.TRAIN_ID_SWORDSMAN:
+				cancelled = barracks.cancel_swordsman_training_at(type_slot_index)
+			Barracks.TRAIN_ID_ARCHER:
+				cancelled = barracks.cancel_archer_training_at(type_slot_index)
 		if not cancelled:
 			break
 
@@ -765,6 +811,8 @@ func _after_production_action() -> void:
 func _get_production_slot_tooltip(train_id: StringName) -> String:
 	var base_tooltip: String = ""
 	match train_id:
+		Barracks.TRAIN_ID_SPEARMAN:
+			base_tooltip = _get_train_spearman_tooltip()
 		Barracks.TRAIN_ID_SWORDSMAN:
 			base_tooltip = _get_train_swordsman_tooltip()
 		Barracks.TRAIN_ID_ARCHER:
@@ -1116,7 +1164,12 @@ func _set_hero_altar_button_labels() -> void:
 
 
 func _set_barracks_button_labels() -> void:
+	var spearman_cost_label := " (%d Gold, %d Food)" % [
+		Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
+		Barracks.TRAIN_FOOD_COST,
+	]
 	var cost_label := " (%d Gold, %d Food)" % [Barracks.TRAIN_GOLD_COST, Barracks.TRAIN_FOOD_COST]
+	_train_spearman_base_label = "Train Spearman%s" % spearman_cost_label
 	_train_swordsman_base_label = "Train Swordsman%s" % cost_label
 	_train_archer_base_label = "Train Archer%s" % cost_label
 	_update_barracks_button_labels()
@@ -1139,13 +1192,17 @@ func _update_town_center_button_labels() -> void:
 
 
 func _update_barracks_button_labels() -> void:
+	var spearman_label: String = _train_spearman_base_label
 	var swordsman_label: String = _train_swordsman_base_label
 	var archer_label: String = _train_archer_base_label
 	if _selected_barracks != null:
+		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
+			spearman_label += " [Repeat: ON]"
 		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
 			swordsman_label += " [Repeat: ON]"
 		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
 			archer_label += " [Repeat: ON]"
+	_train_spearman_button.text = spearman_label
 	_train_swordsman_button.text = swordsman_label
 	_train_archer_button.text = archer_label
 
@@ -1234,7 +1291,13 @@ func _rebuild_barracks_queue_slots() -> void:
 
 	for slot_index: int in queue.size():
 		var train_id: StringName = queue[slot_index]
-		var slot_label: String = "SW" if train_id == Barracks.TRAIN_ID_SWORDSMAN else "AR"
+		var slot_label: String
+		if train_id == Barracks.TRAIN_ID_SPEARMAN:
+			slot_label = "SP"
+		elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
+			slot_label = "SW"
+		elif train_id == Barracks.TRAIN_ID_ARCHER:
+			slot_label = "AR"
 		var slot_in_progress: bool = in_progress and slot_index == 0
 		var slot: PanelContainer = _create_queue_slot(slot_index, train_id, slot_in_progress, slot_label)
 		_swordsman_queue_row.add_child(slot)
@@ -1340,7 +1403,7 @@ func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bo
 
 		return _selected_command_center.cancel_worker_training_at(slot_index)
 
-	if train_id == Barracks.TRAIN_ID_SWORDSMAN or train_id == Barracks.TRAIN_ID_ARCHER:
+	if train_id == Barracks.TRAIN_ID_SPEARMAN or train_id == Barracks.TRAIN_ID_SWORDSMAN or train_id == Barracks.TRAIN_ID_ARCHER:
 		var barracks: Barracks = _get_barracks_for_queue_cancel()
 		if barracks == null:
 			return false
@@ -1876,7 +1939,7 @@ func _refresh_command_visibility() -> void:
 	var single_hero: bool = selected_units.size() == 1 and single_unit is Hero
 	var single_combat_unit: bool = (
 		selected_units.size() == 1
-		and (single_unit is Swordsman or single_unit is Archer or single_unit is Hero)
+		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is Hero)
 	)
 
 	if single_worker:
@@ -2280,6 +2343,16 @@ func _on_train_worker_pressed() -> void:
 	_rebuild_worker_queue_slots()
 
 
+func _on_train_spearman_pressed() -> void:
+	if _selected_barracks == null:
+		return
+
+	_selected_barracks.try_train_spearman_with_repeat(Input.is_key_pressed(KEY_CTRL))
+	_update_barracks_button_labels()
+	_update_auto_training_label()
+	_rebuild_swordsman_queue_slots()
+
+
 func _on_train_swordsman_pressed() -> void:
 	if _selected_barracks == null:
 		return
@@ -2318,6 +2391,7 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_build_hero_altar_button)
 	_clear_control_tooltip(_build_command_center_button)
 	_clear_control_tooltip(_train_worker_button)
+	_clear_control_tooltip(_train_spearman_button)
 	_clear_control_tooltip(_train_swordsman_button)
 	_clear_control_tooltip(_train_archer_button)
 	_clear_control_tooltip(_train_hero_button)
@@ -2389,6 +2463,7 @@ func _setup_command_tooltips() -> void:
 	)
 
 	TooltipManager.bind_control(_train_worker_button, _get_train_worker_tooltip)
+	TooltipManager.bind_control(_train_spearman_button, _get_train_spearman_tooltip)
 	TooltipManager.bind_control(_train_swordsman_button, _get_train_swordsman_tooltip)
 	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
 	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
@@ -2487,6 +2562,21 @@ func _get_train_worker_tooltip() -> String:
 		CommandCenter.TRAIN_ID_WORKER,
 		TooltipFormatter.get_train_blocked_reason(
 			CommandCenter.TRAIN_GOLD_COST, CommandCenter.TRAIN_FOOD_COST
+		)
+	)
+
+
+func _get_train_spearman_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Spearman",
+		Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
+		0,
+		Barracks.TRAIN_FOOD_COST,
+		Barracks.get_unit_train_seconds(Barracks.TRAIN_ID_SPEARMAN),
+		Barracks.TRAIN_ID_SPEARMAN,
+		TooltipFormatter.get_train_blocked_reason(
+			Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
+			Barracks.TRAIN_FOOD_COST
 		)
 	)
 

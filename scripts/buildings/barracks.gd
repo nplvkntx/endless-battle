@@ -5,17 +5,22 @@ extends Building
 
 signal swordsman_queue_changed(queue_count: int)
 signal archer_queue_changed(queue_count: int)
+signal spearman_queue_changed(queue_count: int)
 signal training_queue_changed()
 signal repeat_state_changed()
 
+const TRAIN_ID_SPEARMAN: StringName = &"spearman"
 const TRAIN_ID_SWORDSMAN: StringName = &"swordsman"
 const TRAIN_ID_ARCHER: StringName = &"archer"
 
+const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
 const TRAIN_GOLD_COST: int = 100
+const SPEARMAN_TRAIN_GOLD_COST: int = 65
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 4.0
+const SPEARMAN_TRAIN_SECONDS: float = 5.0
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3
@@ -23,6 +28,7 @@ const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
 const RALLY_SLOT_SPACING: float = 2.0
 
+@export var spearman_spawn_offset: Vector3 = Vector3(-1.2, -0.5, -2.5)
 @export var swordsman_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
 @export var archer_spawn_offset: Vector3 = Vector3(1.2, -0.5, -2.5)
 
@@ -229,6 +235,10 @@ func get_archer_queue_count() -> int:
 	return _count_queued_units(TRAIN_ID_ARCHER)
 
 
+func get_spearman_queue_count() -> int:
+	return _count_queued_units(TRAIN_ID_SPEARMAN)
+
+
 func get_total_queue_count() -> int:
 	return _training_queue.size()
 
@@ -250,6 +260,8 @@ func get_repeat_unit_display_name() -> String:
 		return ""
 
 	match _repeat_unit_type:
+		TRAIN_ID_SPEARMAN:
+			return "Spearman"
 		TRAIN_ID_SWORDSMAN:
 			return "Swordsman"
 		TRAIN_ID_ARCHER:
@@ -265,6 +277,19 @@ func set_repeat_training(enabled: bool, train_id: StringName = &"") -> void:
 		_repeat_waiting_for_resources = false
 		_disconnect_player_resource_listener()
 	repeat_state_changed.emit()
+
+
+func try_train_spearman_with_repeat(ctrl_held: bool) -> void:
+	if ctrl_held:
+		if is_repeat_training_enabled(TRAIN_ID_SPEARMAN):
+			set_repeat_training(false)
+			return
+
+		set_repeat_training(true, TRAIN_ID_SPEARMAN)
+		_try_repeat_training()
+		return
+
+	try_train_spearman()
 
 
 func try_train_swordsman_with_repeat(ctrl_held: bool) -> void:
@@ -293,6 +318,10 @@ func try_train_archer_with_repeat(ctrl_held: bool) -> void:
 	try_train_archer()
 
 
+func is_training_spearman() -> bool:
+	return _is_training and _current_training_id == TRAIN_ID_SPEARMAN
+
+
 func is_training_swordsman() -> bool:
 	return _is_training and _current_training_id == TRAIN_ID_SWORDSMAN
 
@@ -310,11 +339,14 @@ func get_active_unit_training_progress() -> float:
 		return 0.0
 
 	var elapsed: float = _get_time_seconds() - _training_started_at
-	return clampf(elapsed / TRAIN_SECONDS, 0.0, 1.0)
+	var train_seconds: float = get_unit_train_seconds(_current_training_id)
+	return clampf(elapsed / train_seconds, 0.0, 1.0)
 
 
 func get_active_unit_training_name() -> String:
 	match _current_training_id:
+		TRAIN_ID_SPEARMAN:
+			return "Spearman"
 		TRAIN_ID_SWORDSMAN:
 			return "Swordsman"
 		TRAIN_ID_ARCHER:
@@ -323,8 +355,28 @@ func get_active_unit_training_name() -> String:
 			return ""
 
 
+static func get_unit_train_gold_cost(train_id: StringName) -> int:
+	match train_id:
+		TRAIN_ID_SPEARMAN:
+			return SPEARMAN_TRAIN_GOLD_COST
+		_:
+			return TRAIN_GOLD_COST
+
+
+static func get_unit_train_seconds(train_id: StringName) -> float:
+	match train_id:
+		TRAIN_ID_SPEARMAN:
+			return SPEARMAN_TRAIN_SECONDS
+		_:
+			return TRAIN_SECONDS
+
+
 func _get_time_seconds() -> float:
 	return Time.get_ticks_msec() / 1000.0
+
+
+func cancel_spearman_training_at(slot_index: int) -> bool:
+	return cancel_training_at(_map_type_slot_to_queue_index(TRAIN_ID_SPEARMAN, slot_index))
 
 
 func cancel_swordsman_training_at(slot_index: int) -> bool:
@@ -381,7 +433,7 @@ func _cancel_training_at_index(slot_index: int) -> bool:
 		_current_training_id = &""
 		_training_queue.remove_at(0)
 		_emit_queue_changed()
-		_refund_training_cost()
+		_refund_training_cost(cancelled_id)
 
 		if not _training_queue.is_empty():
 			_start_next_training()
@@ -391,9 +443,10 @@ func _cancel_training_at_index(slot_index: int) -> bool:
 		return true
 
 	if slot_index == _training_queue.size() - 1 and _training_queue.size() > 1:
+		var cancelled_id: StringName = _training_queue[slot_index]
 		_training_queue.remove_at(slot_index)
 		_emit_queue_changed()
-		_refund_training_cost()
+		_refund_training_cost(cancelled_id)
 		return true
 
 	return false
@@ -456,6 +509,10 @@ func _update_rally_marker(marker_position: Vector3) -> void:
 	_rally_marker.global_position = marker_position
 
 
+func try_train_spearman() -> void:
+	_try_train_player_unit(TRAIN_ID_SPEARMAN)
+
+
 func try_train_swordsman() -> void:
 	_try_train_player_unit(TRAIN_ID_SWORDSMAN)
 
@@ -468,9 +525,10 @@ func _try_train_player_unit(train_id: StringName) -> void:
 	if building_state != STATE_COMPLETED:
 		return
 
-	if not ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST):
+	var gold_cost: int = get_unit_train_gold_cost(train_id)
+	if not ResourceManager.try_pay_worker_training(gold_cost, TRAIN_FOOD_COST):
 		ResourceManager.show_feedback(
-			ResourceManager.get_training_failure_message(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+			ResourceManager.get_training_failure_message(gold_cost, TRAIN_FOOD_COST)
 		)
 		return
 
@@ -495,7 +553,9 @@ func _start_next_training() -> void:
 	_current_training_id = _training_queue[0]
 	_is_training = true
 	_training_started_at = _get_time_seconds()
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(
+		get_unit_train_seconds(_current_training_id)
+	)
 	wait_timer.timeout.connect(func() -> void:
 		_on_training_finished(session)
 	, CONNECT_ONE_SHOT)
@@ -512,6 +572,8 @@ func _on_training_finished(session: int) -> void:
 		return
 
 	match _training_queue[0]:
+		TRAIN_ID_SPEARMAN:
+			_spawn_spearman()
 		TRAIN_ID_SWORDSMAN:
 			_spawn_swordsman()
 		TRAIN_ID_ARCHER:
@@ -555,17 +617,19 @@ func _try_repeat_training() -> void:
 
 
 func _can_pay_training_costs() -> bool:
+	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
 	if _uses_player_resources():
-		return ResourceManager.can_afford_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+		return ResourceManager.can_afford_worker_training(gold_cost, TRAIN_FOOD_COST)
 
-	return EnemyResourceManager.can_afford_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+	return EnemyResourceManager.can_afford_training(gold_cost, TRAIN_FOOD_COST)
 
 
 func _pay_training_costs() -> bool:
+	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
 	if _uses_player_resources():
-		return ResourceManager.try_pay_worker_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+		return ResourceManager.try_pay_worker_training(gold_cost, TRAIN_FOOD_COST)
 
-	return EnemyResourceManager.try_pay_training(TRAIN_GOLD_COST, TRAIN_FOOD_COST)
+	return EnemyResourceManager.try_pay_training(gold_cost, TRAIN_FOOD_COST)
 
 
 func _uses_player_resources() -> bool:
@@ -592,6 +656,10 @@ func _on_player_resources_changed() -> void:
 	_try_repeat_training()
 
 
+func _spawn_spearman() -> void:
+	_spawn_trained_unit(SPEARMAN_SCENE, spearman_spawn_offset)
+
+
 func _spawn_swordsman() -> void:
 	_spawn_trained_unit(SWORDSMAN_SCENE, swordsman_spawn_offset)
 
@@ -600,16 +668,18 @@ func _spawn_archer() -> void:
 	_spawn_trained_unit(ARCHER_SCENE, archer_spawn_offset)
 
 
-func _refund_training_cost() -> void:
+func _refund_training_cost(train_id: StringName) -> void:
+	var gold_cost: int = get_unit_train_gold_cost(train_id)
 	if _uses_player_resources():
-		ResourceManager.add_gold(TRAIN_GOLD_COST)
+		ResourceManager.add_gold(gold_cost)
 		ResourceManager.release_food_used(TRAIN_FOOD_COST)
 	else:
-		EnemyResourceManager.add_gold(TRAIN_GOLD_COST)
+		EnemyResourceManager.add_gold(gold_cost)
 		EnemyResourceManager.release_food_used(TRAIN_FOOD_COST)
 
 
 func _emit_queue_changed() -> void:
+	spearman_queue_changed.emit(get_spearman_queue_count())
 	swordsman_queue_changed.emit(get_swordsman_queue_count())
 	archer_queue_changed.emit(get_archer_queue_count())
 	training_queue_changed.emit()

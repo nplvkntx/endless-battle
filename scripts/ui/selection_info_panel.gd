@@ -42,6 +42,7 @@ const ENEMY_STAT_COLOR := Color(0.85, 0.5, 0.5, 1)
 
 const PORTRAIT_STYLES: Dictionary = {
 	"worker": {"color": Color(0.55, 0.35, 0.15, 1), "label": "W"},
+	"spearman": {"color": Color(0.62, 0.48, 0.28, 1), "label": "SP"},
 	"swordsman": {"color": Color(0.35, 0.45, 0.75, 1), "label": "SW"},
 	"archer": {"color": Color(0.15, 0.65, 0.25, 1), "label": "A"},
 	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
@@ -902,8 +903,10 @@ func _update_barracks_production() -> void:
 		queue = _tracked_barracks.get_training_queue()
 
 	if queue.is_empty():
-		if _tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN) or (
-			_tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER)
+		if (
+			_tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN)
+			or _tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN)
+			or _tracked_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER)
 		):
 			_task_label.text = "Production: Auto (%s)" % _tracked_barracks.get_repeat_unit_display_name()
 			_task_label.visible = true
@@ -919,7 +922,9 @@ func _update_barracks_production() -> void:
 
 	var training_parts: PackedStringArray = []
 	for train_id: StringName in queue:
-		if train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		if train_id == Barracks.TRAIN_ID_SPEARMAN:
+			training_parts.append("Spearman")
+		elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
 			training_parts.append("Swordsman")
 		elif train_id == Barracks.TRAIN_ID_ARCHER:
 			training_parts.append("Archer")
@@ -1011,6 +1016,8 @@ func _clear_production_tracking() -> void:
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:
+	if unit is Spearman:
+		return {"name": "Spearman", "type": "Unit", "portrait_key": "spearman"}
 	if unit is Swordsman:
 		return {"name": "Swordsman", "type": "Unit", "portrait_key": "swordsman"}
 	if unit is Archer:
@@ -1031,6 +1038,8 @@ func _get_enemy_unit_info(unit: Unit) -> Dictionary:
 		return {"name": "Enemy Hero", "type": "Unit", "portrait_key": "hero"}
 	if unit is Worker:
 		return {"name": "Enemy Worker", "type": "Unit", "portrait_key": "worker"}
+	if unit is Spearman:
+		return {"name": "Enemy Spearman", "type": "Unit", "portrait_key": "spearman"}
 	if unit is Swordsman:
 		return {"name": "Enemy Soldier", "type": "Unit", "portrait_key": "swordsman"}
 	if unit is Archer:

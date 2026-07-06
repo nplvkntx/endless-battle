@@ -1087,7 +1087,7 @@ static func _enemy_has_archer_capability(tree: SceneTree) -> bool:
 
 
 static func is_combat_unit(node: Node) -> bool:
-	return node is Swordsman or node is Archer or node is Hero
+	return node is Spearman or node is Swordsman or node is Archer or node is Hero
 
 
 static func is_hero_unit(node: Node) -> bool:
@@ -2675,7 +2675,7 @@ static func _is_player_military_unit(node: Node) -> bool:
 	if CombatTargetValidation.is_enemy_faction(node):
 		return false
 
-	if not (node is Swordsman or node is Archer or node is Hero):
+	if not (node is Spearman or node is Swordsman or node is Archer or node is Hero):
 		return false
 
 	return _has_positive_health(node)
@@ -3074,7 +3074,7 @@ static func _collect_living_player_combat_unit_nodes(tree: SceneTree) -> Array:
 			if node is Worker:
 				continue
 
-			if not (node is Swordsman or node is Archer or node is Hero):
+			if not (node is Spearman or node is Swordsman or node is Archer or node is Hero):
 				continue
 
 			if not CombatTargetValidation.is_valid_combat_target(node):
