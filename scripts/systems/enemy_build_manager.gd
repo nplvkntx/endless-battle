@@ -931,6 +931,9 @@ func _find_nearest_available_enemy_worker(
 		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
 			continue
 
+		if WorkerAiUnstuck.blocks_external_commands(worker):
+			continue
+
 		if not worker.is_available_for_construction_assignment(allow_gather_interrupt):
 			continue
 

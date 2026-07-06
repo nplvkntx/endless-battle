@@ -569,6 +569,9 @@ func _can_reassign_worker(worker: Worker) -> bool:
 	if worker == null or not is_instance_valid(worker):
 		return false
 
+	if WorkerAiUnstuck.blocks_external_commands(worker):
+		return false
+
 	if worker.is_on_construction_trip():
 		return false
 
@@ -584,6 +587,9 @@ func _can_reassign_worker(worker: Worker) -> bool:
 
 func _can_assign_gather_job(worker: Worker) -> bool:
 	if worker == null or not is_instance_valid(worker):
+		return false
+
+	if WorkerAiUnstuck.blocks_external_commands(worker):
 		return false
 
 	if worker.is_on_construction_trip():

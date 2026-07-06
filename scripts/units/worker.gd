@@ -81,6 +81,17 @@ var _ai_unstuck_watch_position: Vector3 = Vector3.ZERO
 var _ai_unstuck_watch_time: float = 0.0
 var _ai_unstuck_cooldown: float = 0.0
 var _ai_unstuck_direction_offset: int = 0
+var _ai_unstuck_attempt_number: int = 0
+var _ai_unstuck_pending_stagger: float = 0.0
+var _ai_unstuck_stuck_location: Vector3 = Vector3.ZERO
+var _ai_unstuck_last_stuck_location: Vector3 = Vector3.ZERO
+var _ai_unstuck_last_finish_time: float = -INF
+var _ai_unstuck_internal_move: bool = false
+var _ai_unstuck_saved_gather_state: GatherTripState = GatherTripState.IDLE
+var _ai_unstuck_saved_build_state: BuildTripState = BuildTripState.IDLE
+var _ai_unstuck_saved_source_index: int = 0
+var _ai_unstuck_saved_dropoff_index: int = 0
+var _ai_unstuck_saved_build_index: int = 0
 
 
 func _ready() -> void:
@@ -143,7 +154,9 @@ func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
 			return UnitVisualAnimator.LoopState.WORK
 		return UnitVisualAnimator.LoopState.IDLE
 
-	if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
+	if _task_nudge_active or (
+		_is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self)
+	):
 		return UnitVisualAnimator.LoopState.MOVE
 
 	if _is_on_task_movement() and has_move_target:
@@ -419,6 +432,13 @@ func _physics_process(delta: float) -> void:
 
 
 func set_movement_target(target: Vector3) -> void:
+	if (
+		_is_enemy_worker()
+		and WorkerAiUnstuck.blocks_external_commands(self)
+		and not _ai_unstuck_internal_move
+	):
+		return
+
 	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
 		_cancel_build_trip()
 	elif _build_trip_state == BuildTripState.TO_BUILDING:
@@ -705,6 +725,9 @@ func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) 
 	if not _is_alive():
 		return
 
+	if not player_ordered and _is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self):
+		return
+
 	_last_gather_command_source = &"command_gather_gold_mine"
 	_start_gathering(gold_mine, player_ordered)
 	_debug_log_ai_gather_state("command_gather_gold_mine")
@@ -712,6 +735,9 @@ func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) 
 
 func command_gather_tree(tree: WoodTree, player_ordered: bool = true) -> void:
 	if not _is_alive():
+		return
+
+	if not player_ordered and _is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self):
 		return
 
 	_last_gather_command_source = &"command_gather_tree"
@@ -814,6 +840,9 @@ func start_construction_order(building: Building) -> void:
 	if building == null or not is_instance_valid(building):
 		return
 
+	if _is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self):
+		return
+
 	_cancel_build_trip()
 	cancel_gathering()
 	_build_trip_state = BuildTripState.TO_BUILDING
@@ -880,14 +909,18 @@ func _update_gather_trip() -> void:
 
 	match _gather_state:
 		GatherTripState.TO_SOURCE:
-			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
+			if _task_nudge_active or (
+				_is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self)
+			):
 				return
 			if _attempt_source_proximity_resolve():
 				return
 			if not has_move_target:
 				_handle_arrived_at_source()
 		GatherTripState.TO_COMMAND_CENTER:
-			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
+			if _task_nudge_active or (
+				_is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self)
+			):
 				return
 			if _carried_amount > 0:
 				_ensure_returning_to_current_dropoff()
@@ -908,7 +941,9 @@ func _update_build_trip() -> void:
 
 	match _build_trip_state:
 		BuildTripState.TO_BUILDING:
-			if _task_nudge_active or (_is_enemy_worker() and WorkerAiUnstuck.is_active(self)):
+			if _task_nudge_active or (
+				_is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self)
+			):
 				return
 			if _try_commit_construction_if_in_range():
 				return
