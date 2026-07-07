@@ -1,0 +1,145 @@
+[gd_scene format=3 uid="uid://be5pn1av6g5to"]
+
+[ext_resource type="Script" path="res://scripts/buildings/academy.gd" id="1_academy"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stone"]
+albedo_color = Color(0.42, 0.4, 0.52, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marble"]
+albedo_color = Color(0.58, 0.56, 0.68, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_dome"]
+albedo_color = Color(0.36, 0.34, 0.5, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_column"]
+albedo_color = Color(0.72, 0.7, 0.78, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_step"]
+albedo_color = Color(0.48, 0.46, 0.56, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_accent"]
+albedo_color = Color(0.28, 0.42, 0.62, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_placeholder"]
+size = Vector3(3.0, 1.1, 2.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hall"]
+size = Vector3(2.4, 0.95, 1.6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_steps"]
+size = Vector3(2.0, 0.18, 0.9)
+
+[sub_resource type="BoxMesh" id="BoxMesh_portico"]
+size = Vector3(2.6, 0.22, 0.55)
+
+[sub_resource type="BoxMesh" id="BoxMesh_column"]
+size = Vector3(0.22, 1.05, 0.22)
+
+[sub_resource type="SphereMesh" id="SphereMesh_dome"]
+radius = 0.72
+height = 0.55
+
+[sub_resource type="BoxMesh" id="BoxMesh_wing"]
+size = Vector3(0.75, 0.7, 1.35)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(3.2, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 2.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_academy"]
+size = Vector3(3.0, 1.7, 2.2)
+
+[node name="Academy" type="StaticBody3D" groups=["buildings"]]
+collision_layer = 4
+collision_mask = 3
+script = ExtResource("1_academy")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+mesh = SubResource("BoxMesh_placeholder")
+surface_material_override/0 = SubResource("StandardMaterial3D_stone")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="Steps" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.28, 1.05)
+mesh = SubResource("BoxMesh_steps")
+surface_material_override/0 = SubResource("StandardMaterial3D_step")
+
+[node name="MainHall" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
+mesh = SubResource("BoxMesh_hall")
+surface_material_override/0 = SubResource("StandardMaterial3D_marble")
+
+[node name="Portico" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.28, 0.82)
+mesh = SubResource("BoxMesh_portico")
+surface_material_override/0 = SubResource("StandardMaterial3D_accent")
+
+[node name="ColumnLeft" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 0.12, 0.82)
+mesh = SubResource("BoxMesh_column")
+surface_material_override/0 = SubResource("StandardMaterial3D_column")
+
+[node name="ColumnRight" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 0.12, 0.82)
+mesh = SubResource("BoxMesh_column")
+surface_material_override/0 = SubResource("StandardMaterial3D_column")
+
+[node name="Dome" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
+mesh = SubResource("SphereMesh_dome")
+surface_material_override/0 = SubResource("StandardMaterial3D_dome")
+
+[node name="WingLeft" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.05, -0.08, -0.2)
+mesh = SubResource("BoxMesh_wing")
+surface_material_override/0 = SubResource("StandardMaterial3D_stone")
+
+[node name="WingRight" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.05, -0.08, -0.2)
+mesh = SubResource("BoxMesh_wing")
+surface_material_override/0 = SubResource("StandardMaterial3D_stone")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.25)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.25)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_academy")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 720

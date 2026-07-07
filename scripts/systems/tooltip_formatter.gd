@@ -25,6 +25,7 @@ const BUILD_PLACEMENT_NAMES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Blacksmith",
 	_BUILD_MANAGER.PLACEMENT_STABLE: "Stable",
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: "Artillery Depot",
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Academy",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Shop",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Tower",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Hero Altar",
@@ -37,6 +38,7 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Unlocks upgrades.",
 	_BUILD_MANAGER.PLACEMENT_STABLE: "Trains cavalry units.",
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: "Trains siege artillery.",
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Advanced military upgrades.",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains/revives your Hero.",
@@ -47,6 +49,7 @@ const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: ["Command Center Tier 2"],
 	_BUILD_MANAGER.PLACEMENT_STABLE: ["Command Center Tier 2", "Blacksmith"],
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: ["Command Center Tier 3", "Blacksmith"],
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: ["Command Center Tier 3", "Blacksmith"],
 }
 
 const TRAIN_DESCRIPTIONS: Dictionary = {
@@ -378,6 +381,11 @@ static func get_placement_costs(placement_id: StringName) -> Dictionary:
 				"gold": _BUILD_MANAGER.ARTILLERY_DEPOT_GOLD_COST,
 				"wood": _BUILD_MANAGER.ARTILLERY_DEPOT_WOOD_COST,
 			}
+		_BUILD_MANAGER.PLACEMENT_ACADEMY:
+			return {
+				"gold": _BUILD_MANAGER.ACADEMY_GOLD_COST,
+				"wood": _BUILD_MANAGER.ACADEMY_WOOD_COST,
+			}
 		_BUILD_MANAGER.PLACEMENT_SHOP:
 			return {
 				"gold": _BUILD_MANAGER.SHOP_GOLD_COST,
@@ -433,6 +441,10 @@ static func get_build_blocked_reason(placement_id: StringName) -> String:
 	if placement_id == _BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT:
 		if not TechTree.can_build_artillery_depot():
 			return TechTree.ARTILLERY_DEPOT_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE
+
+	if placement_id == _BUILD_MANAGER.PLACEMENT_ACADEMY:
+		if not TechTree.can_build_academy():
+			return TechTree.ACADEMY_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE
 
 	if ResourceManager.gold < costs.gold and ResourceManager.wood < costs.wood:
 		return "Need more gold and wood"
@@ -636,6 +648,8 @@ static func _get_building_display_name(building: Building) -> String:
 		return "Stable"
 	if building is ArtilleryDepot:
 		return "Artillery Depot"
+	if building is Academy:
+		return "Academy"
 	if building is Shop:
 		return "Shop"
 	if building is HeroAltar:

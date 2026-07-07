@@ -500,6 +500,11 @@ custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 text = "Build Artillery Depot"
 
+[node name="BuildAcademyButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Build Academy"
+
 [node name="BuildShopButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
@@ -682,6 +687,18 @@ theme_override_constants/separation = 4
 [node name="ArtilleryDepotTrainingRow" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ArtilleryDepotPanel"]
 layout_mode = 2
 theme_override_constants/separation = 4
+
+[node name="AcademyPanel" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="AcademyPlaceholderLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.84, 0.88, 1)
+theme_override_font_sizes/font_size = 10
+text = "Academy upgrades coming soon"
+horizontal_alignment = 1
 
 [node name="BlacksmithPanel" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
 visible = false

@@ -19,6 +19,9 @@ const STABLE_REQUIRES_TIER_2_AND_BLACKSMITH_MESSAGE := (
 const ARTILLERY_DEPOT_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE := (
 	"Requires Command Center Tier 3 and Blacksmith"
 )
+const ACADEMY_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE := (
+	"Requires Command Center Tier 3 and Blacksmith"
+)
 const ADVANCED_UNIT_REQUIRES_BLACKSMITH_MESSAGE := "Requires Blacksmith"
 
 signal progression_changed(team_id: int)
@@ -197,6 +200,10 @@ func can_build_stable(team_id: int = PLAYER_TEAM_ID) -> bool:
 
 
 func can_build_artillery_depot(team_id: int = PLAYER_TEAM_ID) -> bool:
+	return player_has_tier_3(team_id) and player_has_completed_blacksmith(team_id)
+
+
+func can_build_academy(team_id: int = PLAYER_TEAM_ID) -> bool:
 	return player_has_tier_3(team_id) and player_has_completed_blacksmith(team_id)
 
 

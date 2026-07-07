@@ -17,6 +17,9 @@ extends PanelContainer
 @onready var _build_artillery_depot_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildArtilleryDepotButton
 )
+@onready var _build_academy_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildAcademyButton
+)
 @onready var _build_shop_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildShopButton
 @onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
 @onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
@@ -127,6 +130,9 @@ extends PanelContainer
 @onready var _artillery_depot_training_row: HBoxContainer = (
 	$MarginContainer/HBoxContainer/RightPanel/ArtilleryDepotPanel/ArtilleryDepotTrainingRow
 )
+@onready var _academy_panel: VBoxContainer = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel
+)
 @onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
 @onready var _shop_status_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
@@ -163,6 +169,7 @@ var _selected_shop: Shop = null
 var _selected_hero_altar: HeroAltar = null
 var _selected_stable: Stable = null
 var _selected_artillery_depot: ArtilleryDepot = null
+var _selected_academy: Academy = null
 var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
 var _tracked_artillery_depot: ArtilleryDepot = null
@@ -229,6 +236,7 @@ func _ready() -> void:
 	_stable_training_row.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
@@ -236,6 +244,7 @@ func _ready() -> void:
 	_build_blacksmith_button.visible = false
 	_build_stable_button.visible = false
 	_build_artillery_depot_button.visible = false
+	_build_academy_button.visible = false
 	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
@@ -257,6 +266,7 @@ func _ready() -> void:
 	_build_blacksmith_button.pressed.connect(_on_build_blacksmith_pressed)
 	_build_stable_button.pressed.connect(_on_build_stable_pressed)
 	_build_artillery_depot_button.pressed.connect(_on_build_artillery_depot_pressed)
+	_build_academy_button.pressed.connect(_on_build_academy_pressed)
 	_build_shop_button.pressed.connect(_on_build_shop_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
 	_build_hero_altar_button.pressed.connect(_on_build_hero_altar_pressed)
@@ -394,6 +404,11 @@ func _setup_build_icon_slots() -> void:
 			"",
 		],
 		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_ACADEMY,
+			_build_academy_button,
+			"",
+		],
+		[
 			BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP,
 			_build_shop_button,
 			"",
@@ -470,6 +485,8 @@ func _on_build_slot_clicked(placement_id: StringName) -> void:
 			_on_build_stable_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_ARTILLERY_DEPOT:
 			_on_build_artillery_depot_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_ACADEMY:
+			_on_build_academy_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP:
 			_on_build_shop_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER:
@@ -521,6 +538,10 @@ func _set_build_icon_visibility(show_worker_build: bool) -> void:
 		show_worker_build and _should_use_legacy_build_button(
 			BUILD_MANAGER_SCRIPT.PLACEMENT_ARTILLERY_DEPOT
 		)
+	)
+	_set_legacy_build_button_visibility(
+		_build_academy_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_ACADEMY)
 	)
 	_set_legacy_build_button_visibility(
 		_build_shop_button,
@@ -2352,6 +2373,10 @@ func _refresh_command_visibility() -> void:
 		selected_building is ArtilleryDepot
 		and (selected_building as ArtilleryDepot).can_show_commands()
 	)
+	var show_academy_commands: bool = (
+		selected_building is Academy
+		and (selected_building as Academy).can_show_commands()
+	)
 	var show_shop_items: bool = (
 		selected_building is Shop
 		and (selected_building as Shop).can_show_purchase_ui()
@@ -2366,6 +2391,7 @@ func _refresh_command_visibility() -> void:
 	_selected_artillery_depot = (
 		selected_building as ArtilleryDepot if show_artillery_depot_commands else null
 	)
+	_selected_academy = selected_building as Academy if show_academy_commands else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
@@ -2425,6 +2451,9 @@ func _refresh_command_visibility() -> void:
 	elif show_artillery_depot_commands:
 		_apply_artillery_depot_command_visibility()
 		_set_tracked_hero(null)
+	elif show_academy_commands:
+		_apply_academy_command_visibility()
+		_set_tracked_hero(null)
 	elif show_shop_items:
 		_apply_shop_command_visibility()
 		_set_tracked_hero(null)
@@ -2450,6 +2479,7 @@ func _refresh_command_visibility() -> void:
 	_stable_training_row.visible = show_stable_commands
 	_artillery_depot_panel.visible = show_artillery_depot_commands
 	_artillery_depot_training_row.visible = show_artillery_depot_commands
+	_academy_panel.visible = show_academy_commands
 	_shop_panel.visible = show_shop_items
 	_hero_panel.visible = single_hero
 
@@ -2504,6 +2534,7 @@ func _refresh_command_visibility() -> void:
 		or show_blacksmith_upgrades
 		or show_stable_commands
 		or show_artillery_depot_commands
+		or show_academy_commands
 		or show_shop_items
 		or single_combat_unit
 	)
@@ -2534,6 +2565,7 @@ func _apply_hero_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
@@ -2552,6 +2584,7 @@ func _apply_worker_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
@@ -2570,6 +2603,7 @@ func _apply_combat_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
@@ -2588,6 +2622,7 @@ func _apply_barracks_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2605,6 +2640,7 @@ func _apply_hero_altar_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2622,6 +2658,7 @@ func _apply_town_center_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2640,6 +2677,7 @@ func _apply_blacksmith_command_visibility() -> void:
 	_stable_panel.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
@@ -2662,6 +2700,7 @@ func _apply_stable_command_visibility() -> void:
 	_stable_training_row.visible = true
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
@@ -2685,12 +2724,36 @@ func _apply_artillery_depot_command_visibility() -> void:
 	_stable_training_row.visible = false
 	_artillery_depot_panel.visible = true
 	_artillery_depot_training_row.visible = true
+	_academy_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
 	_clear_queue_row(_hero_queue_row)
 	_refresh_artillery_depot_production_slots()
+
+
+func _apply_academy_command_visibility() -> void:
+	_set_build_icon_visibility(false)
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_hero_panel.visible = false
+	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
+	_stable_training_row.visible = false
+	_artillery_depot_panel.visible = false
+	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = true
+	_shop_panel.visible = false
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
 
 
 func _apply_shop_command_visibility() -> void:
@@ -2723,6 +2786,7 @@ func _apply_hidden_command_buttons() -> void:
 	_stable_training_row.visible = false
 	_artillery_depot_panel.visible = false
 	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
 	_stable_panel.visible = false
@@ -2933,6 +2997,14 @@ func _on_build_artillery_depot_pressed() -> void:
 		return
 
 	build_manager.start_artillery_depot_placement()
+
+
+func _on_build_academy_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_academy_placement()
 
 
 func _on_build_shop_pressed() -> void:

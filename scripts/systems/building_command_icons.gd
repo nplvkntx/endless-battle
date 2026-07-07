@@ -18,6 +18,7 @@ const _PLACEMENT_SCENES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: _BUILD_MANAGER.BLACKSMITH_SCENE,
 	_BUILD_MANAGER.PLACEMENT_STABLE: _BUILD_MANAGER.STABLE_SCENE,
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: _BUILD_MANAGER.ARTILLERY_DEPOT_SCENE,
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: _BUILD_MANAGER.ACADEMY_SCENE,
 	_BUILD_MANAGER.PLACEMENT_SHOP: _BUILD_MANAGER.SHOP_SCENE,
 	_BUILD_MANAGER.PLACEMENT_TOWER: _BUILD_MANAGER.TOWER_SCENE,
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: _BUILD_MANAGER.HERO_ALTAR_SCENE,
@@ -30,6 +31,7 @@ const _PORTRAIT_COLORS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: Color(0.58, 0.42, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_STABLE: Color(0.42, 0.48, 0.28, 1),
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: Color(0.34, 0.38, 0.3, 1),
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: Color(0.42, 0.38, 0.58, 1),
 	_BUILD_MANAGER.PLACEMENT_SHOP: Color(0.72, 0.48, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_TOWER: Color(0.55, 0.58, 0.62, 1),
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: Color(0.55, 0.35, 0.75, 1),
@@ -42,6 +44,7 @@ const _INITIALS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "BS",
 	_BUILD_MANAGER.PLACEMENT_STABLE: "St",
 	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: "AD",
+	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Ac",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Sh",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "T",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "HA",
@@ -209,6 +212,8 @@ static func _create_procedural_icon(placement_id: StringName) -> Texture2D:
 			_draw_stable(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT:
 			_draw_artillery_depot(image, base_color)
+		_BUILD_MANAGER.PLACEMENT_ACADEMY:
+			_draw_academy(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_SHOP:
 			_draw_shop(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_TOWER:
@@ -281,6 +286,18 @@ static func _draw_artillery_depot(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(6, 14, 36, 7), roof)
 	_fill_rect(image, Rect2i(24, 24, 12, 10), bay)
 	_fill_rect(image, Rect2i(28, 27, 14, 4), barrel)
+
+
+static func _draw_academy(image: Image, color: Color) -> void:
+	var wall := color
+	var dome := color.lightened(0.12)
+	var column := Color(0.78, 0.76, 0.86, 1)
+	var step := color.darkened(0.2)
+	_fill_rect(image, Rect2i(10, 22, 28, 14), wall)
+	_fill_rect(image, Rect2i(14, 8, 20, 10), dome)
+	_fill_rect(image, Rect2i(12, 18, 4, 12), column)
+	_fill_rect(image, Rect2i(32, 18, 4, 12), column)
+	_fill_rect(image, Rect2i(16, 34, 16, 4), step)
 
 
 static func _draw_shop(image: Image, color: Color) -> void:

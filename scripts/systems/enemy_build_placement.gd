@@ -27,6 +27,7 @@ const BARRACKS_SIZE := Vector2(3.5, 2.5)
 const BLACKSMITH_SIZE := Vector2(2.2, 1.8)
 const STABLE_SIZE := Vector2(3.0, 2.2)
 const ARTILLERY_DEPOT_SIZE := Vector2(3.2, 2.4)
+const ACADEMY_SIZE := Vector2(3.0, 2.2)
 const SHOP_SIZE := Vector2(2.0, 1.6)
 const TOWER_SIZE := Vector2(2.0, 2.0)
 const HERO_ALTAR_SIZE := Vector2(3.0, 3.0)
@@ -38,6 +39,7 @@ const BARRACKS_GROUND_Y: float = 0.8
 const BLACKSMITH_GROUND_Y: float = 0.8
 const STABLE_GROUND_Y: float = 0.8
 const ARTILLERY_DEPOT_GROUND_Y: float = 0.8
+const ACADEMY_GROUND_Y: float = 0.8
 const SHOP_GROUND_Y: float = 0.7
 const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.0
@@ -170,6 +172,8 @@ static func get_footprint(building_type: StringName) -> Vector2:
 			return STABLE_SIZE
 		&"artillery_depot":
 			return ARTILLERY_DEPOT_SIZE
+		&"academy":
+			return ACADEMY_SIZE
 		&"shop":
 			return SHOP_SIZE
 		&"tower":
@@ -194,6 +198,8 @@ static func get_ground_y(building_type: StringName) -> float:
 			return STABLE_GROUND_Y
 		&"artillery_depot":
 			return ARTILLERY_DEPOT_GROUND_Y
+		&"academy":
+			return ACADEMY_GROUND_Y
 		&"shop":
 			return SHOP_GROUND_Y
 		&"tower":
@@ -480,6 +486,8 @@ static func _resolve_footprint(building: Node3D) -> Vector2:
 		return STABLE_SIZE
 	if building is ArtilleryDepot:
 		return ARTILLERY_DEPOT_SIZE
+	if building is Academy:
+		return ACADEMY_SIZE
 	if building is Shop:
 		return SHOP_SIZE
 	if building is Tower:

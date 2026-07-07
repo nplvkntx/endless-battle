@@ -99,6 +99,9 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 	if building is ArtilleryDepot:
 		return (building as ArtilleryDepot).can_show_commands()
 
+	if building is Academy:
+		return (building as Academy).can_show_commands()
+
 	if building is Shop:
 		return (building as Shop).can_show_purchase_ui()
 
