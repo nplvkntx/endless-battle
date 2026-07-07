@@ -16,6 +16,7 @@ const _PLACEMENT_SCENES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: _BUILD_MANAGER.FARM_SCENE,
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: _BUILD_MANAGER.BARRACKS_SCENE,
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: _BUILD_MANAGER.BLACKSMITH_SCENE,
+	_BUILD_MANAGER.PLACEMENT_STABLE: _BUILD_MANAGER.STABLE_SCENE,
 	_BUILD_MANAGER.PLACEMENT_SHOP: _BUILD_MANAGER.SHOP_SCENE,
 	_BUILD_MANAGER.PLACEMENT_TOWER: _BUILD_MANAGER.TOWER_SCENE,
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: _BUILD_MANAGER.HERO_ALTAR_SCENE,
@@ -26,6 +27,7 @@ const _PORTRAIT_COLORS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: Color(0.45, 0.7, 0.25, 1),
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: Color(0.5, 0.32, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: Color(0.58, 0.42, 0.22, 1),
+	_BUILD_MANAGER.PLACEMENT_STABLE: Color(0.42, 0.48, 0.28, 1),
 	_BUILD_MANAGER.PLACEMENT_SHOP: Color(0.72, 0.48, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_TOWER: Color(0.55, 0.58, 0.62, 1),
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: Color(0.55, 0.35, 0.75, 1),
@@ -36,6 +38,7 @@ const _INITIALS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: "F",
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: "B",
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "BS",
+	_BUILD_MANAGER.PLACEMENT_STABLE: "St",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Sh",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "T",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "HA",
@@ -199,6 +202,8 @@ static func _create_procedural_icon(placement_id: StringName) -> Texture2D:
 			_draw_barracks(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_BLACKSMITH:
 			_draw_blacksmith(image, base_color)
+		_BUILD_MANAGER.PLACEMENT_STABLE:
+			_draw_stable(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_SHOP:
 			_draw_shop(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_TOWER:
@@ -251,6 +256,15 @@ static func _draw_blacksmith(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(8, 18, 32, 20), wall)
 	_fill_rect(image, Rect2i(16, 28, 16, 6), anvil)
 	_fill_rect(image, Rect2i(20, 24, 8, 4), anvil.lightened(0.15))
+
+
+static func _draw_stable(image: Image, color: Color) -> void:
+	var wall := color
+	var roof := color.darkened(0.2)
+	var door := color.darkened(0.35)
+	_fill_rect(image, Rect2i(10, 18, 28, 20), wall)
+	_fill_rect(image, Rect2i(8, 12, 32, 8), roof)
+	_fill_rect(image, Rect2i(20, 26, 8, 12), door)
 
 
 static func _draw_shop(image: Image, color: Color) -> void:

@@ -12,6 +12,9 @@ static var _PORTRAIT_COLORS: Dictionary = {
 	&"spearman": Color(0.62, 0.48, 0.28, 1),
 	&"swordsman": Color(0.35, 0.45, 0.75, 1),
 	&"archer": Color(0.15, 0.65, 0.25, 1),
+	&"heavy_cavalry": Color(0.28, 0.34, 0.52, 1),
+	&"light_cavalry": Color(0.72, 0.58, 0.28, 1),
+	&"cavalry_archer": Color(0.18, 0.58, 0.32, 1),
 	&"hero": Color(0.85, 0.65, 0.15, 1),
 	CommandCenter.UPGRADE_ID_TIER: Color(0.72, 0.55, 0.18, 1),
 }
@@ -34,6 +37,12 @@ static func get_icon_texture(train_id: StringName) -> Texture2D:
 			_draw_swordsman(image, base_color)
 		Barracks.TRAIN_ID_ARCHER:
 			_draw_archer(image, base_color)
+		Stable.TRAIN_ID_HEAVY_CAVALRY:
+			_draw_heavy_cavalry(image, base_color)
+		Stable.TRAIN_ID_LIGHT_CAVALRY:
+			_draw_light_cavalry(image, base_color)
+		Stable.TRAIN_ID_CAVALRY_ARCHER:
+			_draw_cavalry_archer(image, base_color)
 		&"hero":
 			_draw_hero(image, base_color)
 		CommandCenter.UPGRADE_ID_TIER:
@@ -89,6 +98,29 @@ static func _draw_archer(image: Image, color: Color) -> void:
 	for y: int in range(14, 30):
 		image.set_pixel(20, y, string_color)
 	_fill_rect(image, Rect2i(18, 30, 12, 8), color.darkened(0.25))
+
+
+static func _draw_heavy_cavalry(image: Image, color: Color) -> void:
+	var horse := color.darkened(0.35)
+	_fill_rect(image, Rect2i(10, 24, 24, 10), horse)
+	_fill_rect(image, Rect2i(18, 8, 12, 16), color)
+	_fill_rect(image, Rect2i(30, 10, 6, 14), color.darkened(0.15))
+
+
+static func _draw_light_cavalry(image: Image, color: Color) -> void:
+	var horse := color.darkened(0.25)
+	_fill_rect(image, Rect2i(8, 26, 28, 8), horse)
+	_fill_rect(image, Rect2i(18, 10, 10, 14), color.lightened(0.1))
+	_fill_rect(image, Rect2i(32, 12, 4, 12), color.darkened(0.1))
+
+
+static func _draw_cavalry_archer(image: Image, color: Color) -> void:
+	var horse := Color(0.48, 0.32, 0.18, 1)
+	var bow := Color(0.45, 0.3, 0.15, 1)
+	_fill_rect(image, Rect2i(10, 24, 24, 10), horse)
+	_fill_rect(image, Rect2i(18, 10, 12, 14), color)
+	_fill_rect(image, Rect2i(6, 14, 4, 16), bow)
+	_fill_rect(image, Rect2i(34, 14, 4, 16), bow)
 
 
 static func _draw_hero(image: Image, color: Color) -> void:

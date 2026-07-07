@@ -28,6 +28,7 @@ var _tracked_health_component: HealthComponent = null
 var _tracked_hero: Hero = null
 var _tracked_command_center: CommandCenter = null
 var _tracked_barracks: Barracks = null
+var _tracked_stable: Stable = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_activity_building: Building = null
@@ -45,12 +46,16 @@ const PORTRAIT_STYLES: Dictionary = {
 	"spearman": {"color": Color(0.62, 0.48, 0.28, 1), "label": "SP"},
 	"swordsman": {"color": Color(0.35, 0.45, 0.75, 1), "label": "SW"},
 	"archer": {"color": Color(0.15, 0.65, 0.25, 1), "label": "A"},
+	"heavy_cavalry": {"color": Color(0.28, 0.34, 0.52, 1), "label": "HC"},
+	"light_cavalry": {"color": Color(0.72, 0.58, 0.28, 1), "label": "LC"},
+	"cavalry_archer": {"color": Color(0.18, 0.58, 0.32, 1), "label": "CA"},
 	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
 	"neutral_creep": {"color": Color(0.48, 0.38, 0.16, 1), "label": "Nc"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
 	"barracks": {"color": Color(0.5, 0.32, 0.22, 1), "label": "B"},
 	"blacksmith": {"color": Color(0.58, 0.42, 0.22, 1), "label": "BS"},
+	"stable": {"color": Color(0.42, 0.48, 0.28, 1), "label": "St"},
 	"shop": {"color": Color(0.72, 0.48, 0.22, 1), "label": "Sh"},
 	"hero_altar": {"color": Color(0.55, 0.35, 0.75, 1), "label": "HA"},
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
@@ -792,6 +797,16 @@ func _query_active_activity() -> Dictionary:
 				"detail": _get_training_queue_detail(barracks),
 			}
 
+	if building is Stable:
+		var stable: Stable = building as Stable
+		if stable.has_active_unit_training():
+			return {
+				"active": true,
+				"progress": stable.get_active_unit_training_progress(),
+				"label": "Training: %s" % stable.get_active_unit_training_name(),
+				"detail": _get_training_queue_detail(stable),
+			}
+
 	if building is HeroAltar:
 		var hero_altar: HeroAltar = building as HeroAltar
 		if hero_altar.has_active_unit_training():
@@ -819,6 +834,13 @@ func _get_training_queue_detail(building: Node) -> String:
 			return "Queue: %d" % total_count
 		return ""
 
+	if building is Stable:
+		var stable: Stable = building as Stable
+		var stable_count: int = stable.get_total_queue_count()
+		if stable_count > 1:
+			return "Queue: %d" % stable_count
+		return ""
+
 	return ""
 
 
@@ -829,6 +851,10 @@ func _refresh_idle_production_labels() -> void:
 
 	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
 		_update_barracks_production()
+		return
+
+	if _tracked_stable != null and is_instance_valid(_tracked_stable):
+		_update_stable_production()
 		return
 
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
@@ -863,6 +889,19 @@ func _configure_production_display(building: Building) -> void:
 		_update_barracks_production()
 		return
 
+	if building is Stable:
+		_tracked_stable = building as Stable
+		if _tracked_stable.has_signal("heavy_cavalry_queue_changed"):
+			_tracked_stable.heavy_cavalry_queue_changed.connect(_on_production_changed)
+		if _tracked_stable.has_signal("light_cavalry_queue_changed"):
+			_tracked_stable.light_cavalry_queue_changed.connect(_on_production_changed)
+		if _tracked_stable.has_signal("cavalry_archer_queue_changed"):
+			_tracked_stable.cavalry_archer_queue_changed.connect(_on_production_changed)
+		if _tracked_stable.has_signal("training_queue_changed"):
+			_tracked_stable.training_queue_changed.connect(_on_production_changed)
+		_update_stable_production()
+		return
+
 	if building is HeroAltar:
 		_tracked_hero_altar = building as HeroAltar
 		if _tracked_hero_altar.has_signal("hero_altar_state_changed"):
@@ -891,6 +930,10 @@ func _on_production_changed(_value: Variant = null) -> void:
 
 	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
 		_update_barracks_production()
+		return
+
+	if _tracked_stable != null and is_instance_valid(_tracked_stable):
+		_update_stable_production()
 		return
 
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
@@ -970,6 +1013,52 @@ func _update_barracks_production() -> void:
 		_building_detail_label.visible = false
 
 
+func _update_stable_production() -> void:
+	if _tracked_stable == null or not is_instance_valid(_tracked_stable):
+		_hide_production_display()
+		return
+
+	var queue: Array[StringName] = []
+	if _tracked_stable.has_method("get_training_queue"):
+		queue = _tracked_stable.get_training_queue()
+
+	if queue.is_empty():
+		if (
+			_tracked_stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY)
+			or _tracked_stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY)
+			or _tracked_stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER)
+		):
+			_task_label.text = "Production: Auto (%s)" % _tracked_stable.get_repeat_unit_display_name()
+			_task_label.visible = true
+			_building_detail_label.visible = false
+		else:
+			_task_label.text = "Production: Idle"
+			_task_label.visible = true
+			_building_detail_label.visible = false
+		return
+
+	if _tracked_stable.has_active_unit_training():
+		return
+
+	var training_parts: PackedStringArray = []
+	for train_id: StringName in queue:
+		if train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
+			training_parts.append("Heavy Cavalry")
+		elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
+			training_parts.append("Light Cavalry")
+		elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
+			training_parts.append("Cavalry Archer")
+
+	_task_label.text = "Training: %s" % ", ".join(training_parts)
+	_task_label.visible = true
+
+	if queue.size() > 1:
+		_building_detail_label.text = "Queue: %d" % queue.size()
+		_building_detail_label.visible = true
+	else:
+		_building_detail_label.visible = false
+
+
 func _update_hero_altar_production() -> void:
 	if _tracked_hero_altar == null or not is_instance_valid(_tracked_hero_altar):
 		_hide_production_display()
@@ -1030,6 +1119,28 @@ func _clear_production_tracking() -> void:
 		):
 			_tracked_barracks.training_queue_changed.disconnect(_on_production_changed)
 
+	if _tracked_stable != null and is_instance_valid(_tracked_stable):
+		if (
+			_tracked_stable.has_signal("heavy_cavalry_queue_changed")
+			and _tracked_stable.heavy_cavalry_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_stable.heavy_cavalry_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_stable.has_signal("light_cavalry_queue_changed")
+			and _tracked_stable.light_cavalry_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_stable.light_cavalry_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_stable.has_signal("cavalry_archer_queue_changed")
+			and _tracked_stable.cavalry_archer_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_stable.cavalry_archer_queue_changed.disconnect(_on_production_changed)
+		if (
+			_tracked_stable.has_signal("training_queue_changed")
+			and _tracked_stable.training_queue_changed.is_connected(_on_production_changed)
+		):
+			_tracked_stable.training_queue_changed.disconnect(_on_production_changed)
+
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
 		if (
 			_tracked_hero_altar.has_signal("hero_altar_state_changed")
@@ -1047,6 +1158,7 @@ func _clear_production_tracking() -> void:
 	_disconnect_activity_building_signals()
 	_tracked_command_center = null
 	_tracked_barracks = null
+	_tracked_stable = null
 	_tracked_hero_altar = null
 	_tracked_blacksmith = null
 
@@ -1058,6 +1170,12 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 		return {"name": "Swordsman", "type": "Unit", "portrait_key": "swordsman"}
 	if unit is Archer:
 		return {"name": "Archer", "type": "Unit", "portrait_key": "archer"}
+	if unit is HeavyCavalry:
+		return {"name": "Heavy Cavalry", "type": "Unit", "portrait_key": "heavy_cavalry"}
+	if unit is LightCavalry:
+		return {"name": "Light Cavalry", "type": "Unit", "portrait_key": "light_cavalry"}
+	if unit is CavalryArcher:
+		return {"name": "Cavalry Archer", "type": "Unit", "portrait_key": "cavalry_archer"}
 	if unit is Hero:
 		return {"name": "Hero", "type": "Unit", "portrait_key": "hero"}
 	if unit is Worker:
@@ -1080,6 +1198,12 @@ func _get_enemy_unit_info(unit: Unit) -> Dictionary:
 		return {"name": "Enemy Soldier", "type": "Unit", "portrait_key": "swordsman"}
 	if unit is Archer:
 		return {"name": "Enemy Archer", "type": "Unit", "portrait_key": "archer"}
+	if unit is HeavyCavalry:
+		return {"name": "Enemy Heavy Cavalry", "type": "Unit", "portrait_key": "heavy_cavalry"}
+	if unit is LightCavalry:
+		return {"name": "Enemy Light Cavalry", "type": "Unit", "portrait_key": "light_cavalry"}
+	if unit is CavalryArcher:
+		return {"name": "Enemy Cavalry Archer", "type": "Unit", "portrait_key": "cavalry_archer"}
 	if unit is EnemyDummy:
 		return {"name": "Enemy Dummy", "type": "Unit", "portrait_key": "enemy_dummy"}
 	return {"name": "Enemy Unit", "type": "Unit", "portrait_key": "enemy_dummy"}
@@ -1105,6 +1229,8 @@ func _get_building_info(building: Building) -> Dictionary:
 		return {"name": "Barracks", "type": "Building", "portrait_key": "barracks"}
 	if building is Blacksmith:
 		return {"name": "Blacksmith", "type": "Building", "portrait_key": "blacksmith"}
+	if building is Stable:
+		return {"name": "Stable", "type": "Building", "portrait_key": "stable"}
 	if building is Shop:
 		return {"name": "Shop", "type": "Building", "portrait_key": "shop"}
 	if building is HeroAltar:

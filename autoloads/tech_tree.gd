@@ -13,6 +13,9 @@ const PLAYER_TEAM_ID: int = 0
 const ENEMY_TEAM_ID: int = TeamVisuals.ENEMY_TEAM_ID
 
 const BLACKSMITH_REQUIRES_TIER_2_MESSAGE := "Requires Command Center Tier 2"
+const STABLE_REQUIRES_TIER_2_AND_BLACKSMITH_MESSAGE := (
+	"Requires Command Center Tier 2 and Blacksmith"
+)
 const ADVANCED_UNIT_REQUIRES_BLACKSMITH_MESSAGE := "Requires Blacksmith"
 
 signal progression_changed(team_id: int)
@@ -184,6 +187,10 @@ func player_has_completed_blacksmith(team_id: int = PLAYER_TEAM_ID) -> bool:
 
 func can_build_blacksmith(team_id: int = PLAYER_TEAM_ID) -> bool:
 	return player_has_tier_2(team_id)
+
+
+func can_build_stable(team_id: int = PLAYER_TEAM_ID) -> bool:
+	return player_has_tier_2(team_id) and player_has_completed_blacksmith(team_id)
 
 
 func can_train_swordsman_or_archer(team_id: int = PLAYER_TEAM_ID) -> bool:

@@ -13,6 +13,7 @@ extends PanelContainer
 @onready var _build_farm_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildFarmButton
 @onready var _build_barracks_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBarracksButton
 @onready var _build_blacksmith_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildBlacksmithButton
+@onready var _build_stable_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildStableButton
 @onready var _build_shop_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildShopButton
 @onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
 @onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
@@ -113,6 +114,10 @@ extends PanelContainer
 @onready var _archer_range_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/BlacksmithPanel/ArcherRangeColumn/ArcherRangeButton
 )
+@onready var _stable_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/StablePanel
+@onready var _stable_training_row: HBoxContainer = (
+	$MarginContainer/HBoxContainer/RightPanel/StablePanel/StableTrainingRow
+)
 @onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
 @onready var _shop_status_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
@@ -147,7 +152,9 @@ var _selected_barracks: Barracks = null
 var _selected_blacksmith: Blacksmith = null
 var _selected_shop: Shop = null
 var _selected_hero_altar: HeroAltar = null
+var _selected_stable: Stable = null
 var _tracked_barracks: Barracks = null
+var _tracked_stable: Stable = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_shop: Shop = null
 var _tracked_hero_altar: HeroAltar = null
@@ -187,6 +194,9 @@ const BUILD_MANAGER_SCRIPT := preload("res://scripts/systems/build_manager.gd")
 var _barracks_spearman_slot: ProductionIconSlot = null
 var _barracks_swordsman_slot: ProductionIconSlot = null
 var _barracks_archer_slot: ProductionIconSlot = null
+var _stable_heavy_cavalry_slot: ProductionIconSlot = null
+var _stable_light_cavalry_slot: ProductionIconSlot = null
+var _stable_cavalry_archer_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
 var _town_center_upgrade_slot: ProductionIconSlot = null
 var _hero_altar_slot: ProductionIconSlot = null
@@ -199,14 +209,18 @@ func _ready() -> void:
 	_barracks_panel.visible = false
 	_hero_altar_panel.visible = false
 	_barracks_training_row.visible = false
+	_stable_training_row.visible = false
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
+	_stable_training_row.visible = false
 	_shop_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
 	_build_blacksmith_button.visible = false
+	_build_stable_button.visible = false
 	_build_shop_button.visible = false
 	_build_tower_button.visible = false
 	_build_hero_altar_button.visible = false
@@ -226,6 +240,7 @@ func _ready() -> void:
 	_build_farm_button.pressed.connect(_on_build_farm_pressed)
 	_build_barracks_button.pressed.connect(_on_build_barracks_pressed)
 	_build_blacksmith_button.pressed.connect(_on_build_blacksmith_pressed)
+	_build_stable_button.pressed.connect(_on_build_stable_pressed)
 	_build_shop_button.pressed.connect(_on_build_shop_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
 	_build_hero_altar_button.pressed.connect(_on_build_hero_altar_pressed)
@@ -308,6 +323,15 @@ func _setup_production_icon_slots() -> void:
 		Barracks.TRAIN_ID_SWORDSMAN, _barracks_training_row
 	)
 	_barracks_archer_slot = _create_production_icon_slot(Barracks.TRAIN_ID_ARCHER, _barracks_training_row)
+	_stable_heavy_cavalry_slot = _create_production_icon_slot(
+		Stable.TRAIN_ID_HEAVY_CAVALRY, _stable_training_row
+	)
+	_stable_light_cavalry_slot = _create_production_icon_slot(
+		Stable.TRAIN_ID_LIGHT_CAVALRY, _stable_training_row
+	)
+	_stable_cavalry_archer_slot = _create_production_icon_slot(
+		Stable.TRAIN_ID_CAVALRY_ARCHER, _stable_training_row
+	)
 	_town_center_worker_slot = _create_production_icon_slot(
 		CommandCenter.TRAIN_ID_WORKER, _buttons_row
 	)
@@ -338,6 +362,11 @@ func _setup_build_icon_slots() -> void:
 		[
 			BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH,
 			_build_blacksmith_button,
+			"",
+		],
+		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_STABLE,
+			_build_stable_button,
 			"",
 		],
 		[
@@ -413,6 +442,8 @@ func _on_build_slot_clicked(placement_id: StringName) -> void:
 			_on_build_barracks_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH:
 			_on_build_blacksmith_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_STABLE:
+			_on_build_stable_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_SHOP:
 			_on_build_shop_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER:
@@ -454,6 +485,10 @@ func _set_build_icon_visibility(show_worker_build: bool) -> void:
 	_set_legacy_build_button_visibility(
 		_build_blacksmith_button,
 		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_BLACKSMITH)
+	)
+	_set_legacy_build_button_visibility(
+		_build_stable_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_STABLE)
 	)
 	_set_legacy_build_button_visibility(
 		_build_shop_button,
@@ -530,6 +565,9 @@ func _production_icons_visible() -> bool:
 	return (
 		(_barracks_spearman_slot != null and _barracks_spearman_slot.visible)
 		or (_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
+		or (_stable_heavy_cavalry_slot != null and _stable_heavy_cavalry_slot.visible)
+		or (_stable_light_cavalry_slot != null and _stable_light_cavalry_slot.visible)
+		or (_stable_cavalry_archer_slot != null and _stable_cavalry_archer_slot.visible)
 		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
 		or (_town_center_upgrade_slot != null and _town_center_upgrade_slot.visible)
 		or (_hero_altar_slot != null and _hero_altar_slot.visible)
@@ -543,6 +581,66 @@ func _refresh_all_production_slots() -> void:
 		_refresh_town_center_production_slot()
 	if _selected_hero_altar != null and is_instance_valid(_selected_hero_altar):
 		_refresh_hero_altar_production_slot()
+	if _selected_stable != null and is_instance_valid(_selected_stable):
+		_refresh_stable_production_slots()
+
+
+func _refresh_stable_production_slots() -> void:
+	if (
+		_stable_heavy_cavalry_slot == null
+		or _stable_light_cavalry_slot == null
+		or _stable_cavalry_archer_slot == null
+	):
+		return
+
+	if _selected_stable == null or not is_instance_valid(_selected_stable):
+		return
+
+	var stable: Stable = _selected_stable
+	_stable_heavy_cavalry_slot.set_queue_count(stable.get_heavy_cavalry_queue_count())
+	_stable_heavy_cavalry_slot.set_infinite_enabled(
+		stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY)
+	)
+	_stable_heavy_cavalry_slot.set_training_progress(
+		stable.get_active_unit_training_progress(),
+		stable.is_training_heavy_cavalry()
+	)
+	_stable_heavy_cavalry_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_HEAVY_CAVALRY)
+		).is_empty()
+	)
+
+	_stable_light_cavalry_slot.set_queue_count(stable.get_light_cavalry_queue_count())
+	_stable_light_cavalry_slot.set_infinite_enabled(
+		stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY)
+	)
+	_stable_light_cavalry_slot.set_training_progress(
+		stable.get_active_unit_training_progress(),
+		stable.is_training_light_cavalry()
+	)
+	_stable_light_cavalry_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_LIGHT_CAVALRY)
+		).is_empty()
+	)
+
+	_stable_cavalry_archer_slot.set_queue_count(stable.get_cavalry_archer_queue_count())
+	_stable_cavalry_archer_slot.set_infinite_enabled(
+		stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER)
+	)
+	_stable_cavalry_archer_slot.set_training_progress(
+		stable.get_active_unit_training_progress(),
+		stable.is_training_cavalry_archer()
+	)
+	_stable_cavalry_archer_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER)
+		).is_empty()
+	)
 
 
 func _refresh_barracks_production_slots() -> void:
@@ -672,7 +770,8 @@ func _should_use_legacy_train_button(slot: ProductionIconSlot) -> bool:
 func _set_production_icon_visibility(
 	show_barracks: bool,
 	show_town_center: bool,
-	show_hero_altar: bool
+	show_hero_altar: bool,
+	show_stable: bool = false
 ) -> void:
 	if not USE_PRODUCTION_ICON_SLOTS:
 		return
@@ -683,6 +782,12 @@ func _set_production_icon_visibility(
 		_barracks_swordsman_slot.visible = show_barracks
 	if _barracks_archer_slot != null:
 		_barracks_archer_slot.visible = show_barracks
+	if _stable_heavy_cavalry_slot != null:
+		_stable_heavy_cavalry_slot.visible = show_stable
+	if _stable_light_cavalry_slot != null:
+		_stable_light_cavalry_slot.visible = show_stable
+	if _stable_cavalry_archer_slot != null:
+		_stable_cavalry_archer_slot.visible = show_stable
 	if _town_center_worker_slot != null:
 		_town_center_worker_slot.visible = show_town_center
 	if _town_center_upgrade_slot != null:
@@ -706,6 +811,8 @@ func _set_production_icon_visibility(
 
 	if show_barracks:
 		_refresh_barracks_production_slots()
+	if show_stable:
+		_refresh_stable_production_slots()
 	if show_town_center:
 		_refresh_town_center_production_slot()
 	if show_hero_altar:
@@ -763,6 +870,24 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 			return
 
 		_selected_hero_altar.try_train_hero()
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
+		if _selected_stable == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_stable.try_train_heavy_cavalry()
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
+		if _selected_stable == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_stable.try_train_light_cavalry()
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
+		if _selected_stable == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_stable.try_train_cavalry_archer()
 	else:
 		return
 
@@ -792,6 +917,12 @@ func _handle_production_toggle_repeat(train_id: StringName) -> void:
 		_selected_barracks.try_train_archer_with_repeat(true)
 	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
 		_selected_command_center.try_train_worker_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY and _selected_stable != null:
+		_selected_stable.try_train_heavy_cavalry_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY and _selected_stable != null:
+		_selected_stable.try_train_light_cavalry_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
+		_selected_stable.try_train_cavalry_archer_with_repeat(true)
 
 
 func _disable_production_repeat(train_id: StringName) -> void:
@@ -807,6 +938,15 @@ func _disable_production_repeat(train_id: StringName) -> void:
 	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
 		if _selected_command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER):
 			_selected_command_center.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY and _selected_stable != null:
+		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY):
+			_selected_stable.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY and _selected_stable != null:
+		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY):
+			_selected_stable.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
+		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER):
+			_selected_stable.set_repeat_training(false)
 
 
 func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
@@ -816,6 +956,12 @@ func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
 		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
 	elif train_id == Barracks.TRAIN_ID_ARCHER:
 		_cancel_barracks_unit_type(_selected_barracks, train_id, cancel_amount)
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
+		_cancel_stable_unit_type(_selected_stable, train_id, cancel_amount)
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
+		_cancel_stable_unit_type(_selected_stable, train_id, cancel_amount)
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
+		_cancel_stable_unit_type(_selected_stable, train_id, cancel_amount)
 	elif train_id == CommandCenter.TRAIN_ID_WORKER:
 		_cancel_worker_units(cancel_amount)
 	elif train_id == &"hero":
@@ -848,6 +994,35 @@ func _cancel_barracks_unit_type(barracks: Barracks, train_id: StringName, cancel
 				cancelled = barracks.cancel_swordsman_training_at(type_slot_index)
 			Barracks.TRAIN_ID_ARCHER:
 				cancelled = barracks.cancel_archer_training_at(type_slot_index)
+		if not cancelled:
+			break
+
+
+func _cancel_stable_unit_type(stable: Stable, train_id: StringName, cancel_amount: int) -> void:
+	if stable == null or not is_instance_valid(stable):
+		return
+
+	for _unused: int in cancel_amount:
+		var type_count: int = 0
+		match train_id:
+			Stable.TRAIN_ID_HEAVY_CAVALRY:
+				type_count = stable.get_heavy_cavalry_queue_count()
+			Stable.TRAIN_ID_LIGHT_CAVALRY:
+				type_count = stable.get_light_cavalry_queue_count()
+			Stable.TRAIN_ID_CAVALRY_ARCHER:
+				type_count = stable.get_cavalry_archer_queue_count()
+		if type_count <= 0:
+			break
+
+		var type_slot_index: int = type_count - 1
+		var cancelled: bool = false
+		match train_id:
+			Stable.TRAIN_ID_HEAVY_CAVALRY:
+				cancelled = stable.cancel_heavy_cavalry_training_at(type_slot_index)
+			Stable.TRAIN_ID_LIGHT_CAVALRY:
+				cancelled = stable.cancel_light_cavalry_training_at(type_slot_index)
+			Stable.TRAIN_ID_CAVALRY_ARCHER:
+				cancelled = stable.cancel_cavalry_archer_training_at(type_slot_index)
 		if not cancelled:
 			break
 
@@ -887,6 +1062,12 @@ func _get_production_slot_tooltip(train_id: StringName) -> String:
 			base_tooltip = _get_train_swordsman_tooltip()
 		Barracks.TRAIN_ID_ARCHER:
 			base_tooltip = _get_train_archer_tooltip()
+		Stable.TRAIN_ID_HEAVY_CAVALRY:
+			base_tooltip = _get_train_heavy_cavalry_tooltip()
+		Stable.TRAIN_ID_LIGHT_CAVALRY:
+			base_tooltip = _get_train_light_cavalry_tooltip()
+		Stable.TRAIN_ID_CAVALRY_ARCHER:
+			base_tooltip = _get_train_cavalry_archer_tooltip()
 		CommandCenter.TRAIN_ID_WORKER:
 			base_tooltip = _get_train_worker_tooltip()
 		CommandCenter.UPGRADE_ID_TIER:
@@ -1870,6 +2051,7 @@ func _on_execute_upgrade_pressed() -> void:
 func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_worker_queue_signal()
 	_disconnect_barracks_signals()
+	_disconnect_stable_signals()
 	_disconnect_hero_altar_signals()
 	_disconnect_blacksmith_signals()
 	_disconnect_shop_signals()
@@ -1904,6 +2086,19 @@ func _on_building_selection_changed(building: Building) -> void:
 		_clear_queue_row(_swordsman_queue_row)
 		_clear_queue_row(_archer_queue_row)
 
+	if building is Stable and is_instance_valid(building):
+		_tracked_stable = building as Stable
+		_tracked_stable.building_state_changed.connect(_on_stable_state_changed)
+		_tracked_stable.heavy_cavalry_queue_changed.connect(_on_stable_queue_changed)
+		_tracked_stable.light_cavalry_queue_changed.connect(_on_stable_queue_changed)
+		_tracked_stable.cavalry_archer_queue_changed.connect(_on_stable_queue_changed)
+		if _tracked_stable.has_signal("training_queue_changed"):
+			_tracked_stable.training_queue_changed.connect(_on_stable_training_queue_changed)
+		_tracked_stable.repeat_state_changed.connect(_on_production_repeat_state_changed)
+		_on_stable_training_queue_changed()
+	else:
+		_tracked_stable = null
+
 	if building is HeroAltar and is_instance_valid(building):
 		_tracked_hero_altar = building as HeroAltar
 		_tracked_hero_altar.building_state_changed.connect(_on_hero_altar_state_changed)
@@ -1932,6 +2127,22 @@ func _on_building_selection_changed(building: Building) -> void:
 
 func _on_barracks_state_changed(_state: StringName) -> void:
 	_refresh_command_visibility()
+
+
+func _on_stable_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _on_stable_queue_changed(_queue_count: int) -> void:
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_stable_production_slots()
+
+
+func _on_stable_training_queue_changed() -> void:
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_stable_production_slots()
+	else:
+		_update_auto_training_label()
 
 
 func _on_blacksmith_state_changed(_state: StringName) -> void:
@@ -2005,6 +2216,10 @@ func _refresh_command_visibility() -> void:
 		selected_building is Blacksmith
 		and (selected_building as Blacksmith).can_research()
 	)
+	var show_stable_commands: bool = (
+		selected_building is Stable
+		and (selected_building as Stable).can_show_commands()
+	)
 	var show_shop_items: bool = (
 		selected_building is Shop
 		and (selected_building as Shop).can_show_purchase_ui()
@@ -2015,6 +2230,7 @@ func _refresh_command_visibility() -> void:
 	_selected_blacksmith = selected_building as Blacksmith if show_blacksmith_upgrades else null
 	_selected_shop = selected_building as Shop if show_shop_items else null
 	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
+	_selected_stable = selected_building as Stable if show_stable_commands else null
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
@@ -2050,7 +2266,7 @@ func _refresh_command_visibility() -> void:
 	var single_hero: bool = selected_units.size() == 1 and single_unit is Hero
 	var single_combat_unit: bool = (
 		selected_units.size() == 1
-		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is Hero)
+		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is HeavyCavalry or single_unit is LightCavalry or single_unit is CavalryArcher or single_unit is Hero)
 	)
 
 	if single_worker:
@@ -2067,6 +2283,9 @@ func _refresh_command_visibility() -> void:
 		_set_tracked_hero(null)
 	elif show_blacksmith_upgrades:
 		_apply_blacksmith_command_visibility()
+		_set_tracked_hero(null)
+	elif show_stable_commands:
+		_apply_stable_command_visibility()
 		_set_tracked_hero(null)
 	elif show_shop_items:
 		_apply_shop_command_visibility()
@@ -2089,6 +2308,8 @@ func _refresh_command_visibility() -> void:
 	_hero_altar_panel.visible = show_hero_altar_training
 	_hero_altar_training_row.visible = show_hero_altar_training
 	_blacksmith_panel.visible = show_blacksmith_upgrades
+	_stable_panel.visible = show_stable_commands
+	_stable_training_row.visible = show_stable_commands
 	_shop_panel.visible = show_shop_items
 	_hero_panel.visible = single_hero
 
@@ -2109,6 +2330,8 @@ func _refresh_command_visibility() -> void:
 			_rebuild_swordsman_queue_slots()
 			_rebuild_archer_queue_slots()
 		_update_barracks_train_button_states()
+	if show_stable_commands:
+		_refresh_stable_production_slots()
 	if show_hero_altar_training:
 		if not USE_PRODUCTION_ICON_SLOTS:
 			_rebuild_hero_queue_slots()
@@ -2122,7 +2345,7 @@ func _refresh_command_visibility() -> void:
 		_clear_queue_row(_archer_queue_row)
 
 	_set_production_icon_visibility(
-		show_barracks_training, show_town_center_commands, show_hero_altar_training
+		show_barracks_training, show_town_center_commands, show_hero_altar_training, show_stable_commands
 	)
 
 	_update_auto_training_label()
@@ -2133,6 +2356,7 @@ func _refresh_command_visibility() -> void:
 		or show_barracks_training
 		or show_hero_altar_training
 		or show_blacksmith_upgrades
+		or show_stable_commands
 		or show_shop_items
 		or single_combat_unit
 	)
@@ -2160,6 +2384,7 @@ func _apply_hero_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
@@ -2175,6 +2400,7 @@ func _apply_worker_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
@@ -2190,6 +2416,7 @@ func _apply_combat_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
@@ -2205,6 +2432,7 @@ func _apply_barracks_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2219,6 +2447,7 @@ func _apply_hero_altar_command_visibility() -> void:
 	_hero_altar_panel.visible = true
 	_hero_altar_training_row.visible = true
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2233,6 +2462,7 @@ func _apply_town_center_command_visibility() -> void:
 	_hero_altar_panel.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2248,11 +2478,33 @@ func _apply_blacksmith_command_visibility() -> void:
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_blacksmith_panel.visible = true
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
 	_clear_queue_row(_hero_queue_row)
+
+
+func _apply_stable_command_visibility() -> void:
+	_set_build_icon_visibility(false)
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_hero_panel.visible = false
+	_blacksmith_panel.visible = false
+	_stable_panel.visible = true
+	_stable_training_row.visible = true
+	_shop_panel.visible = false
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
+	_refresh_stable_production_slots()
 
 
 func _apply_shop_command_visibility() -> void:
@@ -2266,6 +2518,7 @@ func _apply_shop_command_visibility() -> void:
 	_hero_altar_training_row.visible = false
 	_hero_panel.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = true
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
@@ -2279,8 +2532,10 @@ func _apply_hidden_command_buttons() -> void:
 	_attack_button.visible = false
 	_buttons_row.visible = false
 	_barracks_training_row.visible = false
+	_stable_training_row.visible = false
 	_hero_altar_training_row.visible = false
 	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_hero_panel.visible = false
 
@@ -2372,6 +2627,32 @@ func _disconnect_barracks_signals() -> void:
 	_tracked_barracks = null
 
 
+func _disconnect_stable_signals() -> void:
+	if _tracked_stable != null and is_instance_valid(_tracked_stable):
+		if _tracked_stable.building_state_changed.is_connected(_on_stable_state_changed):
+			_tracked_stable.building_state_changed.disconnect(_on_stable_state_changed)
+
+		if _tracked_stable.heavy_cavalry_queue_changed.is_connected(_on_stable_queue_changed):
+			_tracked_stable.heavy_cavalry_queue_changed.disconnect(_on_stable_queue_changed)
+
+		if _tracked_stable.light_cavalry_queue_changed.is_connected(_on_stable_queue_changed):
+			_tracked_stable.light_cavalry_queue_changed.disconnect(_on_stable_queue_changed)
+
+		if _tracked_stable.cavalry_archer_queue_changed.is_connected(_on_stable_queue_changed):
+			_tracked_stable.cavalry_archer_queue_changed.disconnect(_on_stable_queue_changed)
+
+		if (
+			_tracked_stable.has_signal("training_queue_changed")
+			and _tracked_stable.training_queue_changed.is_connected(_on_stable_training_queue_changed)
+		):
+			_tracked_stable.training_queue_changed.disconnect(_on_stable_training_queue_changed)
+
+		if _tracked_stable.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
+			_tracked_stable.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+
+	_tracked_stable = null
+
+
 func _disconnect_hero_altar_signals() -> void:
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
 		if _tracked_hero_altar.building_state_changed.is_connected(_on_hero_altar_state_changed):
@@ -2424,6 +2705,14 @@ func _on_build_blacksmith_pressed() -> void:
 		return
 
 	build_manager.start_blacksmith_placement()
+
+
+func _on_build_stable_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_stable_placement()
 
 
 func _on_build_shop_pressed() -> void:
@@ -2511,6 +2800,7 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_build_farm_button)
 	_clear_control_tooltip(_build_barracks_button)
 	_clear_control_tooltip(_build_blacksmith_button)
+	_clear_control_tooltip(_build_stable_button)
 	_clear_control_tooltip(_build_shop_button)
 	_clear_control_tooltip(_build_tower_button)
 	_clear_control_tooltip(_build_hero_altar_button)
@@ -2552,6 +2842,14 @@ func _setup_command_tooltips() -> void:
 			return TooltipFormatter.format_build_placement(
 				BUILD_MANAGER.PLACEMENT_BLACKSMITH,
 				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_BLACKSMITH)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_stable_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_STABLE,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_STABLE)
 			)
 	)
 	TooltipManager.bind_control(
@@ -2760,6 +3058,51 @@ func _get_train_archer_tooltip() -> String:
 			Barracks.TRAIN_ID_ARCHER,
 			Barracks.TRAIN_GOLD_COST,
 			Barracks.TRAIN_FOOD_COST
+		)
+	)
+
+
+func _get_train_heavy_cavalry_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Heavy Cavalry",
+		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
+		0,
+		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
+		Stable.get_unit_train_seconds(Stable.TRAIN_ID_HEAVY_CAVALRY),
+		Stable.TRAIN_ID_HEAVY_CAVALRY,
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_HEAVY_CAVALRY)
+		)
+	)
+
+
+func _get_train_light_cavalry_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Light Cavalry",
+		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
+		0,
+		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
+		Stable.get_unit_train_seconds(Stable.TRAIN_ID_LIGHT_CAVALRY),
+		Stable.TRAIN_ID_LIGHT_CAVALRY,
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_LIGHT_CAVALRY)
+		)
+	)
+
+
+func _get_train_cavalry_archer_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Cavalry Archer",
+		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
+		0,
+		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
+		Stable.get_unit_train_seconds(Stable.TRAIN_ID_CAVALRY_ARCHER),
+		Stable.TRAIN_ID_CAVALRY_ARCHER,
+		TooltipFormatter.get_train_blocked_reason(
+			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
+			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER)
 		)
 	)
 

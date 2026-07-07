@@ -10,6 +10,9 @@ const UNIT_ROLE_DESCRIPTIONS: Dictionary = {
 	&"spearman": "Basic melee infantry with reach.",
 	&"swordsman": "Basic melee infantry.",
 	&"archer": "Ranged damage dealer.",
+	&"heavy_cavalry": "Armored heavy mounted melee.",
+	&"light_cavalry": "Fast light mounted melee.",
+	&"cavalry_archer": "Ranged mounted damage dealer.",
 	&"hero": "Powerful leader with abilities.",
 	&"enemy_dummy": "Training target.",
 	&"neutral_creep": "Neutral hostile unit.",
@@ -19,6 +22,7 @@ const BUILD_PLACEMENT_NAMES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: "Farm",
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Barracks",
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Blacksmith",
+	_BUILD_MANAGER.PLACEMENT_STABLE: "Stable",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Shop",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Tower",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Hero Altar",
@@ -29,6 +33,7 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_FARM: "Provides supply.",
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: "Trains Spearmen, Swordsmen, and Archers.",
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "Unlocks upgrades.",
+	_BUILD_MANAGER.PLACEMENT_STABLE: "Trains cavalry units.",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains/revives your Hero.",
@@ -37,6 +42,7 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 
 const BUILD_PLACEMENT_REQUIREMENTS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: ["Command Center Tier 2"],
+	_BUILD_MANAGER.PLACEMENT_STABLE: ["Command Center Tier 2", "Blacksmith"],
 }
 
 const TRAIN_DESCRIPTIONS: Dictionary = {
@@ -44,6 +50,9 @@ const TRAIN_DESCRIPTIONS: Dictionary = {
 	&"spearman": "Basic melee infantry with reach.",
 	&"swordsman": "Basic melee infantry.",
 	&"archer": "Ranged damage dealer.",
+	&"heavy_cavalry": "Armored heavy mounted melee.",
+	&"light_cavalry": "Fast light mounted melee.",
+	&"cavalry_archer": "Ranged mounted damage dealer.",
 	&"hero": "Powerful leader with abilities.",
 }
 
@@ -354,6 +363,11 @@ static func get_placement_costs(placement_id: StringName) -> Dictionary:
 				"gold": _BUILD_MANAGER.BLACKSMITH_GOLD_COST,
 				"wood": _BUILD_MANAGER.BLACKSMITH_WOOD_COST,
 			}
+		_BUILD_MANAGER.PLACEMENT_STABLE:
+			return {
+				"gold": _BUILD_MANAGER.STABLE_GOLD_COST,
+				"wood": _BUILD_MANAGER.STABLE_WOOD_COST,
+			}
 		_BUILD_MANAGER.PLACEMENT_SHOP:
 			return {
 				"gold": _BUILD_MANAGER.SHOP_GOLD_COST,
@@ -401,6 +415,10 @@ static func get_build_blocked_reason(placement_id: StringName) -> String:
 	if placement_id == _BUILD_MANAGER.PLACEMENT_BLACKSMITH:
 		if not TechTree.can_build_blacksmith():
 			return TechTree.BLACKSMITH_REQUIRES_TIER_2_MESSAGE
+
+	if placement_id == _BUILD_MANAGER.PLACEMENT_STABLE:
+		if not TechTree.can_build_stable():
+			return TechTree.STABLE_REQUIRES_TIER_2_AND_BLACKSMITH_MESSAGE
 
 	if ResourceManager.gold < costs.gold and ResourceManager.wood < costs.wood:
 		return "Need more gold and wood"
@@ -576,6 +594,12 @@ static func _get_unit_display_name(unit: Unit) -> String:
 		return "Swordsman"
 	if unit is Archer:
 		return "Archer"
+	if unit is HeavyCavalry:
+		return "Heavy Cavalry"
+	if unit is LightCavalry:
+		return "Light Cavalry"
+	if unit is CavalryArcher:
+		return "Cavalry Archer"
 	if unit is Hero:
 		return "Hero"
 	if unit is NeutralCreep:
@@ -612,6 +636,12 @@ static func _get_unit_role_description(unit: Unit) -> String:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"swordsman"])
 	if unit is Archer:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"archer"])
+	if unit is HeavyCavalry:
+		return String(UNIT_ROLE_DESCRIPTIONS[&"heavy_cavalry"])
+	if unit is LightCavalry:
+		return String(UNIT_ROLE_DESCRIPTIONS[&"light_cavalry"])
+	if unit is CavalryArcher:
+		return String(UNIT_ROLE_DESCRIPTIONS[&"cavalry_archer"])
 	if unit is Hero:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"hero"])
 	if unit is NeutralCreep:
@@ -624,8 +654,10 @@ static func _get_unit_role_description(unit: Unit) -> String:
 static func _get_unit_food_cost(unit: Unit) -> int:
 	if unit is Worker:
 		return CommandCenter.TRAIN_FOOD_COST
-	if unit is Spearman or unit is Swordsman or unit is Archer:
+	if unit is Spearman or unit is Swordsman or unit is Archer or unit is LightCavalry or unit is CavalryArcher:
 		return Barracks.TRAIN_FOOD_COST
+	if unit is HeavyCavalry:
+		return Stable.HEAVY_CAVALRY_TRAIN_FOOD_COST
 	if unit is Hero:
 		return HeroAltar.TRAIN_FOOD_COST
 	return 0

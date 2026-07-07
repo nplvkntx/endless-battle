@@ -116,7 +116,7 @@ func _initialize_population_from_scene() -> void:
 			continue
 		if node is Worker:
 			continue
-		if node is Spearman or node is Swordsman or node is Archer or node is Hero:
+		if node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero:
 			if node is Hero and not (node as Node).is_in_group(&"enemies"):
 				continue
 			supply_used += _get_unit_food_supply(node)

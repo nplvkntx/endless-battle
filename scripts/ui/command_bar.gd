@@ -93,6 +93,9 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 	if building is Blacksmith:
 		return (building as Blacksmith).can_research()
 
+	if building is Stable:
+		return (building as Stable).can_show_commands()
+
 	if building is Shop:
 		return (building as Shop).can_show_purchase_ui()
 

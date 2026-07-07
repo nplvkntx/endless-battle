@@ -155,7 +155,7 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 		return true
 
 	if target is Node and (target as Node).is_in_group(&"enemies"):
-		if target is Spearman or target is Swordsman or target is Archer or target is Worker or target is Hero:
+		if target is Spearman or target is Swordsman or target is Archer or target is HeavyCavalry or target is LightCavalry or target is CavalryArcher or target is Worker or target is Hero:
 			return true
 
 	return is_attackable_enemy_building(target)
@@ -431,7 +431,7 @@ static func get_enemy_attack_target_priority(
 			return ENEMY_ATTACK_PRIORITY_COMMAND_CENTER
 		if target is Tower:
 			return ENEMY_ATTACK_PRIORITY_TOWER
-		if target is Barracks:
+		if target is Barracks or target is Stable:
 			return ENEMY_ATTACK_PRIORITY_PRODUCTION_BUILDING
 		if target is HeroAltar or target is Shop or target is Blacksmith:
 			return ENEMY_ATTACK_PRIORITY_SUPPORT_BUILDING
@@ -446,7 +446,7 @@ static func get_enemy_attack_target_priority(
 			return ENEMY_ATTACK_PRIORITY_INVALID
 		return ENEMY_ATTACK_PRIORITY_WORKER
 
-	if target is Spearman or target is Swordsman or target is Archer or target is Hero:
+	if target is Spearman or target is Swordsman or target is Archer or target is HeavyCavalry or target is LightCavalry or target is CavalryArcher or target is Hero:
 		var retaliation_target: Node = CombatKillTracker.get_attacker(attacker)
 		if target == retaliation_target or distance <= attack_range:
 			return ENEMY_ATTACK_PRIORITY_ENGAGED_MILITARY
@@ -466,7 +466,7 @@ static func get_enemy_defense_target_priority(
 	if not is_attack_target_for_attacker(attacker, target):
 		return ENEMY_DEFENSE_PRIORITY_INVALID
 
-	if target is Spearman or target is Swordsman or target is Archer:
+	if target is Spearman or target is Swordsman or target is Archer or target is HeavyCavalry or target is LightCavalry or target is CavalryArcher:
 		return ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY
 
 	if target is Hero:
