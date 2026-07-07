@@ -431,7 +431,7 @@ static func get_enemy_attack_target_priority(
 			return ENEMY_ATTACK_PRIORITY_COMMAND_CENTER
 		if target is Tower:
 			return ENEMY_ATTACK_PRIORITY_TOWER
-		if target is Barracks or target is Stable:
+		if target is Barracks or target is Stable or target is ArtilleryDepot:
 			return ENEMY_ATTACK_PRIORITY_PRODUCTION_BUILDING
 		if target is HeroAltar or target is Shop or target is Blacksmith:
 			return ENEMY_ATTACK_PRIORITY_SUPPORT_BUILDING

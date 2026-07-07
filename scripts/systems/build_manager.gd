@@ -6,6 +6,7 @@ const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
 const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
 const PLACEMENT_STABLE: StringName = &"stable"
+const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
 const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_TOWER: StringName = &"tower"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
@@ -15,6 +16,7 @@ const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
 const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
+const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
 const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
@@ -27,6 +29,8 @@ const BLACKSMITH_GOLD_COST: int = 100
 const BLACKSMITH_WOOD_COST: int = 150
 const STABLE_GOLD_COST: int = 175
 const STABLE_WOOD_COST: int = 125
+const ARTILLERY_DEPOT_GOLD_COST: int = 225
+const ARTILLERY_DEPOT_WOOD_COST: int = 175
 const SHOP_GOLD_COST: int = 80
 const SHOP_WOOD_COST: int = 120
 const TOWER_GOLD_COST: int = 120
@@ -39,6 +43,7 @@ const FARM_GROUND_Y: float = 0.75
 const BARRACKS_GROUND_Y: float = 1.0
 const BLACKSMITH_GROUND_Y: float = 1.0
 const STABLE_GROUND_Y: float = 1.0
+const ARTILLERY_DEPOT_GROUND_Y: float = 1.0
 const SHOP_GROUND_Y: float = 1.0
 const TOWER_GROUND_Y: float = 1.5
 const HERO_ALTAR_GROUND_Y: float = 1.25
@@ -160,6 +165,14 @@ func start_stable_placement() -> void:
 	_start_placement(PLACEMENT_STABLE)
 
 
+func start_artillery_depot_placement() -> void:
+	if not TechTree.can_build_artillery_depot():
+		ResourceManager.show_feedback(TechTree.ARTILLERY_DEPOT_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE)
+		return
+
+	_start_placement(PLACEMENT_ARTILLERY_DEPOT)
+
+
 func start_shop_placement() -> void:
 	_start_placement(PLACEMENT_SHOP)
 
@@ -235,6 +248,10 @@ func _place_building() -> void:
 		ResourceManager.show_feedback(TechTree.STABLE_REQUIRES_TIER_2_AND_BLACKSMITH_MESSAGE)
 		return
 
+	if _active_placement == PLACEMENT_ARTILLERY_DEPOT and not TechTree.can_build_artillery_depot():
+		ResourceManager.show_feedback(TechTree.ARTILLERY_DEPOT_REQUIRES_TIER_3_AND_BLACKSMITH_MESSAGE)
+		return
+
 	var gold_cost: int = 0
 	var wood_cost: int = 0
 	match _active_placement:
@@ -250,6 +267,9 @@ func _place_building() -> void:
 		PLACEMENT_STABLE:
 			gold_cost = STABLE_GOLD_COST
 			wood_cost = STABLE_WOOD_COST
+		PLACEMENT_ARTILLERY_DEPOT:
+			gold_cost = ARTILLERY_DEPOT_GOLD_COST
+			wood_cost = ARTILLERY_DEPOT_WOOD_COST
 		PLACEMENT_SHOP:
 			gold_cost = SHOP_GOLD_COST
 			wood_cost = SHOP_WOOD_COST
@@ -304,6 +324,8 @@ func _get_building_scene(placement_type: StringName) -> PackedScene:
 			return BLACKSMITH_SCENE
 		PLACEMENT_STABLE:
 			return STABLE_SCENE
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_SCENE
 		PLACEMENT_SHOP:
 			return SHOP_SCENE
 		PLACEMENT_TOWER:
@@ -326,6 +348,8 @@ func _get_ground_y(placement_type: StringName) -> float:
 			return BLACKSMITH_GROUND_Y
 		PLACEMENT_STABLE:
 			return STABLE_GROUND_Y
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_GROUND_Y
 		PLACEMENT_SHOP:
 			return SHOP_GROUND_Y
 		PLACEMENT_TOWER:
@@ -443,6 +467,9 @@ func _is_placement_valid_at(position: Vector3) -> bool:
 		return false
 
 	if _active_placement == PLACEMENT_STABLE and not TechTree.can_build_stable():
+		return false
+
+	if _active_placement == PLACEMENT_ARTILLERY_DEPOT and not TechTree.can_build_artillery_depot():
 		return false
 
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)

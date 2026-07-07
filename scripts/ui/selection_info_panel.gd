@@ -56,6 +56,7 @@ const PORTRAIT_STYLES: Dictionary = {
 	"barracks": {"color": Color(0.5, 0.32, 0.22, 1), "label": "B"},
 	"blacksmith": {"color": Color(0.58, 0.42, 0.22, 1), "label": "BS"},
 	"stable": {"color": Color(0.42, 0.48, 0.28, 1), "label": "St"},
+	"artillery_depot": {"color": Color(0.34, 0.38, 0.3, 1), "label": "AD"},
 	"shop": {"color": Color(0.72, 0.48, 0.22, 1), "label": "Sh"},
 	"hero_altar": {"color": Color(0.55, 0.35, 0.75, 1), "label": "HA"},
 	"farm": {"color": Color(0.45, 0.7, 0.25, 1), "label": "F"},
@@ -1231,6 +1232,8 @@ func _get_building_info(building: Building) -> Dictionary:
 		return {"name": "Blacksmith", "type": "Building", "portrait_key": "blacksmith"}
 	if building is Stable:
 		return {"name": "Stable", "type": "Building", "portrait_key": "stable"}
+	if building is ArtilleryDepot:
+		return {"name": "Artillery Depot", "type": "Building", "portrait_key": "artillery_depot"}
 	if building is Shop:
 		return {"name": "Shop", "type": "Building", "portrait_key": "shop"}
 	if building is HeroAltar:

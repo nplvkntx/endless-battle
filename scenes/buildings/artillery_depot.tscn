@@ -1,0 +1,154 @@
+[gd_scene format=3 uid="uid://dwyy81npybm1m"]
+
+[ext_resource type="Script" path="res://scripts/buildings/artillery_depot.gd" id="1_artillery_depot"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stone"]
+albedo_color = Color(0.34, 0.34, 0.38, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hall"]
+albedo_color = Color(0.38, 0.4, 0.42, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_roof"]
+albedo_color = Color(0.28, 0.34, 0.24, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_shed"]
+albedo_color = Color(0.24, 0.26, 0.28, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_metal"]
+albedo_color = Color(0.22, 0.24, 0.27, 1)
+metallic = 0.35
+roughness = 0.55
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wood"]
+albedo_color = Color(0.42, 0.3, 0.16, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_interior"]
+albedo_color = Color(0.14, 0.15, 0.16, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_placeholder"]
+size = Vector3(3.2, 1.05, 2.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hall"]
+size = Vector3(2.6, 1.0, 1.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_roof"]
+size = Vector3(3.1, 0.28, 2.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_shed"]
+size = Vector3(0.95, 0.75, 1.15)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bay"]
+size = Vector3(1.1, 0.85, 0.35)
+
+[sub_resource type="BoxMesh" id="BoxMesh_crate"]
+size = Vector3(0.45, 0.35, 0.45)
+
+[sub_resource type="BoxMesh" id="BoxMesh_chimney"]
+size = Vector3(0.35, 0.9, 0.35)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_barrel"]
+top_radius = 0.12
+bottom_radius = 0.14
+height = 1.35
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(3.4, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 2.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_artillery_depot"]
+size = Vector3(3.2, 1.6, 2.4)
+
+[node name="ArtilleryDepot" type="StaticBody3D" groups=["buildings"]]
+collision_layer = 4
+collision_mask = 3
+script = ExtResource("1_artillery_depot")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.12, 0)
+mesh = SubResource("BoxMesh_placeholder")
+surface_material_override/0 = SubResource("StandardMaterial3D_stone")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="MainHall" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.02, 0.15)
+mesh = SubResource("BoxMesh_hall")
+surface_material_override/0 = SubResource("StandardMaterial3D_hall")
+
+[node name="Roof" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.58, 0.1)
+mesh = SubResource("BoxMesh_roof")
+surface_material_override/0 = SubResource("StandardMaterial3D_roof")
+
+[node name="SideShed" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.05, -0.08, -0.45)
+mesh = SubResource("BoxMesh_shed")
+surface_material_override/0 = SubResource("StandardMaterial3D_shed")
+
+[node name="BayInterior" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55, -0.05, 0.95)
+mesh = SubResource("BoxMesh_bay")
+surface_material_override/0 = SubResource("StandardMaterial3D_interior")
+
+[node name="CannonBarrel" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0.95, 0.08, 0.95)
+mesh = SubResource("CylinderMesh_barrel")
+surface_material_override/0 = SubResource("StandardMaterial3D_metal")
+
+[node name="CrateStackA" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.75, -0.2, 0.75)
+mesh = SubResource("BoxMesh_crate")
+surface_material_override/0 = SubResource("StandardMaterial3D_wood")
+
+[node name="CrateStackB" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.75, 0.12, 0.75)
+mesh = SubResource("BoxMesh_crate")
+surface_material_override/0 = SubResource("StandardMaterial3D_wood")
+
+[node name="Chimney" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.05, 0.42, -0.35)
+mesh = SubResource("BoxMesh_chimney")
+surface_material_override/0 = SubResource("StandardMaterial3D_shed")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -1.35)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 1.35)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_artillery_depot")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 750

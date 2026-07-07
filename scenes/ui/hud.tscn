@@ -495,6 +495,11 @@ custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 text = "Build Stable"
 
+[node name="BuildArtilleryDepotButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Build Artillery Depot"
+
 [node name="BuildShopButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
@@ -668,6 +673,15 @@ theme_override_colors/font_color = Color(0.82, 0.84, 0.88, 1)
 theme_override_font_sizes/font_size = 10
 text = "No units available yet"
 horizontal_alignment = 1
+
+[node name="ArtilleryDepotPanel" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ArtilleryDepotTrainingRow" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ArtilleryDepotPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
 
 [node name="BlacksmithPanel" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
 visible = false

@@ -17,6 +17,7 @@ const _PLACEMENT_SCENES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: _BUILD_MANAGER.BARRACKS_SCENE,
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: _BUILD_MANAGER.BLACKSMITH_SCENE,
 	_BUILD_MANAGER.PLACEMENT_STABLE: _BUILD_MANAGER.STABLE_SCENE,
+	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: _BUILD_MANAGER.ARTILLERY_DEPOT_SCENE,
 	_BUILD_MANAGER.PLACEMENT_SHOP: _BUILD_MANAGER.SHOP_SCENE,
 	_BUILD_MANAGER.PLACEMENT_TOWER: _BUILD_MANAGER.TOWER_SCENE,
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: _BUILD_MANAGER.HERO_ALTAR_SCENE,
@@ -28,6 +29,7 @@ const _PORTRAIT_COLORS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: Color(0.5, 0.32, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: Color(0.58, 0.42, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_STABLE: Color(0.42, 0.48, 0.28, 1),
+	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: Color(0.34, 0.38, 0.3, 1),
 	_BUILD_MANAGER.PLACEMENT_SHOP: Color(0.72, 0.48, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_TOWER: Color(0.55, 0.58, 0.62, 1),
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: Color(0.55, 0.35, 0.75, 1),
@@ -39,6 +41,7 @@ const _INITIALS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_BARRACKS: "B",
 	_BUILD_MANAGER.PLACEMENT_BLACKSMITH: "BS",
 	_BUILD_MANAGER.PLACEMENT_STABLE: "St",
+	_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT: "AD",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Sh",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "T",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "HA",
@@ -204,6 +207,8 @@ static func _create_procedural_icon(placement_id: StringName) -> Texture2D:
 			_draw_blacksmith(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_STABLE:
 			_draw_stable(image, base_color)
+		_BUILD_MANAGER.PLACEMENT_ARTILLERY_DEPOT:
+			_draw_artillery_depot(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_SHOP:
 			_draw_shop(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_TOWER:
@@ -265,6 +270,17 @@ static func _draw_stable(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(10, 18, 28, 20), wall)
 	_fill_rect(image, Rect2i(8, 12, 32, 8), roof)
 	_fill_rect(image, Rect2i(20, 26, 8, 12), door)
+
+
+static func _draw_artillery_depot(image: Image, color: Color) -> void:
+	var wall := color
+	var roof := color.darkened(0.15)
+	var bay := color.darkened(0.35)
+	var barrel := Color(0.3, 0.32, 0.36, 1)
+	_fill_rect(image, Rect2i(8, 20, 32, 16), wall)
+	_fill_rect(image, Rect2i(6, 14, 36, 7), roof)
+	_fill_rect(image, Rect2i(24, 24, 12, 10), bay)
+	_fill_rect(image, Rect2i(28, 27, 14, 4), barrel)
 
 
 static func _draw_shop(image: Image, color: Color) -> void:
