@@ -16,6 +16,7 @@ const SELECTION_TYPE_ARCHER: StringName = &"archer"
 const SELECTION_TYPE_HEAVY_CAVALRY: StringName = &"heavy_cavalry"
 const SELECTION_TYPE_LIGHT_CAVALRY: StringName = &"light_cavalry"
 const SELECTION_TYPE_CAVALRY_ARCHER: StringName = &"cavalry_archer"
+const SELECTION_TYPE_CANNON: StringName = &"cannon"
 const SELECTION_TYPE_HERO: StringName = &"hero"
 const MULTI_SELECTION_WORKERS: StringName = &"workers"
 const MULTI_SELECTION_COMBAT: StringName = &"combat"
@@ -57,7 +58,7 @@ func get_multi_selection_ui_info() -> Dictionary:
 			continue
 		if unit is Worker:
 			has_worker = true
-		elif unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Hero:
+		elif unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Cannon or unit is Hero:
 			has_combat = true
 		else:
 			category = MULTI_SELECTION_OTHER
@@ -277,6 +278,12 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(selected_building as Stable).set_rally_point(stable_rally_position)
 		return
 
+	if selected_building is ArtilleryDepot:
+		var depot_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if depot_rally_position.is_finite():
+			(selected_building as ArtilleryDepot).set_rally_point(depot_rally_position)
+		return
+
 	if selected_units.is_empty():
 		return
 
@@ -346,6 +353,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 			(unit as LightCavalry).cancel_attack()
 		if unit is CavalryArcher:
 			(unit as CavalryArcher).cancel_attack()
+		if unit is Cannon:
+			(unit as Cannon).cancel_attack()
 		if unit is Hero:
 			(unit as Hero).cancel_attack()
 		unit.set_movement_target(move_targets[index])
@@ -361,7 +370,7 @@ func _dispatch_attack_command(target: Node3D) -> void:
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
-		if unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Hero:
+		if unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Cannon or unit is Hero:
 			military_units.append(unit)
 
 	if military_units.is_empty():
@@ -381,6 +390,8 @@ func _dispatch_attack_command(target: Node3D) -> void:
 			(unit as LightCavalry).command_attack(target, index)
 		elif unit is CavalryArcher:
 			(unit as CavalryArcher).command_attack(target, index)
+		elif unit is Cannon:
+			(unit as Cannon).command_attack(target, index)
 		elif unit is Hero:
 			(unit as Hero).command_attack(target, index)
 
@@ -412,6 +423,8 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 			(unit as LightCavalry).command_attack_move(move_targets[index])
 		elif unit is CavalryArcher:
 			(unit as CavalryArcher).command_attack_move(move_targets[index])
+		elif unit is Cannon:
+			(unit as Cannon).command_attack_move(move_targets[index])
 		elif unit is Hero:
 			(unit as Hero).command_attack_move(move_targets[index])
 		elif unit is Worker:
@@ -448,6 +461,8 @@ func _dispatch_construction_command(building: Building) -> void:
 			(unit as LightCavalry).cancel_attack()
 		elif unit is CavalryArcher:
 			(unit as CavalryArcher).cancel_attack()
+		elif unit is Cannon:
+			(unit as Cannon).cancel_attack()
 		elif unit is Hero:
 			(unit as Hero).cancel_attack()
 
@@ -1131,6 +1146,8 @@ func _get_unit_selection_group(unit: Unit) -> StringName:
 		return SELECTION_TYPE_LIGHT_CAVALRY
 	if unit is CavalryArcher:
 		return SELECTION_TYPE_CAVALRY_ARCHER
+	if unit is Cannon:
+		return SELECTION_TYPE_CANNON
 	if unit is Hero:
 		return SELECTION_TYPE_HERO
 	return &""

@@ -781,7 +781,7 @@ func _is_player_military_unit(node: Node) -> bool:
 	if CombatTargetValidation.is_enemy_faction(node):
 		return false
 
-	return node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero
+	return node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero
 
 
 func _begin_execute(target: Node3D) -> void:

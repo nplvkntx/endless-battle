@@ -421,6 +421,16 @@ func _apply_tier_visuals() -> void:
 		_tier3_marker.visible = command_center_tier >= 3
 
 
+## TEMPORARY DEVELOPMENT TEST SETUP — remove when fast cannon testing no longer needs instant Tier 3.
+func apply_dev_starting_tier_3() -> void:
+	if team_id == ENEMY_TEAM_ID or is_in_group(&"enemy_command_center"):
+		return
+
+	command_center_tier = MAX_TIER
+	_apply_tier_visuals()
+	tier_state_changed.emit()
+
+
 func _get_time_seconds() -> float:
 	return Time.get_ticks_msec() / 1000.0
 

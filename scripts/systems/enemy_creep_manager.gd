@@ -433,7 +433,7 @@ func _estimate_army_power(units: Array) -> int:
 			continue
 
 		var damage: int = int((unit as Object).get("attack_damage")) if "attack_damage" in unit else 0
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			power += int(float(current_health) * CREEP_RANGED_POWER_PER_HEALTH)
 		else:
 			power += int(float(current_health) * CREEP_MELEE_POWER_PER_HEALTH)

@@ -195,7 +195,7 @@ static func _estimate_player_or_enemy_power(units: Array) -> int:
 		if not unit is Node:
 			continue
 
-		if unit is Hero or unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher:
+		if unit is Hero or unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Cannon:
 			if CombatTargetValidation.is_enemy_faction(unit as Node):
 				if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
 					continue
@@ -218,7 +218,7 @@ static func _estimate_player_or_enemy_power(units: Array) -> int:
 			continue
 
 		var damage: int = int((unit as Object).get("attack_damage")) if "attack_damage" in unit else 0
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			power += int(float(current_health) * CREEP_RANGED_POWER_PER_HEALTH)
 		else:
 			power += int(float(current_health) * CREEP_MELEE_POWER_PER_HEALTH)
@@ -291,7 +291,7 @@ static func _is_player_military_unit(node: Node) -> bool:
 	if CombatTargetValidation.is_enemy_faction(node):
 		return false
 
-	if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero):
+	if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero):
 		return false
 
 	if node is Worker:
@@ -324,7 +324,7 @@ static func _estimate_army_power(units: Array) -> int:
 			continue
 
 		var damage: int = int((unit as Object).get("attack_damage")) if "attack_damage" in unit else 0
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			power += int(float(current_health) * CREEP_RANGED_POWER_PER_HEALTH)
 		else:
 			power += int(float(current_health) * CREEP_MELEE_POWER_PER_HEALTH)

@@ -1064,7 +1064,7 @@ static func _count_wave_composition(units: Array) -> Dictionary:
 			continue
 
 		non_hero_count += 1
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			ranged_count += 1
 		else:
 			melee_count += 1
@@ -1080,14 +1080,14 @@ static func _count_wave_composition(units: Array) -> Dictionary:
 
 static func _enemy_has_archer_capability(tree: SceneTree) -> bool:
 	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
-		if is_living_combat_unit(node) and (node is Archer or node is CavalryArcher):
+		if is_living_combat_unit(node) and (node is Archer or node is CavalryArcher or node is Cannon):
 			return true
 
 	return false
 
 
 static func is_combat_unit(node: Node) -> bool:
-	return node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero
+	return node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero
 
 
 static func is_hero_unit(node: Node) -> bool:
@@ -1658,7 +1658,7 @@ static func estimate_military_power(units: Array) -> int:
 			if "attack_damage" in unit
 			else 0
 		)
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			power += int(float(current_health) * DEFENSE_POWER_RANGED_HEALTH)
 		else:
 			power += int(float(current_health) * DEFENSE_POWER_MELEE_HEALTH)
@@ -1970,7 +1970,7 @@ static func _order_units_for_formation(units: Array) -> Array:
 
 		if is_hero_unit(unit as Node):
 			hero_units.append(unit)
-		elif unit is Archer or unit is CavalryArcher:
+		elif unit is Archer or unit is CavalryArcher or unit is Cannon:
 			ranged_units.append(unit)
 		else:
 			melee_units.append(unit)
@@ -2013,7 +2013,7 @@ static func _compute_attack_formation_targets(
 
 		if is_hero_unit(unit as Node):
 			hero_count += 1
-		elif unit is Archer or unit is CavalryArcher:
+		elif unit is Archer or unit is CavalryArcher or unit is Cannon:
 			ranged_count += 1
 		else:
 			melee_count += 1
@@ -2055,7 +2055,7 @@ static func _compute_attack_formation_targets(
 		if is_hero_unit(unit as Node):
 			candidate = hero_targets[hero_index]
 			hero_index += 1
-		elif unit is Archer or unit is CavalryArcher:
+		elif unit is Archer or unit is CavalryArcher or unit is Cannon:
 			candidate = ranged_targets[ranged_index]
 			ranged_index += 1
 		else:
@@ -2675,7 +2675,7 @@ static func _is_player_military_unit(node: Node) -> bool:
 	if CombatTargetValidation.is_enemy_faction(node):
 		return false
 
-	if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero):
+	if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero):
 		return false
 
 	return _has_positive_health(node)
@@ -3074,7 +3074,7 @@ static func _collect_living_player_combat_unit_nodes(tree: SceneTree) -> Array:
 			if node is Worker:
 				continue
 
-			if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero):
+			if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero):
 				continue
 
 			if not CombatTargetValidation.is_valid_combat_target(node):

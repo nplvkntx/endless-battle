@@ -15,6 +15,7 @@ static var _PORTRAIT_COLORS: Dictionary = {
 	&"heavy_cavalry": Color(0.28, 0.34, 0.52, 1),
 	&"light_cavalry": Color(0.72, 0.58, 0.28, 1),
 	&"cavalry_archer": Color(0.18, 0.58, 0.32, 1),
+	ArtilleryDepot.TRAIN_ID_CANNON: Color(0.32, 0.3, 0.24, 1),
 	&"hero": Color(0.85, 0.65, 0.15, 1),
 	CommandCenter.UPGRADE_ID_TIER: Color(0.72, 0.55, 0.18, 1),
 }
@@ -43,6 +44,8 @@ static func get_icon_texture(train_id: StringName) -> Texture2D:
 			_draw_light_cavalry(image, base_color)
 		Stable.TRAIN_ID_CAVALRY_ARCHER:
 			_draw_cavalry_archer(image, base_color)
+		ArtilleryDepot.TRAIN_ID_CANNON:
+			_draw_cannon(image, base_color)
 		&"hero":
 			_draw_hero(image, base_color)
 		CommandCenter.UPGRADE_ID_TIER:
@@ -121,6 +124,17 @@ static func _draw_cavalry_archer(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(18, 10, 12, 14), color)
 	_fill_rect(image, Rect2i(6, 14, 4, 16), bow)
 	_fill_rect(image, Rect2i(34, 14, 4, 16), bow)
+
+
+static func _draw_cannon(image: Image, color: Color) -> void:
+	var horse := Color(0.42, 0.28, 0.16, 1)
+	var barrel := Color(0.2, 0.22, 0.25, 1)
+	var wheel := color.darkened(0.2)
+	_fill_rect(image, Rect2i(8, 28, 20, 8), horse)
+	_fill_rect(image, Rect2i(26, 26, 14, 10), color.darkened(0.1))
+	_fill_rect(image, Rect2i(30, 18, 12, 4), barrel)
+	_fill_rect(image, Rect2i(24, 34, 6, 6), wheel)
+	_fill_rect(image, Rect2i(34, 34, 6, 6), wheel)
 
 
 static func _draw_hero(image: Image, color: Color) -> void:

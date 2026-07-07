@@ -332,7 +332,7 @@ func _count_player_military_near_hero(hero: Hero) -> int:
 			if CombatTargetValidation.is_enemy_faction(node):
 				continue
 
-			if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Hero):
+			if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero):
 				continue
 
 			if node is Worker:
@@ -667,7 +667,7 @@ func _log_wave_trigger_wait(
 	var melee_count: int = 0
 	var ranged_count: int = 0
 	for unit: Variant in non_hero_units:
-		if unit is Archer or unit is CavalryArcher:
+		if unit is Archer or unit is CavalryArcher or unit is Cannon:
 			ranged_count += 1
 		else:
 			melee_count += 1

@@ -13,6 +13,7 @@ const UNIT_ROLE_DESCRIPTIONS: Dictionary = {
 	&"heavy_cavalry": "Armored heavy mounted melee.",
 	&"light_cavalry": "Fast light mounted melee.",
 	&"cavalry_archer": "Ranged mounted damage dealer.",
+	ArtilleryDepot.TRAIN_ID_CANNON: "Long-range siege with splash damage.",
 	&"hero": "Powerful leader with abilities.",
 	&"enemy_dummy": "Training target.",
 	&"neutral_creep": "Neutral hostile unit.",
@@ -56,6 +57,7 @@ const TRAIN_DESCRIPTIONS: Dictionary = {
 	&"heavy_cavalry": "Armored heavy mounted melee.",
 	&"light_cavalry": "Fast light mounted melee.",
 	&"cavalry_archer": "Ranged mounted damage dealer.",
+	ArtilleryDepot.TRAIN_ID_CANNON: "Long-range siege with splash damage.",
 	&"hero": "Powerful leader with abilities.",
 }
 
@@ -612,6 +614,8 @@ static func _get_unit_display_name(unit: Unit) -> String:
 		return "Light Cavalry"
 	if unit is CavalryArcher:
 		return "Cavalry Archer"
+	if unit is Cannon:
+		return "Cannon"
 	if unit is Hero:
 		return "Hero"
 	if unit is NeutralCreep:
@@ -658,6 +662,8 @@ static func _get_unit_role_description(unit: Unit) -> String:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"light_cavalry"])
 	if unit is CavalryArcher:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"cavalry_archer"])
+	if unit is Cannon:
+		return String(UNIT_ROLE_DESCRIPTIONS[ArtilleryDepot.TRAIN_ID_CANNON])
 	if unit is Hero:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"hero"])
 	if unit is NeutralCreep:
@@ -672,6 +678,8 @@ static func _get_unit_food_cost(unit: Unit) -> int:
 		return CommandCenter.TRAIN_FOOD_COST
 	if unit is Spearman or unit is Swordsman or unit is Archer or unit is LightCavalry or unit is CavalryArcher:
 		return Barracks.TRAIN_FOOD_COST
+	if unit is Cannon:
+		return ArtilleryDepot.CANNON_TRAIN_FOOD_COST
 	if unit is HeavyCavalry:
 		return Stable.HEAVY_CAVALRY_TRAIN_FOOD_COST
 	if unit is Hero:

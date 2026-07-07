@@ -165,6 +165,7 @@ var _selected_stable: Stable = null
 var _selected_artillery_depot: ArtilleryDepot = null
 var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
+var _tracked_artillery_depot: ArtilleryDepot = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_shop: Shop = null
 var _tracked_hero_altar: HeroAltar = null
@@ -207,6 +208,7 @@ var _barracks_archer_slot: ProductionIconSlot = null
 var _stable_heavy_cavalry_slot: ProductionIconSlot = null
 var _stable_light_cavalry_slot: ProductionIconSlot = null
 var _stable_cavalry_archer_slot: ProductionIconSlot = null
+var _artillery_depot_cannon_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
 var _town_center_upgrade_slot: ProductionIconSlot = null
 var _hero_altar_slot: ProductionIconSlot = null
@@ -345,6 +347,9 @@ func _setup_production_icon_slots() -> void:
 	)
 	_stable_cavalry_archer_slot = _create_production_icon_slot(
 		Stable.TRAIN_ID_CAVALRY_ARCHER, _stable_training_row
+	)
+	_artillery_depot_cannon_slot = _create_production_icon_slot(
+		ArtilleryDepot.TRAIN_ID_CANNON, _artillery_depot_training_row
 	)
 	_town_center_worker_slot = _create_production_icon_slot(
 		CommandCenter.TRAIN_ID_WORKER, _buttons_row
@@ -595,6 +600,7 @@ func _production_icons_visible() -> bool:
 		or (_stable_heavy_cavalry_slot != null and _stable_heavy_cavalry_slot.visible)
 		or (_stable_light_cavalry_slot != null and _stable_light_cavalry_slot.visible)
 		or (_stable_cavalry_archer_slot != null and _stable_cavalry_archer_slot.visible)
+		or (_artillery_depot_cannon_slot != null and _artillery_depot_cannon_slot.visible)
 		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
 		or (_town_center_upgrade_slot != null and _town_center_upgrade_slot.visible)
 		or (_hero_altar_slot != null and _hero_altar_slot.visible)
@@ -610,6 +616,32 @@ func _refresh_all_production_slots() -> void:
 		_refresh_hero_altar_production_slot()
 	if _selected_stable != null and is_instance_valid(_selected_stable):
 		_refresh_stable_production_slots()
+	if _selected_artillery_depot != null and is_instance_valid(_selected_artillery_depot):
+		_refresh_artillery_depot_production_slots()
+
+
+func _refresh_artillery_depot_production_slots() -> void:
+	if _artillery_depot_cannon_slot == null:
+		return
+
+	if _selected_artillery_depot == null or not is_instance_valid(_selected_artillery_depot):
+		return
+
+	var depot: ArtilleryDepot = _selected_artillery_depot
+	_artillery_depot_cannon_slot.set_queue_count(depot.get_cannon_queue_count())
+	_artillery_depot_cannon_slot.set_infinite_enabled(
+		depot.is_repeat_training_enabled(ArtilleryDepot.TRAIN_ID_CANNON)
+	)
+	_artillery_depot_cannon_slot.set_training_progress(
+		depot.get_active_unit_training_progress(),
+		depot.is_training_cannon()
+	)
+	_artillery_depot_cannon_slot.set_affordable(
+		TooltipFormatter.get_train_blocked_reason(
+			ArtilleryDepot.get_unit_train_gold_cost(ArtilleryDepot.TRAIN_ID_CANNON),
+			ArtilleryDepot.get_unit_train_food_cost(ArtilleryDepot.TRAIN_ID_CANNON)
+		).is_empty()
+	)
 
 
 func _refresh_stable_production_slots() -> void:
@@ -798,7 +830,8 @@ func _set_production_icon_visibility(
 	show_barracks: bool,
 	show_town_center: bool,
 	show_hero_altar: bool,
-	show_stable: bool = false
+	show_stable: bool = false,
+	show_artillery_depot: bool = false
 ) -> void:
 	if not USE_PRODUCTION_ICON_SLOTS:
 		return
@@ -815,6 +848,8 @@ func _set_production_icon_visibility(
 		_stable_light_cavalry_slot.visible = show_stable
 	if _stable_cavalry_archer_slot != null:
 		_stable_cavalry_archer_slot.visible = show_stable
+	if _artillery_depot_cannon_slot != null:
+		_artillery_depot_cannon_slot.visible = show_artillery_depot
 	if _town_center_worker_slot != null:
 		_town_center_worker_slot.visible = show_town_center
 	if _town_center_upgrade_slot != null:
@@ -840,6 +875,8 @@ func _set_production_icon_visibility(
 		_refresh_barracks_production_slots()
 	if show_stable:
 		_refresh_stable_production_slots()
+	if show_artillery_depot:
+		_refresh_artillery_depot_production_slots()
 	if show_town_center:
 		_refresh_town_center_production_slot()
 	if show_hero_altar:
@@ -915,6 +952,12 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 
 		for _unused: int in queue_amount:
 			_selected_stable.try_train_cavalry_archer()
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+		if _selected_artillery_depot == null:
+			return
+
+		for _unused: int in queue_amount:
+			_selected_artillery_depot.try_train_cannon()
 	else:
 		return
 
@@ -950,6 +993,8 @@ func _handle_production_toggle_repeat(train_id: StringName) -> void:
 		_selected_stable.try_train_light_cavalry_with_repeat(true)
 	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
 		_selected_stable.try_train_cavalry_archer_with_repeat(true)
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON and _selected_artillery_depot != null:
+		_selected_artillery_depot.try_train_cannon_with_repeat(true)
 
 
 func _disable_production_repeat(train_id: StringName) -> void:
@@ -974,6 +1019,9 @@ func _disable_production_repeat(train_id: StringName) -> void:
 	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
 		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER):
 			_selected_stable.set_repeat_training(false)
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON and _selected_artillery_depot != null:
+		if _selected_artillery_depot.is_repeat_training_enabled(ArtilleryDepot.TRAIN_ID_CANNON):
+			_selected_artillery_depot.set_repeat_training(false)
 
 
 func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
@@ -989,6 +1037,8 @@ func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
 		_cancel_stable_unit_type(_selected_stable, train_id, cancel_amount)
 	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
 		_cancel_stable_unit_type(_selected_stable, train_id, cancel_amount)
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+		_cancel_artillery_depot_unit_type(_selected_artillery_depot, train_id, cancel_amount)
 	elif train_id == CommandCenter.TRAIN_ID_WORKER:
 		_cancel_worker_units(cancel_amount)
 	elif train_id == &"hero":
@@ -1054,6 +1104,27 @@ func _cancel_stable_unit_type(stable: Stable, train_id: StringName, cancel_amoun
 			break
 
 
+func _cancel_artillery_depot_unit_type(
+	depot: ArtilleryDepot, train_id: StringName, cancel_amount: int
+) -> void:
+	if depot == null or not is_instance_valid(depot):
+		return
+
+	for _unused: int in cancel_amount:
+		var type_count: int = 0
+		if train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+			type_count = depot.get_cannon_queue_count()
+		if type_count <= 0:
+			break
+
+		var type_slot_index: int = type_count - 1
+		var cancelled: bool = false
+		if train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+			cancelled = depot.cancel_cannon_training_at(type_slot_index)
+		if not cancelled:
+			break
+
+
 func _cancel_worker_units(cancel_amount: int) -> void:
 	if _selected_command_center == null:
 		return
@@ -1095,6 +1166,8 @@ func _get_production_slot_tooltip(train_id: StringName) -> String:
 			base_tooltip = _get_train_light_cavalry_tooltip()
 		Stable.TRAIN_ID_CAVALRY_ARCHER:
 			base_tooltip = _get_train_cavalry_archer_tooltip()
+		ArtilleryDepot.TRAIN_ID_CANNON:
+			base_tooltip = _get_train_cannon_tooltip()
 		CommandCenter.TRAIN_ID_WORKER:
 			base_tooltip = _get_train_worker_tooltip()
 		CommandCenter.UPGRADE_ID_TIER:
@@ -2079,6 +2152,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_worker_queue_signal()
 	_disconnect_barracks_signals()
 	_disconnect_stable_signals()
+	_disconnect_artillery_depot_signals()
 	_disconnect_hero_altar_signals()
 	_disconnect_blacksmith_signals()
 	_disconnect_shop_signals()
@@ -2126,6 +2200,17 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_tracked_stable = null
 
+	if building is ArtilleryDepot and is_instance_valid(building):
+		_tracked_artillery_depot = building as ArtilleryDepot
+		_tracked_artillery_depot.building_state_changed.connect(_on_artillery_depot_state_changed)
+		_tracked_artillery_depot.cannon_queue_changed.connect(_on_artillery_depot_queue_changed)
+		if _tracked_artillery_depot.has_signal("training_queue_changed"):
+			_tracked_artillery_depot.training_queue_changed.connect(_on_artillery_depot_training_queue_changed)
+		_tracked_artillery_depot.repeat_state_changed.connect(_on_production_repeat_state_changed)
+		_on_artillery_depot_training_queue_changed()
+	else:
+		_tracked_artillery_depot = null
+
 	if building is HeroAltar and is_instance_valid(building):
 		_tracked_hero_altar = building as HeroAltar
 		_tracked_hero_altar.building_state_changed.connect(_on_hero_altar_state_changed)
@@ -2158,6 +2243,22 @@ func _on_barracks_state_changed(_state: StringName) -> void:
 
 func _on_stable_state_changed(_state: StringName) -> void:
 	_refresh_command_visibility()
+
+
+func _on_artillery_depot_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _on_artillery_depot_queue_changed(_queue_count: int) -> void:
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_artillery_depot_production_slots()
+
+
+func _on_artillery_depot_training_queue_changed() -> void:
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_artillery_depot_production_slots()
+	else:
+		_update_auto_training_label()
 
 
 func _on_stable_queue_changed(_queue_count: int) -> void:
@@ -2300,7 +2401,7 @@ func _refresh_command_visibility() -> void:
 	var single_hero: bool = selected_units.size() == 1 and single_unit is Hero
 	var single_combat_unit: bool = (
 		selected_units.size() == 1
-		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is HeavyCavalry or single_unit is LightCavalry or single_unit is CavalryArcher or single_unit is Hero)
+		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is HeavyCavalry or single_unit is LightCavalry or single_unit is CavalryArcher or single_unit is Cannon or single_unit is Hero)
 	)
 
 	if single_worker:
@@ -2371,6 +2472,8 @@ func _refresh_command_visibility() -> void:
 		_update_barracks_train_button_states()
 	if show_stable_commands:
 		_refresh_stable_production_slots()
+	if show_artillery_depot_commands:
+		_refresh_artillery_depot_production_slots()
 	if show_hero_altar_training:
 		if not USE_PRODUCTION_ICON_SLOTS:
 			_rebuild_hero_queue_slots()
@@ -2384,7 +2487,11 @@ func _refresh_command_visibility() -> void:
 		_clear_queue_row(_archer_queue_row)
 
 	_set_production_icon_visibility(
-		show_barracks_training, show_town_center_commands, show_hero_altar_training, show_stable_commands
+		show_barracks_training,
+		show_town_center_commands,
+		show_hero_altar_training,
+		show_stable_commands,
+		show_artillery_depot_commands
 	)
 
 	_update_auto_training_label()
@@ -2583,6 +2690,7 @@ func _apply_artillery_depot_command_visibility() -> void:
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
 	_clear_queue_row(_hero_queue_row)
+	_refresh_artillery_depot_production_slots()
 
 
 func _apply_shop_command_visibility() -> void:
@@ -2733,6 +2841,28 @@ func _disconnect_stable_signals() -> void:
 			_tracked_stable.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
 
 	_tracked_stable = null
+
+
+func _disconnect_artillery_depot_signals() -> void:
+	if _tracked_artillery_depot != null and is_instance_valid(_tracked_artillery_depot):
+		if _tracked_artillery_depot.building_state_changed.is_connected(_on_artillery_depot_state_changed):
+			_tracked_artillery_depot.building_state_changed.disconnect(_on_artillery_depot_state_changed)
+
+		if _tracked_artillery_depot.cannon_queue_changed.is_connected(_on_artillery_depot_queue_changed):
+			_tracked_artillery_depot.cannon_queue_changed.disconnect(_on_artillery_depot_queue_changed)
+
+		if (
+			_tracked_artillery_depot.has_signal("training_queue_changed")
+			and _tracked_artillery_depot.training_queue_changed.is_connected(
+				_on_artillery_depot_training_queue_changed
+			)
+		):
+			_tracked_artillery_depot.training_queue_changed.disconnect(_on_artillery_depot_training_queue_changed)
+
+		if _tracked_artillery_depot.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
+			_tracked_artillery_depot.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+
+	_tracked_artillery_depot = null
 
 
 func _disconnect_hero_altar_signals() -> void:
@@ -3193,6 +3323,21 @@ func _get_train_cavalry_archer_tooltip() -> String:
 		TooltipFormatter.get_train_blocked_reason(
 			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
 			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER)
+		)
+	)
+
+
+func _get_train_cannon_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		"Cannon",
+		ArtilleryDepot.get_unit_train_gold_cost(ArtilleryDepot.TRAIN_ID_CANNON),
+		0,
+		ArtilleryDepot.get_unit_train_food_cost(ArtilleryDepot.TRAIN_ID_CANNON),
+		ArtilleryDepot.get_unit_train_seconds(ArtilleryDepot.TRAIN_ID_CANNON),
+		ArtilleryDepot.TRAIN_ID_CANNON,
+		TooltipFormatter.get_train_blocked_reason(
+			ArtilleryDepot.get_unit_train_gold_cost(ArtilleryDepot.TRAIN_ID_CANNON),
+			ArtilleryDepot.get_unit_train_food_cost(ArtilleryDepot.TRAIN_ID_CANNON)
 		)
 	)
 
