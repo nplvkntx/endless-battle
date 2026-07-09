@@ -32,4 +32,4 @@ static func apply_from_collision_body(body: CollisionObject3D) -> void:
 		obstacle.radius = 0.5
 		obstacle.height = 2.0
 
-	body.add_child(obstacle)
+	body.call_deferred("add_child", obstacle)

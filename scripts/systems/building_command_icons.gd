@@ -77,6 +77,9 @@ static func _try_schedule_scene_thumbnail(placement_id: StringName) -> void:
 	if _thumbnail_attempted.get(placement_id, false):
 		return
 
+	if _should_skip_scene_thumbnails():
+		return
+
 	if not _PLACEMENT_SCENES.has(placement_id):
 		return
 
@@ -91,7 +94,11 @@ static func _try_schedule_scene_thumbnail(placement_id: StringName) -> void:
 		return
 
 	var renderer := _ThumbnailRenderer.new(placement_id, scene)
-	tree.root.add_child(renderer)
+	tree.root.call_deferred("add_child", renderer)
+
+
+static func _should_skip_scene_thumbnails() -> bool:
+	return DisplayServer.get_name() == "headless"
 
 
 static func _cache_texture(placement_id: StringName, texture: Texture2D) -> void:
@@ -99,8 +106,12 @@ static func _cache_texture(placement_id: StringName, texture: Texture2D) -> void
 		_textures[placement_id] = texture
 
 
-static func _render_scene_thumbnail(host: Node, scene: PackedScene) -> Texture2D:
+static func _render_scene_thumbnail_async(host: Node, scene: PackedScene) -> Texture2D:
 	if scene == null or host == null:
+		return null
+
+	var tree: SceneTree = host.get_tree()
+	if tree == null:
 		return null
 
 	var viewport := SubViewport.new()
@@ -128,13 +139,16 @@ static func _render_scene_thumbnail(host: Node, scene: PackedScene) -> Texture2D
 	var max_extent: float = maxf(bounds.size.x, maxf(bounds.size.y, bounds.size.z))
 	max_extent = maxf(max_extent, 0.5)
 
+	host.add_child(viewport)
+
 	var camera := Camera3D.new()
-	var camera_offset := Vector3(max_extent * 0.85, max_extent * 0.65, max_extent * 0.95)
-	camera.position = center + camera_offset
-	camera.look_at(center, Vector3.UP)
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = max_extent * 1.35
 	world.add_child(camera)
+	var camera_offset := Vector3(max_extent * 0.85, max_extent * 0.65, max_extent * 0.95)
+	var camera_position: Vector3 = center + camera_offset
+	camera.position = camera_position
+	camera.look_at_from_position(camera_position, center, Vector3.UP)
 
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-45, 35, 0)
@@ -145,10 +159,16 @@ static func _render_scene_thumbnail(host: Node, scene: PackedScene) -> Texture2D
 	fill.light_energy = 0.45
 	world.add_child(fill)
 
-	host.add_child(viewport)
 	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await tree.process_frame
+	await tree.process_frame
 
-	var image: Image = viewport.get_texture().get_image()
+	var viewport_texture: ViewportTexture = viewport.get_texture()
+	if viewport_texture == null:
+		viewport.queue_free()
+		return null
+
+	var image: Image = viewport_texture.get_image()
 	viewport.queue_free()
 
 	if image == null or image.is_empty():
@@ -358,7 +378,11 @@ class _ThumbnailRenderer extends Node:
 
 
 	func _ready() -> void:
+		_capture_and_cache()
+
+
+	func _capture_and_cache() -> void:
 		await get_tree().process_frame
-		var thumbnail: Texture2D = BuildingCommandIcons._render_scene_thumbnail(self, _scene)
+		var thumbnail: Texture2D = await BuildingCommandIcons._render_scene_thumbnail_async(self, _scene)
 		BuildingCommandIcons._cache_texture(_placement_id, thumbnail)
 		queue_free()

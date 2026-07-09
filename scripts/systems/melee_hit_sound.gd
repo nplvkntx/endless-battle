@@ -18,6 +18,6 @@ static func play_at(parent: Node, _world_position: Vector3 = Vector3.ZERO) -> vo
 	var player := AudioStreamPlayer.new()
 	player.stream = HIT_SOUND
 	player.volume_db = VOLUME_DB
-	tree.root.add_child(player)
-	player.play()
+	tree.root.call_deferred("add_child", player)
+	player.call_deferred("play")
 	player.finished.connect(player.queue_free, CONNECT_ONE_SHOT)
