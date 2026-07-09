@@ -42,7 +42,7 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Advanced military upgrades.",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
-	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: "Blocks enemy movement.",
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: "Drag to place a straight wall line (40 Wood per segment).",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains/revives your Hero.",
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Expands your base.",
 }

@@ -519,3 +519,111 @@ static func _overlaps(
 	var min_distance_x: float = (size_a.x + size_b.x) * 0.5 + BUILDING_PADDING
 	var min_distance_z: float = (size_a.y + size_b.y) * 0.5 + BUILDING_PADDING
 	return delta_x < min_distance_x and delta_z < min_distance_z
+
+
+static func get_wall_segment_line_positions(
+	start: Vector3,
+	end: Vector3,
+	ground_y: float,
+	max_segments: int = 30
+) -> Array[Vector3]:
+	var positions: Array[Vector3] = []
+	if max_segments <= 0:
+		return positions
+
+	var snapped_start: Vector3 = snap_to_grid(start)
+	var snapped_end: Vector3 = snap_to_grid(end)
+	snapped_start.y = ground_y
+	snapped_end.y = ground_y
+
+	var delta_x: float = snapped_end.x - snapped_start.x
+	var delta_z: float = snapped_end.z - snapped_start.z
+	var along_x: bool = absf(delta_x) >= absf(delta_z)
+
+	if along_x:
+		var step_x: int = 1 if delta_x >= 0.0 else -1
+		var segment_count: int = int(absf(delta_x) / GRID_SIZE) + 1
+		segment_count = mini(segment_count, max_segments)
+		for step_index: int in range(segment_count):
+			var x: float = snapped_start.x + float(step_index * step_x) * GRID_SIZE
+			positions.append(Vector3(x, ground_y, snapped_start.z))
+	else:
+		var step_z: int = 1 if delta_z >= 0.0 else -1
+		var segment_count: int = int(absf(delta_z) / GRID_SIZE) + 1
+		segment_count = mini(segment_count, max_segments)
+		for step_index: int in range(segment_count):
+			var z: float = snapped_start.z + float(step_index * step_z) * GRID_SIZE
+			positions.append(Vector3(snapped_start.x, ground_y, z))
+
+	return positions
+
+
+static func is_wall_segment_line_position_valid(
+	candidate: Vector3,
+	line_positions: Array[Vector3],
+	existing_buildings: Array[Node3D],
+	scene_root: Node = null,
+	exclude_nodes: Array[Node] = []
+) -> bool:
+	var footprint: Vector2 = WALL_SEGMENT_SIZE
+	if not is_footprint_within_bounds(candidate, footprint):
+		return false
+
+	if not _is_wall_position_clear_of_buildings(candidate, footprint, existing_buildings):
+		return false
+
+	if not _is_wall_position_clear_of_line_siblings(candidate, footprint, line_positions):
+		return false
+
+	if scene_root != null and _footprint_overlaps_blocked_colliders(
+		candidate,
+		footprint,
+		scene_root,
+		exclude_nodes
+	):
+		return false
+
+	return true
+
+
+static func _are_adjacent_wall_cells(position_a: Vector3, position_b: Vector3) -> bool:
+	var delta_x: float = absf(position_a.x - position_b.x)
+	var delta_z: float = absf(position_a.z - position_b.z)
+	return (
+		(is_equal_approx(delta_x, GRID_SIZE) and is_zero_approx(delta_z))
+		or (is_equal_approx(delta_z, GRID_SIZE) and is_zero_approx(delta_x))
+	)
+
+
+static func _is_wall_position_clear_of_buildings(
+	candidate: Vector3,
+	footprint: Vector2,
+	existing_buildings: Array[Node3D]
+) -> bool:
+	for building: Node3D in existing_buildings:
+		if building == null or not is_instance_valid(building):
+			continue
+
+		var other_footprint: Vector2 = _resolve_footprint(building)
+		if _overlaps(candidate, footprint, building.global_position, other_footprint):
+			return false
+
+	return true
+
+
+static func _is_wall_position_clear_of_line_siblings(
+	candidate: Vector3,
+	footprint: Vector2,
+	line_positions: Array[Vector3]
+) -> bool:
+	for sibling: Vector3 in line_positions:
+		if is_equal_approx(candidate.x, sibling.x) and is_equal_approx(candidate.z, sibling.z):
+			continue
+
+		if _are_adjacent_wall_cells(candidate, sibling):
+			continue
+
+		if _overlaps(candidate, footprint, sibling, WALL_SEGMENT_SIZE):
+			return false
+
+	return true
