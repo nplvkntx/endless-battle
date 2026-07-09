@@ -1,0 +1,73 @@
+[gd_scene format=3 uid="uid://bd7k73bte0plg"]
+
+[ext_resource type="Script" path="res://scripts/buildings/wall_segment.gd" id="1_wall_segment"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.5, 0.5, 0.54, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sel_edge"]
+shading_mode = 0
+transparency = 1
+albedo_color = Color(0.18, 0.92, 0.32, 0.55)
+emission_enabled = true
+emission = Color(0.12, 0.72, 0.22, 1)
+cull_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall"]
+size = Vector3(1, 1.5, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
+size = Vector3(1.1, 0.025, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_sel_edge_v"]
+size = Vector3(0.06, 0.025, 1.1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall"]
+size = Vector3(1, 1.5, 1)
+
+[node name="WallSegment" type="StaticBody3D" groups=["buildings"]]
+script = ExtResource("1_wall_segment")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("BoxMesh_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="WallPlaceholder" type="MeshInstance3D" parent="Visuals"]
+mesh = SubResource("BoxMesh_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.75, 0)
+
+[node name="EdgeNorth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, -0.55)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeSouth" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 0.55)
+mesh = SubResource("BoxMesh_sel_edge_h")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeEast" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="EdgeWest" type="MeshInstance3D" parent="SelectionIndicator"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.55, 0.03, 0)
+mesh = SubResource("BoxMesh_sel_edge_v")
+surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 500

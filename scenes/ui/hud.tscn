@@ -515,6 +515,11 @@ custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 text = "Build Tower"
 
+[node name="BuildWallSegmentButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+text = "Build Wall"
+
 [node name="BuildHeroAltarButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/ButtonsRow"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2

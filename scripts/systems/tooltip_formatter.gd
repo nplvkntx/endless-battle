@@ -28,6 +28,7 @@ const BUILD_PLACEMENT_NAMES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Academy",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Shop",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Tower",
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: "Wall Segment",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Hero Altar",
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Town Center",
 }
@@ -41,6 +42,7 @@ const BUILD_PLACEMENT_DESCRIPTIONS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Advanced military upgrades.",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Buys hero items.",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "Defensive building.",
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: "Blocks enemy movement.",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "Trains/revives your Hero.",
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "Expands your base.",
 }
@@ -447,6 +449,11 @@ static func get_placement_costs(placement_id: StringName) -> Dictionary:
 				"gold": _BUILD_MANAGER.TOWER_GOLD_COST,
 				"wood": _BUILD_MANAGER.TOWER_WOOD_COST,
 			}
+		_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT:
+			return {
+				"gold": _BUILD_MANAGER.WALL_SEGMENT_GOLD_COST,
+				"wood": _BUILD_MANAGER.WALL_SEGMENT_WOOD_COST,
+			}
 		_BUILD_MANAGER.PLACEMENT_HERO_ALTAR:
 			return {
 				"gold": _BUILD_MANAGER.HERO_ALTAR_GOLD_COST,
@@ -468,6 +475,13 @@ static func get_placement_build_time(placement_id: StringName, worker_count: int
 		if worker_count == 2:
 			return _BUILD_MANAGER.SHOP_CONSTRUCTION_DURATION_TWO_WORKERS
 		return _BUILD_MANAGER.SHOP_CONSTRUCTION_DURATION_ONE_WORKER
+
+	if placement_id == _BUILD_MANAGER.PLACEMENT_WALL_SEGMENT:
+		if worker_count >= 3:
+			return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+		if worker_count == 2:
+			return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS
+		return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER
 
 	if worker_count >= 3:
 		return _BUILD_MANAGER.CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
@@ -709,6 +723,8 @@ static func _get_building_display_name(building: Building) -> String:
 		return "Farm"
 	if building is Tower:
 		return "Tower"
+	if building is WallSegment:
+		return "Wall Segment"
 	return building.name
 
 

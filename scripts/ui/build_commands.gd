@@ -22,6 +22,9 @@ extends PanelContainer
 )
 @onready var _build_shop_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildShopButton
 @onready var _build_tower_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildTowerButton
+@onready var _build_wall_segment_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildWallSegmentButton
+)
 @onready var _build_hero_altar_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildHeroAltarButton
 @onready var _build_command_center_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/BuildCommandCenterButton
@@ -265,6 +268,7 @@ func _ready() -> void:
 	_build_academy_button.visible = false
 	_build_shop_button.visible = false
 	_build_tower_button.visible = false
+	_build_wall_segment_button.visible = false
 	_build_hero_altar_button.visible = false
 	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
@@ -288,6 +292,7 @@ func _ready() -> void:
 	_build_academy_button.pressed.connect(_on_build_academy_pressed)
 	_build_shop_button.pressed.connect(_on_build_shop_pressed)
 	_build_tower_button.pressed.connect(_on_build_tower_pressed)
+	_build_wall_segment_button.pressed.connect(_on_build_wall_segment_pressed)
 	_build_hero_altar_button.pressed.connect(_on_build_hero_altar_pressed)
 	_build_command_center_button.pressed.connect(_on_build_command_center_pressed)
 	_train_worker_button.pressed.connect(_on_train_worker_pressed)
@@ -439,6 +444,11 @@ func _setup_build_icon_slots() -> void:
 			"T",
 		],
 		[
+			BUILD_MANAGER_SCRIPT.PLACEMENT_WALL_SEGMENT,
+			_build_wall_segment_button,
+			"W",
+		],
+		[
 			BUILD_MANAGER_SCRIPT.PLACEMENT_HERO_ALTAR,
 			_build_hero_altar_button,
 			"H",
@@ -511,6 +521,8 @@ func _on_build_slot_clicked(placement_id: StringName) -> void:
 			_on_build_shop_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER:
 			_on_build_tower_pressed()
+		BUILD_MANAGER_SCRIPT.PLACEMENT_WALL_SEGMENT:
+			_on_build_wall_segment_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_HERO_ALTAR:
 			_on_build_hero_altar_pressed()
 		BUILD_MANAGER_SCRIPT.PLACEMENT_COMMAND_CENTER:
@@ -570,6 +582,10 @@ func _set_build_icon_visibility(show_worker_build: bool) -> void:
 	_set_legacy_build_button_visibility(
 		_build_tower_button,
 		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_TOWER)
+	)
+	_set_legacy_build_button_visibility(
+		_build_wall_segment_button,
+		show_worker_build and _should_use_legacy_build_button(BUILD_MANAGER_SCRIPT.PLACEMENT_WALL_SEGMENT)
 	)
 	_set_legacy_build_button_visibility(
 		_build_hero_altar_button,
@@ -3182,6 +3198,14 @@ func _on_build_tower_pressed() -> void:
 	build_manager.start_tower_placement()
 
 
+func _on_build_wall_segment_pressed() -> void:
+	var build_manager: Node = get_node_or_null(build_manager_path)
+	if build_manager == null:
+		return
+
+	build_manager.start_wall_segment_placement()
+
+
 func _on_build_hero_altar_pressed() -> void:
 	var build_manager: Node = get_node_or_null(build_manager_path)
 	if build_manager == null:
@@ -3254,6 +3278,7 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_build_stable_button)
 	_clear_control_tooltip(_build_shop_button)
 	_clear_control_tooltip(_build_tower_button)
+	_clear_control_tooltip(_build_wall_segment_button)
 	_clear_control_tooltip(_build_hero_altar_button)
 	_clear_control_tooltip(_build_command_center_button)
 	_clear_control_tooltip(_train_worker_button)
@@ -3317,6 +3342,14 @@ func _setup_command_tooltips() -> void:
 			return TooltipFormatter.format_build_placement(
 				BUILD_MANAGER.PLACEMENT_TOWER,
 				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_TOWER)
+			)
+	)
+	TooltipManager.bind_control(
+		_build_wall_segment_button,
+		func() -> String:
+			return TooltipFormatter.format_build_placement(
+				BUILD_MANAGER.PLACEMENT_WALL_SEGMENT,
+				TooltipFormatter.get_build_blocked_reason(BUILD_MANAGER.PLACEMENT_WALL_SEGMENT)
 			)
 	)
 	TooltipManager.bind_control(

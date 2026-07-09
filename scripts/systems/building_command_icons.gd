@@ -21,6 +21,7 @@ const _PLACEMENT_SCENES: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: _BUILD_MANAGER.ACADEMY_SCENE,
 	_BUILD_MANAGER.PLACEMENT_SHOP: _BUILD_MANAGER.SHOP_SCENE,
 	_BUILD_MANAGER.PLACEMENT_TOWER: _BUILD_MANAGER.TOWER_SCENE,
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: _BUILD_MANAGER.WALL_SEGMENT_SCENE,
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: _BUILD_MANAGER.HERO_ALTAR_SCENE,
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: _BUILD_MANAGER.COMMAND_CENTER_SCENE,
 }
@@ -34,6 +35,7 @@ const _PORTRAIT_COLORS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: Color(0.42, 0.38, 0.58, 1),
 	_BUILD_MANAGER.PLACEMENT_SHOP: Color(0.72, 0.48, 0.22, 1),
 	_BUILD_MANAGER.PLACEMENT_TOWER: Color(0.55, 0.58, 0.62, 1),
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: Color(0.48, 0.5, 0.52, 1),
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: Color(0.55, 0.35, 0.75, 1),
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: Color(0.75, 0.4, 0.15, 1),
 }
@@ -47,6 +49,7 @@ const _INITIALS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_ACADEMY: "Ac",
 	_BUILD_MANAGER.PLACEMENT_SHOP: "Sh",
 	_BUILD_MANAGER.PLACEMENT_TOWER: "T",
+	_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT: "W",
 	_BUILD_MANAGER.PLACEMENT_HERO_ALTAR: "HA",
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "TC",
 }
@@ -238,6 +241,8 @@ static func _create_procedural_icon(placement_id: StringName) -> Texture2D:
 			_draw_shop(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_TOWER:
 			_draw_tower(image, base_color)
+		_BUILD_MANAGER.PLACEMENT_WALL_SEGMENT:
+			_draw_wall_segment(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_HERO_ALTAR:
 			_draw_hero_altar(image, base_color)
 		_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER:
@@ -336,6 +341,19 @@ static func _draw_tower(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(18, 10, 12, 30), stone)
 	_fill_rect(image, Rect2i(16, 8, 16, 4), top)
 	_fill_rect(image, Rect2i(22, 18, 4, 6), color.darkened(0.35))
+
+
+static func _draw_wall_segment(image: Image, color: Color) -> void:
+	var stone := color
+	var mortar := color.darkened(0.25)
+	var highlight := color.lightened(0.1)
+	_fill_rect(image, Rect2i(8, 12, 32, 28), mortar)
+	_fill_rect(image, Rect2i(10, 14, 13, 7), stone)
+	_fill_rect(image, Rect2i(25, 14, 13, 7), highlight)
+	_fill_rect(image, Rect2i(10, 23, 13, 7), highlight)
+	_fill_rect(image, Rect2i(25, 23, 13, 7), stone)
+	_fill_rect(image, Rect2i(10, 32, 13, 6), stone)
+	_fill_rect(image, Rect2i(25, 32, 13, 6), highlight)
 
 
 static func _draw_hero_altar(image: Image, color: Color) -> void:

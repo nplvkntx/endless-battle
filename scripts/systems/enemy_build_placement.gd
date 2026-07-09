@@ -30,6 +30,7 @@ const ARTILLERY_DEPOT_SIZE := Vector2(3.2, 2.4)
 const ACADEMY_SIZE := Vector2(3.0, 2.2)
 const SHOP_SIZE := Vector2(2.0, 1.6)
 const TOWER_SIZE := Vector2(2.0, 2.0)
+const WALL_SEGMENT_SIZE := Vector2(1.0, 1.0)
 const HERO_ALTAR_SIZE := Vector2(3.0, 3.0)
 const COMMAND_CENTER_SIZE := Vector2(3.5, 3.5)
 const DEFAULT_FOOTPRINT := Vector2(2.5, 2.5)
@@ -42,6 +43,7 @@ const ARTILLERY_DEPOT_GROUND_Y: float = 0.8
 const ACADEMY_GROUND_Y: float = 0.8
 const SHOP_GROUND_Y: float = 0.7
 const TOWER_GROUND_Y: float = 1.5
+const WALL_SEGMENT_GROUND_Y: float = 0.75
 const HERO_ALTAR_GROUND_Y: float = 1.0
 const COMMAND_CENTER_GROUND_Y: float = 1.0
 
@@ -178,6 +180,8 @@ static func get_footprint(building_type: StringName) -> Vector2:
 			return SHOP_SIZE
 		&"tower":
 			return TOWER_SIZE
+		&"wall_segment":
+			return WALL_SEGMENT_SIZE
 		&"hero_altar":
 			return HERO_ALTAR_SIZE
 		&"command_center":
@@ -204,6 +208,8 @@ static func get_ground_y(building_type: StringName) -> float:
 			return SHOP_GROUND_Y
 		&"tower":
 			return TOWER_GROUND_Y
+		&"wall_segment":
+			return WALL_SEGMENT_GROUND_Y
 		&"hero_altar":
 			return HERO_ALTAR_GROUND_Y
 		&"command_center":
@@ -492,6 +498,8 @@ static func _resolve_footprint(building: Node3D) -> Vector2:
 		return SHOP_SIZE
 	if building is Tower:
 		return TOWER_SIZE
+	if building is WallSegment:
+		return WALL_SEGMENT_SIZE
 	if building is HeroAltar:
 		return HERO_ALTAR_SIZE
 	if building is CommandCenter:

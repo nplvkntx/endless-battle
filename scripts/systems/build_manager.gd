@@ -10,6 +10,7 @@ const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
 const PLACEMENT_ACADEMY: StringName = &"academy"
 const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_TOWER: StringName = &"tower"
+const PLACEMENT_WALL_SEGMENT: StringName = &"wall_segment"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 
@@ -21,6 +22,7 @@ const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artil
 const ACADEMY_SCENE: PackedScene = preload("res://scenes/buildings/academy.tscn")
 const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
+const WALL_SEGMENT_SCENE: PackedScene = preload("res://scenes/buildings/wall_segment.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 const FARM_GOLD_COST: int = 80
@@ -39,6 +41,8 @@ const SHOP_GOLD_COST: int = 80
 const SHOP_WOOD_COST: int = 120
 const TOWER_GOLD_COST: int = 120
 const TOWER_WOOD_COST: int = 80
+const WALL_SEGMENT_GOLD_COST: int = 0
+const WALL_SEGMENT_WOOD_COST: int = 40
 const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const COMMAND_CENTER_GOLD_COST: int = 200
@@ -51,6 +55,7 @@ const ARTILLERY_DEPOT_GROUND_Y: float = 1.0
 const ACADEMY_GROUND_Y: float = 1.0
 const SHOP_GROUND_Y: float = 1.0
 const TOWER_GROUND_Y: float = 1.5
+const WALL_SEGMENT_GROUND_Y: float = 0.75
 const HERO_ALTAR_GROUND_Y: float = 1.25
 const COMMAND_CENTER_GROUND_Y: float = 1.25
 const GHOST_ALPHA: float = 0.4
@@ -62,6 +67,9 @@ const CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 2.0
 const SHOP_CONSTRUCTION_DURATION_ONE_WORKER: float = 3.5
 const SHOP_CONSTRUCTION_DURATION_TWO_WORKERS: float = 2.2
 const SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 1.8
+const WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER: float = 8.0
+const WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS: float = 5.0
+const WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS: float = 4.0
 
 @export var camera_path: NodePath = "../Camera3D"
 @export var buildings_parent_path: NodePath = ".."
@@ -118,6 +126,10 @@ func _input(event: InputEvent) -> void:
 				return
 			if event.keycode == KEY_T:
 				start_tower_placement()
+				get_viewport().set_input_as_handled()
+				return
+			if event.keycode == KEY_W:
+				start_wall_segment_placement()
 				get_viewport().set_input_as_handled()
 				return
 			if event.keycode == KEY_H:
@@ -192,6 +204,10 @@ func start_shop_placement() -> void:
 
 func start_tower_placement() -> void:
 	_start_placement(PLACEMENT_TOWER)
+
+
+func start_wall_segment_placement() -> void:
+	_start_placement(PLACEMENT_WALL_SEGMENT)
 
 
 func start_hero_altar_placement() -> void:
@@ -296,6 +312,9 @@ func _place_building() -> void:
 		PLACEMENT_TOWER:
 			gold_cost = TOWER_GOLD_COST
 			wood_cost = TOWER_WOOD_COST
+		PLACEMENT_WALL_SEGMENT:
+			gold_cost = WALL_SEGMENT_GOLD_COST
+			wood_cost = WALL_SEGMENT_WOOD_COST
 		PLACEMENT_HERO_ALTAR:
 			gold_cost = HERO_ALTAR_GOLD_COST
 			wood_cost = HERO_ALTAR_WOOD_COST
@@ -352,6 +371,8 @@ func _get_building_scene(placement_type: StringName) -> PackedScene:
 			return SHOP_SCENE
 		PLACEMENT_TOWER:
 			return TOWER_SCENE
+		PLACEMENT_WALL_SEGMENT:
+			return WALL_SEGMENT_SCENE
 		PLACEMENT_HERO_ALTAR:
 			return HERO_ALTAR_SCENE
 		PLACEMENT_COMMAND_CENTER:
@@ -378,6 +399,8 @@ func _get_ground_y(placement_type: StringName) -> float:
 			return SHOP_GROUND_Y
 		PLACEMENT_TOWER:
 			return TOWER_GROUND_Y
+		PLACEMENT_WALL_SEGMENT:
+			return WALL_SEGMENT_GROUND_Y
 		PLACEMENT_HERO_ALTAR:
 			return HERO_ALTAR_GROUND_Y
 		PLACEMENT_COMMAND_CENTER:
@@ -408,6 +431,13 @@ func _get_construction_duration(worker_count: int, placement_type: StringName = 
 		if worker_count == 2:
 			return SHOP_CONSTRUCTION_DURATION_TWO_WORKERS
 		return SHOP_CONSTRUCTION_DURATION_ONE_WORKER
+
+	if placement_type == PLACEMENT_WALL_SEGMENT:
+		if worker_count >= 3:
+			return WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+		if worker_count == 2:
+			return WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS
+		return WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER
 
 	if worker_count >= 3:
 		return CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
