@@ -27,6 +27,15 @@ const TIER_3_GOLD_COST: int = 2000
 const TIER_3_WOOD_COST: int = 1200
 const TIER_3_UPGRADE_SECONDS: float = 120.0
 
+const TIER_VISUALS_NODE_NAME := &"TierVisuals"
+const TIER2_MARKER_NAME := &"Tier2Marker"
+const TIER3_MARKER_NAME := &"Tier3Marker"
+const TIER_MARKER_RADIUS := 0.12
+const TIER2_MARKER_POSITION := Vector3(-1.45, 2.05, 1.25)
+const TIER3_MARKER_POSITION := Vector3(1.45, 2.15, 1.25)
+const TIER2_MARKER_COLOR := Color(0.2, 0.55, 0.95, 1)
+const TIER3_MARKER_COLOR := Color(0.95, 0.75, 0.15, 1)
+
 @export var worker_spawn_offset: Vector3 = Vector3(0.0, -0.75, -2.8)
 
 enum RallyTargetType {
@@ -52,8 +61,10 @@ var _is_upgrading: bool = false
 var _upgrade_target_tier: int = 0
 var _upgrade_session: int = 0
 var _upgrade_started_at: float = 0.0
+var _tier_visuals_root: Node3D = null
 var _tier2_marker: MeshInstance3D = null
 var _tier3_marker: MeshInstance3D = null
+var _dev_starting_tier_3_applied: bool = false
 
 @onready var _health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 
@@ -135,6 +146,9 @@ func _on_health_depleted() -> void:
 	_is_training = false
 	_invalidate_tier_upgrade()
 	_rally_resource = null
+	_tier2_marker = null
+	_tier3_marker = null
+	_tier_visuals_root = null
 
 	if _rally_marker != null and is_instance_valid(_rally_marker):
 		_rally_marker.queue_free()
@@ -364,68 +378,159 @@ func _invalidate_tier_upgrade() -> void:
 
 
 func _ensure_tier_markers() -> void:
-	if _tier2_marker != null and is_instance_valid(_tier2_marker):
+	_cleanup_stale_tier_visual_nodes()
+
+	var tier_visuals_root: Node3D = _get_tier_visuals_root()
+	_tier2_marker = _resolve_tier_marker(
+		tier_visuals_root,
+		TIER2_MARKER_NAME,
+		TIER2_MARKER_POSITION,
+		TIER2_MARKER_COLOR
+	)
+	_tier3_marker = _resolve_tier_marker(
+		tier_visuals_root,
+		TIER3_MARKER_NAME,
+		TIER3_MARKER_POSITION,
+		TIER3_MARKER_COLOR
+	)
+
+
+func _get_tier_visuals_root() -> Node3D:
+	if _tier_visuals_root != null and is_instance_valid(_tier_visuals_root):
+		return _tier_visuals_root
+
+	var existing_root: Node3D = get_node_or_null(str(TIER_VISUALS_NODE_NAME)) as Node3D
+	if existing_root != null:
+		_tier_visuals_root = existing_root
+		return _tier_visuals_root
+
+	_tier_visuals_root = Node3D.new()
+	_tier_visuals_root.name = TIER_VISUALS_NODE_NAME
+	add_child(_tier_visuals_root)
+	return _tier_visuals_root
+
+
+func _cleanup_stale_tier_visual_nodes() -> void:
+	_remove_duplicate_named_nodes(self, TIER2_MARKER_NAME, _tier2_marker)
+	_remove_duplicate_named_nodes(self, TIER3_MARKER_NAME, _tier3_marker)
+
+	var tier_visual_roots: Array[Node3D] = []
+	for child: Node in get_children():
+		if child.name == TIER_VISUALS_NODE_NAME and child is Node3D:
+			tier_visual_roots.append(child as Node3D)
+
+	while tier_visual_roots.size() > 1:
+		var extra_root: Node3D = tier_visual_roots.pop_back()
+		if extra_root != _tier_visuals_root:
+			extra_root.queue_free()
+
+	if tier_visual_roots.size() == 1:
+		_tier_visuals_root = tier_visual_roots[0]
+		_remove_duplicate_named_nodes(_tier_visuals_root, TIER2_MARKER_NAME, _tier2_marker)
+		_remove_duplicate_named_nodes(_tier_visuals_root, TIER3_MARKER_NAME, _tier3_marker)
+	else:
+		_tier_visuals_root = null
+
+	_cleanup_legacy_tier_visual_addons()
+
+
+func _cleanup_legacy_tier_visual_addons() -> void:
+	var visuals: Node3D = get_node_or_null("Visuals") as Node3D
+	if visuals == null:
 		return
 
-	_tier2_marker = _create_tier_marker(
-		"Tier2Marker",
-		Vector3(-1.2, 2.4, 1.4),
-		Color(0.2, 0.55, 0.95, 1),
-		0.35,
-		1.2
-	)
-	_tier3_marker = _create_tier_marker(
-		"Tier3Marker",
-		Vector3(1.2, 2.8, 1.4),
-		Color(0.95, 0.75, 0.15, 1),
-		0.45,
-		1.6
-	)
+	for child: Node in visuals.get_children():
+		if child.name == &"TownCenterModel":
+			continue
+
+		child.queue_free()
+
+
+func _remove_duplicate_named_nodes(
+	parent: Node,
+	node_name: StringName,
+	keep_node: Node
+) -> void:
+	if parent == null:
+		return
+
+	for child: Node in parent.get_children():
+		if child.name != node_name:
+			continue
+		if child == keep_node:
+			continue
+
+		child.queue_free()
+
+
+func _resolve_tier_marker(
+	parent: Node3D,
+	marker_name: StringName,
+	local_position: Vector3,
+	color: Color
+) -> MeshInstance3D:
+	var existing_marker: MeshInstance3D = parent.get_node_or_null(str(marker_name)) as MeshInstance3D
+	if existing_marker != null:
+		existing_marker.position = local_position
+		_apply_tier_marker_material(existing_marker, color)
+		return existing_marker
+
+	return _create_tier_marker(parent, marker_name, local_position, color)
 
 
 func _create_tier_marker(
-	marker_name: String,
+	parent: Node3D,
+	marker_name: StringName,
 	local_position: Vector3,
-	color: Color,
-	radius: float,
-	height: float
+	color: Color
 ) -> MeshInstance3D:
 	var marker := MeshInstance3D.new()
 	marker.name = marker_name
 	marker.position = local_position
 	marker.visible = false
 
-	var marker_mesh := CylinderMesh.new()
-	marker_mesh.top_radius = radius
-	marker_mesh.bottom_radius = radius
-	marker_mesh.height = height
+	var marker_mesh := SphereMesh.new()
+	marker_mesh.radius = TIER_MARKER_RADIUS
+	marker_mesh.height = TIER_MARKER_RADIUS * 2.0
 	marker.mesh = marker_mesh
+	_apply_tier_marker_material(marker, color)
 
+	parent.add_child(marker)
+	return marker
+
+
+func _apply_tier_marker_material(marker: MeshInstance3D, color: Color) -> void:
 	var marker_material := StandardMaterial3D.new()
+	marker_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	marker_material.albedo_color = color
 	marker_material.emission_enabled = true
-	marker_material.emission = color.darkened(0.25)
+	marker_material.emission = color.darkened(0.2)
 	marker.material_override = marker_material
-
-	add_child(marker)
-	return marker
 
 
 func _apply_tier_visuals() -> void:
 	_ensure_tier_markers()
 
 	if _tier2_marker != null and is_instance_valid(_tier2_marker):
-		_tier2_marker.visible = command_center_tier >= 2
+		_tier2_marker.visible = command_center_tier >= 2 and command_center_tier < 3
+	elif _tier2_marker != null:
+		_tier2_marker = null
 
 	if _tier3_marker != null and is_instance_valid(_tier3_marker):
 		_tier3_marker.visible = command_center_tier >= 3
+	elif _tier3_marker != null:
+		_tier3_marker = null
 
 
 ## TEMPORARY DEVELOPMENT TEST SETUP — remove when fast cannon testing no longer needs instant Tier 3.
 func apply_dev_starting_tier_3() -> void:
+	if _dev_starting_tier_3_applied:
+		return
+
 	if team_id == ENEMY_TEAM_ID or is_in_group(&"enemy_command_center"):
 		return
 
+	_dev_starting_tier_3_applied = true
 	command_center_tier = MAX_TIER
 	_apply_tier_visuals()
 	tier_state_changed.emit()
