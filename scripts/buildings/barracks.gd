@@ -39,6 +39,7 @@ var _is_training: bool = false
 var _training_session: int = 0
 var _training_started_at: float = 0.0
 var _current_training_id: StringName = &""
+var _current_training_seconds: float = 0.0
 var _repeat_enabled: bool = false
 var _repeat_unit_type: StringName = &""
 var _repeat_waiting_for_resources: bool = false
@@ -352,7 +353,7 @@ func get_active_unit_training_progress() -> float:
 		return 0.0
 
 	var elapsed: float = _get_time_seconds() - _training_started_at
-	var train_seconds: float = get_unit_train_seconds(_current_training_id)
+	var train_seconds: float = _current_training_seconds
 	return clampf(elapsed / train_seconds, 0.0, 1.0)
 
 
@@ -567,6 +568,23 @@ func _get_owner_team_id() -> int:
 	return TeamVisuals.resolve_team(self, team_id)
 
 
+func _is_enemy_owned() -> bool:
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+
+
+func _get_unit_training_speed_multiplier() -> float:
+	if UpgradeManager.has_faster_unit_training(_is_enemy_owned()):
+		return UpgradeManager.FASTER_UNIT_TRAINING_SPEED_MULTIPLIER
+	return 1.0
+
+
+func _get_effective_train_seconds(train_id: StringName) -> float:
+	return TrainingConfig.get_train_seconds(
+		get_unit_train_seconds(train_id),
+		_get_unit_training_speed_multiplier()
+	)
+
+
 func _enqueue_training(train_id: StringName) -> void:
 	_training_queue.append(train_id)
 	_emit_queue_changed()
@@ -585,8 +603,9 @@ func _start_next_training() -> void:
 	_current_training_id = _training_queue[0]
 	_is_training = true
 	_training_started_at = _get_time_seconds()
+	_current_training_seconds = _get_effective_train_seconds(_current_training_id)
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(
-		get_unit_train_seconds(_current_training_id)
+		_current_training_seconds
 	)
 	wait_timer.timeout.connect(func() -> void:
 		_on_training_finished(session)

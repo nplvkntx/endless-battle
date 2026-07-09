@@ -711,6 +711,24 @@ theme_override_font_sizes/font_size = 8
 text = "Q
 700W 1000G"
 
+[node name="FasterUnitTrainingColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="FasterUnitTrainingInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterUnitTrainingColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Faster Unit Training"
+horizontal_alignment = 1
+
+[node name="FasterUnitTrainingButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterUnitTrainingColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "W
+900W 1200G"
+
 [node name="BlacksmithPanel" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
 visible = false
 layout_mode = 2

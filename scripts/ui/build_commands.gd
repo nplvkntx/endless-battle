@@ -139,6 +139,12 @@ extends PanelContainer
 @onready var _faster_gathering_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterGatheringColumn/FasterGatheringButton
 )
+@onready var _faster_unit_training_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterUnitTrainingColumn/FasterUnitTrainingInfoLabel
+)
+@onready var _faster_unit_training_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterUnitTrainingColumn/FasterUnitTrainingButton
+)
 @onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
 @onready var _shop_status_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
@@ -1248,8 +1254,8 @@ func _setup_blacksmith_upgrade_controls() -> void:
 
 func _setup_academy_upgrade_controls() -> void:
 	_academy_upgrade_ids = UpgradeManager.ACADEMY_UPGRADE_ORDER.duplicate()
-	_academy_upgrade_info_labels = [_faster_gathering_info_label]
-	_academy_upgrade_buttons = [_faster_gathering_button]
+	_academy_upgrade_info_labels = [_faster_gathering_info_label, _faster_unit_training_info_label]
+	_academy_upgrade_buttons = [_faster_gathering_button, _faster_unit_training_button]
 	_update_academy_upgrade_ui()
 
 
@@ -1662,6 +1668,8 @@ func _try_handle_academy_upgrade_hotkey(key_event: InputEventKey) -> bool:
 	match key_event.keycode:
 		KEY_Q:
 			upgrade_id = UpgradeManager.UPGRADE_FASTER_GATHERING
+		KEY_W:
+			upgrade_id = UpgradeManager.UPGRADE_FASTER_UNIT_TRAINING
 		_:
 			return false
 
@@ -3476,7 +3484,9 @@ func _get_train_spearman_tooltip() -> String:
 		Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
 		0,
 		Barracks.TRAIN_FOOD_COST,
-		Barracks.get_unit_train_seconds(Barracks.TRAIN_ID_SPEARMAN),
+		TrainingConfig.get_player_military_train_seconds(
+			Barracks.get_unit_train_seconds(Barracks.TRAIN_ID_SPEARMAN)
+		),
 		Barracks.TRAIN_ID_SPEARMAN,
 		TooltipFormatter.get_train_blocked_reason(
 			Barracks.get_unit_train_gold_cost(Barracks.TRAIN_ID_SPEARMAN),
@@ -3491,7 +3501,7 @@ func _get_train_swordsman_tooltip() -> String:
 		Barracks.TRAIN_GOLD_COST,
 		0,
 		Barracks.TRAIN_FOOD_COST,
-		Barracks.TRAIN_SECONDS,
+		TrainingConfig.get_player_military_train_seconds(Barracks.TRAIN_SECONDS),
 		Barracks.TRAIN_ID_SWORDSMAN,
 		TooltipFormatter.get_train_blocked_reason_for_unit(
 			Barracks.TRAIN_ID_SWORDSMAN,
@@ -3507,7 +3517,7 @@ func _get_train_archer_tooltip() -> String:
 		Barracks.TRAIN_GOLD_COST,
 		0,
 		Barracks.TRAIN_FOOD_COST,
-		Barracks.TRAIN_SECONDS,
+		TrainingConfig.get_player_military_train_seconds(Barracks.TRAIN_SECONDS),
 		Barracks.TRAIN_ID_ARCHER,
 		TooltipFormatter.get_train_blocked_reason_for_unit(
 			Barracks.TRAIN_ID_ARCHER,
@@ -3523,7 +3533,9 @@ func _get_train_heavy_cavalry_tooltip() -> String:
 		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
 		0,
 		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
-		Stable.get_unit_train_seconds(Stable.TRAIN_ID_HEAVY_CAVALRY),
+		TrainingConfig.get_player_military_train_seconds(
+			Stable.get_unit_train_seconds(Stable.TRAIN_ID_HEAVY_CAVALRY)
+		),
 		Stable.TRAIN_ID_HEAVY_CAVALRY,
 		TooltipFormatter.get_train_blocked_reason(
 			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
@@ -3538,7 +3550,9 @@ func _get_train_light_cavalry_tooltip() -> String:
 		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
 		0,
 		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
-		Stable.get_unit_train_seconds(Stable.TRAIN_ID_LIGHT_CAVALRY),
+		TrainingConfig.get_player_military_train_seconds(
+			Stable.get_unit_train_seconds(Stable.TRAIN_ID_LIGHT_CAVALRY)
+		),
 		Stable.TRAIN_ID_LIGHT_CAVALRY,
 		TooltipFormatter.get_train_blocked_reason(
 			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
@@ -3553,7 +3567,9 @@ func _get_train_cavalry_archer_tooltip() -> String:
 		Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
 		0,
 		Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
-		Stable.get_unit_train_seconds(Stable.TRAIN_ID_CAVALRY_ARCHER),
+		TrainingConfig.get_player_military_train_seconds(
+			Stable.get_unit_train_seconds(Stable.TRAIN_ID_CAVALRY_ARCHER)
+		),
 		Stable.TRAIN_ID_CAVALRY_ARCHER,
 		TooltipFormatter.get_train_blocked_reason(
 			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
@@ -3568,7 +3584,9 @@ func _get_train_cannon_tooltip() -> String:
 		ArtilleryDepot.get_unit_train_gold_cost(ArtilleryDepot.TRAIN_ID_CANNON),
 		0,
 		ArtilleryDepot.get_unit_train_food_cost(ArtilleryDepot.TRAIN_ID_CANNON),
-		ArtilleryDepot.get_unit_train_seconds(ArtilleryDepot.TRAIN_ID_CANNON),
+		TrainingConfig.get_player_military_train_seconds(
+			ArtilleryDepot.get_unit_train_seconds(ArtilleryDepot.TRAIN_ID_CANNON)
+		),
 		ArtilleryDepot.TRAIN_ID_CANNON,
 		TooltipFormatter.get_train_blocked_reason(
 			ArtilleryDepot.get_unit_train_gold_cost(ArtilleryDepot.TRAIN_ID_CANNON),

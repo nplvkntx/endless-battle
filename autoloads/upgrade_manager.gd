@@ -10,6 +10,7 @@ const MAX_LEVEL: int = 5
 const ACADEMY_MAX_LEVEL: int = 1
 const LEVEL_COSTS: Array[int] = [100, 150, 225, 325, 450]
 const FASTER_GATHERING_SPEED_MULTIPLIER: float = 1.25
+const FASTER_UNIT_TRAINING_SPEED_MULTIPLIER: float = 1.2
 
 const UPGRADE_SWORDSMAN_ATTACK: StringName = &"swordsman_attack"
 const UPGRADE_SWORDSMAN_ARMOR: StringName = &"swordsman_armor"
@@ -17,6 +18,7 @@ const UPGRADE_ARCHER_ATTACK: StringName = &"archer_attack"
 const UPGRADE_ARCHER_ATTACK_SPEED: StringName = &"archer_attack_speed"
 const UPGRADE_ARCHER_RANGE: StringName = &"archer_range"
 const UPGRADE_FASTER_GATHERING: StringName = &"faster_gathering"
+const UPGRADE_FASTER_UNIT_TRAINING: StringName = &"faster_unit_training"
 
 const BLACKSMITH_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_SWORDSMAN_ATTACK,
@@ -28,10 +30,17 @@ const BLACKSMITH_UPGRADE_ORDER: Array[StringName] = [
 
 const ACADEMY_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_FASTER_GATHERING,
+	UPGRADE_FASTER_UNIT_TRAINING,
 ]
 
 const ACADEMY_UPGRADE_COSTS: Dictionary = {
 	UPGRADE_FASTER_GATHERING: {"gold": 1000, "wood": 700},
+	UPGRADE_FASTER_UNIT_TRAINING: {"gold": 1200, "wood": 900},
+}
+
+const ACADEMY_UPGRADE_RESEARCH_SECONDS: Dictionary = {
+	UPGRADE_FASTER_GATHERING: 60.0,
+	UPGRADE_FASTER_UNIT_TRAINING: 75.0,
 }
 
 const UPGRADE_DISPLAY_NAMES: Dictionary = {
@@ -41,6 +50,7 @@ const UPGRADE_DISPLAY_NAMES: Dictionary = {
 	UPGRADE_ARCHER_ATTACK_SPEED: "Archer Attack Speed",
 	UPGRADE_ARCHER_RANGE: "Archer Range",
 	UPGRADE_FASTER_GATHERING: "Faster Gathering",
+	UPGRADE_FASTER_UNIT_TRAINING: "Faster Unit Training",
 }
 
 const UPGRADE_HOTKEYS: Dictionary = {
@@ -50,6 +60,7 @@ const UPGRADE_HOTKEYS: Dictionary = {
 	UPGRADE_ARCHER_ATTACK_SPEED: "R",
 	UPGRADE_ARCHER_RANGE: "T",
 	UPGRADE_FASTER_GATHERING: "Q",
+	UPGRADE_FASTER_UNIT_TRAINING: "W",
 }
 
 var _levels: Dictionary = {
@@ -59,6 +70,7 @@ var _levels: Dictionary = {
 	UPGRADE_ARCHER_ATTACK_SPEED: 0,
 	UPGRADE_ARCHER_RANGE: 0,
 	UPGRADE_FASTER_GATHERING: 0,
+	UPGRADE_FASTER_UNIT_TRAINING: 0,
 }
 
 var _enemy_levels: Dictionary = {
@@ -68,6 +80,7 @@ var _enemy_levels: Dictionary = {
 	UPGRADE_ARCHER_ATTACK_SPEED: 0,
 	UPGRADE_ARCHER_RANGE: 0,
 	UPGRADE_FASTER_GATHERING: 0,
+	UPGRADE_FASTER_UNIT_TRAINING: 0,
 }
 
 
@@ -104,6 +117,17 @@ func has_faster_gathering(for_enemy: bool = false) -> bool:
 		return get_enemy_level(UPGRADE_FASTER_GATHERING) >= ACADEMY_MAX_LEVEL
 
 	return get_level(UPGRADE_FASTER_GATHERING) >= ACADEMY_MAX_LEVEL
+
+
+func has_faster_unit_training(for_enemy: bool = false) -> bool:
+	if for_enemy:
+		return get_enemy_level(UPGRADE_FASTER_UNIT_TRAINING) >= ACADEMY_MAX_LEVEL
+
+	return get_level(UPGRADE_FASTER_UNIT_TRAINING) >= ACADEMY_MAX_LEVEL
+
+
+func get_academy_upgrade_research_seconds(upgrade_id: StringName) -> float:
+	return float(ACADEMY_UPGRADE_RESEARCH_SECONDS.get(upgrade_id, 60.0))
 
 
 func get_display_name(upgrade_id: StringName) -> String:

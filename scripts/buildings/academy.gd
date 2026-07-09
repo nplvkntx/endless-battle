@@ -5,8 +5,6 @@ extends Building
 
 signal research_state_changed()
 
-const RESEARCH_SECONDS: float = 60.0
-
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
 ) as HealthComponent
@@ -14,6 +12,7 @@ const RESEARCH_SECONDS: float = 60.0
 var _is_researching: bool = false
 var _research_upgrade_id: StringName = &""
 var _research_started_at: float = 0.0
+var _research_seconds: float = 60.0
 var _research_session: int = 0
 
 
@@ -53,7 +52,7 @@ func get_research_progress() -> float:
 		return 0.0
 
 	var elapsed: float = _get_time_seconds() - _research_started_at
-	return clampf(elapsed / RESEARCH_SECONDS, 0.0, 1.0)
+	return clampf(elapsed / _research_seconds, 0.0, 1.0)
 
 
 func get_research_activity_label() -> String:
@@ -106,10 +105,11 @@ func _begin_research(upgrade_id: StringName) -> void:
 	var session: int = _research_session
 	_is_researching = true
 	_research_upgrade_id = upgrade_id
+	_research_seconds = UpgradeManager.get_academy_upgrade_research_seconds(upgrade_id)
 	_research_started_at = _get_time_seconds()
 	research_state_changed.emit()
 
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(RESEARCH_SECONDS)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(_research_seconds)
 	wait_timer.timeout.connect(func() -> void:
 		_on_research_finished(session)
 	, CONNECT_ONE_SHOT)

@@ -78,6 +78,7 @@ const UPGRADE_DESCRIPTIONS: Dictionary = {
 	UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED: "Increases archer attack speed.",
 	UpgradeManager.UPGRADE_ARCHER_RANGE: "Increases archer attack range.",
 	UpgradeManager.UPGRADE_FASTER_GATHERING: "Workers gather resources 25% faster.",
+	UpgradeManager.UPGRADE_FASTER_UNIT_TRAINING: "Military units train 20% faster.",
 }
 
 
@@ -264,7 +265,9 @@ static func format_academy_upgrade_research(
 			lines.append("Gold: %d" % cost.gold)
 		if cost.wood > 0:
 			lines.append("Wood: %d" % cost.wood)
-		lines.append("Time: %s" % _format_seconds(Academy.RESEARCH_SECONDS))
+		lines.append("Time: %s" % _format_seconds(
+			UpgradeManager.get_academy_upgrade_research_seconds(upgrade_id)
+		))
 
 	if is_researching:
 		lines.append("Research in progress")
