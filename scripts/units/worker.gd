@@ -48,6 +48,7 @@ var _return_dropoff: CommandCenter = null
 var _build_approach_candidate_index: int = 0
 var _build_trip_state: BuildTripState = BuildTripState.IDLE
 var _building_target: Building = null
+var _wall_build_job: WallBuildJob = null
 var _task_movement_destination: Vector3 = Vector3.ZERO
 var _task_has_saved_destination: bool = false
 var _task_stuck_time: float = 0.0
@@ -310,7 +311,13 @@ func _sanitize_stored_targets() -> void:
 		_gather_source = null
 
 	if not NodeSafety.is_alive_node(_building_target):
-		_cancel_build_trip()
+		if _wall_build_job != null:
+			var job: WallBuildJob = _wall_build_job
+			var lost_segment: Building = _building_target
+			_cancel_build_trip(false)
+			job.on_worker_segment_lost(self, lost_segment)
+		else:
+			_cancel_build_trip()
 
 	if not NodeSafety.is_alive_node(_locked_wood_tree):
 		_locked_wood_tree = null
@@ -325,7 +332,12 @@ func _sanitize_stored_targets() -> void:
 		_return_dropoff = null
 
 
-func _cancel_build_trip() -> void:
+func _cancel_build_trip(clear_wall_job: bool = true) -> void:
+	if clear_wall_job and _wall_build_job != null:
+		var job: WallBuildJob = _wall_build_job
+		_wall_build_job = null
+		job.on_worker_left(self)
+
 	if _building_target != null and is_instance_valid(_building_target):
 		_building_target.unregister_builder(self)
 
@@ -843,7 +855,32 @@ func start_construction_order(building: Building) -> void:
 	if _is_enemy_worker() and WorkerAiUnstuck.blocks_external_commands(self):
 		return
 
-	_cancel_build_trip()
+	_begin_construction_trip(building, true)
+
+
+func assign_wall_build_job(job: WallBuildJob) -> void:
+	_wall_build_job = job
+
+
+func clear_wall_build_job_assignment() -> void:
+	_wall_build_job = null
+
+
+func get_wall_build_job() -> WallBuildJob:
+	return _wall_build_job
+
+
+func continue_wall_build_order(building: Building) -> void:
+	if not _is_alive():
+		return
+	if building == null or not is_instance_valid(building):
+		return
+
+	_begin_construction_trip(building, false)
+
+
+func _begin_construction_trip(building: Building, clear_wall_job: bool) -> void:
+	_cancel_build_trip(clear_wall_job)
 	cancel_gathering()
 	_build_trip_state = BuildTripState.TO_BUILDING
 	_building_target = NodeSafety.safe_node(building) as Building
@@ -870,9 +907,14 @@ func on_building_construction_finished() -> void:
 	if _build_trip_state != BuildTripState.CONSTRUCTION_WAIT:
 		return
 
+	var finished_building: Building = _building_target
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
 	_construction_target_point_valid = false
+
+	if _wall_build_job != null:
+		_wall_build_job.on_worker_segment_finished(self, finished_building)
+		return
 
 	if _is_enemy_worker():
 		_notify_enemy_worker_needs_gather_job()
@@ -880,6 +922,12 @@ func on_building_construction_finished() -> void:
 
 func notify_building_destroyed(building: Building) -> void:
 	if _building_target != building:
+		return
+
+	if _wall_build_job != null:
+		var job: WallBuildJob = _wall_build_job
+		_cancel_build_trip(false)
+		job.on_worker_segment_lost(self, building)
 		return
 
 	_cancel_build_trip()
@@ -1080,7 +1128,13 @@ func _is_construction_approach_move_target(target: Vector3) -> bool:
 
 func _validate_construction_session() -> bool:
 	if _building_target == null or not is_instance_valid(_building_target):
-		_cancel_build_trip()
+		if _wall_build_job != null:
+			var job: WallBuildJob = _wall_build_job
+			var lost_segment: Building = _building_target
+			_cancel_build_trip(false)
+			job.on_worker_segment_lost(self, lost_segment)
+		else:
+			_cancel_build_trip()
 		return false
 
 	if _building_target.building_state == Building.STATE_COMPLETED:

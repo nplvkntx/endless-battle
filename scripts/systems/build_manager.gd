@@ -732,9 +732,8 @@ func _place_wall_line() -> void:
 		building.setup_construction(construction_duration)
 		placed_buildings.append(building)
 
-	for worker_index: int in range(workers.size()):
-		var building_index: int = worker_index % placed_buildings.size()
-		workers[worker_index].start_construction_order(placed_buildings[building_index])
+	var wall_job := WallBuildJob.new(placed_buildings, workers)
+	wall_job.start()
 
 	_cancel_placement()
 
