@@ -32,6 +32,7 @@ var _tracked_stable: Stable = null
 var _tracked_artillery_depot: ArtilleryDepot = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_blacksmith: Blacksmith = null
+var _tracked_academy: Academy = null
 var _tracked_activity_building: Building = null
 var _is_enemy_inspect: bool = false
 var _activity_refresh_timer: float = 0.0
@@ -774,6 +775,16 @@ func _query_active_activity() -> Dictionary:
 				"detail": "",
 			}
 
+	if building is Academy:
+		var academy: Academy = building as Academy
+		if academy.is_researching():
+			return {
+				"active": true,
+				"progress": academy.get_research_progress(),
+				"label": "Researching: %s" % academy.get_research_activity_label(),
+				"detail": "",
+			}
+
 	if building is CommandCenter:
 		var command_center: CommandCenter = building as CommandCenter
 		if command_center.is_upgrading_tier():
@@ -888,6 +899,10 @@ func _refresh_idle_production_labels() -> void:
 
 	if _tracked_blacksmith != null and is_instance_valid(_tracked_blacksmith):
 		_update_blacksmith_production()
+		return
+
+	if _tracked_academy != null and is_instance_valid(_tracked_academy):
+		_update_academy_production()
 
 
 func _configure_production_display(building: Building) -> void:
@@ -950,6 +965,13 @@ func _configure_production_display(building: Building) -> void:
 		_update_blacksmith_production()
 		return
 
+	if building is Academy:
+		_tracked_academy = building as Academy
+		if _tracked_academy.has_signal("research_state_changed"):
+			_tracked_academy.research_state_changed.connect(_on_production_changed)
+		_update_academy_production()
+		return
+
 	_hide_production_display()
 
 
@@ -976,6 +998,14 @@ func _on_production_changed(_value: Variant = null) -> void:
 
 	if _tracked_hero_altar != null and is_instance_valid(_tracked_hero_altar):
 		_update_hero_altar_production()
+		return
+
+	if _tracked_blacksmith != null and is_instance_valid(_tracked_blacksmith):
+		_update_blacksmith_production()
+		return
+
+	if _tracked_academy != null and is_instance_valid(_tracked_academy):
+		_update_academy_production()
 
 
 func _update_command_center_production() -> void:
@@ -1165,6 +1195,19 @@ func _update_blacksmith_production() -> void:
 	_building_detail_label.visible = false
 
 
+func _update_academy_production() -> void:
+	if _tracked_academy == null or not is_instance_valid(_tracked_academy):
+		_hide_production_display()
+		return
+
+	if _tracked_academy.is_researching():
+		return
+
+	_task_label.text = "Research: Ready"
+	_task_label.visible = true
+	_building_detail_label.visible = false
+
+
 func _clear_production_tracking() -> void:
 	if _tracked_command_center != null and is_instance_valid(_tracked_command_center):
 		if (
@@ -1243,6 +1286,13 @@ func _clear_production_tracking() -> void:
 		):
 			_tracked_blacksmith.research_state_changed.disconnect(_on_production_changed)
 
+	if _tracked_academy != null and is_instance_valid(_tracked_academy):
+		if (
+			_tracked_academy.has_signal("research_state_changed")
+			and _tracked_academy.research_state_changed.is_connected(_on_production_changed)
+		):
+			_tracked_academy.research_state_changed.disconnect(_on_production_changed)
+
 	_disconnect_activity_building_signals()
 	_tracked_command_center = null
 	_tracked_barracks = null
@@ -1250,6 +1300,7 @@ func _clear_production_tracking() -> void:
 	_tracked_artillery_depot = null
 	_tracked_hero_altar = null
 	_tracked_blacksmith = null
+	_tracked_academy = null
 
 
 func _get_unit_info(unit: Unit) -> Dictionary:

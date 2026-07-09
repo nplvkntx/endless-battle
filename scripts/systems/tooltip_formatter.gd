@@ -77,6 +77,7 @@ const UPGRADE_DESCRIPTIONS: Dictionary = {
 	UpgradeManager.UPGRADE_ARCHER_ATTACK: "Increases archer attack damage.",
 	UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED: "Increases archer attack speed.",
 	UpgradeManager.UPGRADE_ARCHER_RANGE: "Increases archer attack range.",
+	UpgradeManager.UPGRADE_FASTER_GATHERING: "Workers gather resources 25% faster.",
 }
 
 
@@ -244,6 +245,53 @@ static func format_upgrade_research(
 		lines.append(description)
 
 	return "\n".join(lines)
+
+
+static func format_academy_upgrade_research(
+	upgrade_id: StringName,
+	blocked_reason: String = "",
+	is_researching: bool = false
+) -> String:
+	var display_name: String = UpgradeManager.get_display_name(upgrade_id)
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("Research %s" % display_name)
+
+	if UpgradeManager.is_academy_max_level(upgrade_id):
+		lines.append("Already researched")
+	else:
+		var cost: Dictionary = UpgradeManager.get_academy_upgrade_cost(upgrade_id)
+		if cost.gold > 0:
+			lines.append("Gold: %d" % cost.gold)
+		if cost.wood > 0:
+			lines.append("Wood: %d" % cost.wood)
+		lines.append("Time: %s" % _format_seconds(Academy.RESEARCH_SECONDS))
+
+	if is_researching:
+		lines.append("Research in progress")
+	elif not blocked_reason.is_empty():
+		lines.append(blocked_reason)
+
+	var description: String = String(UPGRADE_DESCRIPTIONS.get(upgrade_id, ""))
+	if not description.is_empty():
+		lines.append(description)
+
+	return "\n".join(lines)
+
+
+static func get_academy_upgrade_blocked_reason(upgrade_id: StringName, is_researching: bool) -> String:
+	if is_researching:
+		return "Research in progress"
+	if UpgradeManager.is_academy_max_level(upgrade_id):
+		return "Already researched"
+
+	var cost: Dictionary = UpgradeManager.get_academy_upgrade_cost(upgrade_id)
+	if ResourceManager.gold < cost.gold and ResourceManager.wood < cost.wood:
+		return "Need more gold and wood"
+	if ResourceManager.gold < cost.gold:
+		return "Need more gold"
+	if ResourceManager.wood < cost.wood:
+		return "Need more wood"
+	return ""
 
 
 static func format_inventory_item(item: HeroItemDefinition) -> String:

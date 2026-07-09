@@ -51,3 +51,7 @@ const AI_UNSTUCK_REPEAT_LOCATION_RADIUS: float = 1.5
 const AI_UNSTUCK_DISTANCE_REPEAT_SCALE: float = 1.35
 const AI_UNSTUCK_BUILDING_SEARCH_RADIUS: float = 8.0
 const AI_UNSTUCK_BUILDING_EDGE_PADDING: float = 0.35
+
+
+static func get_gather_wait_seconds(speed_multiplier: float = 1.0) -> float:
+	return GATHER_WAIT_SECONDS / maxf(speed_multiplier, 0.01)

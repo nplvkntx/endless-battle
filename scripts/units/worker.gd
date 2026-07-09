@@ -1558,8 +1558,19 @@ func _begin_gather_wait() -> void:
 		_lock_wood_gathering_position()
 
 	_gather_state = GatherTripState.GATHER_WAIT
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(GatheringConfig.GATHER_WAIT_SECONDS)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(_get_gather_wait_seconds())
 	wait_timer.timeout.connect(_on_gather_wait_finished, CONNECT_ONE_SHOT)
+
+
+func _get_gather_wait_seconds() -> float:
+	return GatheringConfig.get_gather_wait_seconds(_get_gather_speed_multiplier())
+
+
+func _get_gather_speed_multiplier() -> float:
+	if UpgradeManager.has_faster_gathering(_is_enemy_worker()):
+		return UpgradeManager.FASTER_GATHERING_SPEED_MULTIPLIER
+
+	return 1.0
 
 
 func _on_gather_wait_finished() -> void:

@@ -130,8 +130,14 @@ extends PanelContainer
 @onready var _artillery_depot_training_row: HBoxContainer = (
 	$MarginContainer/HBoxContainer/RightPanel/ArtilleryDepotPanel/ArtilleryDepotTrainingRow
 )
-@onready var _academy_panel: VBoxContainer = (
+@onready var _academy_panel: HBoxContainer = (
 	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel
+)
+@onready var _faster_gathering_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterGatheringColumn/FasterGatheringInfoLabel
+)
+@onready var _faster_gathering_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterGatheringColumn/FasterGatheringButton
 )
 @onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
 @onready var _shop_status_label: Label = (
@@ -174,6 +180,7 @@ var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
 var _tracked_artillery_depot: ArtilleryDepot = null
 var _tracked_blacksmith: Blacksmith = null
+var _tracked_academy: Academy = null
 var _tracked_shop: Shop = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
@@ -193,6 +200,7 @@ const QUEUE_SLOT_SIZE := Vector2(28, 28)
 const QUEUE_SLOT_HINT := "Right-click to cancel"
 const QUEUE_SLOT_COLOR := Color(0.28, 0.32, 0.38, 1)
 const BLACKSMITH_UPGRADE_MAX_COLOR := Color(0.55, 0.58, 0.62, 1)
+const ACADEMY_UPGRADE_DONE_COLOR := Color(0.55, 0.58, 0.62, 1)
 
 var _blacksmith_upgrade_buttons: Array[Button] = []
 var _blacksmith_upgrade_info_labels: Array[Label] = []
@@ -202,6 +210,10 @@ var _shop_item_info_labels: Array[Label] = []
 var _shop_item_ids: Array[StringName] = []
 var _shop_item_button_handlers: Array[Callable] = []
 var _blacksmith_upgrade_button_handlers: Array[Callable] = []
+var _academy_upgrade_ids: Array[StringName] = []
+var _academy_upgrade_info_labels: Array[Label] = []
+var _academy_upgrade_buttons: Array[Button] = []
+var _academy_upgrade_button_handlers: Array[Callable] = []
 const QUEUE_SLOT_TRAINING_COLOR := Color(0.45, 0.38, 0.18, 1)
 const PRODUCTION_ICON_SLOT_SCENE: PackedScene = preload("res://scenes/ui/production_icon_slot.tscn")
 const BUILD_ICON_SLOT_SCENE: PackedScene = preload("res://scenes/ui/build_icon_slot.tscn")
@@ -257,6 +269,7 @@ func _ready() -> void:
 	if USE_BUILD_ICON_SLOTS:
 		_setup_build_icon_slots()
 	_setup_blacksmith_upgrade_controls()
+	_setup_academy_upgrade_controls()
 	_setup_shop_item_controls()
 	_set_town_center_button_labels()
 	_set_barracks_button_labels()
@@ -286,6 +299,7 @@ func _ready() -> void:
 	_execute_button.pressed.connect(_on_execute_pressed)
 	_execute_upgrade_button.pressed.connect(_on_execute_upgrade_pressed)
 	_connect_blacksmith_upgrade_buttons()
+	_connect_academy_upgrade_buttons()
 	_connect_shop_item_buttons()
 	_setup_command_tooltips()
 	_hide_all_hero_upgrade_buttons()
@@ -1232,6 +1246,76 @@ func _setup_blacksmith_upgrade_controls() -> void:
 	_update_blacksmith_upgrade_ui()
 
 
+func _setup_academy_upgrade_controls() -> void:
+	_academy_upgrade_ids = UpgradeManager.ACADEMY_UPGRADE_ORDER.duplicate()
+	_academy_upgrade_info_labels = [_faster_gathering_info_label]
+	_academy_upgrade_buttons = [_faster_gathering_button]
+	_update_academy_upgrade_ui()
+
+
+func _connect_academy_upgrade_buttons() -> void:
+	for index: int in _academy_upgrade_buttons.size():
+		var button: Button = _academy_upgrade_buttons[index]
+		if button == null:
+			continue
+		if index < _academy_upgrade_button_handlers.size():
+			continue
+
+		var upgrade_id: StringName = _academy_upgrade_ids[index]
+		var handler := func() -> void:
+			_on_academy_upgrade_button_pressed(upgrade_id)
+		_academy_upgrade_button_handlers.append(handler)
+		button.pressed.connect(handler)
+
+
+func _on_academy_upgrade_button_pressed(upgrade_id: StringName) -> void:
+	if _selected_academy == null or not is_instance_valid(_selected_academy):
+		_selected_academy = null
+		return
+
+	if _selected_academy.try_research_upgrade(upgrade_id):
+		_update_academy_upgrade_ui()
+
+
+func _update_academy_upgrade_ui() -> void:
+	if _selected_academy == null or not is_instance_valid(_selected_academy):
+		_selected_academy = null
+		return
+
+	var is_researching: bool = _selected_academy.is_researching()
+
+	for index: int in _academy_upgrade_buttons.size():
+		if index >= _academy_upgrade_ids.size():
+			break
+
+		var upgrade_id: StringName = _academy_upgrade_ids[index]
+		var info_label: Label = _academy_upgrade_info_labels[index]
+		var button: Button = _academy_upgrade_buttons[index]
+		if info_label == null or button == null:
+			continue
+
+		info_label.text = UpgradeManager.get_display_name(upgrade_id)
+
+		if is_researching:
+			button.disabled = true
+			continue
+
+		if UpgradeManager.is_academy_max_level(upgrade_id):
+			info_label.add_theme_color_override("font_color", ACADEMY_UPGRADE_DONE_COLOR)
+			button.text = "%s\nDONE" % UpgradeManager.get_hotkey_label(upgrade_id)
+			button.disabled = true
+			continue
+
+		info_label.remove_theme_color_override("font_color")
+		var cost: Dictionary = UpgradeManager.get_academy_upgrade_cost(upgrade_id)
+		button.text = "%s\n%dW %dG" % [
+			UpgradeManager.get_hotkey_label(upgrade_id),
+			cost.wood,
+			cost.gold,
+		]
+		button.disabled = not UpgradeManager.can_afford_academy_upgrade(upgrade_id)
+
+
 func _setup_shop_item_controls() -> void:
 	_shop_item_ids = HeroItemCatalog.SHOP_ITEM_ORDER.duplicate()
 	_shop_item_info_labels = [
@@ -1353,6 +1437,7 @@ func _on_blacksmith_upgrade_button_pressed(upgrade_id: StringName) -> void:
 
 func _on_upgrade_levels_changed() -> void:
 	_update_blacksmith_upgrade_ui()
+	_update_academy_upgrade_ui()
 
 
 func _update_barracks_train_button_states() -> void:
@@ -1388,6 +1473,8 @@ func _on_tech_progression_changed(team_id: int) -> void:
 func _on_resources_changed() -> void:
 	if _blacksmith_panel.visible:
 		_update_blacksmith_upgrade_ui()
+	if _academy_panel.visible:
+		_update_academy_upgrade_ui()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
 	if _worker_build_icons_visible():
@@ -1449,6 +1536,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _try_handle_blacksmith_upgrade_hotkey(key_event):
+		return
+
+	if _try_handle_academy_upgrade_hotkey(key_event):
 		return
 
 	var hero: Hero = _get_tracked_hero_for_input()
@@ -1551,6 +1641,36 @@ func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:
 
 	if _selected_blacksmith.try_research_upgrade(upgrade_id):
 		_update_blacksmith_upgrade_ui()
+
+	get_viewport().set_input_as_handled()
+	return true
+
+
+func _try_handle_academy_upgrade_hotkey(key_event: InputEventKey) -> bool:
+	if _selected_academy == null or not is_instance_valid(_selected_academy):
+		_selected_academy = null
+		return false
+
+	if not _selected_academy.can_research():
+		return false
+
+	if _selected_academy.is_researching():
+		get_viewport().set_input_as_handled()
+		return true
+
+	var upgrade_id: StringName = &""
+	match key_event.keycode:
+		KEY_Q:
+			upgrade_id = UpgradeManager.UPGRADE_FASTER_GATHERING
+		_:
+			return false
+
+	if UpgradeManager.is_academy_max_level(upgrade_id):
+		get_viewport().set_input_as_handled()
+		return true
+
+	if _selected_academy.try_research_upgrade(upgrade_id):
+		_update_academy_upgrade_ui()
 
 	get_viewport().set_input_as_handled()
 	return true
@@ -2176,6 +2296,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_artillery_depot_signals()
 	_disconnect_hero_altar_signals()
 	_disconnect_blacksmith_signals()
+	_disconnect_academy_signals()
 	_disconnect_shop_signals()
 	_selected_command_center = null
 
@@ -2249,6 +2370,14 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_tracked_blacksmith = null
 
+	if building is Academy and is_instance_valid(building):
+		_tracked_academy = building as Academy
+		_tracked_academy.building_state_changed.connect(_on_academy_state_changed)
+		if not _tracked_academy.research_state_changed.is_connected(_on_academy_research_state_changed):
+			_tracked_academy.research_state_changed.connect(_on_academy_research_state_changed)
+	else:
+		_tracked_academy = null
+
 	if building is Shop and is_instance_valid(building):
 		_tracked_shop = building as Shop
 		_tracked_shop.building_state_changed.connect(_on_shop_state_changed)
@@ -2303,6 +2432,14 @@ func _on_blacksmith_state_changed(_state: StringName) -> void:
 
 func _on_blacksmith_research_state_changed() -> void:
 	_update_blacksmith_upgrade_ui()
+
+
+func _on_academy_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _on_academy_research_state_changed() -> void:
+	_update_academy_upgrade_ui()
 
 
 func _on_shop_state_changed(_state: StringName) -> void:
@@ -2485,6 +2622,9 @@ func _refresh_command_visibility() -> void:
 
 	if show_blacksmith_upgrades:
 		_update_blacksmith_upgrade_ui()
+
+	if show_academy_commands:
+		_update_academy_upgrade_ui()
 
 	if show_shop_items:
 		_update_shop_item_ui()
@@ -2951,6 +3091,17 @@ func _disconnect_blacksmith_signals() -> void:
 	_tracked_blacksmith = null
 
 
+func _disconnect_academy_signals() -> void:
+	if _tracked_academy != null and is_instance_valid(_tracked_academy):
+		if _tracked_academy.building_state_changed.is_connected(_on_academy_state_changed):
+			_tracked_academy.building_state_changed.disconnect(_on_academy_state_changed)
+
+		if _tracked_academy.research_state_changed.is_connected(_on_academy_research_state_changed):
+			_tracked_academy.research_state_changed.disconnect(_on_academy_research_state_changed)
+
+	_tracked_academy = null
+
+
 func _disconnect_shop_signals() -> void:
 	if _tracked_shop != null and is_instance_valid(_tracked_shop):
 		if _tracked_shop.building_state_changed.is_connected(_on_shop_state_changed):
@@ -3250,6 +3401,18 @@ func _setup_command_tooltips() -> void:
 		_clear_control_tooltip(button)
 		TooltipManager.bind_control(button, func() -> String: return _get_blacksmith_upgrade_tooltip(upgrade_id))
 
+	for index: int in _academy_upgrade_buttons.size():
+		if index >= _academy_upgrade_ids.size():
+			break
+
+		var academy_upgrade_id: StringName = _academy_upgrade_ids[index]
+		var academy_button: Button = _academy_upgrade_buttons[index]
+		_clear_control_tooltip(academy_button)
+		TooltipManager.bind_control(
+			academy_button,
+			func() -> String: return _get_academy_upgrade_tooltip(academy_upgrade_id)
+		)
+
 	for index: int in _shop_item_buttons.size():
 		if index >= _shop_item_ids.size():
 			break
@@ -3435,6 +3598,19 @@ func _get_blacksmith_upgrade_tooltip(upgrade_id: StringName) -> String:
 	return TooltipFormatter.format_upgrade_research(
 		upgrade_id,
 		TooltipFormatter.get_upgrade_blocked_reason(upgrade_id, is_researching),
+		is_researching
+	)
+
+
+func _get_academy_upgrade_tooltip(upgrade_id: StringName) -> String:
+	var is_researching: bool = (
+		_selected_academy != null
+		and is_instance_valid(_selected_academy)
+		and _selected_academy.is_researching()
+	)
+	return TooltipFormatter.format_academy_upgrade_research(
+		upgrade_id,
+		TooltipFormatter.get_academy_upgrade_blocked_reason(upgrade_id, is_researching),
 		is_researching
 	)
 
