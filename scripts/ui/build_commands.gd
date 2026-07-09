@@ -148,6 +148,24 @@ extends PanelContainer
 @onready var _faster_unit_training_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/FasterUnitTrainingColumn/FasterUnitTrainingButton
 )
+@onready var _improved_tools_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/ImprovedToolsColumn/ImprovedToolsInfoLabel
+)
+@onready var _improved_tools_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/ImprovedToolsColumn/ImprovedToolsButton
+)
+@onready var _engineering_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/EngineeringColumn/EngineeringInfoLabel
+)
+@onready var _engineering_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/EngineeringColumn/EngineeringButton
+)
+@onready var _ballistics_info_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/BallisticsColumn/BallisticsInfoLabel
+)
+@onready var _ballistics_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/AcademyPanel/BallisticsColumn/BallisticsButton
+)
 @onready var _shop_panel: VBoxContainer = $MarginContainer/HBoxContainer/RightPanel/ShopPanel
 @onready var _shop_status_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
@@ -1270,8 +1288,20 @@ func _setup_blacksmith_upgrade_controls() -> void:
 
 func _setup_academy_upgrade_controls() -> void:
 	_academy_upgrade_ids = UpgradeManager.ACADEMY_UPGRADE_ORDER.duplicate()
-	_academy_upgrade_info_labels = [_faster_gathering_info_label, _faster_unit_training_info_label]
-	_academy_upgrade_buttons = [_faster_gathering_button, _faster_unit_training_button]
+	_academy_upgrade_info_labels = [
+		_faster_gathering_info_label,
+		_faster_unit_training_info_label,
+		_improved_tools_info_label,
+		_engineering_info_label,
+		_ballistics_info_label,
+	]
+	_academy_upgrade_buttons = [
+		_faster_gathering_button,
+		_faster_unit_training_button,
+		_improved_tools_button,
+		_engineering_button,
+		_ballistics_button,
+	]
 	_update_academy_upgrade_ui()
 
 
@@ -1686,6 +1716,12 @@ func _try_handle_academy_upgrade_hotkey(key_event: InputEventKey) -> bool:
 			upgrade_id = UpgradeManager.UPGRADE_FASTER_GATHERING
 		KEY_W:
 			upgrade_id = UpgradeManager.UPGRADE_FASTER_UNIT_TRAINING
+		KEY_E:
+			upgrade_id = UpgradeManager.UPGRADE_IMPROVED_TOOLS
+		KEY_R:
+			upgrade_id = UpgradeManager.UPGRADE_ENGINEERING
+		KEY_T:
+			upgrade_id = UpgradeManager.UPGRADE_BALLISTICS
 		_:
 			return false
 

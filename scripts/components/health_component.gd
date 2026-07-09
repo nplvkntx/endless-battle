@@ -15,10 +15,13 @@ const ARMY_PASSIVE_REGEN_PER_SECOND := 0.25
 
 var current_health: int = 0
 
+var _base_max_health: int = 0
+var _max_health_multiplier_applied: float = 1.0
 var _passive_regen_accumulator: float = 0.0
 
 
 func _ready() -> void:
+	_base_max_health = max_health
 	current_health = max_health
 	_configure_passive_regen()
 	set_physics_process(passive_regen_per_second > 0.0)
@@ -49,6 +52,22 @@ func heal(amount: int) -> void:
 
 	current_health = new_health
 	health_changed.emit(current_health, max_health)
+
+
+func apply_max_health_multiplier(multiplier: float) -> float:
+	if multiplier <= 1.0 or is_equal_approx(_max_health_multiplier_applied, multiplier):
+		return _max_health_multiplier_applied
+
+	var old_max_health: int = max_health
+	var new_max_health: int = maxi(1, int(round(float(_base_max_health) * multiplier)))
+	if new_max_health <= old_max_health:
+		return _max_health_multiplier_applied
+
+	max_health = new_max_health
+	current_health += new_max_health - old_max_health
+	_max_health_multiplier_applied = multiplier
+	health_changed.emit(current_health, max_health)
+	return _max_health_multiplier_applied
 
 
 func _configure_passive_regen() -> void:

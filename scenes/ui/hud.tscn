@@ -734,6 +734,60 @@ theme_override_font_sizes/font_size = 8
 text = "W
 900W 1200G"
 
+[node name="ImprovedToolsColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ImprovedToolsInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/ImprovedToolsColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Improved Tools"
+horizontal_alignment = 1
+
+[node name="ImprovedToolsButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/ImprovedToolsColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "E
+700W 900G"
+
+[node name="EngineeringColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="EngineeringInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/EngineeringColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Engineering"
+horizontal_alignment = 1
+
+[node name="EngineeringButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/EngineeringColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "R
+1200W 1500G"
+
+[node name="BallisticsColumn" type="VBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="BallisticsInfoLabel" type="Label" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/BallisticsColumn"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.92, 0.82, 1)
+theme_override_font_sizes/font_size = 8
+text = "Ballistics"
+horizontal_alignment = 1
+
+[node name="BallisticsButton" type="Button" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel/AcademyPanel/BallisticsColumn"]
+custom_minimum_size = Vector2(52, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "T
+1200W 1800G"
+
 [node name="BlacksmithPanel" type="HBoxContainer" parent="CommandBar/MarginContainer/VBoxContainer/SelectionCommandPanel/MarginContainer/HBoxContainer/RightPanel"]
 visible = false
 layout_mode = 2

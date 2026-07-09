@@ -80,4 +80,15 @@ func _fire_projectile(target: Node3D) -> void:
 	var arrow: Arrow = ARROW_SCENE.instantiate() as Arrow
 	get_tree().current_scene.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, PROJECTILE_SPAWN_HEIGHT, 0.0)
-	arrow.launch(target, float(attack_damage), spawn_position, self)
+	arrow.launch(target, float(_get_effective_attack_damage()), spawn_position, self)
+
+
+func _get_effective_attack_damage() -> int:
+	return maxi(
+		1,
+		int(round(float(attack_damage) * UpgradeManager.get_ballistics_damage_multiplier(_is_enemy_owned())))
+	)
+
+
+func _is_enemy_owned() -> bool:
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID

@@ -450,6 +450,7 @@ func complete_construction() -> void:
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
+	apply_engineering_bonus()
 
 
 func set_completed() -> void:
@@ -458,6 +459,36 @@ func set_completed() -> void:
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
+	apply_engineering_bonus()
+
+
+func apply_engineering_bonus() -> void:
+	if building_state != STATE_COMPLETED:
+		return
+
+	var health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
+	if health_component == null:
+		return
+
+	var for_enemy: bool = TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+	if not UpgradeManager.has_engineering(for_enemy):
+		return
+
+	health_component.apply_max_health_multiplier(UpgradeManager.ENGINEERING_MAX_HEALTH_MULTIPLIER)
+
+
+func apply_construction_speed_bonus(speed_multiplier: float) -> void:
+	if speed_multiplier <= 1.0:
+		return
+
+	if building_state != STATE_CONSTRUCTING and building_state != STATE_UNDER_CONSTRUCTION:
+		return
+
+	var remaining_duration: float = maxf(0.0, _construction_duration - _construction_elapsed)
+	if remaining_duration <= 0.0:
+		return
+
+	_construction_duration = _construction_elapsed + remaining_duration / speed_multiplier
 
 
 func _on_construction_timer_finished() -> void:

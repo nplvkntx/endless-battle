@@ -287,12 +287,23 @@ func _fire_shell() -> void:
 	var spawn_position: Vector3 = global_position + Vector3(0.0, SHELL_SPAWN_HEIGHT, 0.0)
 	shell.launch(
 		_attack_target,
-		float(attack_damage),
+		float(_get_effective_attack_damage()),
 		splash_radius,
 		spawn_position,
 		self,
 		splash_min_damage_ratio
 	)
+
+
+func _get_effective_attack_damage() -> int:
+	return maxi(
+		1,
+		int(round(float(attack_damage) * UpgradeManager.get_ballistics_damage_multiplier(_is_enemy_owned())))
+	)
+
+
+func _is_enemy_owned() -> bool:
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
 
 
 func take_damage(amount: float, attacker = null) -> void:

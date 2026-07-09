@@ -11,6 +11,9 @@ const ACADEMY_MAX_LEVEL: int = 1
 const LEVEL_COSTS: Array[int] = [100, 150, 225, 325, 450]
 const FASTER_GATHERING_SPEED_MULTIPLIER: float = 1.25
 const FASTER_UNIT_TRAINING_SPEED_MULTIPLIER: float = 1.2
+const IMPROVED_TOOLS_CONSTRUCTION_SPEED_MULTIPLIER: float = 1.2
+const ENGINEERING_MAX_HEALTH_MULTIPLIER: float = 1.2
+const BALLISTICS_DAMAGE_MULTIPLIER: float = 1.2
 
 const UPGRADE_SWORDSMAN_ATTACK: StringName = &"swordsman_attack"
 const UPGRADE_SWORDSMAN_ARMOR: StringName = &"swordsman_armor"
@@ -19,6 +22,9 @@ const UPGRADE_ARCHER_ATTACK_SPEED: StringName = &"archer_attack_speed"
 const UPGRADE_ARCHER_RANGE: StringName = &"archer_range"
 const UPGRADE_FASTER_GATHERING: StringName = &"faster_gathering"
 const UPGRADE_FASTER_UNIT_TRAINING: StringName = &"faster_unit_training"
+const UPGRADE_IMPROVED_TOOLS: StringName = &"improved_tools"
+const UPGRADE_ENGINEERING: StringName = &"engineering"
+const UPGRADE_BALLISTICS: StringName = &"ballistics"
 
 const BLACKSMITH_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_SWORDSMAN_ATTACK,
@@ -31,16 +37,25 @@ const BLACKSMITH_UPGRADE_ORDER: Array[StringName] = [
 const ACADEMY_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_FASTER_GATHERING,
 	UPGRADE_FASTER_UNIT_TRAINING,
+	UPGRADE_IMPROVED_TOOLS,
+	UPGRADE_ENGINEERING,
+	UPGRADE_BALLISTICS,
 ]
 
 const ACADEMY_UPGRADE_COSTS: Dictionary = {
 	UPGRADE_FASTER_GATHERING: {"gold": 1000, "wood": 700},
 	UPGRADE_FASTER_UNIT_TRAINING: {"gold": 1200, "wood": 900},
+	UPGRADE_IMPROVED_TOOLS: {"gold": 900, "wood": 700},
+	UPGRADE_ENGINEERING: {"gold": 1500, "wood": 1200},
+	UPGRADE_BALLISTICS: {"gold": 1800, "wood": 1200},
 }
 
 const ACADEMY_UPGRADE_RESEARCH_SECONDS: Dictionary = {
 	UPGRADE_FASTER_GATHERING: 60.0,
 	UPGRADE_FASTER_UNIT_TRAINING: 75.0,
+	UPGRADE_IMPROVED_TOOLS: 60.0,
+	UPGRADE_ENGINEERING: 90.0,
+	UPGRADE_BALLISTICS: 90.0,
 }
 
 const UPGRADE_DISPLAY_NAMES: Dictionary = {
@@ -51,6 +66,9 @@ const UPGRADE_DISPLAY_NAMES: Dictionary = {
 	UPGRADE_ARCHER_RANGE: "Archer Range",
 	UPGRADE_FASTER_GATHERING: "Faster Gathering",
 	UPGRADE_FASTER_UNIT_TRAINING: "Faster Unit Training",
+	UPGRADE_IMPROVED_TOOLS: "Improved Tools",
+	UPGRADE_ENGINEERING: "Engineering",
+	UPGRADE_BALLISTICS: "Ballistics",
 }
 
 const UPGRADE_HOTKEYS: Dictionary = {
@@ -61,6 +79,9 @@ const UPGRADE_HOTKEYS: Dictionary = {
 	UPGRADE_ARCHER_RANGE: "T",
 	UPGRADE_FASTER_GATHERING: "Q",
 	UPGRADE_FASTER_UNIT_TRAINING: "W",
+	UPGRADE_IMPROVED_TOOLS: "E",
+	UPGRADE_ENGINEERING: "R",
+	UPGRADE_BALLISTICS: "T",
 }
 
 var _levels: Dictionary = {
@@ -71,6 +92,9 @@ var _levels: Dictionary = {
 	UPGRADE_ARCHER_RANGE: 0,
 	UPGRADE_FASTER_GATHERING: 0,
 	UPGRADE_FASTER_UNIT_TRAINING: 0,
+	UPGRADE_IMPROVED_TOOLS: 0,
+	UPGRADE_ENGINEERING: 0,
+	UPGRADE_BALLISTICS: 0,
 }
 
 var _enemy_levels: Dictionary = {
@@ -81,6 +105,9 @@ var _enemy_levels: Dictionary = {
 	UPGRADE_ARCHER_RANGE: 0,
 	UPGRADE_FASTER_GATHERING: 0,
 	UPGRADE_FASTER_UNIT_TRAINING: 0,
+	UPGRADE_IMPROVED_TOOLS: 0,
+	UPGRADE_ENGINEERING: 0,
+	UPGRADE_BALLISTICS: 0,
 }
 
 
@@ -124,6 +151,41 @@ func has_faster_unit_training(for_enemy: bool = false) -> bool:
 		return get_enemy_level(UPGRADE_FASTER_UNIT_TRAINING) >= ACADEMY_MAX_LEVEL
 
 	return get_level(UPGRADE_FASTER_UNIT_TRAINING) >= ACADEMY_MAX_LEVEL
+
+
+func has_improved_tools(for_enemy: bool = false) -> bool:
+	if for_enemy:
+		return get_enemy_level(UPGRADE_IMPROVED_TOOLS) >= ACADEMY_MAX_LEVEL
+
+	return get_level(UPGRADE_IMPROVED_TOOLS) >= ACADEMY_MAX_LEVEL
+
+
+func has_engineering(for_enemy: bool = false) -> bool:
+	if for_enemy:
+		return get_enemy_level(UPGRADE_ENGINEERING) >= ACADEMY_MAX_LEVEL
+
+	return get_level(UPGRADE_ENGINEERING) >= ACADEMY_MAX_LEVEL
+
+
+func has_ballistics(for_enemy: bool = false) -> bool:
+	if for_enemy:
+		return get_enemy_level(UPGRADE_BALLISTICS) >= ACADEMY_MAX_LEVEL
+
+	return get_level(UPGRADE_BALLISTICS) >= ACADEMY_MAX_LEVEL
+
+
+func get_construction_speed_multiplier(for_enemy: bool = false) -> float:
+	if has_improved_tools(for_enemy):
+		return IMPROVED_TOOLS_CONSTRUCTION_SPEED_MULTIPLIER
+
+	return 1.0
+
+
+func get_ballistics_damage_multiplier(for_enemy: bool = false) -> float:
+	if has_ballistics(for_enemy):
+		return BALLISTICS_DAMAGE_MULTIPLIER
+
+	return 1.0
 
 
 func get_academy_upgrade_research_seconds(upgrade_id: StringName) -> float:
@@ -276,6 +338,10 @@ func finish_academy_research(upgrade_id: StringName) -> void:
 	_levels[upgrade_id] = ACADEMY_MAX_LEVEL
 	upgrade_levels_changed.emit()
 	upgrade_applied.emit(upgrade_id)
+	if upgrade_id == UPGRADE_ENGINEERING:
+		call_deferred("_refresh_team_building_engineering", false)
+	elif upgrade_id == UPGRADE_IMPROVED_TOOLS:
+		call_deferred("_refresh_team_construction_speed", false)
 
 
 func finish_enemy_academy_research(upgrade_id: StringName) -> void:
@@ -284,6 +350,10 @@ func finish_enemy_academy_research(upgrade_id: StringName) -> void:
 
 	_enemy_levels[upgrade_id] = ACADEMY_MAX_LEVEL
 	enemy_upgrade_applied.emit(upgrade_id)
+	if upgrade_id == UPGRADE_ENGINEERING:
+		call_deferred("_refresh_team_building_engineering", true)
+	elif upgrade_id == UPGRADE_IMPROVED_TOOLS:
+		call_deferred("_refresh_team_construction_speed", true)
 
 
 func try_research(upgrade_id: StringName) -> bool:
@@ -348,3 +418,48 @@ func _is_enemy_military_unit(unit: Unit) -> bool:
 	if TeamVisuals.resolve_team(unit, unit.team_id) == TeamVisuals.PLAYER_TEAM_ID:
 		return false
 	return true
+
+
+func _refresh_team_building_engineering(for_enemy: bool) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	for node: Node in tree.get_nodes_in_group(&"buildings"):
+		if not node is Building:
+			continue
+
+		var building: Building = node as Building
+		if building.building_state != Building.STATE_COMPLETED:
+			continue
+
+		var is_enemy_building: bool = (
+			TeamVisuals.resolve_team(building, building.team_id) != TeamVisuals.PLAYER_TEAM_ID
+		)
+		if is_enemy_building != for_enemy:
+			continue
+
+		building.apply_engineering_bonus()
+
+
+func _refresh_team_construction_speed(for_enemy: bool) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var speed_multiplier: float = get_construction_speed_multiplier(for_enemy)
+	if speed_multiplier <= 1.0:
+		return
+
+	for node: Node in tree.get_nodes_in_group(&"buildings"):
+		if not node is Building:
+			continue
+
+		var building: Building = node as Building
+		var is_enemy_building: bool = (
+			TeamVisuals.resolve_team(building, building.team_id) != TeamVisuals.PLAYER_TEAM_ID
+		)
+		if is_enemy_building != for_enemy:
+			continue
+
+		building.apply_construction_speed_bonus(speed_multiplier)

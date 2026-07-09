@@ -81,6 +81,9 @@ const UPGRADE_DESCRIPTIONS: Dictionary = {
 	UpgradeManager.UPGRADE_ARCHER_RANGE: "Increases archer attack range.",
 	UpgradeManager.UPGRADE_FASTER_GATHERING: "Workers gather resources 25% faster.",
 	UpgradeManager.UPGRADE_FASTER_UNIT_TRAINING: "Military units train 20% faster.",
+	UpgradeManager.UPGRADE_IMPROVED_TOOLS: "Workers build structures 20% faster.",
+	UpgradeManager.UPGRADE_ENGINEERING: "Buildings gain 20% maximum health.",
+	UpgradeManager.UPGRADE_BALLISTICS: "Towers and Cannons deal 20% more damage.",
 }
 
 

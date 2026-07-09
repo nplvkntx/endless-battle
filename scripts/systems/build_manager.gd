@@ -454,25 +454,31 @@ func _get_selected_workers() -> Array[Worker]:
 
 
 func _get_construction_duration(worker_count: int, placement_type: StringName = &"") -> float:
+	var speed_multiplier: float = _get_construction_speed_multiplier()
+
 	if placement_type == PLACEMENT_SHOP:
 		if worker_count >= 3:
-			return SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+			return SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS / speed_multiplier
 		if worker_count == 2:
-			return SHOP_CONSTRUCTION_DURATION_TWO_WORKERS
-		return SHOP_CONSTRUCTION_DURATION_ONE_WORKER
+			return SHOP_CONSTRUCTION_DURATION_TWO_WORKERS / speed_multiplier
+		return SHOP_CONSTRUCTION_DURATION_ONE_WORKER / speed_multiplier
 
 	if placement_type == PLACEMENT_WALL_SEGMENT:
 		if worker_count >= 3:
-			return WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+			return WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS / speed_multiplier
 		if worker_count == 2:
-			return WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS
-		return WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER
+			return WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS / speed_multiplier
+		return WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER / speed_multiplier
 
 	if worker_count >= 3:
-		return CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
+		return CONSTRUCTION_DURATION_THREE_PLUS_WORKERS / speed_multiplier
 	if worker_count == 2:
-		return CONSTRUCTION_DURATION_TWO_WORKERS
-	return CONSTRUCTION_DURATION_ONE_WORKER
+		return CONSTRUCTION_DURATION_TWO_WORKERS / speed_multiplier
+	return CONSTRUCTION_DURATION_ONE_WORKER / speed_multiplier
+
+
+func _get_construction_speed_multiplier() -> float:
+	return UpgradeManager.get_construction_speed_multiplier(false)
 
 
 func _has_worker_selected() -> bool:

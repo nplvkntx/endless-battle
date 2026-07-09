@@ -858,7 +858,9 @@ func _try_place_building_at_anchor(
 	parent.add_child(building)
 	building.global_position = position
 	building.start_under_construction()
-	building.setup_construction(CONSTRUCTION_DURATION)
+	building.setup_construction(
+		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
+	)
 	_assign_nearest_builder(building)
 	return true
 
