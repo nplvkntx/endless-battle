@@ -5,6 +5,7 @@ extends Node
 
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const HERO_BEHAVIOR_INTERVAL_SECONDS := 1.0
+const OFFENSIVE_MONITOR_INTERVAL_SECONDS := 0.75
 const MIN_HERO_LEVEL_FOR_ATTACK: int = 2
 const MIN_CLEARED_CAMPS_FOR_ATTACK: int = 2
 const FIRST_ATTACK_FALLBACK_SECONDS: float = 240.0
@@ -38,6 +39,7 @@ var _cached_player_base_position: Vector3 = Vector3.ZERO
 var _finishing_reinforcement_timer: float = 0.0
 var _finishing_attack_retry_timer: float = 0.0
 var _was_finishing_mode_active: bool = false
+var _offensive_monitor_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -66,7 +68,11 @@ func _process(delta: float) -> void:
 		_hero_behavior_timer = 0.0
 		_update_hero_army_behavior()
 
-	_monitor_active_offensive_push()
+	_offensive_monitor_timer += delta
+	if _offensive_monitor_timer >= OFFENSIVE_MONITOR_INTERVAL_SECONDS:
+		_offensive_monitor_timer = 0.0
+		_monitor_active_offensive_push()
+
 	EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), delta)
 
 	_regroup_timer += delta

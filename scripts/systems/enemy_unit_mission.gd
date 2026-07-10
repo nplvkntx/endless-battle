@@ -16,7 +16,7 @@ enum Mission {
 
 const COMMITMENT_SECONDS: float = 3.0
 const BUILD_COMMITMENT_SECONDS: float = 12.0
-const ORDER_REISSUE_MIN_SECONDS: float = 2.5
+const ORDER_REISSUE_MIN_SECONDS: float = 2.0
 const ORDER_MOVE_THRESHOLD: float = 4.0
 
 static var _unit_missions: Dictionary = {}

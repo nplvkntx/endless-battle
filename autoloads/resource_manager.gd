@@ -48,10 +48,10 @@ func add_wood(amount: int) -> void:
 
 
 func add_food_max(amount: int) -> void:
-	if amount <= 0:
+	if amount == 0:
 		return
 
-	food_max += amount
+	food_max = maxi(MatchConfig.STARTING_FOOD_MAX, food_max + amount)
 	food_changed.emit(food_current, food_max)
 
 

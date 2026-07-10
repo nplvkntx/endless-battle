@@ -28,6 +28,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	EnemyArmyCommand.tick_group_order_batch(get_tree())
+	EnemyArmyCommand.tick_perf_diagnostics(get_tree(), delta)
 	EnemyArmyCommand.tick_retreat_cooldown(delta)
 	_tick_timer += delta
 	if _tick_timer < TICK_INTERVAL_SECONDS:

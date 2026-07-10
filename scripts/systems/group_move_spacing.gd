@@ -11,6 +11,8 @@ const WALKABLE_PROBE_RADIUS: float = 0.45
 const FALLBACK_RING_COUNT: int = 4
 const FALLBACK_RING_STEPS: int = 8
 
+static var _probe_shape: SphereShape3D = null
+
 
 static func compute_line_targets(
 	row_center: Vector3,
@@ -49,6 +51,23 @@ static func clamp_to_map_bounds(position: Vector3) -> Vector3:
 	)
 
 
+static func resolve_formation_position(
+	candidate: Vector3,
+	fallback: Vector3,
+	_spacing: float = DEFAULT_SPACING
+) -> Vector3:
+	if is_within_map_bounds(candidate):
+		return candidate
+	return clamp_to_map_bounds(fallback)
+
+
+static func _get_probe_shape() -> SphereShape3D:
+	if _probe_shape == null:
+		_probe_shape = SphereShape3D.new()
+		_probe_shape.radius = WALKABLE_PROBE_RADIUS
+	return _probe_shape
+
+
 static func is_walkable_at(position: Vector3, unit: Node3D) -> bool:
 	if unit == null or not is_instance_valid(unit):
 		return true
@@ -58,8 +77,7 @@ static func is_walkable_at(position: Vector3, unit: Node3D) -> bool:
 		return true
 
 	var space_state: PhysicsDirectSpaceState3D = world.direct_space_state
-	var shape: SphereShape3D = SphereShape3D.new()
-	shape.radius = WALKABLE_PROBE_RADIUS
+	var shape: SphereShape3D = _get_probe_shape()
 
 	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
 	query.shape = shape

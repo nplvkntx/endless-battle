@@ -68,5 +68,10 @@ func take_damage(amount: float, attacker = null) -> void:
 
 
 func _on_health_depleted() -> void:
+	if building_state == STATE_COMPLETED:
+		if is_in_group(&"enemy_command_center"):
+			EnemyResourceManager.add_food_max(-FOOD_CAP_BONUS)
+		else:
+			ResourceManager.add_food_max(-FOOD_CAP_BONUS)
 	destroy_building()
 	queue_free()

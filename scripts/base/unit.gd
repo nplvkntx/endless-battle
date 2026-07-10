@@ -423,5 +423,7 @@ func take_damage(_amount: float, _attacker = null) -> void:
 
 ## Handles unit death and notifies listeners through signals.
 func die() -> void:
+	if CombatTargetValidation.is_enemy_faction(self) and not self is Worker:
+		EnemyResourceManager.release_unit_population(self)
 	NodeSafety.prepare_node_for_death(self)
 	died.emit(self)

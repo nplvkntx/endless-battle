@@ -5,9 +5,11 @@ extends Node
 
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
-const REASSIGN_INTERVAL_SECONDS: float = 4.0
+const REASSIGN_INTERVAL_SECONDS: float = 3.0
 const EARLY_GAME_GOLD_RATIO: float = 0.6
 const BUILDING_PRESSURE_GOLD_RATIO: float = 0.45
+const WORKER_TRAIN_GOLD_COST: int = 50
+const FARM_WOOD_COST: int = 20
 const FOOD_RESERVE: int = 2
 const WOOD_STOCK_COMFORT: int = 120
 const GOLD_STOCK_COMFORT: int = 150
@@ -230,13 +232,30 @@ func _compute_target_gold_workers(total_gather_workers: int) -> int:
 		return 1
 
 	var gold_ratio: float = EARLY_GAME_GOLD_RATIO
-	if _enemy_needs_wood_for_buildings() or _is_wood_heavy_imbalance():
+	if _enemy_needs_wood_for_farms() or _enemy_needs_wood_for_buildings() or _is_wood_heavy_imbalance():
 		gold_ratio = BUILDING_PRESSURE_GOLD_RATIO
-	elif _is_gold_heavy_imbalance():
-		gold_ratio = 0.75
+	elif _enemy_needs_gold_for_worker_training() or _is_gold_heavy_imbalance():
+		gold_ratio = 0.72
 
 	var gold_target: int = int(round(float(total_gather_workers) * gold_ratio))
 	return clampi(gold_target, 1, total_gather_workers - 1)
+
+
+func _enemy_needs_gold_for_worker_training() -> bool:
+	if EnemyResourceManager.gold >= GOLD_STOCK_COMFORT:
+		return false
+
+	return EnemyResourceManager.gold < WORKER_TRAIN_GOLD_COST * 3
+
+
+func _enemy_needs_wood_for_farms() -> bool:
+	if EnemyResourceManager.wood >= WOOD_STOCK_COMFORT:
+		return false
+
+	if EnemyResourceManager.food_max - EnemyResourceManager.food_current <= FOOD_RESERVE + 2:
+		return true
+
+	return EnemyResourceManager.wood < FARM_WOOD_COST * 3
 
 
 func _reassign_idle_workers(gather_pool: Array[Worker], target_gold: int) -> void:
@@ -345,45 +364,33 @@ func _scan_fallback_idle_enemy_workers() -> void:
 		return
 
 	var idle_workers: Array[Worker] = []
+	var total_gather_workers: int = 0
+	var active_gold: int = 0
+
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
 		if not _is_valid_worker(node):
 			continue
 
 		var worker: Worker = node as Worker
-		if not _is_fallback_idle_enemy_worker(worker, command_center):
-			continue
-
-		idle_workers.append(worker)
-
-	if idle_workers.is_empty():
-		return
-
-	var total_gather_workers: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
-		if not _is_valid_worker(node):
-			continue
-
-		var pool_worker: Worker = node as Worker
-		if pool_worker.is_on_construction_trip():
+		if worker.is_on_construction_trip():
 			continue
 
 		total_gather_workers += 1
+
+		if _is_fallback_idle_enemy_worker(worker, command_center):
+			idle_workers.append(worker)
+			continue
+
+		if worker.get_assigned_gather_resource_id() == &"gold":
+			active_gold += 1
+
+	if idle_workers.is_empty():
+		return
 
 	var target_gold: int = _apply_target_hysteresis(
 		_compute_target_gold_workers(total_gather_workers),
 		maxi(1, total_gather_workers)
 	)
-	var active_gold: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
-		if not _is_valid_worker(node):
-			continue
-
-		var worker: Worker = node as Worker
-		if _is_fallback_idle_enemy_worker(worker, command_center):
-			continue
-
-		if worker.get_assigned_gather_resource_id() == &"gold":
-			active_gold += 1
 
 	for worker: Worker in idle_workers:
 		if not _is_fallback_idle_enemy_worker(worker, command_center):

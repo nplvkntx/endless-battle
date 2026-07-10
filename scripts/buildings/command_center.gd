@@ -13,7 +13,7 @@ const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const TRAIN_GOLD_COST: int = 50
 const TRAIN_FOOD_COST: int = 1
 const TRAIN_SECONDS: float = 3.0
-const MAX_ENEMY_WORKER_QUEUE: int = 5
+const MAX_ENEMY_WORKER_QUEUE: int = 2
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
 const ENEMY_TEAM_ID: int = 1
@@ -748,6 +748,7 @@ func _on_training_finished(session: int) -> void:
 	_spawn_worker()
 	_worker_queue_count -= 1
 	worker_queue_changed.emit(_worker_queue_count)
+	_notify_enemy_worker_production_check()
 
 	if _worker_queue_count > 0:
 		_start_next_training()
@@ -820,6 +821,16 @@ func _notify_enemy_worker_spawned(worker: Worker) -> void:
 	for node: Node in get_tree().get_nodes_in_group(&"enemy_build_manager"):
 		if node is EnemyBuildManager:
 			(node as EnemyBuildManager).notify_enemy_worker_spawned(worker)
+			return
+
+
+func _notify_enemy_worker_production_check() -> void:
+	if not is_in_group(&"enemy_command_center"):
+		return
+
+	for node: Node in get_tree().get_nodes_in_group(&"enemy_build_manager"):
+		if node is EnemyBuildManager:
+			(node as EnemyBuildManager).request_worker_production_check()
 			return
 
 

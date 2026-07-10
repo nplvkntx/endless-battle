@@ -6,19 +6,30 @@ extends Node
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const TICK_INTERVAL_SECONDS: float = 2.0
+const WORKER_PRODUCTION_CHECK_SECONDS: float = 1.0
+const MACRO_EMERGENCY_INTERVAL_SECONDS: float = 3.0
+const POP_CAP_EMERGENCY_SECONDS: float = 3.0
 const TARGET_WORKERS_EARLY: int = 14
 const TARGET_WORKERS_MID: int = 22
-const TARGET_WORKERS_LATE: int = 36
+const TARGET_WORKERS_LATE: int = 30
+const TARGET_WORKERS_ENDGAME: int = 36
+const TARGET_WORKERS_ENDGAME_HIGH: int = 45
+const HARD_WORKER_SAFETY_CAP: int = 50
+const WORKER_QUEUE_TARGET: int = 2
 const MIN_WORKERS_BEFORE_MILITARY: int = 6
 const MIN_WORKERS_BEFORE_MILITARY_ABUNDANT: int = 4
 const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.60
 const EXPANSION_MINE_MAX_DISTANCE: float = 36.0
 const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
-const WORKER_PHASE_MID_SECONDS: float = 300.0
-const WORKER_PHASE_LATE_SECONDS: float = 600.0
+const WORKER_PHASE_MID_SECONDS: float = 180.0
+const WORKER_PHASE_LATE_SECONDS: float = 360.0
+const WORKER_PHASE_ENDGAME_SECONDS: float = 600.0
 const WORKER_TRAIN_GOLD_COST: int = 50
-const FOOD_RESERVE: int = 5
+const FARM_HEADROOM_EARLY: int = 4
+const FARM_HEADROOM_MID: int = 7
+const FARM_HEADROOM_LATE: int = 10
 const MAX_FARMS: int = 8
+const DEBUG_AI_WORKER_PRODUCTION: bool = false
 const DEFAULT_MAX_BARRACKS: int = 3
 const MAX_BARRACKS_MID: int = 5
 const MAX_BARRACKS_LATE: int = 8
@@ -95,8 +106,16 @@ var _primary_command_center: CommandCenter = null
 var _train_swordsman_next: bool = true
 var _train_cavalry_next: bool = true
 var _tick_active: bool = true
+var _worker_production_active: bool = true
 var _shop_purchase_cooldown_ticks: int = 0
 var _director: EnemyStrategicDirector = null
+var _last_worker_idle_reason: String = ""
+var _pop_capped_since_seconds: float = -1.0
+var _macro_emergency_timer: float = 0.0
+var _farm_reservation_active: bool = false
+var _cc_worker_queue_connected: bool = false
+var _building_scan_frame: int = -1
+var _cached_enemy_buildings: Array = []
 
 
 func _ready() -> void:
@@ -110,7 +129,47 @@ func _begin_build_order() -> void:
 		push_warning("EnemyBuildManager: enemy Command Center not found")
 		return
 
+	_connect_command_center_worker_signals()
 	_schedule_tick()
+	_schedule_worker_production_check()
+
+
+func _connect_command_center_worker_signals() -> void:
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or _cc_worker_queue_connected:
+		return
+
+	if not command_center.worker_queue_changed.is_connected(_on_command_center_worker_queue_changed):
+		command_center.worker_queue_changed.connect(_on_command_center_worker_queue_changed)
+	_cc_worker_queue_connected = true
+
+
+func _on_command_center_worker_queue_changed(_queue_count: int) -> void:
+	request_worker_production_check()
+
+
+func request_worker_production_check() -> void:
+	call_deferred("_try_train_enemy_workers")
+
+
+func _schedule_worker_production_check() -> void:
+	if not _worker_production_active:
+		return
+
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(WORKER_PRODUCTION_CHECK_SECONDS)
+	wait_timer.timeout.connect(_on_worker_production_tick, CONNECT_ONE_SHOT)
+
+
+func _on_worker_production_tick() -> void:
+	if not _worker_production_active or not is_inside_tree():
+		return
+
+	if _resolve_primary_command_center() == null:
+		_worker_production_active = false
+		return
+
+	_try_train_enemy_workers()
+	_schedule_worker_production_check()
 
 
 func _schedule_tick() -> void:
@@ -134,20 +193,18 @@ func _on_build_tick() -> void:
 
 
 func _run_build_order() -> void:
+	_refresh_building_cache_if_needed()
 	_try_assign_idle_builder_to_construction()
+	_run_macro_emergency_checks()
 
 	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
-		if _try_place_building(PLACEMENT_FARM):
+		if _try_place_farm(true):
 			return
 
 	_try_train_enemy_workers()
 
-	if _should_grow_worker_economy():
-		if _needs_farm() and not _should_defer_gold_spending_for_workers():
-			if _try_place_building(PLACEMENT_FARM):
-				return
-		if _count_enemy_workers() < _get_min_workers_before_military():
-			return
+	if _needs_farm():
+		_try_place_farm(false)
 
 	var defer_military: bool = _update_enemy_hero_restoration()
 
@@ -155,16 +212,16 @@ func _run_build_order() -> void:
 	if command_center == null:
 		return
 
-	if _needs_barracks() and _try_place_building(PLACEMENT_BARRACKS):
+	if _should_place_barracks() and _try_place_building(PLACEMENT_BARRACKS):
 		return
 
 	if _should_build_expansion_barracks():
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
-	if _needs_farm() and not _should_defer_gold_spending_for_workers():
-		if _try_place_building(PLACEMENT_FARM):
-			return
+	if _needs_farm():
+		if _try_place_farm(false):
+			pass
 
 	if not _has_completed_building(PLACEMENT_BARRACKS) and not _is_building_type_in_progress(
 		PLACEMENT_BARRACKS
@@ -200,6 +257,53 @@ func _run_build_order() -> void:
 
 	if _should_build_expansion_command_center():
 		_try_place_expansion_command_center()
+
+
+func _should_place_barracks() -> bool:
+	if _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_BARRACKS):
+		return false
+
+	if _count_enemy_workers() < mini(MIN_WORKERS_BEFORE_MILITARY - 2, 4):
+		return false
+
+	return (
+		EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
+		and _get_projected_free_population() > MILITARY_TRAIN_FOOD_COST + 1
+	)
+
+
+func _run_macro_emergency_checks() -> void:
+	_sync_farm_reservation()
+
+	_macro_emergency_timer += TICK_INTERVAL_SECONDS
+	if _macro_emergency_timer < MACRO_EMERGENCY_INTERVAL_SECONDS:
+		return
+
+	_macro_emergency_timer = 0.0
+
+	if _get_effective_worker_count() < _get_target_worker_count():
+		var command_center: CommandCenter = _get_training_command_center()
+		if command_center != null and not command_center.is_training_worker():
+			if command_center.get_worker_queue_count() <= 0:
+				_try_train_enemy_workers()
+
+	if not EnemyResourceManager.has_food_supply(1):
+		if _pop_capped_since_seconds < 0.0:
+			_pop_capped_since_seconds = _get_match_elapsed_seconds()
+		elif (
+			_get_match_elapsed_seconds() - _pop_capped_since_seconds
+			>= POP_CAP_EMERGENCY_SECONDS
+		):
+			_try_place_farm(true)
+	else:
+		_pop_capped_since_seconds = -1.0
+
+	var gather_manager: EnemyGatherManager = _get_enemy_gather_manager()
+	if gather_manager != null:
+		gather_manager.request_gather_rebalance()
 
 
 func _update_enemy_hero_restoration() -> bool:
@@ -490,14 +594,75 @@ func _find_completed_enemy_shop() -> Shop:
 
 
 func _needs_farm() -> bool:
-	if _count_farms() >= MAX_FARMS:
+	if _count_completed_farms() + _count_farms_under_construction() >= MAX_FARMS:
 		return false
 
-	var headroom: int = maxi(
-		FOOD_RESERVE,
-		int(ceil(float(_get_desired_army_size()) * 0.35))
+	return _get_projected_free_population() <= _get_farm_headroom_threshold()
+
+
+func _get_projected_free_population() -> int:
+	var projected_capacity: int = (
+		EnemyResourceManager.food_max
+		+ _count_farms_under_construction() * Farm.FOOD_CAP_BONUS
 	)
-	return EnemyResourceManager.food_max - EnemyResourceManager.food_current <= headroom
+	return projected_capacity - EnemyResourceManager.food_current
+
+
+func _get_farm_headroom_threshold() -> int:
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
+	if elapsed_seconds < WORKER_PHASE_MID_SECONDS:
+		return FARM_HEADROOM_EARLY
+	if elapsed_seconds < WORKER_PHASE_ENDGAME_SECONDS:
+		return FARM_HEADROOM_MID
+	return FARM_HEADROOM_LATE
+
+
+func _get_match_elapsed_seconds() -> float:
+	if _director != null:
+		return _director.get_match_elapsed_seconds()
+	return float(Time.get_ticks_msec()) / 1000.0
+
+
+func _count_player_workers() -> int:
+	var count: int = 0
+	for node: Node in get_tree().get_nodes_in_group(&"workers"):
+		if node is Worker and is_instance_valid(node) and not node.is_queued_for_deletion():
+			count += 1
+	return count
+
+
+func _try_place_farm(emergency: bool) -> bool:
+	_ensure_farm_reservation()
+	if not EnemyResourceManager.can_afford(FARM_GOLD_COST, FARM_WOOD_COST):
+		return false
+
+	var placed: bool = _try_place_building(PLACEMENT_FARM, false, emergency)
+	if placed:
+		_release_farm_reservation()
+	return placed
+
+
+func _ensure_farm_reservation() -> void:
+	if _farm_reservation_active:
+		return
+
+	EnemyResourceManager.reserve_resources(FARM_GOLD_COST, FARM_WOOD_COST)
+	_farm_reservation_active = true
+
+
+func _release_farm_reservation() -> void:
+	if not _farm_reservation_active:
+		return
+
+	EnemyResourceManager.release_reservation(FARM_GOLD_COST, FARM_WOOD_COST)
+	_farm_reservation_active = false
+
+
+func _sync_farm_reservation() -> void:
+	if _needs_farm() or not EnemyResourceManager.has_food_supply(3):
+		_ensure_farm_reservation()
+	else:
+		_release_farm_reservation()
 
 
 func _should_build_expansion_command_center() -> bool:
@@ -525,26 +690,38 @@ func _should_build_expansion_command_center() -> bool:
 func _try_train_enemy_workers() -> bool:
 	var target_workers: int = _get_target_worker_count()
 	if _get_effective_worker_count() >= target_workers:
+		_log_worker_production_stopped("at_target")
 		return false
 
 	var command_center: CommandCenter = _get_training_command_center()
 	if command_center == null:
+		_log_worker_production_stopped("no_command_center")
 		return false
 
 	if not EnemyResourceManager.has_food_supply(1):
-		if _needs_farm() and not _should_defer_gold_spending_for_workers():
-			return _try_place_building(PLACEMENT_FARM)
+		_ensure_farm_reservation()
+		if _needs_farm():
+			_try_place_farm(true)
+		_log_worker_production_stopped("population_cap")
+		return false
 
 	var pending_queue: int = command_center.get_worker_queue_count()
-	var max_trains_this_tick: int = 1 if pending_queue > 0 else CommandCenter.MAX_ENEMY_WORKER_QUEUE
+	var queue_target: int = _get_worker_queue_target()
+	if pending_queue >= queue_target:
+		return false
 
 	var trained_any: bool = false
 	var trained_this_tick: int = 0
-	while (
-		_get_effective_worker_count() < target_workers
-		and trained_this_tick < max_trains_this_tick
-	):
+	var max_trains_this_tick: int = mini(
+		queue_target - pending_queue,
+		mini(
+			target_workers - _get_effective_worker_count(),
+			CommandCenter.MAX_ENEMY_WORKER_QUEUE - pending_queue
+		)
+	)
+	while trained_this_tick < max_trains_this_tick:
 		if not command_center.try_train_enemy_worker():
+			_log_worker_production_blocker(command_center, target_workers)
 			break
 		trained_any = true
 		trained_this_tick += 1
@@ -552,28 +729,102 @@ func _try_train_enemy_workers() -> bool:
 	return trained_any
 
 
-func _get_target_worker_count() -> int:
-	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
-	if elapsed_seconds < WORKER_PHASE_MID_SECONDS:
-		return TARGET_WORKERS_EARLY
-	if elapsed_seconds < WORKER_PHASE_LATE_SECONDS:
-		return TARGET_WORKERS_MID
+func _get_worker_queue_target() -> int:
+	if EnemyResourceManager.gold < WORKER_TRAIN_GOLD_COST * 2:
+		return 1
+	return WORKER_QUEUE_TARGET
 
-	return TARGET_WORKERS_LATE
+
+func _log_worker_production_stopped(reason: String) -> void:
+	if not DEBUG_AI_WORKER_PRODUCTION:
+		return
+
+	if reason == _last_worker_idle_reason:
+		return
+
+	_last_worker_idle_reason = reason
+	var command_center: CommandCenter = _get_training_command_center()
+	var queue_count: int = command_center.get_worker_queue_count() if command_center != null else 0
+	print(
+		"AI worker production stopped: workers=%d/%d gold=%d wood=%d population=%d/%d queue=%d reason=%s"
+		% [
+			_get_effective_worker_count(),
+			_get_target_worker_count(),
+			EnemyResourceManager.gold,
+			EnemyResourceManager.wood,
+			EnemyResourceManager.food_current,
+			EnemyResourceManager.food_max,
+			queue_count,
+			reason,
+		]
+	)
+
+
+func _log_worker_production_blocker(command_center: CommandCenter, target_workers: int) -> void:
+	if not DEBUG_AI_WORKER_PRODUCTION:
+		return
+
+	var reason: String = "unknown"
+	if command_center.is_upgrading_tier():
+		reason = "upgrading"
+	elif command_center.get_worker_queue_count() >= CommandCenter.MAX_ENEMY_WORKER_QUEUE:
+		reason = "queue_full"
+	elif EnemyResourceManager.gold < WORKER_TRAIN_GOLD_COST:
+		reason = "insufficient_gold"
+	elif not EnemyResourceManager.has_food_supply(1):
+		reason = "population_cap"
+	elif not command_center.can_train_enemy_worker():
+		reason = "training_blocked"
+
+	_log_worker_production_stopped(reason)
+
+
+func _compute_base_worker_target() -> int:
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
+	var target: int = TARGET_WORKERS_EARLY
+	if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
+		target = (
+			TARGET_WORKERS_ENDGAME_HIGH
+			if _has_abundant_resources()
+			else TARGET_WORKERS_ENDGAME
+		)
+	elif elapsed_seconds >= WORKER_PHASE_LATE_SECONDS:
+		target = TARGET_WORKERS_LATE
+	elif elapsed_seconds >= WORKER_PHASE_MID_SECONDS:
+		target = TARGET_WORKERS_MID
+
+	if _director != null and _director.should_boost_worker_production():
+		target = maxi(target, TARGET_WORKERS_MID)
+
+	var player_workers: int = _count_player_workers()
+	if player_workers > 0:
+		var ai_workers: int = _count_enemy_workers()
+		if ai_workers < int(float(player_workers) * 0.7):
+			target = maxi(target, mini(player_workers, TARGET_WORKERS_ENDGAME_HIGH))
+
+	return target
+
+
+func _get_target_worker_count() -> int:
+	var target: int = _compute_base_worker_target()
+	if _should_rebuild_workers():
+		target = maxi(target, _get_phase_worker_target())
+	return mini(target, HARD_WORKER_SAFETY_CAP)
+
+
+func _get_phase_worker_target() -> int:
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
+	if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
+		return TARGET_WORKERS_ENDGAME
+	if elapsed_seconds >= WORKER_PHASE_LATE_SECONDS:
+		return TARGET_WORKERS_LATE
+	if elapsed_seconds >= WORKER_PHASE_MID_SECONDS:
+		return TARGET_WORKERS_MID
+	return TARGET_WORKERS_EARLY
 
 
 func _should_grow_worker_economy() -> bool:
 	return _get_effective_worker_count() < _get_target_worker_count()
-
-
-func _should_defer_gold_spending_for_workers() -> bool:
-	if not _should_grow_worker_economy():
-		return false
-
-	if not EnemyResourceManager.has_food_supply(1):
-		return false
-
-	return EnemyResourceManager.gold < WORKER_TRAIN_GOLD_COST * 2
 
 
 func _can_train_military_units() -> bool:
@@ -614,7 +865,7 @@ func _has_wasted_resources() -> bool:
 
 
 func _get_max_barracks() -> int:
-	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
 		return maxi(max_barracks, 3)
 	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
@@ -645,7 +896,7 @@ func _should_build_stable() -> bool:
 
 
 func _get_max_stables() -> int:
-	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
 		return 1
 	return MAX_STABLES_LATE
@@ -660,7 +911,7 @@ func _count_stables() -> int:
 
 
 func _should_rebuild_workers() -> bool:
-	var target_workers: int = _get_target_worker_count()
+	var target_workers: int = _compute_base_worker_target()
 	if target_workers <= 0:
 		return false
 
@@ -688,8 +939,8 @@ func _try_sustain_military_production() -> void:
 		return
 
 	if not EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST):
-		if _count_farms() < MAX_FARMS:
-			_try_place_building(PLACEMENT_FARM)
+		if _count_completed_farms() + _count_farms_under_construction() < MAX_FARMS:
+			_try_place_farm(true)
 		return
 
 	var army_deficit: int = (
@@ -712,7 +963,7 @@ func _try_sustain_military_production() -> void:
 		_log_idle_production_if_needed()
 		return
 
-	var trains_per_barracks: int = (
+	var trains_per_barracks: int = mini(
 		MILITARY_DEFENSE_TRAINS_PER_BARRACKS
 		if defending
 		else (
@@ -723,7 +974,8 @@ func _try_sustain_military_production() -> void:
 				if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
 				else MILITARY_TRAINS_PER_BARRACKS_SUSTAIN
 			)
-		)
+		),
+		Barracks.MAX_ENEMY_UNIT_QUEUE
 	)
 
 	var trained_any: bool = false
@@ -760,7 +1012,8 @@ func _try_sustain_stable_production() -> void:
 
 func _find_all_completed_enemy_stables() -> Array:
 	var stables: Array = []
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if not node is Stable or not _is_living_building(node as Building):
 			continue
 
@@ -806,7 +1059,7 @@ func _log_idle_production_if_needed() -> void:
 
 
 func _get_desired_army_size() -> int:
-	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
 		return DESIRED_ARMY_EARLY
 	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
@@ -943,7 +1196,9 @@ func _has_command_center_near_position(position: Vector3) -> bool:
 	return false
 
 
-func _try_place_building(building_type: StringName, prefer_expansion: bool = false) -> bool:
+func _try_place_building(
+	building_type: StringName, prefer_expansion: bool = false, allow_parallel: bool = false
+) -> bool:
 	if not is_inside_tree():
 		return false
 
@@ -954,19 +1209,25 @@ func _try_place_building(building_type: StringName, prefer_expansion: bool = fal
 	return _try_place_building_at_anchor(
 		building_type,
 		anchor.global_position,
-		prefer_expansion
+		prefer_expansion,
+		allow_parallel
 	)
 
 
 func _try_place_building_at_anchor(
 	building_type: StringName,
 	anchor_position: Vector3,
-	prefer_expansion: bool = false
+	prefer_expansion: bool = false,
+	allow_parallel: bool = false
 ) -> bool:
 	if not is_inside_tree():
 		return false
 
-	if _has_unfinished_construction():
+	var is_farm: bool = building_type == PLACEMENT_FARM
+	if is_farm:
+		if _is_building_type_in_progress(PLACEMENT_FARM):
+			return false
+	elif _has_unfinished_construction():
 		return false
 
 	var gold_cost: int = 0
@@ -1243,9 +1504,22 @@ func _get_training_command_center() -> CommandCenter:
 	return null
 
 
+func _refresh_building_cache_if_needed() -> void:
+	var frame: int = Engine.get_process_frames()
+	if frame == _building_scan_frame:
+		return
+
+	_building_scan_frame = frame
+	_cached_enemy_buildings.clear()
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if node != null and is_instance_valid(node):
+			_cached_enemy_buildings.append(node)
+
+
 func _find_all_completed_enemy_barracks() -> Array[Barracks]:
 	var barracks_list: Array[Barracks] = []
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if not node is Barracks or not _is_living_building(node as Building):
 			continue
 
@@ -1258,7 +1532,8 @@ func _find_all_completed_enemy_barracks() -> Array[Barracks]:
 
 func _count_barracks() -> int:
 	var count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if node is Barracks and _is_living_building(node as Building):
 			count += 1
 
@@ -1266,7 +1541,8 @@ func _count_barracks() -> int:
 
 
 func _find_enemy_hero_altar() -> HeroAltar:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if node is HeroAltar and _is_living_building(node as Building):
 			if (node as HeroAltar).building_state == Building.STATE_COMPLETED:
 				return node as HeroAltar
@@ -1295,7 +1571,8 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 
 
 func _has_completed_building(building_type: StringName) -> bool:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if not _node_matches_building_type(node, building_type):
 			continue
 		if not _is_living_building(node as Building):
@@ -1307,7 +1584,8 @@ func _has_completed_building(building_type: StringName) -> bool:
 
 
 func _is_building_type_in_progress(building_type: StringName) -> bool:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if not _node_matches_building_type(node, building_type):
 			continue
 		if not _is_living_building(node as Building):
@@ -1333,9 +1611,33 @@ func _count_enemy_workers() -> int:
 
 
 func _count_farms() -> int:
+	return _count_completed_farms() + _count_farms_under_construction()
+
+
+func _count_completed_farms() -> int:
 	var count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
-		if node is Farm and _is_living_building(node as Building):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Farm or not _is_living_building(node as Building):
+			continue
+		if (node as Building).building_state == Building.STATE_COMPLETED:
+			count += 1
+
+	return count
+
+
+func _count_farms_under_construction() -> int:
+	var count: int = 0
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Farm or not _is_living_building(node as Building):
+			continue
+
+		var state: StringName = (node as Building).building_state
+		if (
+			state == Building.STATE_UNDER_CONSTRUCTION
+			or state == Building.STATE_CONSTRUCTING
+		):
 			count += 1
 
 	return count
@@ -1343,7 +1645,8 @@ func _count_farms() -> int:
 
 func _count_living_command_centers() -> int:
 	var count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if node is CommandCenter and _is_living_building(node as CommandCenter):
 			count += 1
 
@@ -1375,9 +1678,10 @@ func _get_enemy_gather_manager() -> EnemyGatherManager:
 	return null
 
 
-func notify_enemy_worker_spawned(_worker: Worker) -> void:
+func notify_enemy_worker_spawned(worker: Worker) -> void:
 	var gather_manager: EnemyGatherManager = _get_enemy_gather_manager()
-	if gather_manager == null:
-		return
+	if gather_manager != null:
+		gather_manager.assign_worker_adaptively(worker)
+		gather_manager.request_gather_rebalance()
 
-	gather_manager.request_gather_rebalance()
+	request_worker_production_check()

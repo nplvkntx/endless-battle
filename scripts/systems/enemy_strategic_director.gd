@@ -544,6 +544,10 @@ func _count_barracks(tree: SceneTree) -> int:
 	return count
 
 
+func get_match_elapsed_seconds() -> float:
+	return _get_match_elapsed_seconds()
+
+
 func _get_match_elapsed_seconds() -> float:
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
 

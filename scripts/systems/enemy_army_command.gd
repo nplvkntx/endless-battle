@@ -96,6 +96,10 @@ const HERO_AOE_PLAYER_COUNT := 3
 const HERO_AOE_CHECK_RANGE := 10.0
 const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
 const ATTACK_OBJECTIVE_REISSUE_SECONDS := 2.5
+const OBJECTIVE_EVAL_INTERVAL_SECONDS := 1.0
+const OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS := 0.5
+const MAX_GROUP_ORDERS_PER_FRAME := 12
+const PERF_DIAG_INTERVAL_SECONDS := 5.0
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
 const ATTACK_OBJECTIVE_SPREAD_MULTIPLIER := 1.35
@@ -174,6 +178,14 @@ static var _emergency_defense_active: bool = false
 static var _emergency_threat_position: Vector3 = Vector3.ZERO
 static var _emergency_reason: StringName = &""
 static var _debug_enabled_override: bool = false
+static var _combat_units_cache_frame: int = -1
+static var _cached_offensive_wave_units_frame: int = -1
+static var _cached_offensive_wave_units: Array = []
+static var _pending_group_orders: Array = []
+static var _objective_eval_timer: float = 0.0
+static var _objective_stuck_check_timer: float = 0.0
+static var _perf_diag_timer: float = 0.0
+static var _orders_issued_since_diag: int = 0
 
 
 static func get_army_mode() -> ArmyMode:
@@ -202,17 +214,26 @@ static func get_main_army_group(tree: SceneTree) -> Array:
 	return _main_army_cache.duplicate()
 
 
-static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
+static func _refresh_combat_units_cache_if_needed(tree: SceneTree) -> void:
+	if tree == null:
+		return
+
+	var frame: int = Engine.get_process_frames()
+	if frame == _combat_units_cache_frame:
+		return
+
+	_combat_units_cache_frame = frame
+	_cached_offensive_wave_units_frame = -1
 	var units: Array = []
 	var seen_ids: Dictionary = {}
 
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, ENEMY_COMBAT_GROUP):
 		if not is_living_combat_unit(node):
 			continue
 		if node is Worker:
 			continue
 
-		var unit_id: int = node.get_instance_id()
+		var unit_id: int = (node as Node).get_instance_id()
 		if seen_ids.has(unit_id):
 			continue
 
@@ -220,6 +241,10 @@ static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
 		units.append(node)
 
 	_main_army_cache = units
+
+
+static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
+	_refresh_combat_units_cache_if_needed(tree)
 
 
 static func with_authorized_orders(callback: Callable) -> void:
@@ -346,9 +371,7 @@ static func estimate_local_fight_balance(
 	position: Vector3,
 	radius: float = LOCAL_FIGHT_RADIUS
 ) -> Dictionary:
-	var ai_units: Array = collect_player_military_near(tree, position, radius)
-	# Fix: collect AI units near position
-	ai_units = []
+	var ai_units: Array = []
 	for unit: Variant in collect_living_combat_units(tree):
 		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
 			continue
@@ -918,37 +941,57 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 		else ATTACK_OBJECTIVE_REISSUE_SECONDS
 	)
 
-	var fallback_position: Vector3 = _active_wave_objective_position
-	if fallback_position == Vector3.ZERO:
-		fallback_position = resolve_enemy_rally_position(tree)
+	_objective_reissue_timer += delta
+	_objective_eval_timer += delta
+	_objective_stuck_check_timer += delta
 
 	var previous_objective: Node3D = _active_wave_objective
 	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective)
 	if previous_objective_alive and previous_objective is Building:
 		previous_objective_alive = _is_living_building(previous_objective as Building)
 
-	var objective: Dictionary = resolve_attack_objective(tree, fallback_position)
-	var objective_node: Node3D = objective.get("node") as Node3D
-	var objective_position: Vector3 = objective.get("position", Vector3.ZERO)
-	if objective_position == Vector3.ZERO:
-		return
-
 	var objective_died: bool = previous_objective != null and not previous_objective_alive
-	var objective_changed: bool = (
-		NodeSafety.is_alive_node(objective_node) and objective_node != previous_objective
+	var objective_node: Node3D = previous_objective
+	var objective_position: Vector3 = _active_wave_objective_position
+	var objective_changed: bool = false
+
+	var need_objective_eval: bool = (
+		objective_died
+		or _objective_eval_timer >= OBJECTIVE_EVAL_INTERVAL_SECONDS
 	)
+	if need_objective_eval:
+		_objective_eval_timer = 0.0
 
-	if NodeSafety.is_alive_node(objective_node):
-		_active_wave_objective = objective_node
-	_active_wave_objective_position = objective_position
+		var fallback_position: Vector3 = _active_wave_objective_position
+		if fallback_position == Vector3.ZERO:
+			fallback_position = resolve_enemy_rally_position(tree)
 
-	if _finishing_mode_active and NodeSafety.is_alive_node(objective_node):
-		if objective_died or objective_changed:
-			_log_finishing_objective(objective_node)
+		var objective: Dictionary = resolve_attack_objective(tree, fallback_position)
+		objective_node = objective.get("node") as Node3D
+		objective_position = objective.get("position", Vector3.ZERO)
+		if objective_position == Vector3.ZERO:
+			return
 
-	_update_objective_stuck_detection(tree, objective_node, delta)
+		objective_changed = (
+			NodeSafety.is_alive_node(objective_node) and objective_node != previous_objective
+		)
 
-	_objective_reissue_timer += delta
+		if NodeSafety.is_alive_node(objective_node):
+			_active_wave_objective = objective_node
+		_active_wave_objective_position = objective_position
+
+		if _finishing_mode_active and NodeSafety.is_alive_node(objective_node):
+			if objective_died or objective_changed:
+				_log_finishing_objective(objective_node)
+
+	if _objective_stuck_check_timer >= OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS:
+		_objective_stuck_check_timer = 0.0
+		_update_objective_stuck_detection(
+			tree,
+			objective_node,
+			OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS
+		)
+
 	var should_reissue: bool = (
 		_objective_reissue_timer >= reissue_interval
 		or objective_died
@@ -1028,6 +1071,7 @@ static func _command_focus_attack_objective(
 		return
 
 	units = NodeSafety.clean_node_array(units)
+	var pending_orders: Array = []
 	for unit: Variant in units:
 		if not NodeSafety.is_alive_node(unit):
 			continue
@@ -1035,13 +1079,29 @@ static func _command_focus_attack_objective(
 		if not _should_focus_unit_on_objective(unit as Node3D, objective):
 			continue
 
-		_command_unit_focus_attack(unit, objective)
-		EnemyUnitMission.try_set_mission(unit as Node, mission)
-		EnemyUnitMission.record_move_order(
+		var objective_position: Vector3 = objective.global_position
+		if not EnemyUnitMission.should_reissue_move_order(
 			unit as Node,
-			objective.global_position,
+			objective_position,
 			mission
-		)
+		):
+			continue
+
+		pending_orders.append({
+			"unit": unit,
+			"target": objective_position,
+			"use_attack_move": true,
+			"mission": mission,
+			"focus_objective": objective,
+		})
+
+	if pending_orders.is_empty():
+		return
+
+	var had_pending: bool = not _pending_group_orders.is_empty()
+	_pending_group_orders.append_array(pending_orders)
+	if not had_pending:
+		tick_group_order_batch(null)
 
 
 static func _command_assault_objective(
@@ -1059,6 +1119,7 @@ static func _command_assault_objective(
 			units.size(),
 			FORMATION_SPACING * ATTACK_OBJECTIVE_SPREAD_MULTIPLIER
 		)
+		var pending_orders: Array = []
 		for index: int in units.size():
 			var unit: Variant = units[index]
 			if not NodeSafety.is_alive_node(unit):
@@ -1071,13 +1132,19 @@ static func _command_assault_objective(
 			):
 				continue
 
-			_issue_attack_move(unit, spread_targets[index])
-			EnemyUnitMission.try_set_mission(unit as Node, EnemyUnitMission.Mission.ATTACK)
-			EnemyUnitMission.record_move_order(
-				unit as Node,
-				spread_targets[index],
-				EnemyUnitMission.Mission.ATTACK
-			)
+			pending_orders.append({
+				"unit": unit,
+				"target": spread_targets[index],
+				"use_attack_move": true,
+				"mission": EnemyUnitMission.Mission.ATTACK,
+			})
+
+		if not pending_orders.is_empty():
+			var had_pending: bool = not _pending_group_orders.is_empty()
+			_pending_group_orders.append_array(pending_orders)
+			if not had_pending:
+				tick_group_order_batch(null)
+		return
 
 	_command_focus_attack_objective(units, objective, EnemyUnitMission.Mission.ATTACK)
 
@@ -1294,8 +1361,14 @@ static func should_abort_offensive_push(tree: SceneTree) -> bool:
 
 
 static func _collect_living_offensive_wave_units(tree: SceneTree) -> Array:
+	_refresh_combat_units_cache_if_needed(tree)
+	var frame: int = Engine.get_process_frames()
+	if frame == _cached_offensive_wave_units_frame:
+		return _cached_offensive_wave_units
+
+	_cached_offensive_wave_units_frame = frame
 	var units: Array = []
-	for unit: Variant in collect_living_combat_units(tree):
+	for unit: Variant in _main_army_cache:
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
@@ -1305,6 +1378,7 @@ static func _collect_living_offensive_wave_units(tree: SceneTree) -> Array:
 
 		units.append(unit)
 
+	_cached_offensive_wave_units = units
 	return units
 
 
@@ -1844,19 +1918,14 @@ static func register_combat_unit(unit: Unit) -> void:
 
 
 static func collect_living_combat_units(tree: SceneTree) -> Array:
-	var units: Array = []
-
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
-		if is_living_combat_unit(node):
-			units.append(node)
-
-	return units
+	_refresh_combat_units_cache_if_needed(tree)
+	return _main_army_cache.duplicate()
 
 
 static func collect_living_non_hero_combat_units(tree: SceneTree) -> Array:
+	_refresh_combat_units_cache_if_needed(tree)
 	var units: Array = []
-
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+	for node: Variant in _main_army_cache:
 		if is_living_combat_unit(node) and is_non_hero_combat_unit(node):
 			units.append(node)
 
@@ -1864,7 +1933,8 @@ static func collect_living_non_hero_combat_units(tree: SceneTree) -> Array:
 
 
 static func find_living_enemy_hero(tree: SceneTree) -> Hero:
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+	_refresh_combat_units_cache_if_needed(tree)
+	for node: Variant in _main_army_cache:
 		if is_living_combat_unit(node) and is_hero_unit(node):
 			return node as Hero
 
@@ -2384,14 +2454,15 @@ static func collect_player_military_near(
 	search_range: float
 ) -> Array:
 	var targets: Array = []
+	var search_range_sq: float = search_range * search_range
 
 	for group_name: StringName in [UNITS_GROUP, HEROES_GROUP]:
-		for node: Node in tree.get_nodes_in_group(group_name):
+		for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if not _is_player_military_unit(node):
 				continue
 
 			var target: Node3D = node as Node3D
-			if horizontal_distance(position, target.global_position) > search_range:
+			if horizontal_distance_squared(position, target.global_position) > search_range_sq:
 				continue
 
 			targets.append(node)
@@ -2442,6 +2513,12 @@ static func find_living_player_command_center(tree: SceneTree) -> CommandCenter:
 
 static func horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
 	return _horizontal_distance(from_position, to_position)
+
+
+static func horizontal_distance_squared(from_position: Vector3, to_position: Vector3) -> float:
+	var offset: Vector3 = from_position - to_position
+	offset.y = 0.0
+	return offset.length_squared()
 
 
 static func resolve_enemy_rally_position(tree: SceneTree) -> Vector3:
@@ -2629,6 +2706,8 @@ static func _issue_spaced_group_orders(
 			FORMATION_SPACING
 		)
 	)
+
+	var pending_orders: Array = []
 	for index: int in ordered_units.size():
 		var unit: Variant = ordered_units[index]
 		if not NodeSafety.is_alive_node(unit):
@@ -2638,6 +2717,65 @@ static func _issue_spaced_group_orders(
 		if not EnemyUnitMission.should_reissue_move_order(unit as Node, target, mission):
 			continue
 
+		pending_orders.append({
+			"unit": unit,
+			"target": target,
+			"use_attack_move": use_attack_move,
+			"mission": mission,
+		})
+
+	if pending_orders.is_empty():
+		return
+
+	var had_pending: bool = not _pending_group_orders.is_empty()
+	_pending_group_orders.append_array(pending_orders)
+	if not had_pending:
+		tick_group_order_batch(null)
+
+
+static func tick_group_order_batch(_tree: SceneTree) -> void:
+	if _pending_group_orders.is_empty():
+		return
+
+	var next_index: int = _issue_group_order_batch(_pending_group_orders, 0)
+	if next_index >= _pending_group_orders.size():
+		_pending_group_orders.clear()
+	else:
+		_pending_group_orders = _pending_group_orders.slice(next_index)
+
+
+static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
+	var issued: int = 0
+	var index: int = start_index
+
+	while index < orders.size() and issued < MAX_GROUP_ORDERS_PER_FRAME:
+		var entry: Dictionary = orders[index]
+		var unit: Variant = entry.get("unit")
+		var target: Vector3 = entry.get("target", Vector3.ZERO)
+		var use_attack_move: bool = bool(entry.get("use_attack_move", true))
+		var mission: EnemyUnitMission.Mission = entry.get(
+			"mission",
+			EnemyUnitMission.Mission.ATTACK
+		) as EnemyUnitMission.Mission
+		index += 1
+
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		if (
+			use_attack_move
+			and mission == EnemyUnitMission.Mission.ATTACK
+			and entry.has("focus_objective")
+		):
+			var focus_objective: Node3D = entry.get("focus_objective") as Node3D
+			if NodeSafety.is_alive_node(focus_objective):
+				_command_unit_focus_attack(unit, focus_objective)
+				EnemyUnitMission.try_set_mission(unit as Node, mission)
+				EnemyUnitMission.record_move_order(unit as Node, target, mission)
+				_orders_issued_since_diag += 1
+				issued += 1
+				continue
+
 		if (
 			use_attack_move
 			and mission == EnemyUnitMission.Mission.ATTACK
@@ -2646,6 +2784,8 @@ static func _issue_spaced_group_orders(
 			_command_unit_focus_attack(unit, _active_wave_objective)
 			EnemyUnitMission.try_set_mission(unit as Node, mission)
 			EnemyUnitMission.record_move_order(unit as Node, target, mission)
+			_orders_issued_since_diag += 1
+			issued += 1
 			continue
 
 		if use_attack_move:
@@ -2655,6 +2795,48 @@ static func _issue_spaced_group_orders(
 
 		EnemyUnitMission.try_set_mission(unit as Node, mission)
 		EnemyUnitMission.record_move_order(unit as Node, target, mission)
+		_orders_issued_since_diag += 1
+		issued += 1
+
+	return index
+
+
+static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
+	if not DEBUG_COMBAT_AI and not _debug_enabled_override:
+		return
+
+	_perf_diag_timer += delta
+	if _perf_diag_timer < PERF_DIAG_INTERVAL_SECONDS:
+		return
+
+	_perf_diag_timer = 0.0
+	_refresh_combat_units_cache_if_needed(tree)
+	var worker_count: int = CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		ENEMY_WORKERS_GROUP
+	).size()
+	var building_count: int = CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		BUILDINGS_GROUP
+	).size()
+
+	print(
+		(
+			"AI PERF: units=%d workers=%d buildings=%d combat_group=%d "
+			+ "queued_orders=%d pending_group_orders=%d orders_interval=%d mode=%s"
+		)
+		% [
+			_main_army_cache.size(),
+			worker_count,
+			building_count,
+			CombatTargetValidation.get_cached_group_nodes(tree, ENEMY_COMBAT_GROUP).size(),
+			0,
+			_pending_group_orders.size(),
+			_orders_issued_since_diag,
+			ArmyMode.keys()[_army_mode],
+		]
+	)
+	_orders_issued_since_diag = 0
 
 
 static func _order_units_for_formation(units: Array) -> Array:
@@ -2767,9 +2949,8 @@ static func _compute_attack_formation_targets(
 			melee_index += 1
 
 		targets.append(
-			GroupMoveSpacing.resolve_nearby_walkable_position(
+			GroupMoveSpacing.resolve_formation_position(
 				candidate,
-				unit as Node3D,
 				destination,
 				spacing
 			)
@@ -3386,7 +3567,10 @@ static func _is_player_military_unit(node: Node) -> bool:
 
 
 static func _resolve_living_player_command_center(tree: SceneTree) -> CommandCenter:
-	for node: Node in tree.get_nodes_in_group(PLAYER_COMMAND_CENTER_GROUP):
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		PLAYER_COMMAND_CENTER_GROUP
+	):
 		if node is CommandCenter and _is_living_building(node as Building):
 			return node as CommandCenter
 
@@ -3400,7 +3584,7 @@ static func _find_nearest_important_player_building(
 	var closest_building: Node3D = null
 	var closest_distance: float = INF
 
-	for node: Node in tree.get_nodes_in_group(BUILDINGS_GROUP):
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, BUILDINGS_GROUP):
 		if not node is Building:
 			continue
 
@@ -3432,7 +3616,7 @@ static func _find_nearest_living_player_building(
 	var closest_building: Node3D = null
 	var closest_distance: float = INF
 
-	for node: Node in tree.get_nodes_in_group(BUILDINGS_GROUP):
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, BUILDINGS_GROUP):
 		if not node is Building:
 			continue
 
