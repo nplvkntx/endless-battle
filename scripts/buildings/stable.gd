@@ -8,10 +8,19 @@ signal light_cavalry_queue_changed(queue_count: int)
 signal cavalry_archer_queue_changed(queue_count: int)
 signal training_queue_changed()
 signal repeat_state_changed()
+signal research_state_changed()
+
+const RESEARCH_SECONDS: float = 5.0
 
 const TRAIN_ID_HEAVY_CAVALRY: StringName = &"heavy_cavalry"
 const TRAIN_ID_LIGHT_CAVALRY: StringName = &"light_cavalry"
 const TRAIN_ID_CAVALRY_ARCHER: StringName = &"cavalry_archer"
+
+const CAVALRY_UNIT_IDS: Array[StringName] = [
+	TRAIN_ID_HEAVY_CAVALRY,
+	TRAIN_ID_LIGHT_CAVALRY,
+	TRAIN_ID_CAVALRY_ARCHER,
+]
 
 const HEAVY_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/heavy_cavalry.tscn")
 const LIGHT_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/light_cavalry.tscn")
@@ -53,6 +62,10 @@ var _rally_next_slot: int = 0
 var _enemy_gather_next_slot: int = 0
 var _enemy_production_spawn_light_cavalry_next: bool = true
 var _enemy_production_active: bool = false
+var _is_researching: bool = false
+var _research_upgrade_id: StringName = &""
+var _research_started_at: float = 0.0
+var _research_session: int = 0
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -101,6 +114,110 @@ func can_show_commands() -> bool:
 		return false
 
 	return TeamVisuals.resolve_team(self, team_id) == TeamVisuals.PLAYER_TEAM_ID
+
+
+static func get_cavalry_unit_ids() -> Array[StringName]:
+	return CAVALRY_UNIT_IDS.duplicate()
+
+
+func can_research() -> bool:
+	return can_show_commands()
+
+
+func can_enemy_research() -> bool:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+
+
+func is_researching() -> bool:
+	return _is_researching
+
+
+func get_research_upgrade_id() -> StringName:
+	return _research_upgrade_id
+
+
+func get_research_progress() -> float:
+	if not _is_researching:
+		return 0.0
+
+	var elapsed: float = _get_time_seconds() - _research_started_at
+	return clampf(elapsed / RESEARCH_SECONDS, 0.0, 1.0)
+
+
+func get_research_activity_label() -> String:
+	if not _is_researching:
+		return ""
+
+	var next_level: int = _get_upgrade_level(_research_upgrade_id) + 1
+	var upgrade_kind: String = "Attack" if UpgradeManager.is_cavalry_attack_upgrade(_research_upgrade_id) else "Defense"
+	return "%s Upgrade %d/%d" % [upgrade_kind, next_level, UpgradeManager.MAX_LEVEL]
+
+
+func try_research_upgrade(upgrade_id: StringName) -> bool:
+	if _is_researching:
+		return false
+
+	if not UpgradeManager.is_stable_cavalry_upgrade(upgrade_id):
+		return false
+
+	if _is_enemy_owned():
+		if not can_enemy_research():
+			return false
+		if not UpgradeManager.try_pay_for_enemy_research(upgrade_id):
+			return false
+	else:
+		if not can_research():
+			return false
+		if not UpgradeManager.try_pay_for_research(upgrade_id):
+			return false
+
+	_begin_research(upgrade_id)
+	return true
+
+
+func _begin_research(upgrade_id: StringName) -> void:
+	_research_session += 1
+	var session: int = _research_session
+	_is_researching = true
+	_research_upgrade_id = upgrade_id
+	_research_started_at = _get_time_seconds()
+	research_state_changed.emit()
+
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(RESEARCH_SECONDS)
+	wait_timer.timeout.connect(func() -> void:
+		_on_research_finished(session)
+	, CONNECT_ONE_SHOT)
+
+
+func _on_research_finished(session: int) -> void:
+	if session != _research_session:
+		return
+
+	var completed_upgrade_id: StringName = _research_upgrade_id
+	_is_researching = false
+	_research_upgrade_id = &""
+	if _is_enemy_owned():
+		UpgradeManager.finish_enemy_research(completed_upgrade_id)
+	else:
+		UpgradeManager.finish_research(completed_upgrade_id)
+	research_state_changed.emit()
+
+
+func _invalidate_research() -> void:
+	_research_session += 1
+	_is_researching = false
+	_research_upgrade_id = &""
+	research_state_changed.emit()
+
+
+func _get_upgrade_level(upgrade_id: StringName) -> int:
+	if _is_enemy_owned():
+		return UpgradeManager.get_enemy_level(upgrade_id)
+
+	return UpgradeManager.get_level(upgrade_id)
 
 
 func _exit_tree() -> void:
@@ -229,6 +346,7 @@ func take_damage(amount: float, attacker = null) -> void:
 
 func _on_health_depleted() -> void:
 	_stop_enemy_auto_production()
+	_invalidate_research()
 	_repeat_enabled = false
 	_repeat_waiting_for_resources = false
 	_disconnect_player_resource_listener()

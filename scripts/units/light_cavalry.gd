@@ -3,10 +3,15 @@ extends Unit
 
 ## Fast light mounted melee cavalry placeholder.
 
+const UNIT_ID: StringName = &"light_cavalry"
+
 @export var attack_damage: int = 8
 @export var attack_range: float = 2.0
 @export var attack_cooldown: float = 0.9
 @export var armor: int = 0
+
+var _base_attack_damage: int = -1
+var _base_armor: int = -1
 
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
@@ -27,17 +32,29 @@ var _has_attack_move_destination: bool = false
 
 func _ready() -> void:
 	super._ready()
+	_cache_base_stats()
 	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
 	_health_component.health_changed.connect(_on_health_changed)
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
+	if CombatTargetValidation.is_enemy_faction(self):
+		if not UpgradeManager.enemy_upgrade_applied.is_connected(_on_stable_upgrade_applied):
+			UpgradeManager.enemy_upgrade_applied.connect(_on_stable_upgrade_applied)
+	else:
+		if not UpgradeManager.upgrade_applied.is_connected(_on_stable_upgrade_applied):
+			UpgradeManager.upgrade_applied.connect(_on_stable_upgrade_applied)
+	call_deferred("_try_apply_stable_upgrades")
 
 
 func _exit_tree() -> void:
 	cancel_attack_move()
 	cancel_attack()
 	EnemyUnitMission.clear_unit_mission(self)
+	if UpgradeManager.upgrade_applied.is_connected(_on_stable_upgrade_applied):
+		UpgradeManager.upgrade_applied.disconnect(_on_stable_upgrade_applied)
+	if UpgradeManager.enemy_upgrade_applied.is_connected(_on_stable_upgrade_applied):
+		UpgradeManager.enemy_upgrade_applied.disconnect(_on_stable_upgrade_applied)
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -268,6 +285,50 @@ func _stop_and_attack(delta: float) -> void:
 
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_attack_cooldown_timer = attack_cooldown
+
+
+func apply_stable_upgrades() -> void:
+	_cache_base_stats()
+	var attack_level: int = _get_stable_upgrade_level(
+		UpgradeManager.get_cavalry_attack_upgrade_id(UNIT_ID)
+	)
+	var defense_level: int = _get_stable_upgrade_level(
+		UpgradeManager.get_cavalry_defense_upgrade_id(UNIT_ID)
+	)
+	attack_damage = _base_attack_damage + attack_level * UpgradeManager.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
+	armor = _base_armor + defense_level * UpgradeManager.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
+
+
+func _get_stable_upgrade_level(upgrade_id: StringName) -> int:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return UpgradeManager.get_enemy_level(upgrade_id)
+
+	return UpgradeManager.get_level(upgrade_id)
+
+
+func _cache_base_stats() -> void:
+	if _base_attack_damage < 0:
+		_base_attack_damage = attack_damage
+	if _base_armor < 0:
+		_base_armor = armor
+
+
+func _try_apply_stable_upgrades() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
+	if CombatTargetValidation.is_enemy_faction(self):
+		UpgradeManager.apply_enemy_upgrades_to_unit(self)
+	else:
+		UpgradeManager.apply_player_upgrades_to_unit(self)
+
+
+func _on_stable_upgrade_applied(upgrade_id: StringName) -> void:
+	if upgrade_id != UpgradeManager.get_cavalry_attack_upgrade_id(UNIT_ID):
+		if upgrade_id != UpgradeManager.get_cavalry_defense_upgrade_id(UNIT_ID):
+			return
+
+	_try_apply_stable_upgrades()
 
 
 func take_damage(amount: float, attacker = null) -> void:

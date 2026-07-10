@@ -8,6 +8,12 @@ signal enemy_upgrade_applied(upgrade_id: StringName)
 
 const MAX_LEVEL: int = 5
 const ACADEMY_MAX_LEVEL: int = 1
+const CAVALRY_ATTACK_DAMAGE_PER_LEVEL: int = 3
+const CAVALRY_DEFENSE_ARMOR_PER_LEVEL: int = 1
+const STABLE_UPGRADE_BASE_GOLD: int = 150
+const STABLE_UPGRADE_BASE_WOOD: int = 75
+const STABLE_UPGRADE_GOLD_PER_LEVEL: int = 100
+const STABLE_UPGRADE_WOOD_PER_LEVEL: int = 50
 const LEVEL_COSTS: Array[int] = [100, 150, 225, 325, 450]
 const FASTER_GATHERING_SPEED_MULTIPLIER: float = 1.25
 const FASTER_UNIT_TRAINING_SPEED_MULTIPLIER: float = 1.2
@@ -25,6 +31,19 @@ const UPGRADE_FASTER_UNIT_TRAINING: StringName = &"faster_unit_training"
 const UPGRADE_IMPROVED_TOOLS: StringName = &"improved_tools"
 const UPGRADE_ENGINEERING: StringName = &"engineering"
 const UPGRADE_BALLISTICS: StringName = &"ballistics"
+
+const UPGRADE_HEAVY_CAVALRY_ATTACK: StringName = &"heavy_cavalry_attack"
+const UPGRADE_HEAVY_CAVALRY_DEFENSE: StringName = &"heavy_cavalry_defense"
+const UPGRADE_LIGHT_CAVALRY_ATTACK: StringName = &"light_cavalry_attack"
+const UPGRADE_LIGHT_CAVALRY_DEFENSE: StringName = &"light_cavalry_defense"
+const UPGRADE_CAVALRY_ARCHER_ATTACK: StringName = &"cavalry_archer_attack"
+const UPGRADE_CAVALRY_ARCHER_DEFENSE: StringName = &"cavalry_archer_defense"
+
+const STABLE_CAVALRY_UNIT_IDS: Array[StringName] = [
+	&"heavy_cavalry",
+	&"light_cavalry",
+	&"cavalry_archer",
+]
 
 const BLACKSMITH_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_SWORDSMAN_ATTACK,
@@ -95,6 +114,12 @@ var _levels: Dictionary = {
 	UPGRADE_IMPROVED_TOOLS: 0,
 	UPGRADE_ENGINEERING: 0,
 	UPGRADE_BALLISTICS: 0,
+	UPGRADE_HEAVY_CAVALRY_ATTACK: 0,
+	UPGRADE_HEAVY_CAVALRY_DEFENSE: 0,
+	UPGRADE_LIGHT_CAVALRY_ATTACK: 0,
+	UPGRADE_LIGHT_CAVALRY_DEFENSE: 0,
+	UPGRADE_CAVALRY_ARCHER_ATTACK: 0,
+	UPGRADE_CAVALRY_ARCHER_DEFENSE: 0,
 }
 
 var _enemy_levels: Dictionary = {
@@ -108,7 +133,42 @@ var _enemy_levels: Dictionary = {
 	UPGRADE_IMPROVED_TOOLS: 0,
 	UPGRADE_ENGINEERING: 0,
 	UPGRADE_BALLISTICS: 0,
+	UPGRADE_HEAVY_CAVALRY_ATTACK: 0,
+	UPGRADE_HEAVY_CAVALRY_DEFENSE: 0,
+	UPGRADE_LIGHT_CAVALRY_ATTACK: 0,
+	UPGRADE_LIGHT_CAVALRY_DEFENSE: 0,
+	UPGRADE_CAVALRY_ARCHER_ATTACK: 0,
+	UPGRADE_CAVALRY_ARCHER_DEFENSE: 0,
 }
+
+const _STABLE_CAVALRY_UPGRADE_IDS: Array[StringName] = [
+	UPGRADE_HEAVY_CAVALRY_ATTACK,
+	UPGRADE_HEAVY_CAVALRY_DEFENSE,
+	UPGRADE_LIGHT_CAVALRY_ATTACK,
+	UPGRADE_LIGHT_CAVALRY_DEFENSE,
+	UPGRADE_CAVALRY_ARCHER_ATTACK,
+	UPGRADE_CAVALRY_ARCHER_DEFENSE,
+]
+
+
+static func get_cavalry_attack_upgrade_id(cavalry_unit_id: StringName) -> StringName:
+	return StringName("%s_attack" % cavalry_unit_id)
+
+
+static func get_cavalry_defense_upgrade_id(cavalry_unit_id: StringName) -> StringName:
+	return StringName("%s_defense" % cavalry_unit_id)
+
+
+static func is_stable_cavalry_upgrade(upgrade_id: StringName) -> bool:
+	return upgrade_id in _STABLE_CAVALRY_UPGRADE_IDS
+
+
+static func is_cavalry_attack_upgrade(upgrade_id: StringName) -> bool:
+	return String(upgrade_id).ends_with("_attack") and is_stable_cavalry_upgrade(upgrade_id)
+
+
+static func is_cavalry_defense_upgrade(upgrade_id: StringName) -> bool:
+	return String(upgrade_id).ends_with("_defense") and is_stable_cavalry_upgrade(upgrade_id)
 
 
 func is_academy_upgrade(upgrade_id: StringName) -> bool:
@@ -201,10 +261,14 @@ func get_hotkey_label(upgrade_id: StringName) -> String:
 
 
 func get_next_level_cost(upgrade_id: StringName) -> Dictionary:
+	if is_stable_cavalry_upgrade(upgrade_id):
+		return _get_stable_level_cost(get_level(upgrade_id))
 	return _get_level_cost(get_level(upgrade_id))
 
 
 func get_enemy_next_level_cost(upgrade_id: StringName) -> Dictionary:
+	if is_stable_cavalry_upgrade(upgrade_id):
+		return _get_stable_level_cost(get_enemy_level(upgrade_id))
 	return _get_level_cost(get_enemy_level(upgrade_id))
 
 
@@ -228,6 +292,16 @@ func _get_level_cost(level: int) -> Dictionary:
 
 	var cost: int = LEVEL_COSTS[level]
 	return {"wood": cost, "gold": cost}
+
+
+func _get_stable_level_cost(level: int) -> Dictionary:
+	if level >= MAX_LEVEL:
+		return {"wood": 0, "gold": 0}
+
+	return {
+		"gold": STABLE_UPGRADE_BASE_GOLD + level * STABLE_UPGRADE_GOLD_PER_LEVEL,
+		"wood": STABLE_UPGRADE_BASE_WOOD + level * STABLE_UPGRADE_WOOD_PER_LEVEL,
+	}
 
 
 func can_afford_upgrade(upgrade_id: StringName) -> bool:
@@ -365,23 +439,30 @@ func try_research(upgrade_id: StringName) -> bool:
 
 
 func apply_player_upgrades_to_unit(unit: Unit) -> void:
-	if not _is_player_military_unit(unit):
-		return
-
-	if unit is Swordsman:
+	if unit is Swordsman and _is_player_military_unit(unit):
 		(unit as Swordsman).apply_blacksmith_upgrades()
-	elif unit is Archer:
+	elif unit is Archer and _is_player_military_unit(unit):
 		(unit as Archer).apply_blacksmith_upgrades()
+	elif _is_player_cavalry_unit(unit):
+		_apply_stable_upgrades_to_cavalry(unit)
 
 
 func apply_enemy_upgrades_to_unit(unit: Unit) -> void:
-	if not _is_enemy_military_unit(unit):
-		return
-
-	if unit is Swordsman:
+	if unit is Swordsman and _is_enemy_military_unit(unit):
 		(unit as Swordsman).apply_blacksmith_upgrades()
-	elif unit is Archer:
+	elif unit is Archer and _is_enemy_military_unit(unit):
 		(unit as Archer).apply_blacksmith_upgrades()
+	elif _is_enemy_cavalry_unit(unit):
+		_apply_stable_upgrades_to_cavalry(unit)
+
+
+func _apply_stable_upgrades_to_cavalry(unit: Unit) -> void:
+	if unit is HeavyCavalry:
+		(unit as HeavyCavalry).apply_stable_upgrades()
+	elif unit is LightCavalry:
+		(unit as LightCavalry).apply_stable_upgrades()
+	elif unit is CavalryArcher:
+		(unit as CavalryArcher).apply_stable_upgrades()
 
 
 func _refresh_all_player_military_units() -> void:
@@ -402,6 +483,22 @@ func _refresh_all_enemy_military_units() -> void:
 	for node: Node in tree.get_nodes_in_group(&"enemies"):
 		if node is Unit:
 			apply_enemy_upgrades_to_unit(node as Unit)
+
+
+func _is_player_cavalry_unit(unit: Unit) -> bool:
+	if not (unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher):
+		return false
+	if TeamVisuals.resolve_team(unit, unit.team_id) != TeamVisuals.PLAYER_TEAM_ID:
+		return false
+	return true
+
+
+func _is_enemy_cavalry_unit(unit: Unit) -> bool:
+	if not (unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher):
+		return false
+	if TeamVisuals.resolve_team(unit, unit.team_id) == TeamVisuals.PLAYER_TEAM_ID:
+		return false
+	return true
 
 
 func _is_player_military_unit(unit: Unit) -> bool:

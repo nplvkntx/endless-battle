@@ -265,9 +265,13 @@ const BUILD_MANAGER_SCRIPT := preload("res://scripts/systems/build_manager.gd")
 var _barracks_spearman_slot: ProductionIconSlot = null
 var _barracks_swordsman_slot: ProductionIconSlot = null
 var _barracks_archer_slot: ProductionIconSlot = null
-var _stable_heavy_cavalry_slot: ProductionIconSlot = null
-var _stable_light_cavalry_slot: ProductionIconSlot = null
-var _stable_cavalry_archer_slot: ProductionIconSlot = null
+var _stable_cavalry_unit_ids: Array[StringName] = []
+var _stable_production_slots: Dictionary = {}
+var _stable_column_containers: Dictionary = {}
+var _stable_attack_buttons: Dictionary = {}
+var _stable_defense_buttons: Dictionary = {}
+var _stable_upgrade_button_handlers: Array[Callable] = []
+var _stable_cavalry_columns_ready: bool = false
 var _artillery_depot_cannon_slot: ProductionIconSlot = null
 var _town_center_worker_slot: ProductionIconSlot = null
 var _town_center_upgrade_slot: ProductionIconSlot = null
@@ -408,15 +412,7 @@ func _setup_production_icon_slots() -> void:
 		Barracks.TRAIN_ID_SWORDSMAN, _barracks_training_row
 	)
 	_barracks_archer_slot = _create_production_icon_slot(Barracks.TRAIN_ID_ARCHER, _barracks_training_row)
-	_stable_heavy_cavalry_slot = _create_production_icon_slot(
-		Stable.TRAIN_ID_HEAVY_CAVALRY, _stable_training_row
-	)
-	_stable_light_cavalry_slot = _create_production_icon_slot(
-		Stable.TRAIN_ID_LIGHT_CAVALRY, _stable_training_row
-	)
-	_stable_cavalry_archer_slot = _create_production_icon_slot(
-		Stable.TRAIN_ID_CAVALRY_ARCHER, _stable_training_row
-	)
+	_setup_stable_cavalry_columns()
 	_artillery_depot_cannon_slot = _create_production_icon_slot(
 		ArtilleryDepot.TRAIN_ID_CANNON, _artillery_depot_training_row
 	)
@@ -681,6 +677,198 @@ func _create_production_icon_slot(train_id: StringName, parent: Control) -> Prod
 	return slot
 
 
+func _setup_stable_cavalry_columns() -> void:
+	if _stable_cavalry_columns_ready:
+		return
+
+	_stable_cavalry_columns_ready = true
+	_stable_cavalry_unit_ids = Stable.get_cavalry_unit_ids()
+
+	for unit_id: StringName in _stable_cavalry_unit_ids:
+		var column := VBoxContainer.new()
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.custom_minimum_size = Vector2(56, 0)
+		column.alignment = BoxContainer.ALIGNMENT_CENTER
+		column.add_theme_constant_override("separation", 2)
+		_stable_training_row.add_child(column)
+		_stable_column_containers[unit_id] = column
+
+		var slot: ProductionIconSlot = _create_production_icon_slot(unit_id, column)
+		_stable_production_slots[unit_id] = slot
+		if slot != null:
+			slot.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+
+		var attack_button := Button.new()
+		attack_button.custom_minimum_size = Vector2(72, 26)
+		attack_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(attack_button)
+		_stable_attack_buttons[unit_id] = attack_button
+
+		var defense_button := Button.new()
+		defense_button.custom_minimum_size = Vector2(72, 26)
+		defense_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		column.add_child(defense_button)
+		_stable_defense_buttons[unit_id] = defense_button
+
+		var captured_unit_id: StringName = unit_id
+		var attack_handler := func() -> void:
+			_on_stable_upgrade_button_pressed(captured_unit_id, true)
+		_stable_upgrade_button_handlers.append(attack_handler)
+		attack_button.pressed.connect(attack_handler)
+
+		var defense_handler := func() -> void:
+			_on_stable_upgrade_button_pressed(captured_unit_id, false)
+		_stable_upgrade_button_handlers.append(defense_handler)
+		defense_button.pressed.connect(defense_handler)
+
+		var captured_attack_id: StringName = UpgradeManager.get_cavalry_attack_upgrade_id(unit_id)
+		TooltipManager.bind_control(attack_button, func() -> String:
+			return _get_stable_upgrade_tooltip(captured_attack_id)
+		)
+		var captured_defense_id: StringName = UpgradeManager.get_cavalry_defense_upgrade_id(unit_id)
+		TooltipManager.bind_control(defense_button, func() -> String:
+			return _get_stable_upgrade_tooltip(captured_defense_id)
+		)
+
+
+func _on_stable_upgrade_button_pressed(unit_id: StringName, is_attack: bool) -> void:
+	if _selected_stable == null or not is_instance_valid(_selected_stable):
+		_selected_stable = null
+		return
+
+	var upgrade_id: StringName = (
+		UpgradeManager.get_cavalry_attack_upgrade_id(unit_id)
+		if is_attack
+		else UpgradeManager.get_cavalry_defense_upgrade_id(unit_id)
+	)
+	if _selected_stable.try_research_upgrade(upgrade_id):
+		_update_stable_upgrade_ui()
+
+
+func _get_stable_unit_display_name(unit_id: StringName) -> String:
+	match unit_id:
+		Stable.TRAIN_ID_HEAVY_CAVALRY:
+			return "Heavy Cavalry"
+		Stable.TRAIN_ID_LIGHT_CAVALRY:
+			return "Light Cavalry"
+		Stable.TRAIN_ID_CAVALRY_ARCHER:
+			return "Cavalry Archer"
+		_:
+			return String(unit_id)
+
+
+func _get_cavalry_unit_id_from_upgrade(upgrade_id: StringName) -> StringName:
+	var upgrade_name: String = String(upgrade_id)
+	if upgrade_name.ends_with("_attack"):
+		return StringName(upgrade_name.trim_suffix("_attack"))
+	if upgrade_name.ends_with("_defense"):
+		return StringName(upgrade_name.trim_suffix("_defense"))
+	return &""
+
+
+func _get_stable_upgrade_title(upgrade_id: StringName) -> String:
+	var unit_id: StringName = _get_cavalry_unit_id_from_upgrade(upgrade_id)
+	var unit_name: String = _get_stable_unit_display_name(unit_id)
+	var kind_label: String = "Attack" if UpgradeManager.is_cavalry_attack_upgrade(upgrade_id) else "Defense"
+	return "%s %s Upgrade" % [unit_name, kind_label]
+
+
+func _get_stable_upgrade_tooltip(upgrade_id: StringName) -> String:
+	var lines: PackedStringArray = PackedStringArray()
+	var is_attack: bool = UpgradeManager.is_cavalry_attack_upgrade(upgrade_id)
+	var level: int = UpgradeManager.get_level(upgrade_id)
+	lines.append(_get_stable_upgrade_title(upgrade_id))
+	lines.append("Level: %d/%d" % [level, UpgradeManager.MAX_LEVEL])
+
+	if UpgradeManager.is_max_level(upgrade_id):
+		lines.append("Fully researched.")
+		return "\n".join(lines)
+
+	if is_attack:
+		lines.append(
+			"Next level: +%d damage" % UpgradeManager.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
+		)
+	else:
+		lines.append(
+			"Next level: +%d armor" % UpgradeManager.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
+		)
+
+	var cost: Dictionary = UpgradeManager.get_next_level_cost(upgrade_id)
+	lines.append("Cost: %d gold, %d wood" % [cost.gold, cost.wood])
+	lines.append("Click to research.")
+
+	var is_researching: bool = (
+		_selected_stable != null
+		and is_instance_valid(_selected_stable)
+		and _selected_stable.is_researching()
+	)
+	if is_researching:
+		var active_upgrade_id: StringName = _selected_stable.get_research_upgrade_id()
+		if active_upgrade_id != upgrade_id:
+			lines.append("Another upgrade is currently being researched.")
+	elif not UpgradeManager.can_afford_upgrade(upgrade_id):
+		lines.append("Not enough resources.")
+
+	return "\n".join(lines)
+
+
+func _update_stable_upgrade_ui() -> void:
+	if _selected_stable == null or not is_instance_valid(_selected_stable):
+		_selected_stable = null
+		return
+
+	var is_researching: bool = _selected_stable.is_researching()
+
+	for unit_id: StringName in _stable_cavalry_unit_ids:
+		var attack_button: Button = _stable_attack_buttons.get(unit_id) as Button
+		var defense_button: Button = _stable_defense_buttons.get(unit_id) as Button
+		if attack_button == null or defense_button == null:
+			continue
+
+		var attack_upgrade_id: StringName = UpgradeManager.get_cavalry_attack_upgrade_id(unit_id)
+		var defense_upgrade_id: StringName = UpgradeManager.get_cavalry_defense_upgrade_id(unit_id)
+
+		_set_stable_upgrade_button_state(
+			attack_button,
+			attack_upgrade_id,
+			true,
+			is_researching
+		)
+		_set_stable_upgrade_button_state(
+			defense_button,
+			defense_upgrade_id,
+			false,
+			is_researching
+		)
+
+
+func _set_stable_upgrade_button_state(
+	button: Button,
+	upgrade_id: StringName,
+	is_attack: bool,
+	is_researching: bool
+) -> void:
+	var kind_label: String = "Attack" if is_attack else "Defense"
+
+	if UpgradeManager.is_max_level(upgrade_id):
+		button.text = "%s MAX" % kind_label
+		button.disabled = true
+		button.add_theme_color_override("font_color", BLACKSMITH_UPGRADE_MAX_COLOR)
+		return
+
+	button.remove_theme_color_override("font_color")
+	button.text = kind_label
+	button.disabled = is_researching or not UpgradeManager.can_afford_upgrade(upgrade_id)
+
+
+func _stable_production_icons_visible() -> bool:
+	for unit_id: StringName in _stable_cavalry_unit_ids:
+		var column: Control = _stable_column_containers.get(unit_id) as Control
+		if column != null and column.visible:
+			return true
+	return false
+
+
 func _production_icons_visible() -> bool:
 	if not USE_PRODUCTION_ICON_SLOTS:
 		return false
@@ -688,9 +876,7 @@ func _production_icons_visible() -> bool:
 	return (
 		(_barracks_spearman_slot != null and _barracks_spearman_slot.visible)
 		or (_barracks_swordsman_slot != null and _barracks_swordsman_slot.visible)
-		or (_stable_heavy_cavalry_slot != null and _stable_heavy_cavalry_slot.visible)
-		or (_stable_light_cavalry_slot != null and _stable_light_cavalry_slot.visible)
-		or (_stable_cavalry_archer_slot != null and _stable_cavalry_archer_slot.visible)
+		or _stable_production_icons_visible()
 		or (_artillery_depot_cannon_slot != null and _artillery_depot_cannon_slot.visible)
 		or (_town_center_worker_slot != null and _town_center_worker_slot.visible)
 		or (_town_center_upgrade_slot != null and _town_center_upgrade_slot.visible)
@@ -736,61 +922,40 @@ func _refresh_artillery_depot_production_slots() -> void:
 
 
 func _refresh_stable_production_slots() -> void:
-	if (
-		_stable_heavy_cavalry_slot == null
-		or _stable_light_cavalry_slot == null
-		or _stable_cavalry_archer_slot == null
-	):
-		return
-
 	if _selected_stable == null or not is_instance_valid(_selected_stable):
 		return
 
 	var stable: Stable = _selected_stable
-	_stable_heavy_cavalry_slot.set_queue_count(stable.get_heavy_cavalry_queue_count())
-	_stable_heavy_cavalry_slot.set_infinite_enabled(
-		stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY)
-	)
-	_stable_heavy_cavalry_slot.set_training_progress(
-		stable.get_active_unit_training_progress(),
-		stable.is_training_heavy_cavalry()
-	)
-	_stable_heavy_cavalry_slot.set_affordable(
-		TooltipFormatter.get_train_blocked_reason(
-			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_HEAVY_CAVALRY),
-			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_HEAVY_CAVALRY)
-		).is_empty()
-	)
 
-	_stable_light_cavalry_slot.set_queue_count(stable.get_light_cavalry_queue_count())
-	_stable_light_cavalry_slot.set_infinite_enabled(
-		stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY)
-	)
-	_stable_light_cavalry_slot.set_training_progress(
-		stable.get_active_unit_training_progress(),
-		stable.is_training_light_cavalry()
-	)
-	_stable_light_cavalry_slot.set_affordable(
-		TooltipFormatter.get_train_blocked_reason(
-			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_LIGHT_CAVALRY),
-			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_LIGHT_CAVALRY)
-		).is_empty()
-	)
+	for unit_id: StringName in _stable_cavalry_unit_ids:
+		var slot: ProductionIconSlot = _stable_production_slots.get(unit_id) as ProductionIconSlot
+		if slot == null:
+			continue
 
-	_stable_cavalry_archer_slot.set_queue_count(stable.get_cavalry_archer_queue_count())
-	_stable_cavalry_archer_slot.set_infinite_enabled(
-		stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER)
-	)
-	_stable_cavalry_archer_slot.set_training_progress(
-		stable.get_active_unit_training_progress(),
-		stable.is_training_cavalry_archer()
-	)
-	_stable_cavalry_archer_slot.set_affordable(
-		TooltipFormatter.get_train_blocked_reason(
-			Stable.get_unit_train_gold_cost(Stable.TRAIN_ID_CAVALRY_ARCHER),
-			Stable.get_unit_train_food_cost(Stable.TRAIN_ID_CAVALRY_ARCHER)
-		).is_empty()
-	)
+		var queue_count: int = 0
+		var is_training: bool = false
+		match unit_id:
+			Stable.TRAIN_ID_HEAVY_CAVALRY:
+				queue_count = stable.get_heavy_cavalry_queue_count()
+				is_training = stable.is_training_heavy_cavalry()
+			Stable.TRAIN_ID_LIGHT_CAVALRY:
+				queue_count = stable.get_light_cavalry_queue_count()
+				is_training = stable.is_training_light_cavalry()
+			Stable.TRAIN_ID_CAVALRY_ARCHER:
+				queue_count = stable.get_cavalry_archer_queue_count()
+				is_training = stable.is_training_cavalry_archer()
+
+		slot.set_queue_count(queue_count)
+		slot.set_infinite_enabled(stable.is_repeat_training_enabled(unit_id))
+		slot.set_training_progress(stable.get_active_unit_training_progress(), is_training)
+		slot.set_affordable(
+			TooltipFormatter.get_train_blocked_reason(
+				Stable.get_unit_train_gold_cost(unit_id),
+				Stable.get_unit_train_food_cost(unit_id)
+			).is_empty()
+		)
+
+	_update_stable_upgrade_ui()
 
 
 func _refresh_barracks_production_slots() -> void:
@@ -933,12 +1098,13 @@ func _set_production_icon_visibility(
 		_barracks_swordsman_slot.visible = show_barracks
 	if _barracks_archer_slot != null:
 		_barracks_archer_slot.visible = show_barracks
-	if _stable_heavy_cavalry_slot != null:
-		_stable_heavy_cavalry_slot.visible = show_stable
-	if _stable_light_cavalry_slot != null:
-		_stable_light_cavalry_slot.visible = show_stable
-	if _stable_cavalry_archer_slot != null:
-		_stable_cavalry_archer_slot.visible = show_stable
+	for unit_id: StringName in _stable_cavalry_unit_ids:
+		var column: Control = _stable_column_containers.get(unit_id) as Control
+		if column != null:
+			column.visible = show_stable
+		var slot: ProductionIconSlot = _stable_production_slots.get(unit_id) as ProductionIconSlot
+		if slot != null:
+			slot.visible = show_stable
 	if _artillery_depot_cannon_slot != null:
 		_artillery_depot_cannon_slot.visible = show_artillery_depot
 	if _town_center_worker_slot != null:
@@ -1506,6 +1672,7 @@ func _on_blacksmith_upgrade_button_pressed(upgrade_id: StringName) -> void:
 func _on_upgrade_levels_changed() -> void:
 	_update_blacksmith_upgrade_ui()
 	_update_academy_upgrade_ui()
+	_update_stable_upgrade_ui()
 
 
 func _update_barracks_train_button_states() -> void:
@@ -1543,6 +1710,9 @@ func _on_resources_changed() -> void:
 		_update_blacksmith_upgrade_ui()
 	if _academy_panel.visible:
 		_update_academy_upgrade_ui()
+	if _stable_panel.visible:
+		_update_stable_upgrade_ui()
+		_refresh_stable_production_slots()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
 	if _wall_gate_panel.visible:
@@ -2417,6 +2587,8 @@ func _on_building_selection_changed(building: Building) -> void:
 		if _tracked_stable.has_signal("training_queue_changed"):
 			_tracked_stable.training_queue_changed.connect(_on_stable_training_queue_changed)
 		_tracked_stable.repeat_state_changed.connect(_on_production_repeat_state_changed)
+		if not _tracked_stable.research_state_changed.is_connected(_on_stable_research_state_changed):
+			_tracked_stable.research_state_changed.connect(_on_stable_research_state_changed)
 		_on_stable_training_queue_changed()
 	else:
 		_tracked_stable = null
@@ -2511,6 +2683,12 @@ func _on_stable_training_queue_changed() -> void:
 		_refresh_stable_production_slots()
 	else:
 		_update_auto_training_label()
+
+
+func _on_stable_research_state_changed() -> void:
+	_update_stable_upgrade_ui()
+	if USE_PRODUCTION_ICON_SLOTS:
+		_refresh_stable_production_slots()
 
 
 func _on_blacksmith_state_changed(_state: StringName) -> void:
@@ -2746,6 +2924,7 @@ func _refresh_command_visibility() -> void:
 		_update_barracks_train_button_states()
 	if show_stable_commands:
 		_refresh_stable_production_slots()
+		_update_stable_upgrade_ui()
 	if show_artillery_depot_commands:
 		_refresh_artillery_depot_production_slots()
 	if show_hero_altar_training:
@@ -3266,6 +3445,9 @@ func _disconnect_stable_signals() -> void:
 
 		if _tracked_stable.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
 			_tracked_stable.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+
+		if _tracked_stable.research_state_changed.is_connected(_on_stable_research_state_changed):
+			_tracked_stable.research_state_changed.disconnect(_on_stable_research_state_changed)
 
 	_tracked_stable = null
 
