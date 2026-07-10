@@ -49,6 +49,9 @@ func _ready() -> void:
 
 
 func _run_initial_evaluation() -> void:
+	if not is_inside_tree():
+		return
+
 	_evaluate_normal()
 	_evaluate_strategic()
 
@@ -140,7 +143,7 @@ func notify_army_losses() -> void:
 	desires["attack"] = minf(desires["attack"], DESIRE_LOW)
 
 
-func set_creep_target(camp: Node3D) -> void:
+func set_creep_target(camp) -> void:
 	_creep_target = NodeSafety.safe_node(camp) as Node3D
 
 
@@ -522,7 +525,13 @@ func _collect_workers(tree: SceneTree) -> Array:
 	return NodeSafety.clean_node_array(workers)
 
 
-func _is_idle_worker(worker: Worker) -> bool:
+func _is_idle_worker(worker) -> bool:
+	if not NodeSafety.is_alive_node(worker):
+		return false
+
+	if not worker is Worker:
+		return false
+
 	if worker.is_on_construction_trip() or worker.is_carrying_gathered_resources():
 		return false
 

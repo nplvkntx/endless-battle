@@ -159,26 +159,31 @@ static func _collect_player_military_near(
 	var units: Array = []
 
 	for group_name: StringName in [EnemyArmyCommand.UNITS_GROUP, EnemyArmyCommand.HEROES_GROUP]:
-		for node: Node in tree.get_nodes_in_group(group_name):
-			if not _is_player_military_unit(node):
+		for node_variant: Variant in tree.get_nodes_in_group(group_name):
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not _is_player_military_unit(node_variant):
 				continue
 
-			if not node is Node3D:
+			if not node_variant is Node3D:
 				continue
 
 			var distance: float = EnemyArmyCommand.horizontal_distance(
 				position,
-				(node as Node3D).global_position
+				(node_variant as Node3D).global_position
 			)
 			if distance > search_range:
 				continue
 
-			units.append(node)
+			units.append(node_variant)
 
 	return units
 
 
-static func _is_enemy_non_hero_combat_unit(node: Node) -> bool:
+static func _is_enemy_non_hero_combat_unit(node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
 	if not EnemyArmyCommand.is_living_combat_unit(node):
 		return false
 
@@ -199,7 +204,7 @@ static func _estimate_player_or_enemy_power(units: Array) -> int:
 			if CombatTargetValidation.is_enemy_faction(unit as Node):
 				if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
 					continue
-			elif not _is_player_military_unit(unit as Node):
+			elif not _is_player_military_unit(unit):
 				continue
 		else:
 			continue
@@ -262,26 +267,28 @@ static func _collect_visible_player_military(tree: SceneTree, rally_position: Ve
 	var units: Array = []
 
 	for group_name: StringName in [EnemyArmyCommand.UNITS_GROUP, EnemyArmyCommand.HEROES_GROUP]:
-		for node: Node in tree.get_nodes_in_group(group_name):
-			if not _is_player_military_unit(node):
+		for node_variant: Variant in tree.get_nodes_in_group(group_name):
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not _is_player_military_unit(node_variant):
 				continue
 
-			if not node is Node3D:
+			if not node_variant is Node3D:
 				continue
 
 			var distance: float = EnemyArmyCommand.horizontal_distance(
 				rally_position,
-				(node as Node3D).global_position
+				(node_variant as Node3D).global_position
 			)
 			if distance > SCOUT_RANGE:
 				continue
 
-			units.append(node)
+			units.append(node_variant)
 
 	return units
 
 
-static func _is_player_military_unit(node: Node) -> bool:
+static func _is_player_military_unit(node) -> bool:
 	if node == null or not is_instance_valid(node):
 		return false
 
@@ -425,16 +432,18 @@ static func _count_player_military_near(
 	var count: int = 0
 
 	for group_name: StringName in [EnemyArmyCommand.UNITS_GROUP, EnemyArmyCommand.HEROES_GROUP]:
-		for node: Node in tree.get_nodes_in_group(group_name):
-			if not _is_player_military_unit(node):
+		for node_variant: Variant in tree.get_nodes_in_group(group_name):
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not _is_player_military_unit(node_variant):
 				continue
 
-			if not node is Node3D:
+			if not node_variant is Node3D:
 				continue
 
 			var distance: float = EnemyArmyCommand.horizontal_distance(
 				position,
-				(node as Node3D).global_position
+				(node_variant as Node3D).global_position
 			)
 			if distance <= radius:
 				count += 1
@@ -442,8 +451,11 @@ static func _count_player_military_near(
 	return count
 
 
-static func _is_living_building(building: Building) -> bool:
+static func _is_living_building(building) -> bool:
 	if building == null or not is_instance_valid(building):
+		return false
+
+	if not building is Building:
 		return false
 
 	if building.is_queued_for_deletion():

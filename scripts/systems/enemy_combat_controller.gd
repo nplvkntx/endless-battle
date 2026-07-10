@@ -17,6 +17,7 @@ var _assembly_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.REGRO
 var _assembly_units: Array = []
 var _assembly_use_attack_move: bool = true
 var _pending_player_creep_ambush: Vector3 = Vector3.ZERO
+var _active_player_creep_contest_camp: Node3D = null
 var _creep_manager: EnemyCreepManager = null
 var _director: EnemyStrategicDirector = null
 
@@ -45,8 +46,18 @@ func get_match_elapsed_seconds() -> float:
 
 func _update_combat_control(delta: float) -> void:
 	var tree: SceneTree = get_tree()
+	var elapsed: float = get_match_elapsed_seconds()
 	EnemyArmyCommand.purge_and_rebuild_main_army(tree)
 	_update_opening_phase(tree)
+
+	if EnemyArmyCommand.check_destroyed_army_regroup(tree, elapsed):
+		if _active_player_creep_contest_camp != null:
+			EnemyArmyCommand.record_creep_contest_cooldown(
+				_active_player_creep_contest_camp,
+				"army destroyed"
+			)
+			_active_player_creep_contest_camp = null
+	EnemyArmyCommand.tick_reinforcement_pool(tree, elapsed)
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	if army_mode == EnemyArmyCommand.ArmyMode.RETREATING:
@@ -64,6 +75,12 @@ func _update_combat_control(delta: float) -> void:
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]:
 		if EnemyArmyCommand.should_retreat_from_fight(tree):
+			if _active_player_creep_contest_camp != null:
+				EnemyArmyCommand.record_creep_contest_cooldown(
+					_active_player_creep_contest_camp,
+					"retreat from contest"
+				)
+				_active_player_creep_contest_camp = null
 			EnemyArmyCommand.initiate_group_retreat(tree, "fight unfavorable")
 		return
 
@@ -164,10 +181,23 @@ func request_assembled_group_move(
 	use_attack_move: bool = true
 ) -> bool:
 	units = NodeSafety.clean_node_array(units)
+	units = EnemyArmyCommand.filter_units_for_field_combat(units, mission)
 	if units.is_empty() or destination == Vector3.ZERO:
 		return false
 
 	var tree: SceneTree = get_tree()
+	var elapsed: float = get_match_elapsed_seconds()
+	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(elapsed)
+	if mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]:
+		var non_hero_count: int = 0
+		for unit: Variant in units:
+			if EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
+				non_hero_count += 1
+		if non_hero_count < min_army:
+			EnemyArmyCommand.debug_combat_log(
+				"assembly blocked: %d/%d units" % [non_hero_count, min_army]
+			)
+			return false
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
 		return false
@@ -240,11 +270,16 @@ func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
+	var elapsed: float = get_match_elapsed_seconds()
 	for camp: Node3D in CreepCampSafety.collect_active_camps(tree):
 		if camp == null or not is_instance_valid(camp):
 			continue
 
-		var evaluation: Dictionary = _evaluate_player_at_creep_camp(tree, camp, rally_position)
+		if EnemyArmyCommand.is_creep_contest_on_cooldown(camp):
+			continue
+
+		var request: Dictionary = _build_player_creep_contest_request(tree, camp, rally_position)
+		var evaluation: Dictionary = _evaluate_player_creep_request(tree, camp, rally_position, request, elapsed)
 		var decision: StringName = evaluation.get("decision", &"ignore")
 		match decision:
 			&"contest":
@@ -253,11 +288,16 @@ func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 				_stage_ambush_after_creep(tree, camp, rally_position, evaluation)
 			&"defend":
 				_hold_defense_near_base(tree, rally_position)
+			&"reject":
+				EnemyArmyCommand.record_creep_contest_cooldown(
+					camp,
+					String(evaluation.get("reason", "rejected"))
+				)
 			_:
 				pass
 
 
-func _evaluate_player_at_creep_camp(
+func _build_player_creep_contest_request(
 	tree: SceneTree,
 	camp: Node3D,
 	rally_position: Vector3
@@ -268,61 +308,72 @@ func _evaluate_player_at_creep_camp(
 		camp_position,
 		EnemyArmyCommand.PLAYER_CREEP_DETECT_RADIUS
 	)
-	if player_units.is_empty():
-		return {"decision": &"ignore"}
-
-	EnemyArmyCommand.record_player_army_observation(
-		tree,
-		camp_position,
-		EnemyArmyCommand.PLAYER_CREEP_DETECT_RADIUS
-	)
-
 	var player_strength: float = EnemyArmyCommand.estimate_combat_strength(player_units)
 	var creep_strength: float = _estimate_remaining_creep_strength(camp)
-	var combined_threat: float = player_strength + creep_strength * 0.35
+	var hero_present: bool = false
+	for unit: Variant in player_units:
+		if unit is Hero:
+			hero_present = true
+			break
 
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(get_match_elapsed_seconds())
+	return {
+		"camp": camp,
+		"camp_position": camp_position,
+		"player_units": player_units,
+		"player_strength": player_strength,
+		"player_hero_present": hero_present,
+		"creep_strength": creep_strength,
+		"rally_position": rally_position,
+	}
+
+
+func _evaluate_player_creep_request(
+	tree: SceneTree,
+	camp: Node3D,
+	rally_position: Vector3,
+	request: Dictionary,
+	match_elapsed_seconds: float
+) -> Dictionary:
+	if request.get("player_units", []).is_empty():
+		return {"decision": &"ignore"}
+
+	var contest_eval: Dictionary = EnemyArmyCommand.evaluate_creep_contest_request(
+		tree,
+		camp,
+		rally_position,
+		match_elapsed_seconds
+	)
+	if contest_eval.get("allowed", false):
+		return {
+			"decision": &"contest",
+			"units": contest_eval.get("units", []),
+			"player_strength": contest_eval.get("player_strength", 0.0),
+			"ai_strength": contest_eval.get("ai_strength", 0.0),
+		}
+
+	var reason: StringName = contest_eval.get("reason", &"rejected")
+	var camp_position: Vector3 = request.get("camp_position", camp.global_position)
+	var player_strength: float = float(request.get("player_strength", 0.0))
+
+	if reason in [&"army_not_ready", &"not_assembled", &"hero_missing", &"cooldown", &"retreat_cooldown"]:
+		if EnemyArmyCommand.horizontal_distance(camp_position, rally_position) < 50.0:
+			return {"decision": &"defend", "player_strength": player_strength, "reason": reason}
+		return {"decision": &"reject", "reason": reason, "player_strength": player_strength}
+
 	var ai_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
 		rally_position,
-		min_army,
+		EnemyArmyCommand.get_phase_min_army_size(match_elapsed_seconds),
 		true
 	)
-	if not ai_plan.get("can_launch", false):
-		if EnemyArmyCommand.horizontal_distance(camp_position, rally_position) < 50.0:
-			return {"decision": &"defend", "player_strength": player_strength}
-		EnemyArmyCommand.debug_combat_log("ignoring creep contest: army not ready")
-		return {"decision": &"ignore", "reason": &"army_not_ready"}
-
 	var ai_units: Array = ai_plan.get("units", [])
 	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(ai_units)
-	var travel_time_factor: float = EnemyArmyCommand.horizontal_distance(
-		rally_position,
-		camp_position
-	) / 12.0
-	if travel_time_factor > 8.0:
-		EnemyArmyCommand.debug_combat_log("creep contest ignored: arrival too late")
-		return {"decision": &"ignore", "reason": &"arrival_too_late"}
-
-	var contest_gate: Dictionary = EnemyArmyCommand.evaluate_strength_gate(
-		ai_strength,
-		combined_threat,
-		&"normal"
-	)
-	if contest_gate.get("allowed", false):
-		return {
-			"decision": &"contest",
-			"units": ai_units,
-			"player_strength": player_strength,
-			"ai_strength": ai_strength,
-		}
-
 	var ambush_gate: Dictionary = EnemyArmyCommand.evaluate_strength_gate(
 		ai_strength,
 		player_strength * 0.65,
 		&"normal"
 	)
-	if ambush_gate.get("allowed", false):
+	if ambush_gate.get("allowed", false) and ai_plan.get("can_launch", false):
 		return {
 			"decision": &"ambush",
 			"units": ai_units,
@@ -330,10 +381,10 @@ func _evaluate_player_at_creep_camp(
 		}
 
 	if EnemyArmyCommand.horizontal_distance(camp_position, rally_position) < 45.0:
-		return {"decision": &"defend", "player_strength": player_strength}
+		return {"decision": &"defend", "player_strength": player_strength, "reason": reason}
 
-	EnemyArmyCommand.debug_combat_log("ignoring creep contest: player too strong")
-	return {"decision": &"ignore", "reason": &"outpowered"}
+	EnemyArmyCommand.debug_combat_log("ignoring creep contest: %s" % String(reason))
+	return {"decision": &"reject", "reason": reason, "player_strength": player_strength}
 
 
 func _try_contest_player_creep(
@@ -344,13 +395,34 @@ func _try_contest_player_creep(
 ) -> void:
 	if _director != null and not _director.should_prioritize_attack():
 		if _creep_manager != null and _creep_manager.has_safe_creep_camp_available():
+			EnemyArmyCommand.record_creep_contest_cooldown(camp, "neutral creep priority")
 			return
 
 	var units: Array = evaluation.get("units", [])
 	if units.is_empty():
+		EnemyArmyCommand.record_creep_contest_cooldown(camp, "empty contest group")
 		return
 
+	var contest_eval: Dictionary = EnemyArmyCommand.evaluate_creep_contest_request(
+		tree,
+		camp,
+		rally_position,
+		get_match_elapsed_seconds()
+	)
+	if not contest_eval.get("allowed", false):
+		EnemyArmyCommand.record_creep_contest_cooldown(
+			camp,
+			String(contest_eval.get("reason", "revalidation_failed"))
+		)
+		return
+
+	units = contest_eval.get("units", units)
 	var destination: Vector3 = camp.global_position
+	_active_player_creep_contest_camp = camp
+	EnemyArmyCommand.debug_combat_log(
+		"creep contest approved: %d units vs player strength %.1f"
+		% [units.size(), float(evaluation.get("player_strength", 0.0))]
+	)
 	request_assembled_group_move(
 		units,
 		destination,
@@ -417,7 +489,10 @@ func _hold_defense_near_base(tree: SceneTree, rally_position: Vector3) -> void:
 	)
 
 
-func _estimate_remaining_creep_strength(camp: Node3D) -> float:
+func _estimate_remaining_creep_strength(camp) -> float:
+	if not NodeSafety.is_alive_node(camp):
+		return 0.0
+
 	var strength: float = 0.0
 	for child_variant: Variant in camp.get_children():
 		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:

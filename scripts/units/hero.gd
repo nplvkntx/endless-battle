@@ -774,8 +774,11 @@ func find_execute_target(search_range: float) -> Node3D:
 	return null
 
 
-func _is_player_military_unit(node: Node) -> bool:
+func _is_player_military_unit(node) -> bool:
 	if node == null or not is_instance_valid(node):
+		return false
+
+	if not NodeSafety.is_alive_node(node):
 		return false
 
 	if CombatTargetValidation.is_enemy_faction(node):

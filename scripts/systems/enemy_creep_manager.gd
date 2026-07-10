@@ -177,7 +177,9 @@ func _get_match_elapsed_seconds() -> float:
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
 
 
-func _is_player_contesting_camp(tree: SceneTree, camp: Node3D) -> bool:
+func _is_player_contesting_camp(tree: SceneTree, camp) -> bool:
+	if not NodeSafety.is_alive_node(camp):
+		return false
 	return not EnemyArmyCommand.collect_player_military_near(
 		tree,
 		camp.global_position,
@@ -332,7 +334,9 @@ func _collect_creep_camps(tree: SceneTree) -> Array[Node3D]:
 	return CreepCampSafety.collect_active_camps(tree)
 
 
-func _is_enemy_side_camp(camp: Node3D, enemy_rally: Vector3, tree: SceneTree) -> bool:
+func _is_enemy_side_camp(camp, enemy_rally: Vector3, tree: SceneTree) -> bool:
+	if not NodeSafety.is_alive_node(camp):
+		return false
 	var player_command_center: CommandCenter = (
 		EnemyArmyCommand.find_living_player_command_center(tree)
 	)
@@ -351,8 +355,8 @@ func _is_enemy_side_camp(camp: Node3D, enemy_rally: Vector3, tree: SceneTree) ->
 	return distance_to_enemy <= distance_to_player
 
 
-func _is_camp_cleared(tree: SceneTree, camp: Node3D) -> bool:
-	if camp == null or not is_instance_valid(camp):
+func _is_camp_cleared(tree: SceneTree, camp) -> bool:
+	if not NodeSafety.is_alive_node(camp):
 		return true
 
 	return _count_living_creeps_near(tree, camp.global_position, CAMP_CLEAR_RADIUS) == 0
@@ -403,8 +407,8 @@ func _find_nearest_living_creep_at_camp(
 	return nearest_creep
 
 
-func _is_army_engaging_camp(tree: SceneTree, army: Array, camp: Node3D) -> bool:
-	if camp == null or not is_instance_valid(camp):
+func _is_army_engaging_camp(tree: SceneTree, army: Array, camp) -> bool:
+	if not NodeSafety.is_alive_node(camp):
 		return false
 
 	if _count_living_creeps_near(tree, camp.global_position, CAMP_ENGAGEMENT_RADIUS) == 0:
@@ -444,7 +448,10 @@ func _count_living_creeps_near(tree: SceneTree, position: Vector3, radius: float
 	return count
 
 
-func _estimate_camp_power(camp: Node3D) -> int:
+func _estimate_camp_power(camp) -> int:
+	if not NodeSafety.is_alive_node(camp):
+		return 0
+
 	var power: int = 0
 
 	for child_variant: Variant in camp.get_children():

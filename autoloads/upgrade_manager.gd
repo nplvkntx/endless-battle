@@ -438,7 +438,10 @@ func try_research(upgrade_id: StringName) -> bool:
 	return true
 
 
-func apply_player_upgrades_to_unit(unit: Unit) -> void:
+func apply_player_upgrades_to_unit(unit) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+
 	if unit is Swordsman and _is_player_military_unit(unit):
 		(unit as Swordsman).apply_blacksmith_upgrades()
 	elif unit is Archer and _is_player_military_unit(unit):
@@ -447,7 +450,10 @@ func apply_player_upgrades_to_unit(unit: Unit) -> void:
 		_apply_stable_upgrades_to_cavalry(unit)
 
 
-func apply_enemy_upgrades_to_unit(unit: Unit) -> void:
+func apply_enemy_upgrades_to_unit(unit) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+
 	if unit is Swordsman and _is_enemy_military_unit(unit):
 		(unit as Swordsman).apply_blacksmith_upgrades()
 	elif unit is Archer and _is_enemy_military_unit(unit):
@@ -456,7 +462,10 @@ func apply_enemy_upgrades_to_unit(unit: Unit) -> void:
 		_apply_stable_upgrades_to_cavalry(unit)
 
 
-func _apply_stable_upgrades_to_cavalry(unit: Unit) -> void:
+func _apply_stable_upgrades_to_cavalry(unit) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+
 	if unit is HeavyCavalry:
 		(unit as HeavyCavalry).apply_stable_upgrades()
 	elif unit is LightCavalry:
@@ -485,7 +494,10 @@ func _refresh_all_enemy_military_units() -> void:
 			apply_enemy_upgrades_to_unit(node as Unit)
 
 
-func _is_player_cavalry_unit(unit: Unit) -> bool:
+func _is_player_cavalry_unit(unit) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+
 	if not (unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher):
 		return false
 	if TeamVisuals.resolve_team(unit, unit.team_id) != TeamVisuals.PLAYER_TEAM_ID:
@@ -493,7 +505,10 @@ func _is_player_cavalry_unit(unit: Unit) -> bool:
 	return true
 
 
-func _is_enemy_cavalry_unit(unit: Unit) -> bool:
+func _is_enemy_cavalry_unit(unit) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+
 	if not (unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher):
 		return false
 	if TeamVisuals.resolve_team(unit, unit.team_id) == TeamVisuals.PLAYER_TEAM_ID:
@@ -501,7 +516,10 @@ func _is_enemy_cavalry_unit(unit: Unit) -> bool:
 	return true
 
 
-func _is_player_military_unit(unit: Unit) -> bool:
+func _is_player_military_unit(unit) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+
 	if not (unit is Swordsman or unit is Archer):
 		return false
 	if TeamVisuals.resolve_team(unit, unit.team_id) != TeamVisuals.PLAYER_TEAM_ID:
@@ -509,7 +527,10 @@ func _is_player_military_unit(unit: Unit) -> bool:
 	return true
 
 
-func _is_enemy_military_unit(unit: Unit) -> bool:
+func _is_enemy_military_unit(unit) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+
 	if not (unit is Swordsman or unit is Archer):
 		return false
 	if TeamVisuals.resolve_team(unit, unit.team_id) == TeamVisuals.PLAYER_TEAM_ID:

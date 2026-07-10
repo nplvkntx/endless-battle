@@ -62,7 +62,7 @@ static func purge_stale_instance_id_dict(dict: Dictionary) -> int:
 	return removed
 
 
-static func prepare_node_for_death(node: Node) -> void:
+static func prepare_node_for_death(node) -> void:
 	if node == null or not is_instance_valid(node):
 		return
 

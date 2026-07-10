@@ -9,6 +9,7 @@ enum Mission {
 	BUILD,
 	CREEP,
 	REGROUP,
+	REINFORCEMENT_WAIT,
 	ATTACK,
 	DEFEND,
 	RETREAT,
@@ -45,7 +46,7 @@ static func set_main_army_mission(mission: Mission, reason: String = "") -> bool
 	return true
 
 
-static func get_unit_mission(unit: Node) -> Mission:
+static func get_unit_mission(unit) -> Mission:
 	if not NodeSafety.is_alive_node(unit):
 		return Mission.IDLE
 
@@ -62,7 +63,7 @@ static func get_mission_priority(mission: Mission) -> int:
 			return 3
 		Mission.CREEP:
 			return 4
-		Mission.REGROUP:
+		Mission.REGROUP, Mission.REINFORCEMENT_WAIT:
 			return 6
 		Mission.BUILD, Mission.ECONOMY:
 			return 7
@@ -72,7 +73,7 @@ static func get_mission_priority(mission: Mission) -> int:
 			return 9
 
 
-static func can_override_mission(unit: Node, new_mission: Mission) -> bool:
+static func can_override_mission(unit, new_mission: Mission) -> bool:
 	if not NodeSafety.is_alive_node(unit):
 		return false
 
@@ -93,7 +94,7 @@ static func can_override_mission(unit: Node, new_mission: Mission) -> bool:
 
 
 static func try_set_mission(
-	unit: Node,
+	unit,
 	mission: Mission,
 	lock_seconds: float = COMMITMENT_SECONDS
 ) -> bool:
@@ -115,7 +116,7 @@ static func try_set_mission(
 	return true
 
 
-static func clear_unit_mission(unit: Node) -> void:
+static func clear_unit_mission(unit) -> void:
 	if unit == null or not is_instance_valid(unit):
 		return
 
@@ -148,13 +149,16 @@ static func filter_commandable_units(units: Array, mission: Mission) -> Array:
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
-		if can_override_mission(unit as Node, mission):
+		if can_override_mission(unit, mission):
 			result.append(unit)
 
 	return result
 
 
-static func allows_combat_micro(unit: Node) -> bool:
+static func allows_combat_micro(unit) -> bool:
+	if not NodeSafety.is_alive_node(unit):
+		return false
+
 	if not CombatTargetValidation.is_enemy_faction(unit):
 		return true
 
@@ -166,7 +170,7 @@ static func allows_combat_micro(unit: Node) -> bool:
 
 
 static func should_reissue_move_order(
-	unit: Node,
+	unit,
 	destination: Vector3,
 	mission: Mission
 ) -> bool:
@@ -188,7 +192,7 @@ static func should_reissue_move_order(
 	return EnemyArmyCommand.horizontal_distance(last_destination, destination) > ORDER_MOVE_THRESHOLD
 
 
-static func record_move_order(unit: Node, destination: Vector3, mission: Mission) -> void:
+static func record_move_order(unit, destination: Vector3, mission: Mission) -> void:
 	if not NodeSafety.is_alive_node(unit):
 		return
 
@@ -208,7 +212,7 @@ static func assign_missions_to_units(
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
-		try_set_mission(unit as Node, mission, lock_seconds)
+		try_set_mission(unit, mission, lock_seconds)
 
 
 static func mission_to_label(mission: Mission) -> String:
@@ -221,6 +225,8 @@ static func mission_to_label(mission: Mission) -> String:
 			return "CREEP"
 		Mission.REGROUP:
 			return "REGROUP"
+		Mission.REINFORCEMENT_WAIT:
+			return "REINFORCEMENT_WAIT"
 		Mission.ATTACK:
 			return "ATTACK"
 		Mission.DEFEND:

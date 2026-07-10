@@ -78,7 +78,7 @@ static func is_valid_target(target: Variant) -> bool:
 	return is_valid_combat_target(target)
 
 
-static func clear_target_combat_state(target: Node) -> void:
+static func clear_target_combat_state(target) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 
@@ -178,8 +178,8 @@ static func is_enemy_faction(node: Variant) -> bool:
 	return false
 
 
-static func are_hostile(attacker: Node, target: Variant) -> bool:
-	if attacker == null or not is_instance_valid(attacker):
+static func are_hostile(attacker, target: Variant) -> bool:
+	if not NodeSafety.is_alive_node(attacker):
 		return false
 
 	if not is_valid_combat_target(target):
@@ -194,7 +194,7 @@ static func are_hostile(attacker: Node, target: Variant) -> bool:
 	return is_enemy_faction(attacker) != is_enemy_faction(target)
 
 
-static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bool:
+static func is_attack_target_for_attacker(attacker, target: Variant) -> bool:
 	if not are_hostile(attacker, target):
 		return false
 
@@ -210,8 +210,8 @@ static func is_attack_target_for_attacker(attacker: Node, target: Variant) -> bo
 	return is_player_unit_attack_target(target)
 
 
-static func is_hero_unit_ability_target(attacker: Node, target: Variant) -> bool:
-	if attacker == null:
+static func is_hero_unit_ability_target(attacker, target: Variant) -> bool:
+	if not NodeSafety.is_alive_node(attacker):
 		return false
 	if target == null:
 		return false
@@ -235,16 +235,28 @@ static func get_hostile_search_groups() -> Array[StringName]:
 	return [&"enemies", ENEMY_BUILDING_GROUP, NEUTRAL_CREEP_GROUP]
 
 
-static func find_closest_attack_target_for_attacker(attacker: Node3D) -> Node3D:
+static func find_closest_attack_target_for_attacker(attacker) -> Node3D:
+	if not NodeSafety.is_alive_node(attacker):
+		return null
+
+	if not attacker is Node3D:
+		return null
+
 	if is_enemy_faction(attacker):
 		return find_best_attack_target_for_attacker_in_range(attacker, INF)
 	return find_closest_player_unit_attack_target_in_range(attacker, INF)
 
 
 static func find_best_attack_target_for_attacker_in_range(
-	attacker: Node3D, search_range: float
+	attacker, search_range: float
 ) -> Node3D:
-	if attacker == null or search_range <= 0.0:
+	if not NodeSafety.is_alive_node(attacker):
+		return null
+
+	if not attacker is Node3D:
+		return null
+
+	if search_range <= 0.0:
 		return null
 
 	if not is_enemy_faction(attacker):
@@ -602,7 +614,7 @@ static func _is_living_player_building(target: Variant) -> bool:
 	return is_valid_combat_target(target)
 
 
-static func _is_worker_attacking_enemy_buildings(tree: SceneTree, worker: Node) -> bool:
+static func _is_worker_attacking_enemy_buildings(tree: SceneTree, worker) -> bool:
 	if tree == null or not NodeSafety.is_alive_node(worker):
 		return false
 
@@ -614,15 +626,15 @@ static func _is_worker_attacking_enemy_buildings(tree: SceneTree, worker: Node) 
 		if building.building_state != Building.STATE_COMPLETED:
 			continue
 
-		var attacker: Node = CombatKillTracker.get_attacker(building)
+		var attacker: Variant = CombatKillTracker.get_attacker(building)
 		if attacker == worker:
 			return true
 
 	return false
 
 
-static func _get_attacker_attack_range(attacker: Node3D) -> float:
-	if attacker == null:
+static func _get_attacker_attack_range(attacker) -> float:
+	if not NodeSafety.is_alive_node(attacker):
 		return 0.0
 
 	if "attack_range" in attacker:
@@ -631,7 +643,7 @@ static func _get_attacker_attack_range(attacker: Node3D) -> float:
 	return 2.0
 
 
-static func claim_attack_approach_slot(target: Node) -> int:
+static func claim_attack_approach_slot(target) -> int:
 	if target == null or not is_instance_valid(target):
 		return 0
 
@@ -641,7 +653,7 @@ static func claim_attack_approach_slot(target: Node) -> int:
 	return next_slot
 
 
-static func clear_attack_approach_slots(target: Node) -> void:
+static func clear_attack_approach_slots(target) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 

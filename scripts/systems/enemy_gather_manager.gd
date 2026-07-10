@@ -63,7 +63,7 @@ func _schedule_reassign() -> void:
 
 
 func _on_reassign_timer() -> void:
-	if not _reassign_active:
+	if not _reassign_active or not is_inside_tree():
 		return
 
 	_rebalance_gather_workers()
@@ -758,7 +758,7 @@ func _find_enemy_workers(command_center_position: Vector3) -> Array[Worker]:
 	return workers
 
 
-func _is_valid_worker(node: Node) -> bool:
+func _is_valid_worker(node) -> bool:
 	if not NodeSafety.is_alive_node(node):
 		return false
 

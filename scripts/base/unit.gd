@@ -425,5 +425,6 @@ func take_damage(_amount: float, _attacker = null) -> void:
 func die() -> void:
 	if CombatTargetValidation.is_enemy_faction(self) and not self is Worker:
 		EnemyResourceManager.release_unit_population(self)
+	EnemyArmyCommand.release_reinforcement_from_pool(self)
 	NodeSafety.prepare_node_for_death(self)
 	died.emit(self)

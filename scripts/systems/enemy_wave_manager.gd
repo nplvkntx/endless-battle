@@ -287,8 +287,11 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 	EnemyArmyCommand.set_rebuilding_army(true)
 
 
-func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
+func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 	if not NodeSafety.is_alive_node(hero):
+		return
+
+	if not hero is Hero:
 		return
 	if not CombatTargetValidation.is_enemy_faction(hero):
 		return
@@ -319,7 +322,12 @@ func _try_enemy_hero_abilities(hero: Hero, health_ratio: float) -> void:
 		hero.try_ground_slam()
 
 
-func _ensure_enemy_hero_combat_abilities(hero: Hero) -> void:
+func _ensure_enemy_hero_combat_abilities(hero) -> void:
+	if not NodeSafety.is_alive_node(hero):
+		return
+
+	if not hero is Hero:
+		return
 	if hero.ability_progression == null:
 		return
 
@@ -331,12 +339,24 @@ func _ensure_enemy_hero_combat_abilities(hero: Hero) -> void:
 		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_R)
 
 
-func _count_player_military_near_hero(hero: Hero) -> int:
+func _count_player_military_near_hero(hero) -> int:
+	if not NodeSafety.is_alive_node(hero):
+		return 0
+
+	if not hero is Hero:
+		return 0
+
 	var count: int = 0
 	var search_range: float = EnemyArmyCommand.HERO_AOE_CHECK_RANGE
 
 	for group_name: StringName in [&"units", &"heroes"]:
-		for node: Node in get_tree().get_nodes_in_group(group_name):
+		for node_variant: Variant in get_tree().get_nodes_in_group(group_name):
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not node_variant is Node:
+				continue
+
+			var node: Node = node_variant as Node
 			if CombatTargetValidation.is_enemy_faction(node):
 				continue
 

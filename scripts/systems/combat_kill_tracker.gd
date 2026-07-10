@@ -6,7 +6,7 @@ extends RefCounted
 const LAST_ATTACKER_META := &"_last_damage_attacker"
 
 
-static func record_attacker(victim: Node, attacker: Node) -> void:
+static func record_attacker(victim, attacker) -> void:
 	if not NodeSafety.is_alive_node(victim):
 		return
 
@@ -17,7 +17,7 @@ static func record_attacker(victim: Node, attacker: Node) -> void:
 	victim.set_meta(LAST_ATTACKER_META, attacker)
 
 
-static func get_attacker(victim: Node) -> Node:
+static func get_attacker(victim) -> Node:
 	if not NodeSafety.is_alive_node(victim):
 		return null
 
@@ -31,7 +31,7 @@ static func get_attacker(victim: Node) -> Node:
 	return attacker as Node
 
 
-static func clear_attacker_record(victim: Node) -> void:
+static func clear_attacker_record(victim) -> void:
 	if victim == null or not is_instance_valid(victim):
 		return
 
