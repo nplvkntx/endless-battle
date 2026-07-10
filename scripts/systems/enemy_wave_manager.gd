@@ -10,7 +10,7 @@ const MIN_CLEARED_CAMPS_FOR_ATTACK: int = 2
 const FIRST_ATTACK_FALLBACK_SECONDS: float = 240.0
 const ARMY_REGROUP_INTERVAL_SECONDS: float = 5.0
 const WAVE_GATHER_PULL_INTERVAL_SECONDS: float = 1.0
-const FALLBACK_ATTACK_MIN_COMBAT_UNITS: int = 25
+const FALLBACK_ATTACK_MIN_COMBAT_UNITS: int = 12
 const FALLBACK_ATTACK_READY_SECONDS: float = 10.0
 const HERO_EXECUTE_SEARCH_RANGE := 14.0
 
@@ -32,6 +32,7 @@ var _last_wave_non_hero_count: int = 0
 var _match_start_msec: int = 0
 var _creep_manager: EnemyCreepManager = null
 var _director: EnemyStrategicDirector = null
+var _combat_controller: EnemyCombatController = null
 var _large_army_ready_timer: float = 0.0
 var _cached_player_base_position: Vector3 = Vector3.ZERO
 var _finishing_reinforcement_timer: float = 0.0
@@ -43,6 +44,7 @@ func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
 	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 	_tracked_player_command_center = _resolve_player_command_center()
 	if _tracked_player_command_center != null:
 		_tracked_player_command_center.destroyed.connect(
@@ -88,20 +90,19 @@ func _update_hero_army_behavior() -> void:
 		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 			return
-		if (
-			emergency_objective != Vector3.ZERO
-			and health_ratio >= EnemyArmyCommand.EMERGENCY_HERO_JOIN_HP_RATIO
-		):
-			EnemyArmyCommand.command_attack_move(
-				[hero],
-				emergency_objective,
-				EnemyUnitMission.Mission.DEFEND
-			)
+		# Hero joins emergency defense only as part of the assembled defense group.
 		return
 
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
 	if EnemyArmyCommand.is_hero_isolated_near_player_threat(get_tree(), hero):
@@ -122,7 +123,9 @@ func _update_hero_army_behavior() -> void:
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
-	if not finishing_mode and non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+	if not finishing_mode and non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(
+		_get_match_elapsed_seconds()
+	):
 		_abort_active_offensive_push(rally_position)
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
@@ -137,7 +140,7 @@ func _update_hero_army_behavior() -> void:
 		EnemyArmyCommand.command_retreat_hero(hero, army_center)
 		return
 
-	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+	if non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds()):
 		if finishing_mode:
 			return
 		var distance_to_rally: float = _horizontal_distance(hero.global_position, rally_position)
@@ -233,9 +236,14 @@ func _process_wave_gather(delta: float) -> void:
 
 
 func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void:
-	if not EnemyArmyCommand.try_claim_army_mode(
+	if _combat_controller == null:
+		return
+
+	if not _combat_controller.request_assembled_group_move(
+		wave_units,
+		attack_destination,
 		EnemyArmyCommand.ArmyMode.ATTACKING,
-		true
+		EnemyUnitMission.Mission.ATTACK
 	):
 		return
 
@@ -250,13 +258,7 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 		attack_destination
 	)
 
-	EnemyArmyCommand.begin_offensive_wave(wave_units)
 	EnemyArmyCommand.set_rebuilding_army(false)
-	EnemyArmyCommand.command_attack_move(
-		wave_units,
-		attack_destination,
-		EnemyUnitMission.Mission.ATTACK
-	)
 	print(
 		"[AI Wave] launching attack with %d units to %s"
 		% [wave_units.size(), str(attack_destination)]
@@ -371,7 +373,10 @@ func _on_wave_timer() -> void:
 	if not _wave_active:
 		return
 
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		_schedule_next_wave()
 		return
 
@@ -603,7 +608,10 @@ func _count_regrouped_non_hero_units(rally_position: Vector3) -> int:
 
 
 func _enforce_army_regroup_when_waiting() -> void:
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	if EnemyArmyCommand.is_finishing_mode_active():
@@ -635,10 +643,16 @@ func _enforce_army_regroup_when_waiting() -> void:
 
 
 func _hold_army_when_too_weak_to_attack(rally_position: Vector3) -> void:
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(get_tree())
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(
+		get_tree(),
+		_get_match_elapsed_seconds()
+	)
 	if creep_plan.get("can_launch", false):
 		return
 
@@ -706,13 +720,16 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(
 		get_tree()
 	)
-	if non_hero_units.size() < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN:
+	if non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds()):
 		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 		if hero != null and is_instance_valid(hero):
 			EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
 		return
 
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(get_tree())
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(
+		get_tree(),
+		_get_match_elapsed_seconds()
+	)
 	if creep_plan.get("can_launch", false):
 		return
 
@@ -721,7 +738,10 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 
 
 func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> void:
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
@@ -763,10 +783,11 @@ func _cache_player_base_position() -> void:
 
 func _process_large_army_fallback(delta: float) -> void:
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
-	if (
-		army_mode == EnemyArmyCommand.ArmyMode.DEFENDING
-		or army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
-	):
+	if army_mode in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		EnemyArmyCommand.ArmyMode.ATTACKING,
+	]:
 		_large_army_ready_timer = 0.0
 		return
 
@@ -900,7 +921,10 @@ func _process_finishing_mode(delta: float) -> void:
 
 
 func _try_launch_finishing_wave() -> void:
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
@@ -917,7 +941,10 @@ func _try_launch_finishing_attack() -> void:
 	if EnemyArmyCommand.is_emergency_defense_active():
 		return
 
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	if _wave_gather_timer >= 0.0:

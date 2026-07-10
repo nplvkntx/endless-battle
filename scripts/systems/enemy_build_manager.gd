@@ -5,11 +5,12 @@ extends Node
 
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
-const TICK_INTERVAL_SECONDS: float = 4.0
+const TICK_INTERVAL_SECONDS: float = 2.0
 const TARGET_WORKERS_EARLY: int = 14
-const TARGET_WORKERS_MID: int = 24
-const TARGET_WORKERS_LATE: int = 32
-const MIN_WORKERS_BEFORE_MILITARY: int = 8
+const TARGET_WORKERS_MID: int = 22
+const TARGET_WORKERS_LATE: int = 36
+const MIN_WORKERS_BEFORE_MILITARY: int = 6
+const MIN_WORKERS_BEFORE_MILITARY_ABUNDANT: int = 4
 const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.60
 const EXPANSION_MINE_MAX_DISTANCE: float = 36.0
 const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
@@ -17,13 +18,20 @@ const WORKER_PHASE_MID_SECONDS: float = 300.0
 const WORKER_PHASE_LATE_SECONDS: float = 600.0
 const WORKER_TRAIN_GOLD_COST: int = 50
 const FOOD_RESERVE: int = 5
-const MAX_FARMS: int = 5
+const MAX_FARMS: int = 8
 const DEFAULT_MAX_BARRACKS: int = 3
+const MAX_BARRACKS_MID: int = 5
+const MAX_BARRACKS_LATE: int = 8
+const MAX_STABLES_LATE: int = 2
 const DESIRED_ARMY_EARLY: int = 28
-const DESIRED_ARMY_MID: int = 40
-const DESIRED_ARMY_LATE: int = 55
-const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 3
+const DESIRED_ARMY_MID: int = 45
+const DESIRED_ARMY_LATE: int = 60
+const MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW: int = 4
 const MILITARY_TRAINS_PER_BARRACKS_SUSTAIN: int = 3
+const MILITARY_TRAINS_PER_BARRACKS_ABUNDANT: int = 6
+const RESOURCE_HIGH_THRESHOLD: int = 3000
+const RESOURCE_AGGRESSIVE_THRESHOLD: int = 6000
+const RESOURCE_WASTE_THRESHOLD: int = 10000
 const MILITARY_LOW_ARMY_DEFICIT: int = 8
 const MILITARY_DEFENSE_EXTRA_DESIRED: int = 6
 const MILITARY_DEFENSE_TRAINS_PER_BARRACKS: int = 2
@@ -38,6 +46,7 @@ const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
 const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
+const PLACEMENT_STABLE: StringName = &"stable"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
@@ -45,6 +54,7 @@ const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith
 const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
+const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
 
 const FARM_GOLD_COST: int = 80
@@ -60,6 +70,8 @@ const SHOP_PURCHASE_COOLDOWN_TICKS: int = 7
 const SHOP_HERO_RALLY_DISTANCE: float = 18.0
 const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
+const STABLE_GOLD_COST: int = 175
+const STABLE_WOOD_COST: int = 125
 const COMMAND_CENTER_GOLD_COST: int = 200
 const COMMAND_CENTER_WOOD_COST: int = 400
 const TIER_2_GOLD_COST: int = CommandCenter.TIER_2_GOLD_COST
@@ -71,6 +83,7 @@ const CONSTRUCTION_DURATION: float = 4.0
 const BARRACKS_MAX_HEALTH: int = 300
 const FARM_MAX_HEALTH: int = 250
 const HERO_ALTAR_MAX_HEALTH: int = 350
+const STABLE_MAX_HEALTH: int = 320
 const COMMAND_CENTER_MAX_HEALTH: int = 500
 
 @export var enemy_command_center_path: NodePath
@@ -80,6 +93,7 @@ const COMMAND_CENTER_MAX_HEALTH: int = 500
 
 var _primary_command_center: CommandCenter = null
 var _train_swordsman_next: bool = true
+var _train_cavalry_next: bool = true
 var _tick_active: bool = true
 var _shop_purchase_cooldown_ticks: int = 0
 var _director: EnemyStrategicDirector = null
@@ -122,13 +136,17 @@ func _on_build_tick() -> void:
 func _run_build_order() -> void:
 	_try_assign_idle_builder_to_construction()
 
+	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
+		if _try_place_building(PLACEMENT_FARM):
+			return
+
 	_try_train_enemy_workers()
 
 	if _should_grow_worker_economy():
 		if _needs_farm() and not _should_defer_gold_spending_for_workers():
 			if _try_place_building(PLACEMENT_FARM):
 				return
-		if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+		if _count_enemy_workers() < _get_min_workers_before_military():
 			return
 
 	var defer_military: bool = _update_enemy_hero_restoration()
@@ -140,7 +158,7 @@ func _run_build_order() -> void:
 	if _needs_barracks() and _try_place_building(PLACEMENT_BARRACKS):
 		return
 
-	if _count_barracks() <= 1 and _should_build_expansion_barracks():
+	if _should_build_expansion_barracks():
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
@@ -154,10 +172,6 @@ func _run_build_order() -> void:
 		if _try_place_building(PLACEMENT_BARRACKS):
 			return
 
-	if _should_build_expansion_barracks():
-		if _try_place_building(PLACEMENT_BARRACKS):
-			return
-
 	_try_upgrade_command_center_tier()
 
 	if _should_build_blacksmith():
@@ -165,6 +179,14 @@ func _run_build_order() -> void:
 			return
 
 	_try_sustain_blacksmith_research()
+
+	if _should_build_hero_altar():
+		if _try_place_building(PLACEMENT_HERO_ALTAR):
+			return
+
+	if _should_build_stable():
+		if _try_place_building(PLACEMENT_STABLE):
+			return
 
 	if _should_build_shop():
 		if _try_place_building(PLACEMENT_SHOP):
@@ -174,6 +196,7 @@ func _run_build_order() -> void:
 
 	if not defer_military and _can_train_military_units():
 		_try_sustain_military_production()
+		_try_sustain_stable_production()
 
 	if _should_build_expansion_command_center():
 		_try_place_expansion_command_center()
@@ -225,22 +248,19 @@ func _should_build_hero_altar() -> bool:
 
 
 func _should_build_expansion_barracks() -> bool:
-	if _count_barracks() >= max_barracks:
+	if _count_barracks() >= _get_max_barracks():
 		return false
 
 	if _count_barracks() == 0:
-		return _count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
+		return _count_enemy_workers() >= _get_min_workers_before_military()
 
-	if _count_barracks() == 1:
-		return (
-			_count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
-			and EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
-		)
+	if _has_abundant_resources():
+		return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
 
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
-	if _count_enemy_workers() < mini(_get_target_worker_count(), MIN_WORKERS_BEFORE_MILITARY + 6):
+	if _count_enemy_workers() < mini(_get_target_worker_count(), MIN_WORKERS_BEFORE_MILITARY + 4):
 		return false
 
 	return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
@@ -432,12 +452,13 @@ func _should_send_hero_to_shop(hero: Hero) -> bool:
 		army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
 		or army_mode == EnemyArmyCommand.ArmyMode.REGROUPING
 		or army_mode == EnemyArmyCommand.ArmyMode.DEFENDING
+		or army_mode == EnemyArmyCommand.ArmyMode.INTERCEPTING
 	):
 		return false
 
 	if (
 		EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()).size()
-		< EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
+		< EnemyArmyCommand.ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
 	):
 		return false
 
@@ -556,13 +577,86 @@ func _should_defer_gold_spending_for_workers() -> bool:
 
 
 func _can_train_military_units() -> bool:
-	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+	if _count_enemy_workers() < _get_min_workers_before_military():
 		return false
 
-	if _should_rebuild_workers():
+	if _should_rebuild_workers() and not _has_abundant_resources():
 		return false
 
 	return true
+
+
+func _get_min_workers_before_military() -> int:
+	if _has_abundant_resources():
+		return MIN_WORKERS_BEFORE_MILITARY_ABUNDANT
+	return MIN_WORKERS_BEFORE_MILITARY
+
+
+func _has_excess_resources() -> bool:
+	return (
+		EnemyResourceManager.gold >= RESOURCE_HIGH_THRESHOLD
+		or EnemyResourceManager.wood >= RESOURCE_HIGH_THRESHOLD
+	)
+
+
+func _has_abundant_resources() -> bool:
+	return (
+		EnemyResourceManager.gold >= RESOURCE_AGGRESSIVE_THRESHOLD
+		or EnemyResourceManager.wood >= RESOURCE_AGGRESSIVE_THRESHOLD
+	)
+
+
+func _has_wasted_resources() -> bool:
+	return (
+		EnemyResourceManager.gold >= RESOURCE_WASTE_THRESHOLD
+		and EnemyResourceManager.wood >= RESOURCE_WASTE_THRESHOLD
+	)
+
+
+func _get_max_barracks() -> int:
+	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
+		return maxi(max_barracks, 3)
+	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
+		return MAX_BARRACKS_MID
+	return MAX_BARRACKS_LATE
+
+
+func _should_build_stable() -> bool:
+	if not TechTree.can_build_stable(ENEMY_TEAM_ID):
+		return false
+
+	if _count_stables() >= _get_max_stables():
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_STABLE):
+		return false
+
+	if not _has_completed_building(PLACEMENT_BARRACKS):
+		return false
+
+	if not TechTree.player_has_tier_2(ENEMY_TEAM_ID):
+		return false
+
+	return (
+		_has_excess_resources()
+		and EnemyResourceManager.can_afford(STABLE_GOLD_COST, STABLE_WOOD_COST)
+	)
+
+
+func _get_max_stables() -> int:
+	var elapsed_seconds: float = Time.get_ticks_msec() / 1000.0
+	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
+		return 1
+	return MAX_STABLES_LATE
+
+
+func _count_stables() -> int:
+	var count: int = 0
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if node is Stable and _is_living_building(node as Building):
+			count += 1
+	return count
 
 
 func _should_rebuild_workers() -> bool:
@@ -603,27 +697,36 @@ func _try_sustain_military_production() -> void:
 		- _count_living_military_units()
 		- _count_pending_military_units()
 	)
-	var defending: bool = (
-		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING
-	)
+	var defending: bool = EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]
 	var sustain_pressure: bool = (
 		army_deficit > 0
 		or _director != null and _director.should_boost_army_production()
 		or EnemyArmyCommand.is_rebuilding_army()
+		or _has_excess_resources()
+		or _has_wasted_resources()
 	)
 	if not sustain_pressure:
+		_log_idle_production_if_needed()
 		return
 
 	var trains_per_barracks: int = (
 		MILITARY_DEFENSE_TRAINS_PER_BARRACKS
 		if defending
 		else (
-			MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
-			if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
-			else MILITARY_TRAINS_PER_BARRACKS_SUSTAIN
+			MILITARY_TRAINS_PER_BARRACKS_ABUNDANT
+			if _has_abundant_resources()
+			else (
+				MILITARY_TRAINS_PER_BARRACKS_WHEN_LOW
+				if army_deficit >= MILITARY_LOW_ARMY_DEFICIT
+				else MILITARY_TRAINS_PER_BARRACKS_SUSTAIN
+			)
 		)
 	)
 
+	var trained_any: bool = false
 	for barracks: Barracks in _find_all_completed_enemy_barracks():
 		var queue_attempts: int = trains_per_barracks
 		while queue_attempts > 0:
@@ -633,7 +736,73 @@ func _try_sustain_military_production() -> void:
 			if not _try_train_military(barracks):
 				break
 
+			trained_any = true
 			queue_attempts -= 1
+
+	if not trained_any and _has_wasted_resources():
+		EnemyArmyCommand.debug_combat_log("production idle unexpectedly with excess resources")
+
+
+func _try_sustain_stable_production() -> void:
+	if not TechTree.can_build_stable(ENEMY_TEAM_ID):
+		return
+
+	if not EnemyResourceManager.has_food_supply(1):
+		return
+
+	for stable: Stable in _find_all_completed_enemy_stables():
+		var queue_attempts: int = 2 if _has_excess_resources() else 1
+		while queue_attempts > 0:
+			if not _try_train_cavalry(stable):
+				break
+			queue_attempts -= 1
+
+
+func _find_all_completed_enemy_stables() -> Array:
+	var stables: Array = []
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is Stable or not _is_living_building(node as Building):
+			continue
+
+		var stable: Stable = node as Stable
+		if stable.building_state == Building.STATE_COMPLETED:
+			stables.append(stable)
+
+	return stables
+
+
+func _try_train_cavalry(stable: Stable) -> bool:
+	if not is_instance_valid(stable):
+		return false
+
+	if _train_cavalry_next:
+		if stable.try_train_enemy_light_cavalry():
+			_train_cavalry_next = false
+			return true
+		if stable.try_train_enemy_cavalry_archer():
+			_train_cavalry_next = true
+			return true
+	else:
+		if stable.try_train_enemy_cavalry_archer():
+			_train_cavalry_next = true
+			return true
+		if stable.try_train_enemy_light_cavalry():
+			_train_cavalry_next = false
+			return true
+
+	return stable.try_train_enemy_heavy_cavalry()
+
+
+func _log_idle_production_if_needed() -> void:
+	if not _has_wasted_resources():
+		return
+
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		if barracks.get_enemy_pending_unit_count() <= 0:
+			EnemyArmyCommand.debug_combat_log(
+				"production idle unexpectedly at barracks with excess resources"
+			)
+			return
 
 
 func _get_desired_army_size() -> int:
@@ -821,6 +990,9 @@ func _try_place_building_at_anchor(
 		PLACEMENT_COMMAND_CENTER:
 			gold_cost = COMMAND_CENTER_GOLD_COST
 			wood_cost = COMMAND_CENTER_WOOD_COST
+		PLACEMENT_STABLE:
+			gold_cost = STABLE_GOLD_COST
+			wood_cost = STABLE_WOOD_COST
 		_:
 			return false
 
@@ -862,6 +1034,8 @@ func _try_place_building_at_anchor(
 		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
 	)
 	_assign_nearest_builder(building)
+	if building_type == PLACEMENT_BARRACKS and _has_excess_resources():
+		EnemyArmyCommand.debug_combat_log("building additional barracks: excess resources")
 	return true
 
 
@@ -879,6 +1053,8 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return HERO_ALTAR_SCENE.instantiate() as Building
 		PLACEMENT_COMMAND_CENTER:
 			return COMMAND_CENTER_SCENE.instantiate() as Building
+		PLACEMENT_STABLE:
+			return STABLE_SCENE.instantiate() as Building
 		_:
 			return null
 
@@ -909,6 +1085,8 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 			max_health = HERO_ALTAR_MAX_HEALTH
 		PLACEMENT_COMMAND_CENTER:
 			max_health = COMMAND_CENTER_MAX_HEALTH
+		PLACEMENT_STABLE:
+			max_health = STABLE_MAX_HEALTH
 		_:
 			return
 
@@ -1110,6 +1288,8 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 			return node is HeroAltar
 		PLACEMENT_COMMAND_CENTER:
 			return node is CommandCenter
+		PLACEMENT_STABLE:
+			return node is Stable
 		_:
 			return false
 

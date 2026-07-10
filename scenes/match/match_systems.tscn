@@ -10,11 +10,15 @@
 [ext_resource type="Script" uid="uid://dmawlogwv25xq" path="res://scripts/systems/enemy_creep_manager.gd" id="8_enemy_creep_manager"]
 [ext_resource type="Script" uid="uid://c8kdef3nse7mgr" path="res://scripts/systems/enemy_defense_manager.gd" id="9_enemy_defense_manager"]
 [ext_resource type="Script" uid="uid://d4stratdirector9" path="res://scripts/systems/enemy_strategic_director.gd" id="10_enemy_strategic_director"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_combat_controller.gd" id="11_enemy_combat_controller"]
 
 [node name="MatchSystems" type="Node"]
 
 [node name="EnemyStrategicDirector" type="Node" parent="."]
 script = ExtResource("10_enemy_strategic_director")
+
+[node name="EnemyCombatController" type="Node" parent="."]
+script = ExtResource("11_enemy_combat_controller")
 
 [node name="SelectionManager" type="Node" parent="." unique_id=53640150]
 script = ExtResource("1_selection_manager")

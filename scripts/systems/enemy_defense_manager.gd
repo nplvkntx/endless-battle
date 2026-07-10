@@ -5,12 +5,21 @@ extends Node
 
 const DEFENSE_TICK_INTERVAL_SECONDS := 1.0
 const THREAT_CLEAR_SECONDS := 6.0
+const DEFENSE_MAINTAIN_INTERVAL_SECONDS := 2.5
 
 var _tick_timer: float = 0.0
 var _threat_clear_timer: float = 0.0
 var _emergency_clear_timer: float = 0.0
 var _emergency_gather_timer: float = 0.0
+var _defense_maintain_timer: float = 0.0
 var _logged_recall: bool = false
+var _combat_controller: EnemyCombatController = null
+var _match_start_msec: int = 0
+
+
+func _ready() -> void:
+	_match_start_msec = Time.get_ticks_msec()
+	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 
 
 func _process(delta: float) -> void:
@@ -20,6 +29,10 @@ func _process(delta: float) -> void:
 
 	_tick_timer = 0.0
 	_update_defense()
+
+
+func _get_match_elapsed_seconds() -> float:
+	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
 
 
 func _update_defense() -> void:
@@ -77,8 +90,13 @@ func _end_emergency_defense(tree: SceneTree, rally_position: Vector3) -> void:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
 		EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
 
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
+		EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.INTERCEPTING)
+
 	if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
-		EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+		)
 
 
 func _commit_emergency_defense(
@@ -115,15 +133,7 @@ func _commit_emergency_defense(
 				EnemyArmyCommand.pull_emergency_defense_reinforcements(tree, intercept_position)
 			return
 
-	var defense_army: Array = EnemyArmyCommand.build_defense_army(tree, intercept_position)
-	if defense_army.is_empty():
-		return
-
-	EnemyArmyCommand.command_attack_move(
-		defense_army,
-		intercept_position,
-		EnemyUnitMission.Mission.DEFEND
-	)
+	_issue_defense_group(tree, intercept_position)
 
 
 func _gather_emergency_defenders(
@@ -135,40 +145,16 @@ func _gather_emergency_defenders(
 		rally_position,
 		intercept_position
 	)
-	var gather_units: Array = []
-	for unit: Variant in EnemyArmyCommand.collect_living_combat_units(tree):
-		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
-			continue
-
-		if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
-			continue
-
-		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
-		if (
-			mission != EnemyUnitMission.Mission.IDLE
-			and mission != EnemyUnitMission.Mission.REGROUP
-			and mission != EnemyUnitMission.Mission.DEFEND
-		):
-			continue
-
-		if (
-			EnemyArmyCommand.horizontal_distance(
-				(unit as Node3D).global_position,
-				rally_position
-			)
-			> EnemyArmyCommand.DEFENSE_GATHER_MAX_DISTANCE
-		):
-			continue
-
-		gather_units.append(unit)
-
+	var gather_units: Array = EnemyArmyCommand.collect_living_combat_units(tree)
 	if gather_units.is_empty():
 		return
 
-	EnemyArmyCommand.command_hold_at_rally(
-		gather_units,
-		hold_position,
-		EnemyUnitMission.Mission.DEFEND
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			gather_units,
+			hold_position,
+			EnemyUnitMission.Mission.DEFEND
+		)
 	)
 
 
@@ -192,62 +178,32 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 			threat,
 			rally_position
 		)
-		var recall_entire_army: bool = _should_recall_entire_army_for_threat(tree, threat)
 
-		if recall_entire_army:
-			EnemyArmyCommand.prepare_defense_recall(tree)
-			if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
-				return
-
-			var defense_army: Array = EnemyArmyCommand.build_defense_army(
-				tree,
-				intercept_position
-			)
-			if defense_army.is_empty():
-				return
-
-			EnemyArmyCommand.command_attack_move(
-				defense_army,
-				intercept_position,
-				EnemyUnitMission.Mission.DEFEND
-			)
-			return
-
-		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
-			var committed_defenders: Array = EnemyArmyCommand.build_defense_army(
-				tree,
-				intercept_position
-			)
-			if committed_defenders.is_empty():
-				return
-
-			EnemyArmyCommand.command_attack_move(
-				committed_defenders,
-				intercept_position,
-				EnemyUnitMission.Mission.DEFEND
-			)
-			return
-
-		if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
-			return
-
-		var nearby_defenders: Array = EnemyArmyCommand.filter_units_near_rally(
-			EnemyArmyCommand.build_defense_army(tree, intercept_position),
-			rally_position,
-			EnemyArmyCommand.DEFENSE_GATHER_MAX_DISTANCE
+		var defense_mode: EnemyArmyCommand.ArmyMode = (
+			EnemyArmyCommand.ArmyMode.INTERCEPTING
+			if threat.get("reason", &"") == &"approach"
+			else EnemyArmyCommand.ArmyMode.DEFENDING
 		)
-		if nearby_defenders.is_empty():
-			EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
+
+		var already_defending: bool = EnemyArmyCommand.get_army_mode() in [
+			EnemyArmyCommand.ArmyMode.DEFENDING,
+			EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		]
+		if not already_defending:
+			if not EnemyArmyCommand.try_claim_army_mode(defense_mode):
+				return
+			if defense_mode == EnemyArmyCommand.ArmyMode.INTERCEPTING:
+				EnemyArmyCommand.debug_combat_log("intercepting player army")
+			_issue_defense_group(tree, intercept_position, defense_mode)
 			return
 
-		EnemyArmyCommand.command_attack_move(
-			nearby_defenders,
-			intercept_position,
-			EnemyUnitMission.Mission.DEFEND
-		)
+		_maintain_standard_defense(tree, intercept_position, defense_mode)
 		return
 
-	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() not in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	_threat_clear_timer += DEFENSE_TICK_INTERVAL_SECONDS
@@ -255,21 +211,100 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 		return
 
 	EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
+		EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.INTERCEPTING)
 	_threat_clear_timer = 0.0
 
 	if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
-		EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+		)
 
 
-func _should_recall_entire_army_for_threat(tree: SceneTree, threat: Dictionary) -> bool:
-	if EnemyArmyCommand.should_recall_offensive_for_defense(tree):
-		return true
+func _issue_defense_group(
+	tree: SceneTree,
+	intercept_position: Vector3,
+	defense_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.ArmyMode.DEFENDING
+) -> void:
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds())
+	var defense_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
+		tree,
+		rally_position,
+		mini(min_army, 4),
+		true
+	)
+	var defense_army: Array = defense_plan.get("units", [])
+	if defense_army.is_empty():
+		defense_army = EnemyArmyCommand.build_defense_army(tree, intercept_position)
 
-	if threat.get("force_commit", false):
-		return true
+	defense_army = NodeSafety.clean_node_array(defense_army)
+	if defense_army.is_empty():
+		return
 
-	if EnemyArmyCommand.is_finishing_mode_active():
-		return false
+	var commitment: Dictionary = EnemyArmyCommand.evaluate_defense_commitment(
+		tree,
+		defense_army,
+		intercept_position
+	)
+	if not commitment.get("can_commit", false):
+		EnemyArmyCommand.debug_combat_log("defense held: threat too strong")
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_hold_at_rally(
+				defense_army,
+				rally_position,
+				EnemyUnitMission.Mission.DEFEND
+			)
+		)
+		return
 
-	var reason: StringName = threat.get("reason", &"")
-	return reason == &"base" or reason == &"buildings" or reason == &"workers"
+	if _combat_controller != null:
+		_combat_controller.request_assembled_group_move(
+			defense_army,
+			intercept_position,
+			defense_mode,
+			EnemyUnitMission.Mission.DEFEND
+		)
+		return
+
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_attack_move(
+			defense_army,
+			intercept_position,
+			EnemyUnitMission.Mission.DEFEND
+		)
+	)
+
+
+func _maintain_standard_defense(
+	tree: SceneTree,
+	intercept_position: Vector3,
+	defense_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.ArmyMode.DEFENDING
+) -> void:
+	_defense_maintain_timer += DEFENSE_TICK_INTERVAL_SECONDS
+	if _defense_maintain_timer < DEFENSE_MAINTAIN_INTERVAL_SECONDS:
+		return
+
+	_defense_maintain_timer = 0.0
+
+	var defense_army: Array = EnemyArmyCommand.build_defense_army(tree, intercept_position)
+	defense_army = NodeSafety.clean_node_array(defense_army)
+	if defense_army.is_empty():
+		return
+
+	if _combat_controller != null:
+		_combat_controller.issue_immediate_group_move(
+			defense_army,
+			intercept_position,
+			defense_mode,
+			EnemyUnitMission.Mission.DEFEND
+		)
+		return
+
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_attack_move(
+			defense_army,
+			intercept_position,
+			EnemyUnitMission.Mission.DEFEND
+		)
+	)

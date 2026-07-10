@@ -1,7 +1,7 @@
 class_name EnemyCreepManager
 extends Node
 
-## Sends the enemy hero and early army to clear nearby neutral creep camps.
+## Sends the enemy hero and army to clear nearby neutral creep camps via the combat controller.
 
 const CREEP_TICK_INTERVAL_SECONDS: float = 8.0
 const CREEP_SEARCH_RANGE: float = 48.0
@@ -13,19 +13,20 @@ const CAMP_POWER_MARGIN: float = 1.15
 const STRONG_CAMP_POWER_MARGIN: float = 1.35
 const STRONG_CAMP_POWER_THRESHOLD: int = 280
 const CREEP_REGROUP_MAX_DISTANCE: float = 24.0
-const CREEP_HERO_POWER: int = 220
-const CREEP_MELEE_POWER_PER_HEALTH: float = 1.0
-const CREEP_RANGED_POWER_PER_HEALTH: float = 0.85
 const CREEP_DAMAGE_POWER_MULTIPLIER: float = 8.0
 const MAX_CREEP_SETBACKS_BEFORE_ATTACK: int = 3
 
 var _tick_timer: float = 0.0
 var _consecutive_creep_setbacks: int = 0
 var _director: EnemyStrategicDirector = null
+var _combat_controller: EnemyCombatController = null
+var _match_start_msec: int = 0
 
 
 func _ready() -> void:
+	_match_start_msec = Time.get_ticks_msec()
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 
 
 func _process(delta: float) -> void:
@@ -47,16 +48,22 @@ func has_safe_creep_camp_available() -> bool:
 	if rally_position == Vector3.ZERO:
 		return false
 
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(
+		tree,
+		_get_match_elapsed_seconds()
+	)
 	if not creep_plan.get("can_launch", false):
 		return false
 
-	var army_power: int = _estimate_army_power(creep_plan.get("units", []))
-	return _find_best_creep_camp(tree, rally_position, army_power) != null
+	var army_power: int = EnemyArmyCommand.estimate_combat_strength(creep_plan.get("units", []))
+	return _find_best_creep_camp(tree, rally_position, int(army_power)) != null
 
 
 func _update_creeping() -> void:
 	if EnemyArmyCommand.is_finishing_mode_active():
+		return
+
+	if _combat_controller != null and not _combat_controller.can_launch_offensive_action():
 		return
 
 	var tree: SceneTree = get_tree()
@@ -64,25 +71,50 @@ func _update_creeping() -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
+		return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
 		return
 
 	if _director != null and not _director.should_prioritize_creep():
 		return
 
-	var creep_plan: Dictionary = _build_regrouped_creep_army(tree, rally_position)
+	var elapsed: float = _get_match_elapsed_seconds()
+	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(elapsed)
+	var creep_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
+		tree,
+		rally_position,
+		min_army,
+		true
+	)
 	if not creep_plan.get("can_launch", false):
-		var full_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+		var full_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree, elapsed)
 		if (
 			full_plan.get("can_launch", false)
 			and EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING)
 		):
-			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+			)
 		return
 
 	var creep_army: Array = creep_plan.get("units", [])
 	creep_army = NodeSafety.clean_node_array(creep_army)
 	if creep_army.is_empty():
+		return
+
+	if not creep_plan.get("hero_included", false):
+		EnemyArmyCommand.debug_combat_log("waiting for hero before creeping")
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
+		)
 		return
 
 	if EnemyArmyCommand.is_enemy_army_under_attack(tree, creep_army, ARMY_UNDER_ATTACK_RANGE):
@@ -101,13 +133,17 @@ func _update_creeping() -> void:
 	if not _army_available_for_creeping(tree, army_center, rally_position):
 		return
 
-	var army_power: int = _estimate_army_power(creep_army)
+	var army_power: int = int(EnemyArmyCommand.estimate_combat_strength(creep_army))
 	var camp: Node3D = _find_best_creep_camp(tree, rally_position, army_power)
 	if camp == null or not is_instance_valid(camp):
 		if _has_uncleared_enemy_side_camps(tree, rally_position):
 			_record_creep_setback()
 		if _director != null:
 			_director.clear_creep_target()
+		return
+
+	if _is_player_contesting_camp(tree, camp):
+		EnemyArmyCommand.debug_combat_log("creep skipped: player contesting camp")
 		return
 
 	if _director != null:
@@ -125,14 +161,28 @@ func _update_creeping() -> void:
 		camp,
 		army_center
 	)
-	if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.CREEPING):
+
+	if _combat_controller == null:
 		return
 
-	EnemyArmyCommand.command_attack_move(
+	_combat_controller.request_assembled_group_move(
 		creep_army,
 		attack_destination,
+		EnemyArmyCommand.ArmyMode.CREEPING,
 		EnemyUnitMission.Mission.CREEP
 	)
+
+
+func _get_match_elapsed_seconds() -> float:
+	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _is_player_contesting_camp(tree: SceneTree, camp: Node3D) -> bool:
+	return not EnemyArmyCommand.collect_player_military_near(
+		tree,
+		camp.global_position,
+		EnemyArmyCommand.PLAYER_CREEP_DETECT_RADIUS
+	).is_empty()
 
 
 func _record_creep_setback() -> void:
@@ -152,7 +202,11 @@ func _has_uncleared_enemy_side_camps(tree: SceneTree, rally_position: Vector3) -
 
 
 func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
+	if _combat_controller != null:
+		_combat_controller.issue_group_retreat("creep setback")
+		return
+
+	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree, _get_match_elapsed_seconds())
 	var creep_army: Array = creep_plan.get("units", [])
 	creep_army = NodeSafety.clean_node_array(creep_army)
 	if creep_army.is_empty():
@@ -162,10 +216,13 @@ func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
 		return
 
 	EnemyArmyCommand.cancel_offensive_orders(tree)
-	EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
+	)
 
 
 func _should_abort_creep_push(tree: SceneTree, creep_army: Array) -> bool:
+	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds())
 	var non_hero_count: int = 0
 	for unit: Variant in NodeSafety.clean_node_array(creep_army):
 		if not NodeSafety.is_alive_node(unit):
@@ -175,32 +232,7 @@ func _should_abort_creep_push(tree: SceneTree, creep_army: Array) -> bool:
 		if EnemyArmyCommand.is_living_combat_unit(unit as Node):
 			non_hero_count += 1
 
-	return non_hero_count < EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
-
-
-func _build_regrouped_creep_army(tree: SceneTree, rally_position: Vector3) -> Dictionary:
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree)
-	if not creep_plan.get("can_launch", false):
-		return creep_plan
-
-	var regrouped_units: Array = EnemyArmyCommand.filter_units_near_rally(
-		creep_plan.get("units", []),
-		rally_position,
-		CREEP_REGROUP_MAX_DISTANCE
-	)
-	var non_hero_count: int = 0
-	for unit: Variant in NodeSafety.clean_node_array(regrouped_units):
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		if unit is Hero:
-			continue
-		non_hero_count += 1
-
-	var can_launch: bool = non_hero_count >= EnemyArmyCommand.MIN_NON_HERO_FOR_HERO_JOIN
-	return {
-		"units": regrouped_units if can_launch else [],
-		"can_launch": can_launch,
-	}
+	return non_hero_count < min_army
 
 
 func _army_available_for_creeping(
@@ -260,6 +292,9 @@ func _find_best_creep_camp(
 			continue
 
 		if _is_camp_cleared(tree, camp):
+			continue
+
+		if _is_player_contesting_camp(tree, camp):
 			continue
 
 		var distance: float = EnemyArmyCommand.horizontal_distance(
@@ -407,39 +442,6 @@ func _count_living_creeps_near(tree: SceneTree, position: Vector3, radius: float
 			count += 1
 
 	return count
-
-
-func _estimate_army_power(units: Array) -> int:
-	var power: int = 0
-
-	for unit: Variant in NodeSafety.clean_node_array(units):
-		if not NodeSafety.is_alive_node(unit):
-			continue
-
-		if not EnemyArmyCommand.is_living_combat_unit(unit as Node):
-			continue
-
-		var health_component: HealthComponent = (unit as Node).get_node_or_null(
-			"HealthComponent"
-		) as HealthComponent
-		var current_health: int = (
-			health_component.current_health
-			if health_component != null
-			else 0
-		)
-
-		if unit is Hero:
-			power += CREEP_HERO_POWER + current_health
-			continue
-
-		var damage: int = int((unit as Object).get("attack_damage")) if "attack_damage" in unit else 0
-		if unit is Archer or unit is CavalryArcher or unit is Cannon:
-			power += int(float(current_health) * CREEP_RANGED_POWER_PER_HEALTH)
-		else:
-			power += int(float(current_health) * CREEP_MELEE_POWER_PER_HEALTH)
-		power += damage * int(CREEP_DAMAGE_POWER_MULTIPLIER)
-
-	return power
 
 
 func _estimate_camp_power(camp: Node3D) -> int:

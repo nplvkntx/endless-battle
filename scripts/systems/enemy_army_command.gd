@@ -22,27 +22,59 @@ const FORMATION_SPACING := 2.0
 const RANGED_ROW_DEPTH_MULTIPLIER := 1.5
 const HERO_ROW_DEPTH_MULTIPLIER := 1.25
 
-const MIN_NON_HERO_FOR_HERO_JOIN := 24
-const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 10
-const MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK := 25
-const MIN_MELEE_UNITS_FOR_ATTACK := 8
-const MIN_RANGED_UNITS_FOR_ATTACK := 6
-const ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS := 6
-const ATTACK_STANDARD_MIN_NON_HERO_UNITS := 18
+const MIN_NON_HERO_FOR_HERO_JOIN := 4
+const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 6
+const MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK := 12
+const MIN_MELEE_UNITS_FOR_ATTACK := 3
+const MIN_RANGED_UNITS_FOR_ATTACK := 2
+const ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS := 4
+const ATTACK_STANDARD_MIN_NON_HERO_UNITS := 6
 const ATTACK_TIMER_MIN_NON_HERO_UNITS := 12
-const ATTACK_DESPERATE_MIN_NON_HERO_UNITS := 9
-const ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS := 8
+const ATTACK_DESPERATE_MIN_NON_HERO_UNITS := 6
+const ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS := 4
 const ATTACK_TIMER_STANDARD_SECONDS := 240.0
 const ATTACK_TIMER_DESPERATE_SECONDS := 360.0
-const DEBUG_ATTACK_GATE := true
-const PLAYER_ARMY_STRENGTH_RATIO := 0.8
+const DEBUG_ATTACK_GATE := false
+const DEBUG_COMBAT_AI := false
+const PLAYER_ARMY_STRENGTH_RATIO := 1.15
+const ATTACK_AGGRESSIVE_STRENGTH_RATIO := 1.05
+const ATTACK_NORMAL_STRENGTH_RATIO := 1.15
+const DEFEND_FIGHT_STRENGTH_RATIO := 0.80
+const RETREAT_STRENGTH_RATIO := 0.70
+const EMERGENCY_RETREAT_ARMY_LOSS_RATIO := 0.40
+const ASSEMBLY_RADIUS := 10.0
+const ASSEMBLY_REQUIRED_PERCENT := 0.75
+const ASSEMBLY_MAX_WAIT_SECONDS := 7.0
+const COMBAT_EVAL_INTERVAL_SECONDS := 0.75
+const MIN_STATE_DURATION_SECONDS := 0.75
+const RETREAT_COOLDOWN_SECONDS := 10.0
+const LOCAL_FIGHT_RADIUS := 30.0
+const MAX_CHASE_DISTANCE := 25.0
+const MAX_CHASE_DURATION_SECONDS := 6.0
+const PLAYER_ARMY_MEMORY_DECAY_SECONDS := 45.0
+const PLAYER_CREEP_DETECT_RADIUS := 28.0
+const CREEP_HERO_WAIT_RADIUS := 18.0
+const PHASE_EARLY_SECONDS := 300.0
+const PHASE_MID_SECONDS := 600.0
+const PHASE_EARLY_MIN_ARMY := 6
+const PHASE_MID_MIN_ARMY := 12
+const PHASE_LATE_MIN_ARMY := 20
+const STRENGTH_SPEARMAN := 1.0
+const STRENGTH_SWORDSMAN := 1.2
+const STRENGTH_ARCHER := 1.2
+const STRENGTH_LIGHT_CAVALRY := 1.6
+const STRENGTH_HEAVY_CAVALRY := 2.2
+const STRENGTH_CAVALRY_ARCHER := 1.8
+const STRENGTH_CANNON := 2.0
+const STRENGTH_HERO_BASE := 3.0
+const STRENGTH_HERO_PER_LEVEL := 0.5
 const KNOWN_PLAYER_SCOUT_RANGE := 55.0
 const ARMY_GROUP_MAX_RADIUS := 24.0
 const WAVE_REINFORCEMENT_WAIT_SECONDS := 5.0
 const MIN_ATTACK_ARMY_POWER := 350
 const HERO_ALONE_PLAYER_THREAT_RANGE := 18.0
 const HERO_MAX_DISTANCE_FROM_ARMY := 16.0
-const HERO_RETREAT_HP_RATIO := 0.30
+const HERO_RETREAT_HP_RATIO := 0.35
 const HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO := 0.20
 const HERO_WAVE_JOIN_HP_RATIO := 0.60
 const HERO_DEFENSIVE_ABILITY_HP_RATIO := 0.40
@@ -71,10 +103,13 @@ const ATTACK_CLOSE_TO_WIN_CC_HEALTH_RATIO := 0.35
 const ATTACK_CLOSE_TO_WIN_ARMY_DISTANCE := 28.0
 const IMPORTANT_BUILDING_SEARCH_RANGE := 200.0
 
-const WAVE_1_MIN_NON_HERO_UNITS := 24
-const WAVE_2_MIN_NON_HERO_UNITS := 24
-const WAVE_3_MIN_NON_HERO_UNITS := 24
-const WAVE_4_MIN_NON_HERO_UNITS := 24
+const WAVE_1_MIN_NON_HERO_UNITS := 6
+const WAVE_2_MIN_NON_HERO_UNITS := 12
+const WAVE_3_MIN_NON_HERO_UNITS := 16
+const WAVE_4_MIN_NON_HERO_UNITS := 20
+const RESOURCE_HIGH_THRESHOLD := 3000
+const RESOURCE_AGGRESSIVE_THRESHOLD := 6000
+const REINFORCEMENT_MERGE_MIN_UNITS := 5
 const WAVE_REGROUP_MAX_DISTANCE := 22.0
 const WAVE_REBUILD_ARMY_RATIO := 0.40
 
@@ -95,13 +130,35 @@ const FINISHING_MODE_TOWER_THREAT_BUFFER := 2.0
 
 enum ArmyMode {
 	IDLE,
+	OPENING,
+	ASSEMBLING,
 	CREEPING,
 	ATTACKING,
-	REGROUPING,
+	INTERCEPTING,
 	DEFENDING,
+	RETREATING,
+	REGROUPING,
 }
 
 static var _army_mode: ArmyMode = ArmyMode.IDLE
+static var _mode_claim_msec: int = 0
+static var _orders_authorized: bool = false
+static var _assembly_timer: float = 0.0
+static var _assembly_rally: Vector3 = Vector3.ZERO
+static var _assembly_required_count: int = 0
+static var _retreat_cooldown: float = 0.0
+static var _fight_start_strength: float = 0.0
+static var _fight_anchor_position: Vector3 = Vector3.ZERO
+static var _fight_start_msec: int = 0
+static var _last_combat_eval_msec: int = 0
+static var _main_army_cache: Array = []
+static var _player_army_memory: Dictionary = {
+	"strength": 0.0,
+	"position": Vector3.ZERO,
+	"hero_level": 0,
+	"timestamp_msec": 0,
+	"unit_count": 0,
+}
 static var _is_rebuilding_army: bool = false
 static var _active_wave_start_unit_count: int = 0
 static var _active_wave_objective: Node3D = null
@@ -116,10 +173,564 @@ static var _last_finishing_objective: Node3D = null
 static var _emergency_defense_active: bool = false
 static var _emergency_threat_position: Vector3 = Vector3.ZERO
 static var _emergency_reason: StringName = &""
+static var _debug_enabled_override: bool = false
 
 
 static func get_army_mode() -> ArmyMode:
 	return _army_mode
+
+
+static func is_retreat_on_cooldown() -> bool:
+	return _retreat_cooldown > 0.0
+
+
+static func tick_retreat_cooldown(delta: float) -> void:
+	if _retreat_cooldown > 0.0:
+		_retreat_cooldown = maxf(0.0, _retreat_cooldown - delta)
+
+
+static func get_phase_min_army_size(match_elapsed_seconds: float) -> int:
+	if match_elapsed_seconds >= PHASE_MID_SECONDS:
+		return PHASE_LATE_MIN_ARMY
+	if match_elapsed_seconds >= PHASE_EARLY_SECONDS:
+		return PHASE_MID_MIN_ARMY
+	return PHASE_EARLY_MIN_ARMY
+
+
+static func get_main_army_group(tree: SceneTree) -> Array:
+	purge_and_rebuild_main_army(tree)
+	return _main_army_cache.duplicate()
+
+
+static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
+	var units: Array = []
+	var seen_ids: Dictionary = {}
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+		if not is_living_combat_unit(node):
+			continue
+		if node is Worker:
+			continue
+
+		var unit_id: int = node.get_instance_id()
+		if seen_ids.has(unit_id):
+			continue
+
+		seen_ids[unit_id] = true
+		units.append(node)
+
+	_main_army_cache = units
+
+
+static func with_authorized_orders(callback: Callable) -> void:
+	_orders_authorized = true
+	callback.call()
+	_orders_authorized = false
+
+
+static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
+	if _orders_authorized or _emergency_defense_active:
+		return true
+
+	match mission:
+		EnemyUnitMission.Mission.RETREAT, EnemyUnitMission.Mission.REGROUP, EnemyUnitMission.Mission.IDLE:
+			return true
+		EnemyUnitMission.Mission.ATTACK:
+			return _army_mode == ArmyMode.ATTACKING or _army_mode == ArmyMode.ASSEMBLING
+		EnemyUnitMission.Mission.CREEP:
+			return _army_mode == ArmyMode.CREEPING or _army_mode == ArmyMode.ASSEMBLING
+		EnemyUnitMission.Mission.DEFEND:
+			return (
+				_army_mode == ArmyMode.DEFENDING
+				or _army_mode == ArmyMode.INTERCEPTING
+				or _army_mode == ArmyMode.ASSEMBLING
+			)
+		_:
+			return false
+
+
+static func set_debug_enabled(enabled: bool) -> void:
+	_debug_enabled_override = enabled
+
+
+static func _debug_combat(message: String) -> void:
+	if DEBUG_COMBAT_AI or _debug_enabled_override:
+		print("[AI Combat] %s" % message)
+
+
+static func debug_combat_log(message: String) -> void:
+	_debug_combat(message)
+
+
+static func _debug_state_change(from_mode: ArmyMode, to_mode: ArmyMode, reason: String = "") -> void:
+	if from_mode == to_mode:
+		return
+
+	_debug_combat(
+		"state %s -> %s%s"
+		% [
+			_army_mode_label(from_mode),
+			_army_mode_label(to_mode),
+			(" (%s)" % reason) if not reason.is_empty() else "",
+		]
+	)
+
+
+static func _army_mode_label(mode: ArmyMode) -> String:
+	match mode:
+		ArmyMode.IDLE:
+			return "IDLE"
+		ArmyMode.OPENING:
+			return "OPENING"
+		ArmyMode.ASSEMBLING:
+			return "ASSEMBLING"
+		ArmyMode.CREEPING:
+			return "CREEPING"
+		ArmyMode.DEFENDING:
+			return "DEFENDING"
+		ArmyMode.INTERCEPTING:
+			return "INTERCEPTING"
+		ArmyMode.ATTACKING:
+			return "ATTACKING"
+		ArmyMode.RETREATING:
+			return "RETREATING"
+		ArmyMode.REGROUPING:
+			return "REGROUPING"
+		_:
+			return "UNKNOWN"
+
+
+static func get_unit_type_strength_weight(unit: Node) -> float:
+	if unit is Hero:
+		var level: int = int(unit.get("level")) if "level" in unit else 1
+		return STRENGTH_HERO_BASE + float(level) * STRENGTH_HERO_PER_LEVEL
+
+	if unit is Spearman:
+		return STRENGTH_SPEARMAN
+	if unit is Swordsman:
+		return STRENGTH_SWORDSMAN
+	if unit is Archer:
+		return STRENGTH_ARCHER
+	if unit is LightCavalry:
+		return STRENGTH_LIGHT_CAVALRY
+	if unit is HeavyCavalry:
+		return STRENGTH_HEAVY_CAVALRY
+	if unit is CavalryArcher:
+		return STRENGTH_CAVALRY_ARCHER
+	if unit is Cannon:
+		return STRENGTH_CANNON
+
+	return 1.0
+
+
+static func estimate_combat_strength(units: Array) -> float:
+	var strength: float = 0.0
+
+	for unit: Variant in NodeSafety.clean_node_array(units):
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		if not is_living_combat_unit(unit as Node):
+			continue
+		if unit is Worker:
+			continue
+
+		var base_weight: float = get_unit_type_strength_weight(unit as Node)
+		var health_ratio: float = get_health_ratio(unit as Node)
+		strength += base_weight * health_ratio * 100.0
+
+	return strength
+
+
+static func estimate_local_fight_balance(
+	tree: SceneTree,
+	position: Vector3,
+	radius: float = LOCAL_FIGHT_RADIUS
+) -> Dictionary:
+	var ai_units: Array = collect_player_military_near(tree, position, radius)
+	# Fix: collect AI units near position
+	ai_units = []
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+		if horizontal_distance((unit as Node3D).global_position, position) <= radius:
+			ai_units.append(unit)
+
+	var player_units: Array = collect_player_military_near(tree, position, radius)
+	var ai_strength: float = estimate_combat_strength(ai_units)
+	var player_strength: float = estimate_combat_strength(player_units)
+
+	return {
+		"ai_strength": ai_strength,
+		"player_strength": player_strength,
+		"ratio": ai_strength / maxf(player_strength, 1.0),
+		"ai_units": ai_units,
+		"player_units": player_units,
+	}
+
+
+static func record_player_army_observation(tree: SceneTree, position: Vector3, radius: float) -> void:
+	var player_units: Array = collect_player_military_near(tree, position, radius)
+	if player_units.is_empty():
+		return
+
+	var strength: float = estimate_combat_strength(player_units)
+	var hero_level: int = 0
+	for unit: Variant in player_units:
+		if unit is Hero:
+			hero_level = maxi(hero_level, int((unit as Hero).level))
+
+	_player_army_memory = {
+		"strength": strength,
+		"position": position,
+		"hero_level": hero_level,
+		"timestamp_msec": Time.get_ticks_msec(),
+		"unit_count": player_units.size(),
+	}
+
+
+static func get_effective_player_strength_at(tree: SceneTree, position: Vector3, radius: float) -> float:
+	var visible: Array = collect_player_military_near(tree, position, radius)
+	if not visible.is_empty():
+		record_player_army_observation(tree, position, radius)
+		return estimate_combat_strength(visible)
+
+	var memory_strength: float = float(_player_army_memory.get("strength", 0.0))
+	if memory_strength <= 0.0:
+		return 0.0
+
+	var memory_position: Vector3 = _player_army_memory.get("position", Vector3.ZERO)
+	var age_seconds: float = float(
+		Time.get_ticks_msec() - int(_player_army_memory.get("timestamp_msec", 0))
+	) / 1000.0
+	if age_seconds > PLAYER_ARMY_MEMORY_DECAY_SECONDS:
+		return memory_strength * 0.5
+
+	if horizontal_distance(memory_position, position) > radius * 2.5:
+		return memory_strength * 0.7
+
+	return memory_strength
+
+
+static func begin_fight_tracking(units: Array, anchor_position: Vector3) -> void:
+	_fight_start_strength = estimate_combat_strength(units)
+	_fight_anchor_position = anchor_position
+	_fight_start_msec = Time.get_ticks_msec()
+
+
+static func should_retreat_from_fight(tree: SceneTree) -> bool:
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec - _last_combat_eval_msec < int(COMBAT_EVAL_INTERVAL_SECONDS * 1000.0):
+		return false
+	_last_combat_eval_msec = now_msec
+
+	var anchor: Vector3 = _fight_anchor_position
+	if anchor == Vector3.ZERO:
+		anchor = compute_army_center(collect_living_combat_units(tree))
+
+	var balance: Dictionary = estimate_local_fight_balance(tree, anchor)
+	var ratio: float = float(balance.get("ratio", 1.0))
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+
+	if player_strength > 0.0 and ratio <= RETREAT_STRENGTH_RATIO:
+		_debug_combat("retreating: ratio %.2f" % ratio)
+		return true
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null and get_health_ratio(hero) < HERO_RETREAT_HP_RATIO:
+		_debug_combat("retreating: hero low health")
+		return true
+
+	if _fight_start_strength > 0.0:
+		var current_strength: float = estimate_combat_strength(balance.get("ai_units", []))
+		if current_strength <= _fight_start_strength * (1.0 - EMERGENCY_RETREAT_ARMY_LOSS_RATIO):
+			_debug_combat("retreating: army lost %.0f%%" % (EMERGENCY_RETREAT_ARMY_LOSS_RATIO * 100.0))
+			return true
+
+	return false
+
+
+static func should_stop_chase(
+	tree: SceneTree,
+	start_position: Vector3,
+	army_center: Vector3,
+	target_position: Vector3
+) -> bool:
+	if start_position == Vector3.ZERO:
+		return false
+
+	if horizontal_distance(army_center, start_position) > MAX_CHASE_DISTANCE:
+		return true
+
+	if (
+		_fight_start_msec > 0
+		and float(Time.get_ticks_msec() - _fight_start_msec) / 1000.0 > MAX_CHASE_DURATION_SECONDS
+	):
+		return true
+
+	var non_hero: Array = collect_living_non_hero_combat_units(tree)
+	if non_hero.size() >= 4:
+		var grouped: Array = filter_units_near_rally(non_hero, army_center, ASSEMBLY_RADIUS * 2.0)
+		if float(grouped.size()) / float(non_hero.size()) < 0.5:
+			return true
+
+	return horizontal_distance(army_center, target_position) > MAX_CHASE_DISTANCE * 1.25
+
+
+static func get_retreat_destination(tree: SceneTree) -> Vector3:
+	var rally: Vector3 = resolve_enemy_rally_position(tree)
+	if rally != Vector3.ZERO:
+		return rally
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+		if node is Barracks or node is Stable:
+			if _is_living_building(node as Building):
+				return (node as Node3D).global_position
+
+	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if node is CommandCenter and _is_living_building(node as CommandCenter):
+			return (node as Node3D).global_position
+
+	return Vector3.ZERO
+
+
+static func initiate_group_retreat(tree: SceneTree, reason: String = "") -> bool:
+	if not try_claim_army_mode(ArmyMode.RETREATING):
+		return false
+
+	var destination: Vector3 = get_retreat_destination(tree)
+	if destination == Vector3.ZERO:
+		release_army_mode(ArmyMode.RETREATING)
+		return false
+
+	cancel_offensive_orders(tree)
+	var survivors: Array = collect_living_combat_units(tree)
+	with_authorized_orders(func() -> void:
+		command_retreat_to(survivors, destination)
+	)
+
+	_retreat_cooldown = RETREAT_COOLDOWN_SECONDS
+	_fight_start_strength = 0.0
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RETREAT, reason)
+	return true
+
+
+static func complete_retreat_to_regroup(tree: SceneTree) -> void:
+	if get_army_mode() != ArmyMode.RETREATING:
+		return
+
+	var rally: Vector3 = get_retreat_destination(tree)
+	var army: Array = collect_living_combat_units(tree)
+	var assembled: int = filter_units_near_rally(army, rally, ASSEMBLY_RADIUS * 2.0).size()
+	if army.size() > 0 and float(assembled) / float(army.size()) < 0.6:
+		return
+
+	release_army_mode(ArmyMode.RETREATING)
+	if try_claim_army_mode(ArmyMode.REGROUPING):
+		set_rebuilding_army(true)
+		command_regroup_at_rally(tree, rally)
+		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat")
+
+
+static func begin_assembly(
+	tree: SceneTree,
+	target_mode: ArmyMode,
+	rally_position: Vector3,
+	required_units: Array
+) -> bool:
+	if rally_position == Vector3.ZERO:
+		return false
+
+	var previous_mode: ArmyMode = _army_mode
+	if not try_claim_army_mode(ArmyMode.ASSEMBLING):
+		return false
+
+	_assembly_timer = 0.0
+	_assembly_rally = rally_position
+	_assembly_required_count = maxi(
+		1,
+		int(ceil(float(required_units.size()) * ASSEMBLY_REQUIRED_PERCENT))
+	)
+	_debug_state_change(previous_mode, ArmyMode.ASSEMBLING)
+
+	with_authorized_orders(func() -> void:
+		command_hold_at_rally(required_units, rally_position, EnemyUnitMission.Mission.REGROUP)
+	)
+
+	return true
+
+
+static func is_assembly_ready(tree: SceneTree, delta: float) -> bool:
+	if get_army_mode() != ArmyMode.ASSEMBLING:
+		return false
+
+	_assembly_timer += delta
+	var army: Array = collect_living_combat_units(tree)
+	var assembled: Array = filter_units_near_rally(army, _assembly_rally, ASSEMBLY_RADIUS)
+	var assembled_count: int = assembled.size()
+	var required_count: int = _assembly_required_count
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null:
+		var hero_near: bool = (
+			horizontal_distance(hero.global_position, _assembly_rally) <= ASSEMBLY_RADIUS
+		)
+		if not hero_near:
+			if _assembly_timer < ASSEMBLY_MAX_WAIT_SECONDS:
+				debug_combat_log(
+					"waiting for hero: %d/%d units assembled"
+					% [assembled_count, army.size()]
+				)
+				return false
+
+	if assembled_count >= required_count:
+		return true
+
+	if _assembly_timer >= ASSEMBLY_MAX_WAIT_SECONDS:
+		var adjusted_required: int = maxi(1, required_count - 1)
+		return assembled_count >= adjusted_required
+
+	return false
+
+
+static func finish_assembly(target_mode: ArmyMode) -> void:
+	if get_army_mode() != ArmyMode.ASSEMBLING:
+		return
+
+	release_army_mode(ArmyMode.ASSEMBLING)
+	try_claim_army_mode(target_mode)
+
+
+static func is_regroup_ready(tree: SceneTree, match_elapsed_seconds: float) -> bool:
+	if is_retreat_on_cooldown():
+		return false
+
+	var min_army: int = get_phase_min_army_size(match_elapsed_seconds)
+	var rally: Vector3 = resolve_enemy_rally_position(tree)
+	if rally == Vector3.ZERO:
+		return false
+
+	var non_hero: Array = collect_living_non_hero_combat_units(tree)
+	if non_hero.size() < min_army:
+		return false
+
+	var regrouped: Array = filter_units_near_rally(non_hero, rally, ASSEMBLY_RADIUS)
+	if float(regrouped.size()) / float(non_hero.size()) < ASSEMBLY_REQUIRED_PERCENT:
+		return false
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null and not is_hero_healthy_enough_for_wave(hero):
+		return false
+
+	if hero != null:
+		var army_center: Vector3 = compute_army_center(regrouped)
+		if (
+			army_center != Vector3.ZERO
+			and horizontal_distance(hero.global_position, army_center) > HERO_MAX_DISTANCE_FROM_ARMY
+		):
+			return false
+
+	return true
+
+
+static func build_coordinated_combat_group(
+	tree: SceneTree,
+	rally_position: Vector3,
+	min_non_hero: int,
+	require_hero: bool = true
+) -> Dictionary:
+	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
+	var regrouped_non_hero: Array = filter_units_near_rally(
+		non_hero_units,
+		rally_position,
+		ASSEMBLY_RADIUS * 2.5
+	)
+	var can_launch: bool = regrouped_non_hero.size() >= min_non_hero
+	var group_units: Array = regrouped_non_hero.duplicate()
+
+	if can_launch:
+		var hero: Hero = find_living_enemy_hero(tree)
+		var army_center: Vector3 = compute_army_center(regrouped_non_hero)
+		var hero_ready: bool = (
+			hero != null
+			and regrouped_non_hero.size() >= ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
+			and army_center != Vector3.ZERO
+			and is_living_combat_unit(hero)
+		)
+		if require_hero and hero == null:
+			can_launch = false
+		elif hero_ready:
+			if (
+				is_hero_healthy_enough_for_wave(hero)
+				and horizontal_distance(hero.global_position, army_center)
+				<= HERO_MAX_DISTANCE_FROM_ARMY
+			):
+				group_units.append(hero)
+			elif require_hero:
+				can_launch = false
+
+	var hero_included: bool = false
+	for unit: Variant in group_units:
+		if unit is Hero:
+			hero_included = true
+			break
+
+	return {
+		"units": group_units,
+		"can_launch": can_launch,
+		"non_hero_count": regrouped_non_hero.size(),
+		"total_non_hero_count": non_hero_units.size(),
+		"hero_included": hero_included,
+	}
+
+
+static func evaluate_strength_gate(
+	ai_strength: float,
+	player_strength: float,
+	attack_style: StringName = &"normal"
+) -> Dictionary:
+	if player_strength <= 0.0:
+		return {"allowed": true, "reason": &"no_visible_threat"}
+
+	var required_ratio: float = ATTACK_NORMAL_STRENGTH_RATIO
+	if attack_style == &"aggressive":
+		required_ratio = ATTACK_AGGRESSIVE_STRENGTH_RATIO
+	elif attack_style == &"defend":
+		required_ratio = DEFEND_FIGHT_STRENGTH_RATIO
+
+	var ratio: float = ai_strength / player_strength
+	return {
+		"allowed": ratio >= required_ratio,
+		"ratio": ratio,
+		"required_ratio": required_ratio,
+		"reason": &"strength_ok" if ratio >= required_ratio else &"outpowered",
+	}
+
+
+static func issue_group_combat_move(
+	tree: SceneTree,
+	units: Array,
+	destination: Vector3,
+	mission: EnemyUnitMission.Mission,
+	mode: ArmyMode,
+	allow_attack_override_creep: bool = false
+) -> bool:
+	units = NodeSafety.clean_node_array(units)
+	if units.is_empty() or destination == Vector3.ZERO:
+		return false
+
+	if is_retreat_on_cooldown() and mission != EnemyUnitMission.Mission.DEFEND:
+		_debug_combat("order blocked: retreat cooldown")
+		return false
+
+	if not try_claim_army_mode(mode, allow_attack_override_creep):
+		return false
+
+	begin_fight_tracking(units, compute_army_center(units))
+	with_authorized_orders(func() -> void:
+		command_attack_move(units, destination, mission)
+	)
+
+	return true
 
 
 static func is_rebuilding_army() -> bool:
@@ -526,48 +1137,124 @@ static func try_claim_army_mode(
 	if requested_mode == _army_mode:
 		return true
 
+	if not _can_transition_army_mode(requested_mode):
+		return false
+
+	var previous_mode: ArmyMode = _army_mode
+
 	match _army_mode:
-		ArmyMode.IDLE:
-			_army_mode = requested_mode
+		ArmyMode.IDLE, ArmyMode.OPENING:
+			_set_army_mode(requested_mode, previous_mode)
 			return true
+		ArmyMode.ASSEMBLING:
+			if requested_mode in [
+				ArmyMode.RETREATING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
+				return true
+			return requested_mode == ArmyMode.ASSEMBLING
 		ArmyMode.CREEPING:
 			if requested_mode == ArmyMode.ATTACKING and allow_attack_override_creep:
-				_army_mode = ArmyMode.ATTACKING
+				_set_army_mode(requested_mode, previous_mode)
 				return true
-			if requested_mode == ArmyMode.REGROUPING or requested_mode == ArmyMode.DEFENDING:
-				_army_mode = requested_mode
+			if requested_mode in [
+				ArmyMode.REGROUPING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+				ArmyMode.RETREATING,
+				ArmyMode.ASSEMBLING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
 				return true
 			return false
 		ArmyMode.ATTACKING:
-			if requested_mode == ArmyMode.REGROUPING or requested_mode == ArmyMode.DEFENDING:
-				_army_mode = requested_mode
+			if requested_mode in [
+				ArmyMode.REGROUPING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+				ArmyMode.RETREATING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
 				return true
 			return false
+		ArmyMode.INTERCEPTING:
+			if requested_mode == ArmyMode.INTERCEPTING:
+				return true
+			if requested_mode in [
+				ArmyMode.DEFENDING,
+				ArmyMode.RETREATING,
+				ArmyMode.REGROUPING,
+				ArmyMode.ASSEMBLING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
+				return true
+			return false
+		ArmyMode.RETREATING:
+			if requested_mode in [ArmyMode.REGROUPING, ArmyMode.IDLE, ArmyMode.OPENING]:
+				_set_army_mode(requested_mode, previous_mode)
+				return true
+			return requested_mode == ArmyMode.RETREATING
 		ArmyMode.REGROUPING:
-			if (
-				requested_mode == ArmyMode.CREEPING
-				or requested_mode == ArmyMode.ATTACKING
-				or requested_mode == ArmyMode.IDLE
-				or requested_mode == ArmyMode.DEFENDING
-			):
-				_army_mode = requested_mode
+			if requested_mode in [
+				ArmyMode.CREEPING,
+				ArmyMode.ATTACKING,
+				ArmyMode.IDLE,
+				ArmyMode.OPENING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+				ArmyMode.ASSEMBLING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
 				return true
 			return false
 		ArmyMode.DEFENDING:
-			return requested_mode == ArmyMode.DEFENDING
+			if requested_mode == ArmyMode.DEFENDING:
+				return true
+			if requested_mode in [
+				ArmyMode.RETREATING,
+				ArmyMode.REGROUPING,
+				ArmyMode.INTERCEPTING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
+				return true
+			return false
 
 	return false
+
+
+static func _can_transition_army_mode(requested_mode: ArmyMode) -> bool:
+	if requested_mode in [ArmyMode.RETREATING, ArmyMode.DEFENDING, ArmyMode.INTERCEPTING]:
+		return true
+
+	var elapsed_seconds: float = float(
+		Time.get_ticks_msec() - _mode_claim_msec
+	) / 1000.0
+	return elapsed_seconds >= MIN_STATE_DURATION_SECONDS
+
+
+static func _set_army_mode(requested_mode: ArmyMode, previous_mode: ArmyMode) -> void:
+	_army_mode = requested_mode
+	_mode_claim_msec = Time.get_ticks_msec()
+	_debug_state_change(previous_mode, requested_mode)
 
 
 static func release_army_mode(mode: ArmyMode) -> bool:
 	if _army_mode != mode:
 		return false
 
+	var previous_mode: ArmyMode = _army_mode
 	_army_mode = ArmyMode.IDLE
+	_mode_claim_msec = Time.get_ticks_msec()
+	_debug_state_change(previous_mode, ArmyMode.IDLE)
 	return true
 
 
 static func should_abort_offensive_push(tree: SceneTree) -> bool:
+	if should_retreat_from_fight(tree):
+		return true
+
 	if _finishing_mode_active:
 		var living_wave_units: Array = _collect_living_offensive_wave_units(tree)
 		var living_count: int = living_wave_units.size()
@@ -622,8 +1309,13 @@ static func _collect_living_offensive_wave_units(tree: SceneTree) -> Array:
 
 
 static func abort_offensive_and_regroup(tree: SceneTree) -> bool:
-	if get_army_mode() != ArmyMode.ATTACKING:
+	if get_army_mode() != ArmyMode.ATTACKING and get_army_mode() != ArmyMode.CREEPING:
 		return false
+
+	if initiate_group_retreat(tree, "offensive abort"):
+		clear_offensive_wave_tracking()
+		set_rebuilding_army(true)
+		return true
 
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
@@ -700,12 +1392,7 @@ static func is_hero_isolated_near_player_threat(tree: SceneTree, hero: Hero) -> 
 
 
 static func get_effective_attack_min_non_hero_units(match_elapsed_seconds: float) -> int:
-	if match_elapsed_seconds >= ATTACK_TIMER_DESPERATE_SECONDS:
-		return ATTACK_DESPERATE_MIN_NON_HERO_UNITS
-	if match_elapsed_seconds >= ATTACK_TIMER_STANDARD_SECONDS:
-		return ATTACK_TIMER_MIN_NON_HERO_UNITS
-
-	return ATTACK_STANDARD_MIN_NON_HERO_UNITS
+	return get_phase_min_army_size(match_elapsed_seconds)
 
 
 static func can_commit_attack_wave(
@@ -841,9 +1528,17 @@ static func evaluate_attack_gate(
 		)
 
 	var wave_power: int = estimate_military_power(evaluated_units)
+	var wave_strength: float = estimate_combat_strength(evaluated_units)
 	var known_player_power: int = estimate_known_player_army_strength(tree, rally_position)
+	var known_player_strength: float = get_effective_player_strength_at(
+		tree,
+		rally_position,
+		KNOWN_PLAYER_SCOUT_RANGE
+	)
 	debug_context["player_strength"] = known_player_power
 	debug_context["wave_power"] = wave_power
+	debug_context["wave_strength"] = wave_strength
+	debug_context["player_combat_strength"] = known_player_strength
 
 	var required_power: int = (
 		int(float(known_player_power) * PLAYER_ARMY_STRENGTH_RATIO)
@@ -876,6 +1571,7 @@ static func evaluate_attack_gate(
 		)
 
 	if known_player_power > 0 and wave_power < required_power and not large_army_ready:
+		_debug_combat("attack cancelled: human strength too high")
 		return _finalize_attack_gate(
 			{
 				"can_commit": false,
@@ -886,6 +1582,31 @@ static func evaluate_attack_gate(
 			debug_context,
 			match_elapsed_seconds
 		)
+
+	if known_player_strength > 0.0:
+		var strength_gate: Dictionary = evaluate_strength_gate(
+			wave_strength,
+			known_player_strength,
+			&"normal"
+		)
+		if not strength_gate.get("allowed", false) and not large_army_ready:
+			_debug_combat(
+				"attack cancelled: strength ratio %.2f < %.2f"
+				% [
+					float(strength_gate.get("ratio", 0.0)),
+					float(strength_gate.get("required_ratio", ATTACK_NORMAL_STRENGTH_RATIO)),
+				]
+			)
+			return _finalize_attack_gate(
+				{
+					"can_commit": false,
+					"reason": &"strength_ratio",
+					"wave_strength": wave_strength,
+					"player_strength": known_player_strength,
+				},
+				debug_context,
+				match_elapsed_seconds
+			)
 
 	if not composition_relaxed:
 		if melee_count < MIN_MELEE_UNITS_FOR_ATTACK:
@@ -1232,6 +1953,19 @@ static func assign_reinforcement_regroup(tree: SceneTree, unit: Unit) -> void:
 	command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.REGROUP)
 
 
+static func _count_pending_reinforcement_units(tree: SceneTree) -> int:
+	var count: int = 0
+	for unit: Variant in collect_living_combat_units(tree):
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if mission == EnemyUnitMission.Mission.REGROUP:
+			count += 1
+
+	return count
+
+
 static func pull_reinforcement_units_to_rally(
 	tree: SceneTree,
 	rally_position: Vector3,
@@ -1311,35 +2045,7 @@ static func build_regrouped_attack_wave_units(
 	rally_position: Vector3,
 	min_non_hero_units: int
 ) -> Dictionary:
-	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
-	var regrouped_non_hero: Array = filter_units_near_rally(
-		non_hero_units,
-		rally_position
-	)
-	var can_launch: bool = regrouped_non_hero.size() >= min_non_hero_units
-	var wave_units: Array = regrouped_non_hero.duplicate()
-
-	if can_launch:
-		var hero: Hero = find_living_enemy_hero(tree)
-		var army_center: Vector3 = compute_army_center(regrouped_non_hero)
-		if (
-			hero != null
-			and regrouped_non_hero.size() >= ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
-			and army_center != Vector3.ZERO
-			and is_hero_healthy_enough_for_wave(hero)
-			and horizontal_distance(hero.global_position, army_center)
-			<= HERO_MAX_DISTANCE_FROM_ARMY
-			and horizontal_distance(hero.global_position, rally_position)
-			<= WAVE_REGROUP_MAX_DISTANCE + 6.0
-		):
-			wave_units.append(hero)
-
-	return {
-		"units": wave_units,
-		"can_launch": can_launch,
-		"non_hero_count": regrouped_non_hero.size(),
-		"total_non_hero_count": non_hero_units.size(),
-	}
+	return build_coordinated_combat_group(tree, rally_position, min_non_hero_units, true)
 
 
 static func should_rebuild_army_after_wave(
@@ -1365,7 +2071,7 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 		var army_center: Vector3 = compute_army_center(non_hero_units)
 		if (
 			hero != null
-			and non_hero_units.size() >= MIN_NON_HERO_FOR_HERO_JOIN
+			and non_hero_units.size() >= ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
 			and army_center != Vector3.ZERO
 			and is_hero_healthy_enough_for_wave(hero)
 			and horizontal_distance(hero.global_position, army_center)
@@ -1380,28 +2086,10 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 	}
 
 
-static func build_creep_army(tree: SceneTree) -> Dictionary:
-	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
-	var can_launch: bool = non_hero_units.size() >= MIN_NON_HERO_FOR_HERO_JOIN
-	var creep_units: Array = non_hero_units.duplicate()
-
-	if can_launch:
-		var hero: Hero = find_living_enemy_hero(tree)
-		var army_center: Vector3 = compute_army_center(non_hero_units)
-		if (
-			hero != null
-			and army_center != Vector3.ZERO
-			and is_living_combat_unit(hero)
-			and horizontal_distance(hero.global_position, army_center)
-			<= HERO_MAX_DISTANCE_FROM_ARMY
-		):
-			creep_units.append(hero)
-
-	return {
-		"units": creep_units,
-		"can_launch": can_launch,
-		"non_hero_count": non_hero_units.size(),
-	}
+static func build_creep_army(tree: SceneTree, match_elapsed_seconds: float = 0.0) -> Dictionary:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	var min_non_hero: int = get_phase_min_army_size(match_elapsed_seconds)
+	return build_coordinated_combat_group(tree, rally_position, min_non_hero, true)
 
 
 static func is_enemy_base_threatened(tree: SceneTree) -> bool:
@@ -1589,33 +2277,46 @@ static func evaluate_defense_commitment(
 	defense_army: Array,
 	threat_position: Vector3
 ) -> Dictionary:
-	var defender_power: int = estimate_military_power(defense_army)
-	var threat_power: int = estimate_player_threat_power_near(
+	var defender_strength: float = estimate_combat_strength(defense_army)
+	var threat_units: Array = collect_player_military_near(
 		tree,
 		threat_position,
 		DEFENSE_THREAT_POWER_RANGE
 	)
+	var threat_strength: float = estimate_combat_strength(threat_units)
 
 	return {
-		"defender_power": defender_power,
-		"threat_power": threat_power,
-		"can_commit": should_defense_commit_attack(defense_army, defender_power, threat_power),
+		"defender_power": int(defender_strength),
+		"threat_power": int(threat_strength),
+		"can_commit": should_defense_commit_attack(
+			defense_army,
+			int(defender_strength),
+			int(threat_strength)
+		),
 	}
 
 
 static func should_defense_commit_attack(
 	defense_army: Array,
 	defender_power: int,
-	_threat_power: int
+	threat_power: int
 ) -> bool:
 	if defense_army.is_empty():
 		return false
 
-	# Always engage with the full gathered army; only pause if there is no army to send.
 	if defender_power <= 0:
 		return false
 
-	return true
+	var defender_strength: float = estimate_combat_strength(defense_army)
+	var threat_strength: float = float(threat_power)
+	if threat_strength <= 0.0:
+		return true
+
+	return evaluate_strength_gate(
+		defender_strength,
+		threat_strength,
+		&"defend"
+	).get("allowed", false)
 
 
 static func resolve_defense_intercept_position(
@@ -1867,6 +2568,9 @@ static func command_attack_move(
 	destination: Vector3,
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
 ) -> void:
+	if not _combat_orders_allowed(mission):
+		return
+
 	_issue_spaced_group_orders(units, destination, true, mission)
 
 

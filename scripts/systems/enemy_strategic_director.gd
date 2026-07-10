@@ -44,6 +44,7 @@ var snapshot: Dictionary = {}
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	EnemyArmyCommand.set_debug_enabled(debug_enabled)
 	call_deferred("_run_initial_evaluation")
 
 
@@ -92,7 +93,10 @@ func should_prioritize_creep() -> bool:
 	return (
 		get_desire("creep") >= DESIRE_MEDIUM
 		and get_desire("defense") < DESIRE_HIGH
-		and EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.DEFENDING
+		and EnemyArmyCommand.get_army_mode() not in [
+			EnemyArmyCommand.ArmyMode.DEFENDING,
+			EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		]
 	)
 
 
@@ -360,7 +364,8 @@ func _recommend_main_army_mission() -> void:
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	match army_mode:
-		EnemyArmyCommand.ArmyMode.DEFENDING:
+		EnemyArmyCommand.ArmyMode.DEFENDING, EnemyArmyCommand.ArmyMode.INTERCEPTING:
+			_set_main_mission(EnemyUnitMission.Mission.DEFEND, "army defending")
 			return
 		EnemyArmyCommand.ArmyMode.ATTACKING:
 			_set_main_mission(EnemyUnitMission.Mission.ATTACK, "army attacking")
@@ -417,7 +422,10 @@ func _run_recovery_checks() -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
 		return
 
 	var main_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_main_army_mission()
