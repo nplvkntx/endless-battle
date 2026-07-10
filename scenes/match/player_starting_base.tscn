@@ -1,11 +1,9 @@
 [gd_scene format=3 uid="uid://dp7k3m2n8w5xqb"]
 
-[ext_resource type="Script" path="res://scripts/match/player_starting_base.gd" id="1_player_starting_base"]
 [ext_resource type="PackedScene" uid="uid://dthkmgtnrowg3" path="res://scenes/buildings/command_center.tscn" id="1_command_center_scene"]
 [ext_resource type="PackedScene" uid="uid://c34sseipvxy7a" path="res://scenes/units/worker.tscn" id="2_worker"]
 
 [node name="PlayerStartingBase" type="Node3D"]
-script = ExtResource("1_player_starting_base")
 
 [node name="Worker" parent="." unique_id=1420813028 instance=ExtResource("2_worker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -29, 0.5, -23)

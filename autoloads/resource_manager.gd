@@ -8,16 +8,10 @@ signal food_changed(current: int, maximum: int)
 signal resource_spent_failed(resource_id: StringName, amount: float)
 signal feedback_message(message: String)
 
-# Temporary dev-test values for human player — rebalance before release.
-const STARTING_GOLD: int = 10000
-const STARTING_WOOD: int = 10000
-const STARTING_FOOD: int = 5
-const STARTING_FOOD_MAX: int = 15
-
-var gold: int = STARTING_GOLD
-var wood: int = STARTING_WOOD
-var food_current: int = STARTING_FOOD
-var food_max: int = STARTING_FOOD_MAX
+var gold: int = MatchConfig.HUMAN_STARTING_GOLD
+var wood: int = MatchConfig.HUMAN_STARTING_WOOD
+var food_current: int = MatchConfig.HUMAN_STARTING_FOOD
+var food_max: int = MatchConfig.HUMAN_STARTING_FOOD_MAX
 
 
 func _ready() -> void:
@@ -25,10 +19,10 @@ func _ready() -> void:
 
 
 func reset_to_starting_values() -> void:
-	gold = STARTING_GOLD
-	wood = STARTING_WOOD
-	food_current = STARTING_FOOD
-	food_max = STARTING_FOOD_MAX
+	gold = MatchConfig.HUMAN_STARTING_GOLD
+	wood = MatchConfig.HUMAN_STARTING_WOOD
+	food_current = MatchConfig.HUMAN_STARTING_FOOD
+	food_max = MatchConfig.HUMAN_STARTING_FOOD_MAX
 	_emit_resource_state()
 
 

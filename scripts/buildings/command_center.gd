@@ -64,8 +64,6 @@ var _upgrade_started_at: float = 0.0
 var _tier_visuals_root: Node3D = null
 var _tier2_marker: MeshInstance3D = null
 var _tier3_marker: MeshInstance3D = null
-var _dev_starting_tier_3_applied: bool = false
-
 @onready var _health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 
 
@@ -520,20 +518,6 @@ func _apply_tier_visuals() -> void:
 		_tier3_marker.visible = command_center_tier >= 3
 	elif _tier3_marker != null:
 		_tier3_marker = null
-
-
-## TEMPORARY DEVELOPMENT TEST SETUP — remove when fast cannon testing no longer needs instant Tier 3.
-func apply_dev_starting_tier_3() -> void:
-	if _dev_starting_tier_3_applied:
-		return
-
-	if team_id == ENEMY_TEAM_ID or is_in_group(&"enemy_command_center"):
-		return
-
-	_dev_starting_tier_3_applied = true
-	command_center_tier = MAX_TIER
-	_apply_tier_visuals()
-	tier_state_changed.emit()
 
 
 func _get_time_seconds() -> float:

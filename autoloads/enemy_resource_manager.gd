@@ -4,14 +4,10 @@ extends Node
 
 signal resources_changed()
 
-const STARTING_GOLD: int = 20000
-const STARTING_WOOD: int = 20000
-const STARTING_FOOD_MAX: int = 15
-
-var gold: int = STARTING_GOLD
-var wood: int = STARTING_WOOD
+var gold: int = MatchConfig.AI_STARTING_GOLD
+var wood: int = MatchConfig.AI_STARTING_WOOD
 var food_current: int = 0
-var food_max: int = STARTING_FOOD_MAX
+var food_max: int = MatchConfig.AI_STARTING_FOOD_MAX
 
 
 func _ready() -> void:
@@ -19,10 +15,10 @@ func _ready() -> void:
 
 
 func reset_to_starting_values() -> void:
-	gold = STARTING_GOLD
-	wood = STARTING_WOOD
+	gold = MatchConfig.AI_STARTING_GOLD
+	wood = MatchConfig.AI_STARTING_WOOD
 	food_current = 0
-	food_max = STARTING_FOOD_MAX
+	food_max = MatchConfig.AI_STARTING_FOOD_MAX
 	resources_changed.emit()
 	call_deferred("_initialize_population_from_scene")
 
