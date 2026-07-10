@@ -8,8 +8,8 @@ signal food_changed(current: int, maximum: int)
 signal resource_spent_failed(resource_id: StringName, amount: float)
 signal feedback_message(message: String)
 
-var gold: int = MatchConfig.HUMAN_STARTING_GOLD
-var wood: int = MatchConfig.HUMAN_STARTING_WOOD
+var gold: int = MatchConfig.NORMAL_STARTING_GOLD
+var wood: int = MatchConfig.NORMAL_STARTING_WOOD
 var food_current: int = MatchConfig.HUMAN_STARTING_FOOD
 var food_max: int = MatchConfig.HUMAN_STARTING_FOOD_MAX
 
@@ -19,8 +19,8 @@ func _ready() -> void:
 
 
 func reset_to_starting_values() -> void:
-	gold = MatchConfig.HUMAN_STARTING_GOLD
-	wood = MatchConfig.HUMAN_STARTING_WOOD
+	gold = MatchConfig.NORMAL_STARTING_GOLD
+	wood = MatchConfig.NORMAL_STARTING_WOOD
 	food_current = MatchConfig.HUMAN_STARTING_FOOD
 	food_max = MatchConfig.HUMAN_STARTING_FOOD_MAX
 	_emit_resource_state()

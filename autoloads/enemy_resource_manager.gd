@@ -4,8 +4,8 @@ extends Node
 
 signal resources_changed()
 
-var gold: int = MatchConfig.AI_STARTING_GOLD
-var wood: int = MatchConfig.AI_STARTING_WOOD
+var gold: int = MatchConfig.NORMAL_STARTING_GOLD
+var wood: int = MatchConfig.NORMAL_STARTING_WOOD
 var food_current: int = 0
 var food_max: int = MatchConfig.AI_STARTING_FOOD_MAX
 
@@ -15,8 +15,8 @@ func _ready() -> void:
 
 
 func reset_to_starting_values() -> void:
-	gold = MatchConfig.AI_STARTING_GOLD
-	wood = MatchConfig.AI_STARTING_WOOD
+	gold = MatchConfig.NORMAL_STARTING_GOLD
+	wood = MatchConfig.NORMAL_STARTING_WOOD
 	food_current = 0
 	food_max = MatchConfig.AI_STARTING_FOOD_MAX
 	resources_changed.emit()
