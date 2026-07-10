@@ -729,11 +729,14 @@ func _place_wall_line() -> void:
 		PLACEMENT_WALL_SEGMENT
 	)
 	var placed_buildings: Array[Building] = []
+	var wall_chain_id: int = WallSegment.allocate_wall_chain_id()
 
 	for position: Vector3 in line_positions:
 		var building: Building = WALL_SEGMENT_SCENE.instantiate() as Building
 		buildings_parent.add_child(building)
 		building.global_position = position
+		if building is WallSegment:
+			(building as WallSegment).wall_chain_id = wall_chain_id
 		building.start_under_construction()
 		building.setup_construction(construction_duration)
 		placed_buildings.append(building)

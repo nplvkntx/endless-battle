@@ -62,9 +62,16 @@ func _ready() -> void:
 	_selection_indicator = get_node_or_null("SelectionIndicator") as Node3D
 	if _selection_indicator:
 		_selection_indicator.visible = false
-	NavigationObstacleSetup.apply_from_collision_body(self)
+	call_deferred("_apply_default_navigation_obstacle")
 	_apply_building_data()
 	call_deferred("apply_team_visuals")
+
+
+func _apply_default_navigation_obstacle() -> void:
+	if has_method(&"_wants_navigation_obstacle") and not call(&"_wants_navigation_obstacle"):
+		return
+
+	NavigationObstacleSetup.apply_from_collision_body(self)
 
 
 ## Applies a subtle team tint across all building meshes from team_id or faction groups.

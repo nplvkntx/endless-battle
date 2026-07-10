@@ -727,6 +727,9 @@ static func _get_building_display_name(building: Building) -> String:
 	if building is Tower:
 		return "Tower"
 	if building is WallSegment:
+		var wall_segment := building as WallSegment
+		if wall_segment.is_gate:
+			return "Gate"
 		return "Wall Segment"
 	return building.name
 

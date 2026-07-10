@@ -54,6 +54,39 @@ const _INITIALS: Dictionary = {
 	_BUILD_MANAGER.PLACEMENT_COMMAND_CENTER: "TC",
 }
 
+const GATE_COMMAND_BUILD := &"gate_build"
+const GATE_COMMAND_OPEN := &"gate_open"
+const GATE_COMMAND_CLOSE := &"gate_close"
+
+const _GATE_COMMAND_COLORS: Dictionary = {
+	GATE_COMMAND_BUILD: Color(0.48, 0.5, 0.52, 1),
+	GATE_COMMAND_OPEN: Color(0.35, 0.62, 0.38, 1),
+	GATE_COMMAND_CLOSE: Color(0.62, 0.38, 0.32, 1),
+}
+
+
+static func get_gate_command_icon(command_id: StringName) -> Texture2D:
+	if _textures.has(command_id):
+		return _textures[command_id] as Texture2D
+
+	var base_color: Color = _GATE_COMMAND_COLORS.get(command_id, Color(0.48, 0.5, 0.52, 1))
+	var image := Image.create(ICON_SIZE, ICON_SIZE, false, Image.FORMAT_RGBA8)
+	image.fill(base_color.darkened(0.38))
+
+	match command_id:
+		GATE_COMMAND_BUILD:
+			_draw_gate_build(image, base_color)
+		GATE_COMMAND_OPEN:
+			_draw_gate_open(image, base_color)
+		GATE_COMMAND_CLOSE:
+			_draw_gate_close(image, base_color)
+		_:
+			_draw_initials(image, "?", base_color)
+
+	var texture := ImageTexture.create_from_image(image)
+	_textures[command_id] = texture
+	return texture
+
 
 static func get_icon_texture(placement_id: StringName) -> Texture2D:
 	if _textures.has(placement_id):
@@ -354,6 +387,32 @@ static func _draw_wall_segment(image: Image, color: Color) -> void:
 	_fill_rect(image, Rect2i(25, 23, 13, 7), stone)
 	_fill_rect(image, Rect2i(10, 32, 13, 6), stone)
 	_fill_rect(image, Rect2i(25, 32, 13, 6), highlight)
+
+
+static func _draw_gate_build(image: Image, color: Color) -> void:
+	var post := color.darkened(0.15)
+	var panel := color.lightened(0.12)
+	_fill_rect(image, Rect2i(10, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(32, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(16, 16, 16, 20), panel)
+
+
+static func _draw_gate_open(image: Image, color: Color) -> void:
+	var post := color.darkened(0.15)
+	var arrow := color.lightened(0.35)
+	_fill_rect(image, Rect2i(10, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(32, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(18, 24, 12, 4), arrow)
+	_fill_rect(image, Rect2i(24, 20, 4, 12), arrow)
+
+
+static func _draw_gate_close(image: Image, color: Color) -> void:
+	var post := color.darkened(0.15)
+	var panel := color.lightened(0.12)
+	_fill_rect(image, Rect2i(10, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(32, 12, 6, 28), post)
+	_fill_rect(image, Rect2i(16, 16, 16, 20), panel)
+	_fill_rect(image, Rect2i(22, 8, 4, 8), color.lightened(0.25))
 
 
 static func _draw_hero_altar(image: Image, color: Color) -> void:

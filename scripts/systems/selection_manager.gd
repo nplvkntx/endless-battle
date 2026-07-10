@@ -440,6 +440,10 @@ func _dispatch_construction_command(building: Building) -> void:
 	if not _is_unfinished_player_construction(building):
 		return
 
+	if building is WallSegment:
+		_dispatch_wall_chain_construction_command(building as WallSegment)
+		return
+
 	InputManager.disarm_attack_move()
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
@@ -468,6 +472,34 @@ func _dispatch_construction_command(building: Building) -> void:
 
 	if dispatched_to_worker:
 		_play_construction_target_feedback(building)
+
+
+func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment) -> void:
+	if not NodeSafety.is_alive_node(clicked_segment):
+		return
+
+	var segments: Array[Building] = WallSegment.collect_unfinished_chain_segments(
+		clicked_segment
+	)
+	if segments.is_empty():
+		return
+
+	InputManager.disarm_attack_move()
+	_purge_invalid_selected_units()
+
+	var workers: Array[Worker] = []
+	for unit: Unit in selected_units:
+		if not _is_commandable_unit(unit):
+			continue
+		if unit is Worker:
+			workers.append(unit as Worker)
+
+	if workers.is_empty():
+		return
+
+	var wall_job := WallBuildJob.new(segments, workers)
+	wall_job.start()
+	_play_construction_target_feedback(clicked_segment)
 
 
 func _is_unfinished_player_construction(building: Building) -> bool:

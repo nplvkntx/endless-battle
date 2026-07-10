@@ -17,6 +17,18 @@ cull_mode = 2
 [sub_resource type="BoxMesh" id="BoxMesh_wall"]
 size = Vector3(1, 1.5, 1)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gate_post"]
+albedo_color = Color(0.42, 0.32, 0.22, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gate_panel"]
+albedo_color = Color(0.55, 0.42, 0.3, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_gate_post"]
+size = Vector3(0.22, 1.5, 0.22)
+
+[sub_resource type="BoxMesh" id="BoxMesh_gate_panel"]
+size = Vector3(0.46, 1.2, 0.12)
+
 [sub_resource type="BoxMesh" id="BoxMesh_sel_edge_h"]
 size = Vector3(1.1, 0.025, 0.06)
 
@@ -40,6 +52,23 @@ surface_material_override/0 = SubResource("StandardMaterial3D_wall")
 [node name="WallPlaceholder" type="MeshInstance3D" parent="Visuals"]
 mesh = SubResource("BoxMesh_wall")
 surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="GateVisuals" type="Node3D" parent="Visuals"]
+visible = false
+
+[node name="LeftPost" type="MeshInstance3D" parent="Visuals/GateVisuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.36, 0, 0)
+mesh = SubResource("BoxMesh_gate_post")
+surface_material_override/0 = SubResource("StandardMaterial3D_gate_post")
+
+[node name="RightPost" type="MeshInstance3D" parent="Visuals/GateVisuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.36, 0, 0)
+mesh = SubResource("BoxMesh_gate_post")
+surface_material_override/0 = SubResource("StandardMaterial3D_gate_post")
+
+[node name="GatePanel" type="MeshInstance3D" parent="Visuals/GateVisuals"]
+mesh = SubResource("BoxMesh_gate_panel")
+surface_material_override/0 = SubResource("StandardMaterial3D_gate_panel")
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false

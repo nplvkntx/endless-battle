@@ -859,6 +859,11 @@ func start_construction_order(building: Building) -> void:
 
 
 func assign_wall_build_job(job: WallBuildJob) -> void:
+	if _wall_build_job != null and _wall_build_job != job:
+		var previous_job: WallBuildJob = _wall_build_job
+		_wall_build_job = null
+		previous_job.on_worker_left(self)
+
 	_wall_build_job = job
 
 
@@ -1142,6 +1147,13 @@ func _validate_construction_session() -> bool:
 		return false
 
 	if not is_in_build_start_range():
+		if _wall_build_job != null and NodeSafety.is_alive_node(_building_target):
+			if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+				_building_target.unregister_builder(self)
+			_build_trip_state = BuildTripState.TO_BUILDING
+			_try_repath_construction_movement()
+			return false
+
 		_cancel_build_trip()
 		return false
 

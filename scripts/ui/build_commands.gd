@@ -194,6 +194,18 @@ extends PanelContainer
 @onready var _wizard_orb_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn/WizardOrbButton
 )
+@onready var _wall_gate_panel: HBoxContainer = (
+	$MarginContainer/HBoxContainer/RightPanel/WallGatePanel
+)
+@onready var _build_gate_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/WallGatePanel/BuildGateButton
+)
+@onready var _open_gate_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/WallGatePanel/OpenGateButton
+)
+@onready var _close_gate_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/WallGatePanel/CloseGateButton
+)
 
 var _selected_command_center: CommandCenter = null
 var _selected_barracks: Barracks = null
@@ -203,12 +215,14 @@ var _selected_hero_altar: HeroAltar = null
 var _selected_stable: Stable = null
 var _selected_artillery_depot: ArtilleryDepot = null
 var _selected_academy: Academy = null
+var _selected_wall_segment: WallSegment = null
 var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
 var _tracked_artillery_depot: ArtilleryDepot = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_academy: Academy = null
 var _tracked_shop: Shop = null
+var _tracked_wall_segment: WallSegment = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
 var _ui_refresh_timer: float = 0.0
@@ -277,6 +291,7 @@ func _ready() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_buttons_row.visible = false
 	_build_farm_button.visible = false
 	_build_barracks_button.visible = false
@@ -330,6 +345,7 @@ func _ready() -> void:
 	_connect_blacksmith_upgrade_buttons()
 	_connect_academy_upgrade_buttons()
 	_connect_shop_item_buttons()
+	_setup_wall_gate_buttons()
 	_setup_command_tooltips()
 	_hide_all_hero_upgrade_buttons()
 
@@ -1529,6 +1545,8 @@ func _on_resources_changed() -> void:
 		_update_academy_upgrade_ui()
 	if _shop_panel.visible:
 		_update_shop_item_ui()
+	if _wall_gate_panel.visible:
+		_update_wall_gate_ui()
 	if _worker_build_icons_visible():
 		_update_build_icon_slots()
 	if _barracks_training_row.visible:
@@ -2358,6 +2376,7 @@ func _on_building_selection_changed(building: Building) -> void:
 	_disconnect_blacksmith_signals()
 	_disconnect_academy_signals()
 	_disconnect_shop_signals()
+	_disconnect_wall_gate_signals()
 	_selected_command_center = null
 
 	if building != null and not is_instance_valid(building):
@@ -2443,6 +2462,17 @@ func _on_building_selection_changed(building: Building) -> void:
 		_tracked_shop.building_state_changed.connect(_on_shop_state_changed)
 	else:
 		_tracked_shop = null
+
+	if building is WallSegment and is_instance_valid(building):
+		_tracked_wall_segment = building as WallSegment
+		if not _tracked_wall_segment.gate_state_changed.is_connected(_on_wall_gate_state_changed):
+			_tracked_wall_segment.gate_state_changed.connect(_on_wall_gate_state_changed)
+		if not _tracked_wall_segment.building_state_changed.is_connected(
+			_on_wall_segment_state_changed
+		):
+			_tracked_wall_segment.building_state_changed.connect(_on_wall_segment_state_changed)
+	else:
+		_tracked_wall_segment = null
 
 	_refresh_command_visibility()
 
@@ -2578,6 +2608,10 @@ func _refresh_command_visibility() -> void:
 		selected_building is Shop
 		and (selected_building as Shop).can_show_purchase_ui()
 	)
+	var show_wall_gate_commands: bool = (
+		selected_building is WallSegment
+		and (selected_building as WallSegment).can_show_commands()
+	)
 	var show_town_center_commands: bool = selected_building is CommandCenter
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
@@ -2589,6 +2623,9 @@ func _refresh_command_visibility() -> void:
 		selected_building as ArtilleryDepot if show_artillery_depot_commands else null
 	)
 	_selected_academy = selected_building as Academy if show_academy_commands else null
+	_selected_wall_segment = (
+		selected_building as WallSegment if show_wall_gate_commands else null
+	)
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
@@ -2654,6 +2691,9 @@ func _refresh_command_visibility() -> void:
 	elif show_shop_items:
 		_apply_shop_command_visibility()
 		_set_tracked_hero(null)
+	elif show_wall_gate_commands:
+		_apply_wall_gate_command_visibility()
+		_set_tracked_hero(null)
 	elif show_barracks_training:
 		_apply_barracks_command_visibility()
 		_set_tracked_hero(null)
@@ -2678,6 +2718,7 @@ func _refresh_command_visibility() -> void:
 	_artillery_depot_training_row.visible = show_artillery_depot_commands
 	_academy_panel.visible = show_academy_commands
 	_shop_panel.visible = show_shop_items
+	_wall_gate_panel.visible = show_wall_gate_commands
 	_hero_panel.visible = single_hero
 
 	if show_blacksmith_upgrades:
@@ -2688,6 +2729,9 @@ func _refresh_command_visibility() -> void:
 
 	if show_shop_items:
 		_update_shop_item_ui()
+
+	if show_wall_gate_commands:
+		_update_wall_gate_ui()
 
 	if show_hero_altar_training:
 		_update_hero_altar_status()
@@ -2736,6 +2780,7 @@ func _refresh_command_visibility() -> void:
 		or show_artillery_depot_commands
 		or show_academy_commands
 		or show_shop_items
+		or show_wall_gate_commands
 		or single_combat_unit
 	)
 	_sync_ui_process()
@@ -2767,6 +2812,7 @@ func _apply_hero_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
 
@@ -2786,6 +2832,7 @@ func _apply_worker_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -2805,6 +2852,7 @@ func _apply_combat_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
 
@@ -2824,6 +2872,7 @@ func _apply_barracks_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -2842,6 +2891,7 @@ func _apply_hero_altar_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -2860,6 +2910,7 @@ func _apply_town_center_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
 
 
@@ -2879,6 +2930,7 @@ func _apply_blacksmith_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
@@ -2902,6 +2954,7 @@ func _apply_stable_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
@@ -2926,6 +2979,7 @@ func _apply_artillery_depot_command_visibility() -> void:
 	_artillery_depot_training_row.visible = true
 	_academy_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
@@ -2950,6 +3004,7 @@ func _apply_academy_command_visibility() -> void:
 	_artillery_depot_training_row.visible = false
 	_academy_panel.visible = true
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
 	_clear_queue_row(_archer_queue_row)
@@ -2991,7 +3046,115 @@ func _apply_hidden_command_buttons() -> void:
 	_blacksmith_panel.visible = false
 	_stable_panel.visible = false
 	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
+
+
+func _apply_wall_gate_command_visibility() -> void:
+	_set_build_icon_visibility(false)
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_buttons_row.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_hero_panel.visible = false
+	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
+	_artillery_depot_panel.visible = false
+	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
+	_shop_panel.visible = false
+	_wall_gate_panel.visible = true
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
+
+
+func _setup_wall_gate_buttons() -> void:
+	_build_gate_button.icon = BuildingCommandIcons.get_gate_command_icon(
+		BuildingCommandIcons.GATE_COMMAND_BUILD
+	)
+	_open_gate_button.icon = BuildingCommandIcons.get_gate_command_icon(
+		BuildingCommandIcons.GATE_COMMAND_OPEN
+	)
+	_close_gate_button.icon = BuildingCommandIcons.get_gate_command_icon(
+		BuildingCommandIcons.GATE_COMMAND_CLOSE
+	)
+	_build_gate_button.pressed.connect(_on_build_gate_pressed)
+	_open_gate_button.pressed.connect(_on_open_gate_pressed)
+	_close_gate_button.pressed.connect(_on_close_gate_pressed)
+
+
+func _update_wall_gate_ui() -> void:
+	if _selected_wall_segment == null or not NodeSafety.is_alive_node(_selected_wall_segment):
+		_selected_wall_segment = null
+		_build_gate_button.visible = false
+		_open_gate_button.visible = false
+		_close_gate_button.visible = false
+		return
+
+	var wall_segment: WallSegment = _selected_wall_segment
+	var show_build_gate: bool = wall_segment.can_build_gate()
+	var show_open_gate: bool = wall_segment.is_gate and not wall_segment.gate_open
+	var show_close_gate: bool = wall_segment.is_gate and wall_segment.gate_open
+
+	_build_gate_button.visible = show_build_gate
+	_open_gate_button.visible = show_open_gate
+	_close_gate_button.visible = show_close_gate
+
+	if show_build_gate:
+		_build_gate_button.disabled = not ResourceManager.can_afford(
+			0,
+			WallSegment.GATE_CONVERSION_WOOD_COST
+		)
+
+
+func _on_build_gate_pressed() -> void:
+	if _selected_wall_segment == null or not NodeSafety.is_alive_node(_selected_wall_segment):
+		return
+
+	if _selected_wall_segment.try_convert_to_gate():
+		_update_wall_gate_ui()
+
+
+func _on_open_gate_pressed() -> void:
+	if _selected_wall_segment == null or not NodeSafety.is_alive_node(_selected_wall_segment):
+		return
+
+	if _selected_wall_segment.try_open_gate():
+		_update_wall_gate_ui()
+
+
+func _on_close_gate_pressed() -> void:
+	if _selected_wall_segment == null or not NodeSafety.is_alive_node(_selected_wall_segment):
+		return
+
+	if _selected_wall_segment.try_close_gate():
+		_update_wall_gate_ui()
+
+
+func _on_wall_gate_state_changed() -> void:
+	_refresh_command_visibility()
+	_update_wall_gate_ui()
+
+
+func _on_wall_segment_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _disconnect_wall_gate_signals() -> void:
+	if _tracked_wall_segment != null and NodeSafety.is_alive_node(_tracked_wall_segment):
+		if _tracked_wall_segment.gate_state_changed.is_connected(_on_wall_gate_state_changed):
+			_tracked_wall_segment.gate_state_changed.disconnect(_on_wall_gate_state_changed)
+		if _tracked_wall_segment.building_state_changed.is_connected(
+			_on_wall_segment_state_changed
+		):
+			_tracked_wall_segment.building_state_changed.disconnect(_on_wall_segment_state_changed)
+
+	_tracked_wall_segment = null
 
 
 func _on_attack_pressed() -> void:
@@ -3331,6 +3494,9 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_power_strike_upgrade_button)
 	_clear_control_tooltip(_execute_button)
 	_clear_control_tooltip(_execute_upgrade_button)
+	_clear_control_tooltip(_build_gate_button)
+	_clear_control_tooltip(_open_gate_button)
+	_clear_control_tooltip(_close_gate_button)
 
 	TooltipManager.bind_control(
 		_build_farm_button,
@@ -3411,6 +3577,12 @@ func _setup_command_tooltips() -> void:
 	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
 	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
 	TooltipManager.bind_static_tooltip(_attack_button, "Attack-move\nMove while engaging enemies.")
+	TooltipManager.bind_static_tooltip(
+		_build_gate_button,
+		"Build Gate\nConvert this wall segment into a gate.\nCost: 100 wood"
+	)
+	TooltipManager.bind_static_tooltip(_open_gate_button, "Open Gate\nAllow units to pass through.")
+	TooltipManager.bind_static_tooltip(_close_gate_button, "Close Gate\nBlock movement through the gate.")
 
 	TooltipManager.bind_control(
 		_ground_slam_button,

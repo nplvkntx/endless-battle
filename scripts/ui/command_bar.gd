@@ -105,6 +105,9 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 	if building is Shop:
 		return (building as Shop).can_show_purchase_ui()
 
+	if building is WallSegment:
+		return (building as WallSegment).can_show_commands()
+
 	return false
 
 
