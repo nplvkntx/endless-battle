@@ -77,6 +77,17 @@ static func can_override_mission(unit, new_mission: Mission) -> bool:
 	if not NodeSafety.is_alive_node(unit):
 		return false
 
+	if EnemyArmyCommand.is_attack_wave_active():
+		if new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE]:
+			return false
+
+	if (
+		EnemyArmyCommand.is_attack_wave_controlling_hero()
+		and unit is Hero
+		and new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE]
+	):
+		return false
+
 	var unit_id: int = unit.get_instance_id()
 	var current: Mission = get_unit_mission(unit)
 	if current == new_mission:

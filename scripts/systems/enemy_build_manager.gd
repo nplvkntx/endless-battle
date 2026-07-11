@@ -194,6 +194,7 @@ func _on_build_tick() -> void:
 
 func _run_build_order() -> void:
 	_refresh_building_cache_if_needed()
+	_release_stale_build_workers()
 	_try_assign_idle_builder_to_construction()
 	_run_macro_emergency_checks()
 
@@ -551,9 +552,13 @@ func _hero_already_owns_item(hero: Hero, item_id: StringName) -> bool:
 
 
 func _should_send_hero_to_shop(hero: Hero) -> bool:
+	if EnemyArmyCommand.is_attack_wave_controlling_hero():
+		return false
+
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	if (
 		army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
+		or army_mode == EnemyArmyCommand.ArmyMode.ASSEMBLING
 		or army_mode == EnemyArmyCommand.ArmyMode.REGROUPING
 		or army_mode == EnemyArmyCommand.ArmyMode.DEFENDING
 		or army_mode == EnemyArmyCommand.ArmyMode.INTERCEPTING
@@ -1366,6 +1371,37 @@ func _try_assign_idle_builder_to_construction() -> void:
 			continue
 
 		_assign_nearest_builder(building)
+
+
+func _release_stale_build_workers() -> void:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not node is Worker:
+			continue
+
+		var worker: Worker = node as Worker
+		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
+			continue
+
+		if not worker.is_on_construction_trip():
+			continue
+
+		var build_target: Building = worker.get_build_target()
+		if build_target == null or not is_instance_valid(build_target):
+			worker.prepare_for_enemy_economy_reassign(
+				"build task invalid, returning worker to economy"
+			)
+			notify_enemy_worker_spawned(worker)
+			continue
+
+		if build_target.building_state == Building.STATE_COMPLETED:
+			worker.on_building_construction_finished()
+			continue
+
+		if worker.needs_enemy_worker_recovery() and worker.can_enemy_economy_force_reassign():
+			worker.prepare_for_enemy_economy_reassign(
+				"build task invalid, returning worker to economy"
+			)
+			notify_enemy_worker_spawned(worker)
 
 
 func _collect_unfinished_buildings() -> Array[Building]:

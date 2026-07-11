@@ -93,6 +93,14 @@ var _ai_unstuck_saved_build_state: BuildTripState = BuildTripState.IDLE
 var _ai_unstuck_saved_source_index: int = 0
 var _ai_unstuck_saved_dropoff_index: int = 0
 var _ai_unstuck_saved_build_index: int = 0
+var _enemy_recovery_cooldown: float = 0.0
+var _enemy_stuck_watch_position: Vector3 = Vector3.ZERO
+var _enemy_stuck_watch_time: float = 0.0
+var _enemy_dropoff_stuck_time: float = 0.0
+var _enemy_build_unreachable_time: float = 0.0
+var _enemy_blacklisted_targets_until_msec: Dictionary = {}
+var _enemy_target_failure_counts: Dictionary = {}
+var _enemy_last_recovery_log: String = ""
 
 
 func _ready() -> void:
@@ -436,6 +444,9 @@ func _physics_process(delta: float) -> void:
 
 	if _is_enemy_worker():
 		WorkerAiUnstuck.update_detection(self, delta)
+		_update_enemy_worker_validation(delta)
+		_update_gather_stuck_recovery(delta)
+		_update_construction_stuck_recovery(delta)
 	else:
 		_update_gather_stuck_recovery(delta)
 		_update_construction_stuck_recovery(delta)
@@ -1383,7 +1394,17 @@ func _attempt_gather_stuck_recovery() -> void:
 			return
 
 		if _advance_task_approach_candidate():
+			if _is_enemy_worker():
+				_log_ai_worker_recovery_once("stuck path detected, retrying alternate approach")
 			_apply_current_task_movement_target()
+			return
+
+		if _is_enemy_worker():
+			var failed_source: GatherableResource = _get_valid_gather_source()
+			if failed_source != null:
+				register_enemy_gather_target_failure(failed_source)
+			_log_ai_worker_recovery_once("stuck path detected, retrying alternate approach")
+			_notify_enemy_worker_needs_gather_job()
 			return
 
 		_source_approach_candidate_index = 0
@@ -1899,6 +1920,267 @@ func _finish_gathering_idle() -> void:
 	if _is_enemy_worker():
 		_debug_log_ai_gather_state("finish_gathering_idle")
 		_notify_enemy_worker_needs_gather_job()
+
+
+func _update_enemy_worker_validation(delta: float) -> void:
+	if not _is_enemy_worker() or not _is_alive():
+		return
+
+	if _enemy_recovery_cooldown > 0.0:
+		_enemy_recovery_cooldown = maxf(0.0, _enemy_recovery_cooldown - delta)
+
+	_prune_enemy_target_blacklist()
+
+	if WorkerAiUnstuck.is_active(self):
+		_reset_enemy_stuck_watch()
+		return
+
+	if _is_playing_work_animation():
+		_reset_enemy_stuck_watch()
+		_enemy_build_unreachable_time = 0.0
+		return
+
+	if _gather_state == GatherTripState.TO_COMMAND_CENTER and _carried_amount > 0:
+		if not _has_valid_dropoff_target():
+			_enemy_dropoff_stuck_time += delta
+			if _enemy_dropoff_stuck_time >= GatheringConfig.AI_WORKER_DROP_OFF_STUCK_DELAY:
+				_return_dropoff = null
+				_assigned_dropoff = null
+				var replacement_dropoff: CommandCenter = _resolve_dropoff_target()
+				if replacement_dropoff != null:
+					_log_ai_worker_recovery_once("no reachable drop-off, recalculating")
+					_enemy_dropoff_stuck_time = 0.0
+					_ensure_returning_to_current_dropoff()
+				else:
+					_log_ai_worker_recovery_once("no reachable drop-off, recalculating")
+					_notify_enemy_worker_needs_gather_job()
+		else:
+			_enemy_dropoff_stuck_time = 0.0
+
+	if _build_trip_state == BuildTripState.TO_BUILDING:
+		if _building_target == null or not is_instance_valid(_building_target):
+			_release_invalid_build_assignment("build task invalid, returning worker to economy")
+			return
+
+		if _building_target.building_state == Building.STATE_COMPLETED:
+			on_building_construction_finished()
+			return
+
+		if _is_in_build_start_range():
+			_enemy_build_unreachable_time = 0.0
+		elif has_move_target or _task_has_saved_destination or _task_navigation_active:
+			_enemy_build_unreachable_time += delta
+			if _enemy_build_unreachable_time >= GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT:
+				_release_invalid_build_assignment("build task invalid, returning worker to economy")
+				return
+		else:
+			_enemy_build_unreachable_time += delta
+			if _enemy_build_unreachable_time >= GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT:
+				_release_invalid_build_assignment("build task invalid, returning worker to economy")
+				return
+
+	if _gather_state == GatherTripState.TO_SOURCE and _has_valid_gather_source():
+		var source: GatherableResource = _get_valid_gather_source()
+		if not source.can_gather():
+			_log_ai_worker_recovery_once("resource target depleted, finding replacement")
+			if not _try_reassign_gather_source():
+				_notify_enemy_worker_needs_gather_job()
+			return
+
+		if not WorkerGathering.is_safe_gather_source(source, get_tree()):
+			_log_ai_worker_recovery_once("resource target depleted, finding replacement")
+			_notify_enemy_worker_needs_gather_job()
+			return
+
+	if _is_on_enemy_stuck_eligible_movement():
+		var moved: Vector3 = global_position - _enemy_stuck_watch_position
+		moved.y = 0.0
+		if moved.length() >= GatheringConfig.GATHER_STUCK_MIN_MOVE_DISTANCE:
+			_reset_enemy_stuck_watch()
+		else:
+			_enemy_stuck_watch_time += delta
+	else:
+		_reset_enemy_stuck_watch()
+
+
+func _is_on_enemy_stuck_eligible_movement() -> bool:
+	if _gather_state == GatherTripState.GATHER_WAIT:
+		return false
+
+	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+		return false
+
+	if _task_nudge_active:
+		return false
+
+	if not _is_on_task_movement():
+		return false
+
+	return has_move_target or _task_has_saved_destination or _task_navigation_active
+
+
+func _reset_enemy_stuck_watch() -> void:
+	_enemy_stuck_watch_position = global_position
+	_enemy_stuck_watch_time = 0.0
+
+
+func _prune_enemy_target_blacklist() -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	var stale_ids: Array = []
+	for target_id: Variant in _enemy_blacklisted_targets_until_msec.keys():
+		if int(_enemy_blacklisted_targets_until_msec[target_id]) <= now_msec:
+			stale_ids.append(target_id)
+
+	for target_id: Variant in stale_ids:
+		_enemy_blacklisted_targets_until_msec.erase(target_id)
+		_enemy_target_failure_counts.erase(target_id)
+
+
+func register_enemy_gather_target_failure(target: Object) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+
+	var target_id: int = target.get_instance_id()
+	var failures: int = int(_enemy_target_failure_counts.get(target_id, 0)) + 1
+	_enemy_target_failure_counts[target_id] = failures
+
+	if failures < GatheringConfig.AI_WORKER_MAX_TARGET_FAILURES:
+		return
+
+	_enemy_blacklisted_targets_until_msec[target_id] = (
+		Time.get_ticks_msec()
+		+ int(GatheringConfig.AI_WORKER_TARGET_BLACKLIST_SECONDS * 1000.0)
+	)
+	_enemy_target_failure_counts.erase(target_id)
+
+
+func is_enemy_gather_target_blacklisted(target: Object) -> bool:
+	if target == null or not is_instance_valid(target):
+		return true
+
+	var target_id: int = target.get_instance_id()
+	if not _enemy_blacklisted_targets_until_msec.has(target_id):
+		return false
+
+	return Time.get_ticks_msec() < int(_enemy_blacklisted_targets_until_msec[target_id])
+
+
+func get_enemy_recovery_cooldown() -> float:
+	return _enemy_recovery_cooldown
+
+
+func needs_enemy_worker_recovery() -> bool:
+	if not _is_enemy_worker() or not _is_alive():
+		return false
+
+	if is_enemy_gather_fallback_idle():
+		return true
+
+	if _enemy_stuck_watch_time >= GatheringConfig.AI_WORKER_STUCK_RECOVERY_DELAY:
+		return true
+
+	if _enemy_dropoff_stuck_time >= GatheringConfig.AI_WORKER_DROP_OFF_STUCK_DELAY:
+		return true
+
+	if _enemy_build_unreachable_time >= GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT:
+		return true
+
+	if (
+		needs_gather_target_reassignment()
+		and _gather_state == GatherTripState.TO_SOURCE
+		and _carried_amount <= 0
+	):
+		return true
+
+	return false
+
+
+func can_enemy_economy_force_reassign() -> bool:
+	if not _is_enemy_worker() or not _is_alive():
+		return false
+
+	if WorkerAiUnstuck.blocks_external_commands(self):
+		if _enemy_stuck_watch_time < (
+			GatheringConfig.AI_WORKER_STUCK_RECOVERY_DELAY
+			+ GatheringConfig.AI_UNSTUCK_STUCK_DELAY
+		):
+			return false
+
+	if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
+		if (
+			_build_trip_state != BuildTripState.IDLE
+			and _building_target != null
+			and is_instance_valid(_building_target)
+			and _building_target.building_state != Building.STATE_COMPLETED
+			and _enemy_build_unreachable_time < GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT
+		):
+			return false
+
+	if (
+		_carried_amount > 0
+		and _gather_state == GatherTripState.TO_COMMAND_CENTER
+		and _has_valid_dropoff_target()
+		and _enemy_dropoff_stuck_time < GatheringConfig.AI_WORKER_DROP_OFF_STUCK_DELAY
+	):
+		return false
+
+	return true
+
+
+func prepare_for_enemy_economy_reassign(reason: String) -> bool:
+	if not _is_enemy_worker() or not _is_alive():
+		return false
+
+	if _carried_amount > 0:
+		var dropoff: CommandCenter = _resolve_dropoff_target()
+		if dropoff != null:
+			_begin_return_to_command_center()
+			_enemy_recovery_cooldown = GatheringConfig.AI_WORKER_RECOVERY_COOLDOWN
+			if not reason.is_empty():
+				_log_ai_worker_recovery_once(reason)
+			return false
+
+	if _build_trip_state != BuildTripState.IDLE:
+		_cancel_build_trip()
+		if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
+			EnemyUnitMission.clear_unit_mission(self)
+
+	if _gather_state != GatherTripState.IDLE or _gather_source != null:
+		cancel_gathering()
+
+	_source_approach_candidate_index = 0
+	_dropoff_candidate_index = 0
+	_enemy_build_unreachable_time = 0.0
+	_enemy_dropoff_stuck_time = 0.0
+	_reset_enemy_stuck_watch()
+	_enemy_recovery_cooldown = GatheringConfig.AI_WORKER_RECOVERY_COOLDOWN
+
+	if not reason.is_empty():
+		_log_ai_worker_recovery_once(reason)
+
+	return true
+
+
+func _release_invalid_build_assignment(reason: String) -> void:
+	if _build_trip_state == BuildTripState.IDLE:
+		return
+
+	_cancel_build_trip()
+	if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
+		EnemyUnitMission.clear_unit_mission(self)
+
+	_enemy_build_unreachable_time = 0.0
+	_enemy_recovery_cooldown = GatheringConfig.AI_WORKER_RECOVERY_COOLDOWN
+	_log_ai_worker_recovery_once(reason)
+	_notify_enemy_worker_needs_gather_job()
+
+
+func _log_ai_worker_recovery_once(message: String) -> void:
+	if message.is_empty() or message == _enemy_last_recovery_log:
+		return
+
+	_enemy_last_recovery_log = message
+	print("AI WORKER: %s" % message)
 
 
 func needs_gather_target_reassignment() -> bool:

@@ -60,6 +60,9 @@ func has_safe_creep_camp_available() -> bool:
 
 
 func _update_creeping() -> void:
+	if EnemyArmyCommand.is_attack_wave_active():
+		return
+
 	if EnemyArmyCommand.is_finishing_mode_active():
 		return
 

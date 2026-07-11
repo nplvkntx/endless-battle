@@ -134,6 +134,14 @@ static func _begin_unstuck(worker: Worker) -> void:
 		worker._ai_unstuck_direction_offset += 1
 		worker._ai_unstuck_cooldown = GatheringConfig.AI_UNSTUCK_COOLDOWN
 		reset_watch(worker)
+		if (
+			worker._ai_unstuck_attempt_number
+			>= GatheringConfig.AI_UNSTUCK_MAX_ATTEMPTS_BEFORE_REASSIGN
+		):
+			worker.prepare_for_enemy_economy_reassign(
+				"stuck path detected, retrying alternate approach"
+			)
+			worker._notify_enemy_worker_needs_gather_job()
 		return
 
 	worker._disable_task_navigation()

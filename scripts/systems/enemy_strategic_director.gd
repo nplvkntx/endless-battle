@@ -420,6 +420,9 @@ func _set_main_mission(mission: EnemyUnitMission.Mission, reason: String) -> voi
 
 
 func _run_recovery_checks() -> void:
+	if EnemyArmyCommand.is_attack_wave_controlling_hero():
+		return
+
 	var tree: SceneTree = get_tree()
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:

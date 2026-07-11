@@ -152,6 +152,37 @@ enum ArmyMode {
 	REGROUPING,
 }
 
+enum AttackWaveState {
+	NONE,
+	PREPARING,
+	GATHERING,
+	WAITING_FOR_HERO,
+	REGROUPING,
+	ADVANCING,
+	ENGAGING,
+	RETREATING,
+	RECOVERING,
+}
+
+const ATTACK_WAVE_STAGING_OFFSET := Vector3(8.0, 0.0, 0.0)
+const ATTACK_WAVE_GATHER_PERCENT := 0.75
+const ATTACK_WAVE_REGROUP_PERCENT := 0.70
+const ATTACK_WAVE_HERO_STAGING_DISTANCE := 12.0
+const ATTACK_WAVE_HERO_WAIT_TIMEOUT_SECONDS := 15.0
+const ATTACK_WAVE_REGROUP_TIMEOUT_SECONDS := 12.0
+const ATTACK_WAVE_RECOVERY_COOLDOWN_SECONDS := 18.0
+const ATTACK_WAVE_TARGET_COMMITMENT_SECONDS := 8.0
+const ATTACK_WAVE_COMMAND_REFRESH_SECONDS := 2.5
+const ATTACK_WAVE_MAX_STRAGGLERS := 2
+const ATTACK_WAVE_STRAGGLER_IGNORE_SECONDS := 10.0
+const ATTACK_WAVE_ENGAGE_DISTANCE := 28.0
+const ATTACK_WAVE_COHESION_RADIUS := 20.0
+const ATTACK_WAVE_MIN_COHESION_RATIO := 0.65
+const ATTACK_WAVE_HERO_WITHOUT_ARMY_POWER := 500
+const ATTACK_WAVE_MISSION_LOCK_SECONDS := 6.0
+const EXPOSED_PLAYER_ARMY_SEARCH_RANGE := 90.0
+const EXPOSED_PLAYER_ARMY_MIN_UNITS := 3
+
 static var _army_mode: ArmyMode = ArmyMode.IDLE
 static var _mode_claim_msec: int = 0
 static var _orders_authorized: bool = false
@@ -196,6 +227,23 @@ static var _perf_diag_timer: float = 0.0
 static var _orders_issued_since_diag: int = 0
 static var _creep_contest_cooldowns: Dictionary = {}
 static var _reinforcement_pool: Dictionary = {}
+static var _attack_wave_state: AttackWaveState = AttackWaveState.NONE
+static var _attack_wave_state_msec: int = 0
+static var _attack_wave_units: Array = []
+static var _attack_wave_staging_point: Vector3 = Vector3.ZERO
+static var _attack_wave_target_position: Vector3 = Vector3.ZERO
+static var _attack_wave_target_node: Node3D = null
+static var _attack_wave_target_committed_until_msec: int = 0
+static var _attack_wave_gather_pull_timer: float = 0.0
+static var _attack_wave_hero_wait_timer: float = 0.0
+static var _attack_wave_regroup_timer: float = 0.0
+static var _attack_wave_recovery_timer: float = 0.0
+static var _attack_wave_command_refresh_timer: float = 0.0
+static var _attack_wave_hero_unreachable_retries: int = 0
+static var _attack_wave_min_non_hero_units: int = 0
+static var _attack_wave_ready_to_advance: bool = false
+static var _attack_wave_pending_transition: AttackWaveState = AttackWaveState.NONE
+static var _attack_wave_pending_transition_reason: String = ""
 
 
 static func get_army_mode() -> ArmyMode:
@@ -270,6 +318,9 @@ static func with_authorized_orders(callback: Callable) -> void:
 static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 	if _orders_authorized or _emergency_defense_active:
 		return true
+
+	if is_attack_wave_active() and mission == EnemyUnitMission.Mission.CREEP:
+		return false
 
 	match mission:
 		EnemyUnitMission.Mission.RETREAT, EnemyUnitMission.Mission.REGROUP, EnemyUnitMission.Mission.IDLE, EnemyUnitMission.Mission.REINFORCEMENT_WAIT:
@@ -534,6 +585,9 @@ static func get_retreat_destination(tree: SceneTree) -> Vector3:
 
 
 static func initiate_group_retreat(tree: SceneTree, reason: String = "") -> bool:
+	if is_attack_wave_active():
+		notify_attack_wave_retreat_started(reason if not reason.is_empty() else "retreating")
+
 	if not try_claim_army_mode(ArmyMode.RETREATING):
 		return false
 
@@ -569,6 +623,8 @@ static func complete_retreat_to_regroup(tree: SceneTree) -> void:
 		set_rebuilding_army(true)
 		command_regroup_at_rally(tree, rally)
 		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat")
+		if _attack_wave_state == AttackWaveState.RETREATING:
+			notify_attack_wave_retreat_complete(tree)
 
 
 static func begin_assembly(
@@ -589,7 +645,11 @@ static func begin_assembly(
 		return false
 
 	_assembly_timer = 0.0
-	_assembly_rally = rally_position
+	_assembly_rally = (
+		get_attack_wave_assembly_point()
+		if is_attack_wave_active() and get_attack_wave_assembly_point() != Vector3.ZERO
+		else rally_position
+	)
 	_assembly_required_count = maxi(
 		1,
 		int(ceil(float(required_units.size()) * ASSEMBLY_REQUIRED_PERCENT))
@@ -597,7 +657,7 @@ static func begin_assembly(
 	_debug_state_change(previous_mode, ArmyMode.ASSEMBLING)
 
 	with_authorized_orders(func() -> void:
-		command_hold_at_rally(required_units, rally_position, EnemyUnitMission.Mission.REGROUP)
+		command_hold_at_rally(required_units, _assembly_rally, EnemyUnitMission.Mission.REGROUP)
 	)
 
 	return true
@@ -614,7 +674,18 @@ static func is_assembly_ready(tree: SceneTree, delta: float) -> bool:
 	var required_count: int = _assembly_required_count
 
 	var hero: Hero = find_living_enemy_hero(tree)
-	if hero != null:
+	if hero != null and is_attack_wave_controlling_hero():
+		var hero_near: bool = (
+			horizontal_distance(hero.global_position, _assembly_rally) <= ATTACK_WAVE_HERO_STAGING_DISTANCE
+		)
+		if not hero_near:
+			if _assembly_timer < ATTACK_WAVE_HERO_WAIT_TIMEOUT_SECONDS:
+				debug_combat_log(
+					"waiting for hero: %d/%d units assembled"
+					% [assembled_count, army.size()]
+				)
+				return false
+	elif hero != null:
 		var hero_near: bool = (
 			horizontal_distance(hero.global_position, _assembly_rally) <= ASSEMBLY_RADIUS
 		)
@@ -863,6 +934,770 @@ static func set_rebuilding_army(rebuilding: bool) -> void:
 	_is_rebuilding_army = rebuilding
 
 
+static func get_attack_wave_state() -> AttackWaveState:
+	return _attack_wave_state
+
+
+static func is_attack_wave_active() -> bool:
+	return _attack_wave_state not in [AttackWaveState.NONE, AttackWaveState.RECOVERING]
+
+
+static func is_attack_wave_controlling_hero() -> bool:
+	return _attack_wave_state in [
+		AttackWaveState.PREPARING,
+		AttackWaveState.GATHERING,
+		AttackWaveState.WAITING_FOR_HERO,
+		AttackWaveState.REGROUPING,
+		AttackWaveState.ADVANCING,
+		AttackWaveState.ENGAGING,
+		AttackWaveState.RETREATING,
+	]
+
+
+static func consume_attack_wave_advance_request() -> Dictionary:
+	if not _attack_wave_ready_to_advance:
+		return {}
+
+	_attack_wave_ready_to_advance = false
+	return {
+		"units": _sanitize_attack_wave_units(_attack_wave_units),
+		"destination": _attack_wave_target_position,
+		"staging": _attack_wave_staging_point,
+	}
+
+
+static func confirm_attack_wave_advance_started() -> void:
+	if _attack_wave_state in [AttackWaveState.REGROUPING, AttackWaveState.ADVANCING]:
+		_transition_attack_wave_state(AttackWaveState.ADVANCING, "advance confirmed")
+
+
+static func confirm_attack_wave_engaging() -> void:
+	if _attack_wave_state == AttackWaveState.ADVANCING:
+		_transition_attack_wave_state(AttackWaveState.ENGAGING, "contact with objective")
+
+
+static func try_begin_attack_wave_preparation(
+	tree: SceneTree,
+	wave_units: Array,
+	attack_destination: Vector3,
+	min_non_hero_units: int,
+	match_elapsed_seconds: float
+) -> bool:
+	if is_attack_wave_active():
+		return false
+
+	if is_retreat_on_cooldown():
+		return false
+
+	wave_units = _sanitize_attack_wave_units(wave_units)
+	if wave_units.is_empty() or attack_destination == Vector3.ZERO:
+		return false
+
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	var attack_commitment: Dictionary = can_commit_attack_wave(
+		tree,
+		wave_units,
+		rally_position,
+		min_non_hero_units,
+		match_elapsed_seconds
+	)
+	if not attack_commitment.get("can_commit", false):
+		return false
+
+	var objective: Dictionary = resolve_attack_objective(tree, attack_destination)
+	var target_position: Vector3 = objective.get("position", attack_destination)
+	var target_node: Node3D = objective.get("node") as Node3D
+	if target_position == Vector3.ZERO:
+		return false
+
+	_attack_wave_units = wave_units.duplicate()
+	_attack_wave_min_non_hero_units = min_non_hero_units
+	_attack_wave_target_position = target_position
+	_attack_wave_target_node = NodeSafety.safe_node(target_node) as Node3D
+	_attack_wave_staging_point = resolve_attack_staging_point(tree, rally_position, target_position)
+	_attack_wave_gather_pull_timer = 0.0
+	_attack_wave_hero_wait_timer = 0.0
+	_attack_wave_regroup_timer = 0.0
+	_attack_wave_hero_unreachable_retries = 0
+	_attack_wave_ready_to_advance = false
+	_commit_attack_wave_target(target_node, target_position)
+
+	_transition_attack_wave_state(AttackWaveState.PREPARING, "preparing wave")
+	_suspend_units_for_attack_wave(tree)
+	return true
+
+
+static func tick_attack_wave_state(
+	tree: SceneTree,
+	delta: float,
+	match_elapsed_seconds: float
+) -> void:
+	_apply_pending_attack_wave_transition()
+	if _attack_wave_state == AttackWaveState.NONE:
+		return
+
+	_attack_wave_units = _sanitize_attack_wave_units(_attack_wave_units)
+	_attack_wave_command_refresh_timer += delta
+
+	match _attack_wave_state:
+		AttackWaveState.PREPARING:
+			_tick_attack_wave_preparing(tree, match_elapsed_seconds)
+		AttackWaveState.GATHERING:
+			_tick_attack_wave_gathering(tree, delta, match_elapsed_seconds)
+		AttackWaveState.WAITING_FOR_HERO:
+			_tick_attack_wave_waiting_for_hero(tree, delta)
+		AttackWaveState.REGROUPING:
+			_tick_attack_wave_regrouping(tree, delta, match_elapsed_seconds)
+		AttackWaveState.ADVANCING:
+			_tick_attack_wave_advancing(tree, delta)
+		AttackWaveState.ENGAGING:
+			_tick_attack_wave_engaging(tree, delta)
+		AttackWaveState.RETREATING:
+			_tick_attack_wave_retreating(tree, delta)
+		AttackWaveState.RECOVERING:
+			_tick_attack_wave_recovering(tree, delta)
+
+
+static func abort_attack_wave(tree: SceneTree, reason: String) -> void:
+	if _attack_wave_state == AttackWaveState.NONE:
+		return
+
+	print("AI ATTACK: aborted because %s" % reason)
+	_attack_wave_ready_to_advance = false
+	_clear_attack_wave_unit_missions()
+	clear_offensive_wave_tracking()
+	_transition_attack_wave_state(AttackWaveState.RECOVERING, reason)
+	set_rebuilding_army(true)
+	_attack_wave_recovery_timer = 0.0
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "attack aborted: %s" % reason)
+
+
+static func notify_attack_wave_retreat_started(reason: String = "") -> void:
+	if not is_attack_wave_active():
+		return
+
+	_transition_attack_wave_state(AttackWaveState.RETREATING, reason if not reason.is_empty() else "retreating")
+	_attack_wave_ready_to_advance = false
+
+
+static func notify_attack_wave_retreat_complete(tree: SceneTree) -> void:
+	if _attack_wave_state != AttackWaveState.RETREATING:
+		return
+
+	_transition_attack_wave_state(AttackWaveState.RECOVERING, "retreat complete")
+	set_rebuilding_army(true)
+	_attack_wave_recovery_timer = 0.0
+	_clear_attack_wave_unit_missions()
+	clear_offensive_wave_tracking()
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat recovery")
+
+
+static func resolve_attack_staging_point(
+	tree: SceneTree,
+	base_position: Vector3,
+	target_position: Vector3
+) -> Vector3:
+	if base_position == Vector3.ZERO:
+		return Vector3.ZERO
+
+	var direction: Vector3 = target_position - base_position
+	direction.y = 0.0
+	if direction.length_squared() < 0.01:
+		direction = Vector3(1.0, 0.0, 0.0)
+	else:
+		direction = direction.normalized()
+
+	return base_position + direction * ATTACK_WAVE_STAGING_OFFSET.length()
+
+
+static func get_attack_wave_assembly_point() -> Vector3:
+	if _attack_wave_staging_point != Vector3.ZERO:
+		return _attack_wave_staging_point
+
+	return _assembly_rally
+
+
+static func _transition_attack_wave_state(new_state: AttackWaveState, reason: String = "") -> void:
+	if _attack_wave_state == new_state:
+		return
+
+	_attack_wave_pending_transition = new_state
+	_attack_wave_pending_transition_reason = reason
+
+
+static func _apply_pending_attack_wave_transition() -> void:
+	if _attack_wave_pending_transition == AttackWaveState.NONE:
+		return
+	if _attack_wave_pending_transition == _attack_wave_state:
+		_attack_wave_pending_transition = AttackWaveState.NONE
+		_attack_wave_pending_transition_reason = ""
+		return
+
+	var previous_state: AttackWaveState = _attack_wave_state
+	var new_state: AttackWaveState = _attack_wave_pending_transition
+	var reason: String = _attack_wave_pending_transition_reason
+	_attack_wave_state = new_state
+	_attack_wave_state_msec = Time.get_ticks_msec()
+	_attack_wave_pending_transition = AttackWaveState.NONE
+	_attack_wave_pending_transition_reason = ""
+	_attack_wave_command_refresh_timer = 0.0
+
+	if reason.is_empty():
+		print("AI ATTACK: %s" % _attack_wave_state_label(new_state))
+	else:
+		print("AI ATTACK: %s (%s)" % [_attack_wave_state_label(new_state), reason])
+
+	if previous_state != new_state and new_state == AttackWaveState.GATHERING:
+		print("AI ATTACK: gathering %d units" % _attack_wave_units.size())
+
+
+static func _attack_wave_state_label(state: AttackWaveState) -> String:
+	match state:
+		AttackWaveState.PREPARING:
+			return "preparing wave"
+		AttackWaveState.GATHERING:
+			return "gathering"
+		AttackWaveState.WAITING_FOR_HERO:
+			return "waiting for hero"
+		AttackWaveState.REGROUPING:
+			return "regrouping stragglers"
+		AttackWaveState.ADVANCING:
+			return "advancing toward objective"
+		AttackWaveState.ENGAGING:
+			return "engaging"
+		AttackWaveState.RETREATING:
+			return "retreating"
+		AttackWaveState.RECOVERING:
+			return "recovering"
+		_:
+			return "idle"
+
+
+static func _is_valid_attack_unit(unit) -> bool:
+	if not is_instance_valid(unit):
+		return false
+
+	if not unit is Node:
+		return false
+
+	return (unit as Node).is_inside_tree()
+
+
+static func _sanitize_attack_wave_units(units: Array) -> Array:
+	var cleaned: Array = NodeSafety.clean_node_array(units)
+	var valid: Array = []
+	for unit: Variant in cleaned:
+		if not _is_valid_attack_unit(unit):
+			continue
+
+		if not is_combat_unit(unit):
+			continue
+
+		valid.append(unit)
+
+	return valid
+
+
+static func _suspend_units_for_attack_wave(tree: SceneTree) -> void:
+	var units: Array = _sanitize_attack_wave_units(_attack_wave_units)
+	if units.is_empty():
+		return
+
+	cancel_offensive_orders(tree)
+	EnemyUnitMission.assign_missions_to_units(
+		units,
+		EnemyUnitMission.Mission.ATTACK,
+		ATTACK_WAVE_MISSION_LOCK_SECONDS
+	)
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null and not units.has(hero) and is_living_combat_unit(hero):
+		_suspend_hero_for_attack_wave(hero)
+
+
+static func _suspend_hero_for_attack_wave(hero) -> void:
+	if not NodeSafety.is_alive_node(hero):
+		return
+
+	_cancel_unit_offensive_orders(hero)
+	EnemyUnitMission.try_set_mission(
+		hero,
+		EnemyUnitMission.Mission.ATTACK,
+		ATTACK_WAVE_MISSION_LOCK_SECONDS
+	)
+	if not _attack_wave_units.has(hero):
+		_attack_wave_units.append(hero)
+
+
+static func _clear_attack_wave_unit_missions() -> void:
+	for unit: Variant in _attack_wave_units:
+		if not _is_valid_attack_unit(unit):
+			continue
+
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
+		if mission == EnemyUnitMission.Mission.ATTACK:
+			EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP, 0.0)
+
+
+static func _commit_attack_wave_target(target_node: Node3D, target_position: Vector3) -> void:
+	_attack_wave_target_node = NodeSafety.safe_node(target_node) as Node3D
+	_attack_wave_target_position = target_position
+	_attack_wave_target_committed_until_msec = (
+		Time.get_ticks_msec() + int(ATTACK_WAVE_TARGET_COMMITMENT_SECONDS * 1000.0)
+	)
+	set_attack_objective(_attack_wave_target_node, _attack_wave_target_position)
+
+
+static func _should_refresh_attack_wave_orders() -> bool:
+	return _attack_wave_command_refresh_timer >= ATTACK_WAVE_COMMAND_REFRESH_SECONDS
+
+
+static func _issue_attack_wave_hold_at_staging(units: Array) -> void:
+	if _attack_wave_staging_point == Vector3.ZERO:
+		return
+
+	if not _should_refresh_attack_wave_orders():
+		return
+
+	with_authorized_orders(func() -> void:
+		command_hold_at_rally(
+			_sanitize_attack_wave_units(units),
+			_attack_wave_staging_point,
+			EnemyUnitMission.Mission.ATTACK
+		)
+	)
+	_attack_wave_command_refresh_timer = 0.0
+
+
+static func _issue_hero_to_staging(hero) -> void:
+	if not NodeSafety.is_alive_node(hero) or _attack_wave_staging_point == Vector3.ZERO:
+		return
+
+	if not _should_refresh_attack_wave_orders():
+		if not EnemyUnitMission.should_reissue_move_order(
+			hero,
+			_attack_wave_staging_point,
+			EnemyUnitMission.Mission.ATTACK
+		):
+			return
+
+	with_authorized_orders(func() -> void:
+		_cancel_unit_offensive_orders(hero)
+		EnemyUnitMission.try_set_mission(
+			hero,
+			EnemyUnitMission.Mission.ATTACK,
+			ATTACK_WAVE_MISSION_LOCK_SECONDS
+		)
+		_issue_hold_at_rally(hero, _attack_wave_staging_point)
+	)
+	_attack_wave_command_refresh_timer = 0.0
+
+
+static func _count_wave_units_near_staging(units: Array) -> Dictionary:
+	units = _sanitize_attack_wave_units(units)
+	var staging: Vector3 = _attack_wave_staging_point
+	var gathered: Array = filter_units_near_rally(units, staging, ASSEMBLY_RADIUS * 1.5)
+	var non_hero_gathered: int = 0
+	var non_hero_total: int = 0
+	for unit: Variant in units:
+		if not _is_valid_attack_unit(unit):
+			continue
+
+		if is_non_hero_combat_unit(unit):
+			non_hero_total += 1
+
+	for unit: Variant in gathered:
+		if not _is_valid_attack_unit(unit):
+			continue
+
+		if is_non_hero_combat_unit(unit):
+			non_hero_gathered += 1
+
+	return {
+		"gathered_count": gathered.size(),
+		"non_hero_gathered": non_hero_gathered,
+		"non_hero_total": non_hero_total,
+		"gathered_units": gathered,
+	}
+
+
+static func _is_hero_at_staging(hero) -> bool:
+	if not NodeSafety.is_alive_node(hero):
+		return false
+
+	return (
+		horizontal_distance(hero.global_position, _attack_wave_staging_point)
+		<= ATTACK_WAVE_HERO_STAGING_DISTANCE
+	)
+
+
+static func _can_attack_without_hero(tree: SceneTree) -> bool:
+	var non_hero: Array = []
+	for unit: Variant in _attack_wave_units:
+		if not _is_valid_attack_unit(unit):
+			continue
+
+		if is_non_hero_combat_unit(unit):
+			non_hero.append(unit)
+
+	return estimate_military_power(non_hero) >= ATTACK_WAVE_HERO_WITHOUT_ARMY_POWER
+
+
+static func _tick_attack_wave_preparing(tree: SceneTree, match_elapsed_seconds: float) -> void:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		abort_attack_wave(tree, "no rally position")
+		return
+
+	if should_recall_offensive_for_defense(tree):
+		abort_attack_wave(tree, "base defense override")
+		return
+
+	_attack_wave_units = _sanitize_attack_wave_units(_attack_wave_units)
+	if _attack_wave_units.is_empty():
+		abort_attack_wave(tree, "no valid units")
+		return
+
+	var commitment: Dictionary = can_commit_attack_wave(
+		tree,
+		_attack_wave_units,
+		rally_position,
+		_attack_wave_min_non_hero_units,
+		match_elapsed_seconds
+	)
+	if not commitment.get("can_commit", false):
+		abort_attack_wave(tree, "requirements not met")
+		return
+
+	if try_claim_army_mode(ArmyMode.REGROUPING):
+		pass
+
+	_suspend_units_for_attack_wave(tree)
+	_transition_attack_wave_state(AttackWaveState.GATHERING, "gathering at staging")
+
+
+static func _tick_attack_wave_gathering(
+	tree: SceneTree,
+	delta: float,
+	match_elapsed_seconds: float
+) -> void:
+	if should_recall_offensive_for_defense(tree):
+		abort_attack_wave(tree, "base defense override")
+		return
+
+	_attack_wave_gather_pull_timer += delta
+	_attack_wave_units = _sanitize_attack_wave_units(_attack_wave_units)
+
+	if _attack_wave_gather_pull_timer >= 1.0:
+		_attack_wave_gather_pull_timer = 0.0
+		pull_straggler_units_to_rally(tree, _attack_wave_staging_point, WAVE_REGROUP_MAX_DISTANCE)
+		pull_reinforcement_units_to_rally(tree, _attack_wave_staging_point)
+
+	var refreshed_plan: Dictionary = build_regrouped_attack_wave_units(
+		tree,
+		_attack_wave_staging_point,
+		_attack_wave_min_non_hero_units
+	)
+	if refreshed_plan.get("can_launch", false):
+		_attack_wave_units = _sanitize_attack_wave_units(refreshed_plan.get("units", _attack_wave_units))
+
+	_issue_attack_wave_hold_at_staging(_attack_wave_units)
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null:
+		_suspend_hero_for_attack_wave(hero)
+		_issue_hero_to_staging(hero)
+
+	var counts: Dictionary = _count_wave_units_near_staging(_attack_wave_units)
+	var required_non_hero: int = maxi(
+		1,
+		int(ceil(float(counts.get("non_hero_total", 0)) * ATTACK_WAVE_GATHER_PERCENT))
+	)
+	var gather_ready: bool = (
+		int(counts.get("non_hero_gathered", 0)) >= required_non_hero
+		and int(counts.get("non_hero_gathered", 0)) >= _attack_wave_min_non_hero_units
+	)
+	var state_elapsed_seconds: float = float(
+		Time.get_ticks_msec() - _attack_wave_state_msec
+	) / 1000.0
+	var gather_timeout: bool = state_elapsed_seconds >= WAVE_REINFORCEMENT_WAIT_SECONDS
+
+	if not gather_ready and not gather_timeout:
+		return
+
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	var commitment: Dictionary = can_commit_attack_wave(
+		tree,
+		_attack_wave_units,
+		rally_position,
+		_attack_wave_min_non_hero_units,
+		match_elapsed_seconds
+	)
+	if not commitment.get("can_commit", false):
+		abort_attack_wave(tree, "force too weak after gather")
+		return
+
+	if hero != null and not _is_hero_at_staging(hero):
+		_transition_attack_wave_state(AttackWaveState.WAITING_FOR_HERO, "hero not at staging")
+		return
+
+	_transition_attack_wave_state(AttackWaveState.REGROUPING, "army gathered")
+
+
+static func _tick_attack_wave_waiting_for_hero(tree: SceneTree, delta: float) -> void:
+	if should_recall_offensive_for_defense(tree):
+		abort_attack_wave(tree, "base defense override")
+		return
+
+	_attack_wave_hero_wait_timer += delta
+	_issue_attack_wave_hold_at_staging(_attack_wave_units)
+
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero == null:
+		if _can_attack_without_hero(tree):
+			_transition_attack_wave_state(AttackWaveState.REGROUPING, "hero dead, army sufficient")
+		else:
+			abort_attack_wave(tree, "hero dead and army too weak")
+		return
+
+	_suspend_hero_for_attack_wave(hero)
+	_issue_hero_to_staging(hero)
+
+	if _is_hero_at_staging(hero):
+		print("AI ATTACK: hero joined wave")
+		_transition_attack_wave_state(AttackWaveState.REGROUPING, "hero joined wave")
+		return
+
+	if _attack_wave_hero_wait_timer < ATTACK_WAVE_HERO_WAIT_TIMEOUT_SECONDS:
+		return
+
+	if _attack_wave_hero_unreachable_retries < 1:
+		_attack_wave_hero_unreachable_retries += 1
+		_attack_wave_hero_wait_timer = 0.0
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		_attack_wave_staging_point = resolve_attack_staging_point(
+			tree,
+			rally_position,
+			_attack_wave_target_position
+		)
+		cancel_offensive_orders(tree)
+		_issue_hero_to_staging(hero)
+		_issue_attack_wave_hold_at_staging(_attack_wave_units)
+		return
+
+	abort_attack_wave(tree, "hero was unreachable")
+
+
+static func _tick_attack_wave_regrouping(
+	tree: SceneTree,
+	delta: float,
+	_match_elapsed_seconds: float
+) -> void:
+	if _attack_wave_ready_to_advance:
+		return
+
+	if should_recall_offensive_for_defense(tree):
+		abort_attack_wave(tree, "base defense override")
+		return
+
+	_attack_wave_regroup_timer += delta
+	var regroup_center: Vector3 = _attack_wave_staging_point
+	var army_center: Vector3 = compute_army_center(_attack_wave_units)
+	if army_center != Vector3.ZERO and get_army_mode() in [ArmyMode.ATTACKING, ArmyMode.CREEPING]:
+		regroup_center = army_center
+
+	_issue_attack_wave_hold_at_staging(_attack_wave_units)
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero != null:
+		_suspend_hero_for_attack_wave(hero)
+		if not _is_hero_at_staging(hero) and regroup_center == _attack_wave_staging_point:
+			_issue_hero_to_staging(hero)
+
+	var counts: Dictionary = _count_wave_units_near_staging(_attack_wave_units)
+	if regroup_center != _attack_wave_staging_point:
+		counts = {
+			"non_hero_gathered": filter_units_near_rally(
+				_attack_wave_units,
+				regroup_center,
+				ATTACK_WAVE_COHESION_RADIUS
+			).size(),
+			"non_hero_total": _attack_wave_units.size(),
+		}
+
+	var non_hero_total: int = maxi(1, int(counts.get("non_hero_total", 1)))
+	var cohesion_ratio: float = float(counts.get("non_hero_gathered", 0)) / float(non_hero_total)
+	var regroup_ready: bool = cohesion_ratio >= ATTACK_WAVE_REGROUP_PERCENT
+	var regroup_timeout: bool = _attack_wave_regroup_timer >= ATTACK_WAVE_REGROUP_TIMEOUT_SECONDS
+
+	if hero != null and not _is_hero_at_staging(hero) and not _can_attack_without_hero(tree):
+		_transition_attack_wave_state(AttackWaveState.WAITING_FOR_HERO, "hero separated")
+		return
+
+	if not regroup_ready and not regroup_timeout:
+		return
+
+	_attack_wave_ready_to_advance = true
+	_transition_attack_wave_state(AttackWaveState.REGROUPING, "wave ready to advance")
+
+
+static func _tick_attack_wave_advancing(tree: SceneTree, delta: float) -> void:
+	if should_retreat_from_fight(tree) or should_abort_offensive_push(tree):
+		notify_attack_wave_retreat_started("low army strength")
+		initiate_group_retreat(tree, "attack wave retreat")
+		return
+
+	if should_recall_offensive_for_defense(tree):
+		notify_attack_wave_retreat_started("base defense recall")
+		initiate_group_retreat(tree, "defense override")
+		return
+
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	if wave_units.is_empty():
+		wave_units = _sanitize_attack_wave_units(_attack_wave_units)
+
+	var army_center: Vector3 = compute_army_center(wave_units)
+	if army_center != Vector3.ZERO and _attack_wave_target_position != Vector3.ZERO:
+		if horizontal_distance(army_center, _attack_wave_target_position) <= ATTACK_WAVE_ENGAGE_DISTANCE:
+			confirm_attack_wave_engaging()
+
+	var cohesion: float = _estimate_attack_wave_cohesion(wave_units)
+	if cohesion < ATTACK_WAVE_MIN_COHESION_RATIO and army_center != Vector3.ZERO:
+		_attack_wave_staging_point = army_center
+		_attack_wave_ready_to_advance = false
+		_transition_attack_wave_state(AttackWaveState.REGROUPING, "poor cohesion during advance")
+
+
+static func _tick_attack_wave_engaging(tree: SceneTree, delta: float) -> void:
+	if should_retreat_from_fight(tree) or should_abort_offensive_push(tree):
+		notify_attack_wave_retreat_started("fight unfavorable")
+		initiate_group_retreat(tree, "attack wave retreat")
+		return
+
+	if should_recall_offensive_for_defense(tree):
+		notify_attack_wave_retreat_started("base defense recall")
+		initiate_group_retreat(tree, "defense override")
+		return
+
+	var wave_units: Array = _collect_living_offensive_wave_units(tree)
+	var cohesion: float = _estimate_attack_wave_cohesion(wave_units)
+	if cohesion < ATTACK_WAVE_MIN_COHESION_RATIO * 0.85 and wave_units.size() >= 4:
+		var army_center: Vector3 = compute_army_center(wave_units)
+		if army_center != Vector3.ZERO:
+			_attack_wave_staging_point = army_center
+			_transition_attack_wave_state(AttackWaveState.REGROUPING, "fragmented during engagement")
+
+
+static func _tick_attack_wave_retreating(tree: SceneTree, delta: float) -> void:
+	if get_army_mode() != ArmyMode.RETREATING:
+		notify_attack_wave_retreat_complete(tree)
+
+
+static func _tick_attack_wave_recovering(tree: SceneTree, delta: float) -> void:
+	_attack_wave_recovery_timer += delta
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position != Vector3.ZERO:
+		pull_reinforcement_units_to_rally(tree, rally_position)
+
+	if _attack_wave_recovery_timer < ATTACK_WAVE_RECOVERY_COOLDOWN_SECONDS:
+		return
+
+	_attack_wave_units.clear()
+	_attack_wave_staging_point = Vector3.ZERO
+	_attack_wave_target_position = Vector3.ZERO
+	_attack_wave_target_node = null
+	_attack_wave_ready_to_advance = false
+	_attack_wave_min_non_hero_units = 0
+	_transition_attack_wave_state(AttackWaveState.NONE, "recovery complete")
+
+
+static func _estimate_attack_wave_cohesion(units: Array) -> float:
+	units = _sanitize_attack_wave_units(units)
+	if units.size() <= 1:
+		return 1.0
+
+	var center: Vector3 = compute_army_center(units)
+	if center == Vector3.ZERO:
+		return 0.0
+
+	var grouped: Array = filter_units_near_rally(units, center, ATTACK_WAVE_COHESION_RADIUS)
+	return float(grouped.size()) / float(units.size())
+
+
+static func _find_exposed_player_army_cluster(
+	tree: SceneTree,
+	from_position: Vector3
+) -> Dictionary:
+	var player_units: Array = collect_player_military_near(
+		tree,
+		from_position,
+		EXPOSED_PLAYER_ARMY_SEARCH_RANGE
+	)
+	player_units = NodeSafety.clean_node_array(player_units)
+	if player_units.size() < EXPOSED_PLAYER_ARMY_MIN_UNITS:
+		return {}
+
+	var cluster_position: Vector3 = compute_army_center(player_units)
+	if cluster_position == Vector3.ZERO:
+		return {}
+
+	var nearby_army: Array = collect_player_military_near(
+		tree,
+		cluster_position,
+		LOCAL_FIGHT_RADIUS
+	)
+	if nearby_army.size() < EXPOSED_PLAYER_ARMY_MIN_UNITS:
+		return {}
+
+	var strongest: Node3D = null
+	var strongest_power: int = 0
+	for unit: Variant in nearby_army:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		var power: int = estimate_military_power([unit])
+		if power > strongest_power:
+			strongest_power = power
+			strongest = unit as Node3D
+
+	return {
+		"node": strongest,
+		"position": cluster_position,
+		"unit_count": nearby_army.size(),
+	}
+
+
+static func _find_player_production_building(tree: SceneTree, from_position: Vector3) -> Node3D:
+	var closest_building: Node3D = null
+	var closest_distance: float = INF
+
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, BUILDINGS_GROUP):
+		if not node is Building:
+			continue
+
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+
+		if not _is_living_building(node as Building):
+			continue
+
+		if not (node is Barracks or node is Stable or node is ArtilleryDepot or node is Academy):
+			continue
+
+		var building: Node3D = node as Node3D
+		var distance: float = _horizontal_distance(from_position, building.global_position)
+		if distance > IMPORTANT_BUILDING_SEARCH_RANGE:
+			continue
+
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_building = building
+
+	return closest_building
+
+
 static func get_active_wave_start_unit_count() -> int:
 	return _active_wave_start_unit_count
 
@@ -870,9 +1705,12 @@ static func get_active_wave_start_unit_count() -> int:
 static func begin_offensive_wave(wave_units: Array) -> void:
 	wave_units = NodeSafety.clean_node_array(wave_units)
 	_active_wave_start_unit_count = wave_units.size()
+	_attack_wave_units = wave_units.duplicate()
 	_objective_reissue_timer = 0.0
 	_objective_stuck_timer = 0.0
 	_objective_last_building_health = -1
+	if _attack_wave_state == AttackWaveState.ADVANCING:
+		_transition_attack_wave_state(AttackWaveState.ENGAGING, "offensive wave committed")
 
 
 static func set_attack_objective(objective: Node3D, position: Vector3) -> void:
@@ -888,6 +1726,8 @@ static func get_attack_objective_position() -> Vector3:
 
 
 static func prepare_defense_recall(tree: SceneTree) -> void:
+	if is_attack_wave_active():
+		abort_attack_wave(tree, "defense override recall")
 	cancel_offensive_orders(tree)
 	clear_offensive_wave_tracking()
 
@@ -1405,7 +2245,12 @@ static func _collect_living_offensive_wave_units(tree: SceneTree) -> Array:
 
 
 static func abort_offensive_and_regroup(tree: SceneTree) -> bool:
+	if is_attack_wave_active():
+		notify_attack_wave_retreat_started("offensive abort")
+
 	if get_army_mode() != ArmyMode.ATTACKING and get_army_mode() != ArmyMode.CREEPING:
+		if is_attack_wave_active():
+			abort_attack_wave(tree, "offensive aborted")
 		return false
 
 	if initiate_group_retreat(tree, "offensive abort"):
@@ -2120,10 +2965,13 @@ static func collect_reinforcement_waiting_units(tree: SceneTree) -> Array:
 
 static func _register_reinforcement_waiting(
 	tree: SceneTree,
-	unit: Unit,
+	unit,
 	rally_position: Vector3,
 	reason: String = "spawn_complete"
 ) -> void:
+	if not _is_valid_attack_unit(unit) or not is_combat_unit(unit):
+		return
+
 	if rally_position == Vector3.ZERO:
 		return
 
@@ -2996,11 +3844,28 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 	if _finishing_mode_active:
 		return resolve_finishing_attack_objective(tree, fallback_position)
 
-	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
-	if command_center != null:
+	if (
+		_attack_wave_target_node != null
+		and NodeSafety.is_alive_node(_attack_wave_target_node)
+		and Time.get_ticks_msec() < _attack_wave_target_committed_until_msec
+	):
 		return {
-			"node": command_center,
-			"position": command_center.global_position,
+			"node": _attack_wave_target_node,
+			"position": _attack_wave_target_position,
+		}
+
+	var exposed_army: Dictionary = _find_exposed_player_army_cluster(tree, fallback_position)
+	if not exposed_army.is_empty():
+		return {
+			"node": exposed_army.get("node"),
+			"position": exposed_army.get("position", fallback_position),
+		}
+
+	var production_building: Node3D = _find_player_production_building(tree, fallback_position)
+	if production_building != null:
+		return {
+			"node": production_building,
+			"position": production_building.global_position,
 		}
 
 	var important_building: Node3D = _find_nearest_important_player_building(
@@ -3011,6 +3876,13 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 		return {
 			"node": important_building,
 			"position": important_building.global_position,
+		}
+
+	var command_center: CommandCenter = _resolve_living_player_command_center(tree)
+	if command_center != null:
+		return {
+			"node": command_center,
+			"position": command_center.global_position,
 		}
 
 	var nearest_building: Node3D = _find_nearest_living_player_building(
@@ -3025,6 +3897,19 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 
 	var nearest_worker: Node3D = _find_nearest_living_player_worker(tree, fallback_position)
 	if nearest_worker != null:
+		var nearby_army: Array = collect_player_military_near(
+			tree,
+			nearest_worker.global_position,
+			LOCAL_FIGHT_RADIUS
+		)
+		if nearby_army.size() >= EXPOSED_PLAYER_ARMY_MIN_UNITS:
+			var cluster_position: Vector3 = compute_army_center(nearby_army)
+			if cluster_position != Vector3.ZERO:
+				return {
+					"node": nearby_army[0] as Node3D,
+					"position": cluster_position,
+				}
+
 		return {
 			"node": nearest_worker,
 			"position": nearest_worker.global_position,

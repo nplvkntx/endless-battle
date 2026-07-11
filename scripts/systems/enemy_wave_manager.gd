@@ -59,6 +59,11 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	EnemyArmyCommand.update_finishing_mode(get_tree(), delta)
 	_cache_player_base_position()
+
+	var match_elapsed_seconds: float = _get_match_elapsed_seconds()
+	EnemyArmyCommand.tick_attack_wave_state(get_tree(), delta, match_elapsed_seconds)
+	_process_attack_wave_advance()
+
 	_process_wave_gather(delta)
 	_process_large_army_fallback(delta)
 	_process_finishing_mode(delta)
@@ -73,12 +78,31 @@ func _process(delta: float) -> void:
 		_offensive_monitor_timer = 0.0
 		_monitor_active_offensive_push()
 
-	EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), delta)
+	if EnemyArmyCommand.get_attack_wave_state() in [
+		EnemyArmyCommand.AttackWaveState.ADVANCING,
+		EnemyArmyCommand.AttackWaveState.ENGAGING,
+	]:
+		EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), delta)
 
 	_regroup_timer += delta
 	if _regroup_timer >= ARMY_REGROUP_INTERVAL_SECONDS:
 		_regroup_timer = 0.0
 		_enforce_army_regroup_when_waiting()
+
+
+func _process_attack_wave_advance() -> void:
+	var advance_request: Dictionary = EnemyArmyCommand.consume_attack_wave_advance_request()
+	if advance_request.is_empty():
+		return
+
+	var wave_units: Array = advance_request.get("units", [])
+	var attack_destination: Vector3 = advance_request.get("destination", Vector3.ZERO)
+	if wave_units.is_empty() or attack_destination == Vector3.ZERO:
+		EnemyArmyCommand.abort_attack_wave(get_tree(), "invalid advance request")
+		return
+
+	_launch_attack_wave(wave_units, attack_destination)
+	EnemyArmyCommand.confirm_attack_wave_advance_started()
 
 
 func _update_hero_army_behavior() -> void:
@@ -88,8 +112,25 @@ func _update_hero_army_behavior() -> void:
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	var health_ratio: float = EnemyArmyCommand.get_health_ratio(hero)
+	var wave_state: EnemyArmyCommand.AttackWaveState = EnemyArmyCommand.get_attack_wave_state()
 
-	_try_enemy_hero_abilities(hero, health_ratio)
+	if wave_state in [
+		EnemyArmyCommand.AttackWaveState.PREPARING,
+		EnemyArmyCommand.AttackWaveState.GATHERING,
+		EnemyArmyCommand.AttackWaveState.WAITING_FOR_HERO,
+		EnemyArmyCommand.AttackWaveState.REGROUPING,
+	]:
+		_try_enemy_hero_abilities(hero, health_ratio)
+		return
+
+	if wave_state == EnemyArmyCommand.AttackWaveState.RETREATING:
+		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
+
+	if wave_state == EnemyArmyCommand.AttackWaveState.RECOVERING:
+		if health_ratio < EnemyArmyCommand.HERO_WAVE_JOIN_HP_RATIO:
+			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+		return
 
 	if EnemyArmyCommand.is_emergency_defense_active():
 		var emergency_objective: Vector3 = EnemyArmyCommand.get_emergency_defense_objective()
@@ -110,6 +151,27 @@ func _update_hero_army_behavior() -> void:
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
+
+	if wave_state in [
+		EnemyArmyCommand.AttackWaveState.ADVANCING,
+		EnemyArmyCommand.AttackWaveState.ENGAGING,
+	]:
+		_try_enemy_hero_abilities(hero, health_ratio)
+		var wave_units: Array = EnemyArmyCommand.collect_living_combat_units(get_tree())
+		var army_center: Vector3 = EnemyArmyCommand.compute_army_center(wave_units)
+		if army_center != Vector3.ZERO:
+			var distance_to_army: float = _horizontal_distance(hero.global_position, army_center)
+			if distance_to_army > EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY * 0.75:
+				EnemyArmyCommand.with_authorized_orders(func() -> void:
+					EnemyArmyCommand.command_hold_at_rally(
+						[hero],
+						army_center,
+						EnemyUnitMission.Mission.ATTACK
+					)
+				)
+		return
+
+	_try_enemy_hero_abilities(hero, health_ratio)
 
 	if EnemyArmyCommand.is_hero_isolated_near_player_threat(get_tree(), hero):
 		if not EnemyArmyCommand.is_finishing_mode_active():
@@ -171,6 +233,9 @@ func _abort_active_offensive_push(rally_position: Vector3) -> void:
 		_rebuilding_army_after_wave = true
 		_cancel_pending_wave_gather()
 
+	if EnemyArmyCommand.is_attack_wave_active():
+		EnemyArmyCommand.notify_attack_wave_retreat_started("offensive push aborted")
+
 	if rally_position == Vector3.ZERO:
 		return
 
@@ -189,6 +254,10 @@ func _cancel_pending_wave_gather() -> void:
 
 func _process_wave_gather(delta: float) -> void:
 	if _wave_gather_timer < 0.0:
+		return
+
+	if EnemyArmyCommand.is_attack_wave_active():
+		_cancel_pending_wave_gather()
 		return
 
 	_wave_gather_timer += delta
@@ -243,7 +312,14 @@ func _process_wave_gather(delta: float) -> void:
 
 func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void:
 	if _combat_controller == null:
+		EnemyArmyCommand.abort_attack_wave(get_tree(), "no combat controller")
 		return
+
+	wave_units = NodeSafety.clean_node_array(wave_units)
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero != null and is_instance_valid(hero) and not wave_units.has(hero):
+		if EnemyArmyCommand.is_hero_healthy_enough_for_wave(hero):
+			wave_units.append(hero)
 
 	if not _combat_controller.request_assembled_group_move(
 		wave_units,
@@ -251,6 +327,7 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 		EnemyArmyCommand.ArmyMode.ATTACKING,
 		EnemyUnitMission.Mission.ATTACK
 	):
+		EnemyArmyCommand.abort_attack_wave(get_tree(), "assembly rejected")
 		return
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
@@ -266,8 +343,8 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 
 	EnemyArmyCommand.set_rebuilding_army(false)
 	print(
-		"[AI Wave] launching attack with %d units to %s"
-		% [wave_units.size(), str(attack_destination)]
+		"AI ATTACK: engaging with hero and %d units"
+		% wave_units.size()
 	)
 	if _director != null:
 		_director.notify_attack_launched()
@@ -410,6 +487,10 @@ func _on_wave_timer() -> void:
 		_schedule_next_wave()
 		return
 
+	if EnemyArmyCommand.is_attack_wave_active():
+		_schedule_next_wave()
+		return
+
 	if not _has_any_attack_target():
 		_wave_active = false
 		return
@@ -522,13 +603,23 @@ func _on_wave_timer() -> void:
 			return
 		_director.set_attack_target_position(attack_destination)
 
-	_begin_wave_gather(wave_units, attack_destination, min_non_hero_units)
-	_log_wave_trigger_wait(
-		&"wave_gather_started",
-		match_elapsed_seconds,
+	if EnemyArmyCommand.try_begin_attack_wave_preparation(
+		get_tree(),
+		wave_units,
+		attack_destination,
 		min_non_hero_units,
-		{"wave_units": wave_units.size()}
-	)
+		match_elapsed_seconds
+	):
+		_log_wave_trigger_wait(
+			&"wave_gather_started",
+			match_elapsed_seconds,
+			min_non_hero_units,
+			{"wave_units": wave_units.size()}
+		)
+	else:
+		_hold_army_when_too_weak_to_attack(rally_position)
+		if _director != null:
+			_director.notify_attack_failed()
 	_schedule_next_wave()
 
 
@@ -634,6 +725,9 @@ func _count_regrouped_non_hero_units(rally_position: Vector3) -> int:
 
 
 func _enforce_army_regroup_when_waiting() -> void:
+	if EnemyArmyCommand.is_attack_wave_active():
+		return
+
 	if EnemyArmyCommand.get_army_mode() in [
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
@@ -820,6 +914,9 @@ func _process_large_army_fallback(delta: float) -> void:
 	if _wave_gather_timer >= 0.0:
 		return
 
+	if EnemyArmyCommand.is_attack_wave_active():
+		return
+
 	var non_hero_count: int = EnemyArmyCommand.collect_living_non_hero_combat_units(
 		get_tree()
 	).size()
@@ -836,20 +933,21 @@ func _process_large_army_fallback(delta: float) -> void:
 
 
 func _try_launch_fallback_attack() -> void:
+	if EnemyArmyCommand.is_attack_wave_active() or EnemyArmyCommand.is_retreat_on_cooldown():
+		return
+
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	var attack_destination: Vector3 = _resolve_fallback_attack_destination(rally_position)
 	if attack_destination == Vector3.ZERO:
 		return
 
-	var wave_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(
-		get_tree()
-	)
+	var wave_units: Array = EnemyArmyCommand.build_regrouped_attack_wave_units(
+		get_tree(),
+		rally_position,
+		FALLBACK_ATTACK_MIN_COMBAT_UNITS
+	).get("units", [])
 	if wave_units.size() < FALLBACK_ATTACK_MIN_COMBAT_UNITS:
 		return
-
-	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
-	if hero != null and NodeSafety.is_alive_node(hero):
-		wave_units.append(hero)
 
 	_rebuilding_army_after_wave = false
 	EnemyArmyCommand.set_rebuilding_army(false)
@@ -858,7 +956,14 @@ func _try_launch_fallback_attack() -> void:
 	if _director != null:
 		_director.set_attack_target_position(attack_destination)
 
-	_launch_attack_wave(wave_units, attack_destination)
+	if not EnemyArmyCommand.try_begin_attack_wave_preparation(
+		get_tree(),
+		wave_units,
+		attack_destination,
+		FALLBACK_ATTACK_MIN_COMBAT_UNITS,
+		_get_match_elapsed_seconds()
+	):
+		return
 
 
 func _resolve_fallback_attack_destination(rally_position: Vector3) -> Vector3:
@@ -997,5 +1102,24 @@ func _try_launch_finishing_attack() -> void:
 
 	if _director != null:
 		_director.set_attack_target_position(attack_destination)
+
+	if EnemyArmyCommand.is_attack_wave_active():
+		var advance_request: Dictionary = EnemyArmyCommand.consume_attack_wave_advance_request()
+		if not advance_request.is_empty():
+			_launch_attack_wave(
+				advance_request.get("units", wave_units),
+				advance_request.get("destination", attack_destination)
+			)
+			EnemyArmyCommand.confirm_attack_wave_advance_started()
+		return
+
+	if EnemyArmyCommand.try_begin_attack_wave_preparation(
+		get_tree(),
+		wave_units,
+		attack_destination,
+		EnemyArmyCommand.FINISHING_MODE_MIN_PUSH_UNITS,
+		_get_match_elapsed_seconds()
+	):
+		return
 
 	_launch_attack_wave(wave_units, attack_destination)
