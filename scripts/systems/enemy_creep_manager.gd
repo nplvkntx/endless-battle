@@ -66,6 +66,12 @@ func _update_creeping() -> void:
 	if EnemyArmyCommand.is_finishing_mode_active():
 		return
 
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		return
+
+	if not EnemyArmyCommand.allows_creep_orders():
+		return
+
 	if _combat_controller != null and not _combat_controller.can_launch_offensive_action():
 		return
 
@@ -78,9 +84,6 @@ func _update_creeping() -> void:
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]:
-		return
-
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
 		return
 
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:

@@ -170,7 +170,20 @@ func set_attack_target_position(position: Vector3) -> void:
 
 
 func _evaluate_fast() -> void:
+	EnemyArmyCommand.apply_pending_strategic_transition()
 	var tree: SceneTree = get_tree()
+	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
+	if emergency_threat.get("threatened", false):
+		desires["defense"] = 1.0
+		desires["attack"] = 0.0
+		desires["creep"] = 0.0
+		desires["expansion"] = 0.0
+		_set_main_mission(
+			EnemyUnitMission.Mission.DEFEND,
+			"threat near base (%s)" % String(emergency_threat.get("reason", "unknown"))
+		)
+		return
+
 	var threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(tree)
 	if threat.get("threatened", false):
 		desires["defense"] = 1.0
@@ -362,6 +375,10 @@ func _update_desires_from_snapshot() -> void:
 
 
 func _recommend_main_army_mission() -> void:
+	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING:
+		_set_main_mission(EnemyUnitMission.Mission.DEFEND, "emergency defending")
+		return
+
 	if desires["defense"] >= DESIRE_HIGH:
 		return
 

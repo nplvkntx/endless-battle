@@ -29,6 +29,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	EnemyArmyCommand.apply_pending_strategic_transition()
 	EnemyArmyCommand.tick_group_order_batch(get_tree())
 	EnemyArmyCommand.tick_perf_diagnostics(get_tree(), delta)
 	EnemyArmyCommand.tick_retreat_cooldown(delta)
@@ -178,17 +179,31 @@ func request_assembled_group_move(
 	destination: Vector3,
 	mode: EnemyArmyCommand.ArmyMode,
 	mission: EnemyUnitMission.Mission,
-	use_attack_move: bool = true
+	use_attack_move: bool = true,
+	skip_min_army_gate: bool = false
 ) -> bool:
 	units = NodeSafety.clean_node_array(units)
 	units = EnemyArmyCommand.filter_units_for_field_combat(units, mission)
 	if units.is_empty() or destination == Vector3.ZERO:
 		return false
 
+	if mission == EnemyUnitMission.Mission.DEFEND and EnemyArmyCommand.is_defense_blocking_offense():
+		skip_min_army_gate = true
+
+	if mission == EnemyUnitMission.Mission.ATTACK and not EnemyArmyCommand.allows_attack_wave_orders():
+		return false
+
+	if mission == EnemyUnitMission.Mission.CREEP and not EnemyArmyCommand.allows_creep_orders():
+		EnemyArmyCommand.debug_combat_log("AI CREEP: ignoring player creep activity, no favorable interception")
+		return false
+
 	var tree: SceneTree = get_tree()
 	var elapsed: float = get_match_elapsed_seconds()
 	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(elapsed)
-	if mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]:
+	if (
+		not skip_min_army_gate
+		and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
+	):
 		var non_hero_count: int = 0
 		for unit: Variant in units:
 			if EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
@@ -257,6 +272,12 @@ func can_launch_offensive_action() -> bool:
 
 func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if not can_launch_offensive_action():
+		return
+
+	if not EnemyArmyCommand.allows_creep_orders():
+		return
+
+	if EnemyArmyCommand.is_defense_blocking_offense():
 		return
 
 	if EnemyArmyCommand.get_army_mode() not in [
@@ -355,10 +376,12 @@ func _evaluate_player_creep_request(
 	var camp_position: Vector3 = request.get("camp_position", camp.global_position)
 	var player_strength: float = float(request.get("player_strength", 0.0))
 
-	if reason in [&"army_not_ready", &"not_assembled", &"hero_missing", &"cooldown", &"retreat_cooldown"]:
-		if EnemyArmyCommand.horizontal_distance(camp_position, rally_position) < 50.0:
-			return {"decision": &"defend", "player_strength": player_strength, "reason": reason}
-		return {"decision": &"reject", "reason": reason, "player_strength": player_strength}
+	if reason in [&"army_not_ready", &"not_assembled", &"hero_missing", &"cooldown", &"retreat_cooldown", &"outpowered", &"arrival_too_late"]:
+		EnemyArmyCommand.debug_combat_log(
+			"AI CREEP: ignoring player creep activity, no favorable interception (%s)"
+			% String(reason)
+		)
+		return {"decision": &"ignore", "reason": reason, "player_strength": player_strength}
 
 	var ai_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
@@ -381,7 +404,10 @@ func _evaluate_player_creep_request(
 		}
 
 	if EnemyArmyCommand.horizontal_distance(camp_position, rally_position) < 45.0:
-		return {"decision": &"defend", "player_strength": player_strength, "reason": reason}
+		EnemyArmyCommand.debug_combat_log(
+			"AI CREEP: ignoring player creep activity near base, no favorable interception"
+		)
+		return {"decision": &"ignore", "reason": reason, "player_strength": player_strength}
 
 	EnemyArmyCommand.debug_combat_log("ignoring creep contest: %s" % String(reason))
 	return {"decision": &"reject", "reason": reason, "player_strength": player_strength}

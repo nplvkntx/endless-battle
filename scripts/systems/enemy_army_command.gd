@@ -164,6 +164,20 @@ enum AttackWaveState {
 	RECOVERING,
 }
 
+enum StrategicState {
+	ECONOMY,
+	CREEPING,
+	PREPARING_ATTACK,
+	ATTACKING,
+	DEFENDING,
+	EMERGENCY_DEFENDING,
+	RETREATING,
+	RECOVERING,
+}
+
+const STRATEGIC_THREAT_CLEAR_SECONDS := 6.0
+const STRATEGIC_ATTACK_COMMITMENT_SECONDS := 8.0
+
 const ATTACK_WAVE_STAGING_OFFSET := Vector3(8.0, 0.0, 0.0)
 const ATTACK_WAVE_GATHER_PERCENT := 0.75
 const ATTACK_WAVE_REGROUP_PERCENT := 0.70
@@ -185,6 +199,11 @@ const EXPOSED_PLAYER_ARMY_MIN_UNITS := 3
 
 static var _army_mode: ArmyMode = ArmyMode.IDLE
 static var _mode_claim_msec: int = 0
+static var _strategic_state: StrategicState = StrategicState.ECONOMY
+static var _strategic_state_msec: int = 0
+static var _pending_strategic_state: StrategicState = StrategicState.ECONOMY
+static var _pending_strategic_reason: String = ""
+static var _has_pending_strategic_transition: bool = false
 static var _orders_authorized: bool = false
 static var _assembly_timer: float = 0.0
 static var _assembly_rally: Vector3 = Vector3.ZERO
@@ -248,6 +267,160 @@ static var _attack_wave_pending_transition_reason: String = ""
 
 static func get_army_mode() -> ArmyMode:
 	return _army_mode
+
+
+static func get_strategic_state() -> StrategicState:
+	return _strategic_state
+
+
+static func get_strategic_state_priority(state: StrategicState) -> int:
+	match state:
+		StrategicState.EMERGENCY_DEFENDING:
+			return 1
+		StrategicState.DEFENDING:
+			return 2
+		StrategicState.RETREATING:
+			return 3
+		StrategicState.ATTACKING:
+			return 4
+		StrategicState.PREPARING_ATTACK:
+			return 5
+		StrategicState.CREEPING:
+			return 6
+		StrategicState.RECOVERING:
+			return 7
+		StrategicState.ECONOMY:
+			return 8
+		_:
+			return 9
+
+
+static func request_strategic_state(new_state: StrategicState, reason: String = "") -> bool:
+	if new_state == _strategic_state:
+		return false
+
+	if _has_pending_strategic_transition:
+		return false
+
+	var elapsed_seconds: float = float(
+		Time.get_ticks_msec() - _strategic_state_msec
+	) / 1000.0
+	var new_priority: int = get_strategic_state_priority(new_state)
+	var current_priority: int = get_strategic_state_priority(_strategic_state)
+	if (
+		elapsed_seconds < MIN_STATE_DURATION_SECONDS
+		and new_priority > current_priority
+	):
+		return false
+
+	_pending_strategic_state = new_state
+	_pending_strategic_reason = reason
+	_has_pending_strategic_transition = true
+	return true
+
+
+static func apply_pending_strategic_transition() -> void:
+	if not _has_pending_strategic_transition:
+		return
+
+	var previous_state: StrategicState = _strategic_state
+	_strategic_state = _pending_strategic_state
+	_strategic_state_msec = Time.get_ticks_msec()
+	_has_pending_strategic_transition = false
+	_log_strategic_state_change(previous_state, _strategic_state, _pending_strategic_reason)
+	_pending_strategic_reason = ""
+
+
+static func allows_offensive_orders() -> bool:
+	return _strategic_state not in [
+		StrategicState.EMERGENCY_DEFENDING,
+		StrategicState.DEFENDING,
+		StrategicState.RETREATING,
+		StrategicState.RECOVERING,
+	]
+
+
+static func allows_creep_orders() -> bool:
+	if not allows_offensive_orders():
+		return false
+
+	return _strategic_state in [
+		StrategicState.ECONOMY,
+		StrategicState.CREEPING,
+		StrategicState.RECOVERING,
+	]
+
+
+static func allows_attack_wave_orders() -> bool:
+	if not allows_offensive_orders():
+		return false
+
+	return _strategic_state in [
+		StrategicState.ECONOMY,
+		StrategicState.PREPARING_ATTACK,
+		StrategicState.ATTACKING,
+		StrategicState.RECOVERING,
+	]
+
+
+static func is_defense_blocking_offense() -> bool:
+	return _strategic_state in [
+		StrategicState.EMERGENCY_DEFENDING,
+		StrategicState.DEFENDING,
+	]
+
+
+static func _log_strategic_state_change(
+	from_state: StrategicState,
+	to_state: StrategicState,
+	reason: String
+) -> void:
+	var message: String = ""
+	match to_state:
+		StrategicState.PREPARING_ATTACK:
+			message = "AI STRATEGY: preparing coordinated attack"
+		StrategicState.ATTACKING:
+			message = "AI STRATEGY: launching attack"
+		StrategicState.EMERGENCY_DEFENDING:
+			message = "AI DEFENSE: emergency override activated"
+		StrategicState.DEFENDING:
+			message = "AI DEFENSE: defending base"
+		StrategicState.RETREATING:
+			if reason.contains("pursuit"):
+				message = "AI ATTACK: player retreating, continuing limited pursuit"
+			else:
+				message = "AI ATTACK: retreating due to unfavorable strength"
+		StrategicState.CREEPING:
+			message = "AI CREEP: clearing neutral camps"
+		StrategicState.RECOVERING:
+			message = "AI DEFENSE: threat cleared, regrouping"
+		_:
+			pass
+
+	if not message.is_empty():
+		print(message if reason.is_empty() else "%s (%s)" % [message, reason])
+
+
+static func _strategic_state_label(state: StrategicState) -> String:
+	match state:
+		StrategicState.ECONOMY:
+			return "ECONOMY"
+		StrategicState.CREEPING:
+			return "CREEPING"
+		StrategicState.PREPARING_ATTACK:
+			return "PREPARING_ATTACK"
+		StrategicState.ATTACKING:
+			return "ATTACKING"
+		StrategicState.DEFENDING:
+			return "DEFENDING"
+		StrategicState.EMERGENCY_DEFENDING:
+			return "EMERGENCY_DEFENDING"
+		StrategicState.RETREATING:
+			return "RETREATING"
+		StrategicState.RECOVERING:
+			return "RECOVERING"
+		_:
+			return "UNKNOWN"
 
 
 static func is_retreat_on_cooldown() -> bool:
@@ -321,6 +494,39 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 
 	if is_attack_wave_active() and mission == EnemyUnitMission.Mission.CREEP:
 		return false
+
+	if is_defense_blocking_offense():
+		if mission in [
+			EnemyUnitMission.Mission.ATTACK,
+			EnemyUnitMission.Mission.CREEP,
+			EnemyUnitMission.Mission.ECONOMY,
+			EnemyUnitMission.Mission.BUILD,
+			EnemyUnitMission.Mission.IDLE,
+		]:
+			return false
+
+	if _strategic_state == StrategicState.RETREATING:
+		if mission in [
+			EnemyUnitMission.Mission.ATTACK,
+			EnemyUnitMission.Mission.CREEP,
+			EnemyUnitMission.Mission.DEFEND,
+		]:
+			return false
+
+	if _strategic_state == StrategicState.RECOVERING:
+		if mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]:
+			return false
+
+	if _strategic_state == StrategicState.CREEPING:
+		if mission == EnemyUnitMission.Mission.ATTACK and not is_attack_wave_active():
+			return false
+
+	if _strategic_state in [
+		StrategicState.PREPARING_ATTACK,
+		StrategicState.ATTACKING,
+	]:
+		if mission == EnemyUnitMission.Mission.CREEP:
+			return false
 
 	match mission:
 		EnemyUnitMission.Mission.RETREAT, EnemyUnitMission.Mission.REGROUP, EnemyUnitMission.Mission.IDLE, EnemyUnitMission.Mission.REINFORCEMENT_WAIT:
@@ -514,6 +720,9 @@ static func should_retreat_from_fight(tree: SceneTree) -> bool:
 		return false
 	_last_combat_eval_msec = now_msec
 
+	if is_defense_blocking_offense():
+		return false
+
 	var anchor: Vector3 = _fight_anchor_position
 	if anchor == Vector3.ZERO:
 		anchor = compute_army_center(collect_living_combat_units(tree))
@@ -521,6 +730,24 @@ static func should_retreat_from_fight(tree: SceneTree) -> bool:
 	var balance: Dictionary = estimate_local_fight_balance(tree, anchor)
 	var ratio: float = float(balance.get("ratio", 1.0))
 	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ai_strength: float = float(balance.get("ai_strength", 0.0))
+
+	if player_strength <= 0.0 or player_strength < ai_strength * 0.25:
+		if ratio >= 1.0 and get_army_mode() == ArmyMode.ATTACKING:
+			var army_center: Vector3 = compute_army_center(balance.get("ai_units", []))
+			var chase_target: Vector3 = _active_wave_objective_position
+			if chase_target == Vector3.ZERO:
+				chase_target = army_center
+			if should_stop_chase(tree, anchor, army_center, chase_target):
+				_debug_combat("ending limited pursuit at chase boundary")
+				return false
+			_debug_combat("continuing limited pursuit while player retreats")
+			return false
+		if player_strength <= 0.0 and get_army_mode() in [
+			ArmyMode.DEFENDING,
+			ArmyMode.INTERCEPTING,
+		]:
+			return false
 
 	if player_strength > 0.0 and ratio <= RETREAT_STRENGTH_RATIO:
 		_debug_combat("retreating: ratio %.2f" % ratio)
@@ -605,6 +832,7 @@ static func initiate_group_retreat(tree: SceneTree, reason: String = "") -> bool
 	_retreat_cooldown = RETREAT_COOLDOWN_SECONDS
 	_fight_start_strength = 0.0
 	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RETREAT, reason)
+	request_strategic_state(StrategicState.RETREATING, reason)
 	return true
 
 
@@ -623,6 +851,7 @@ static func complete_retreat_to_regroup(tree: SceneTree) -> void:
 		set_rebuilding_army(true)
 		command_regroup_at_rally(tree, rally)
 		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat")
+		request_strategic_state(StrategicState.RECOVERING, "post-retreat")
 		if _attack_wave_state == AttackWaveState.RETREATING:
 			notify_attack_wave_retreat_complete(tree)
 
@@ -838,8 +1067,28 @@ static func issue_group_combat_move(
 		_debug_combat("order blocked: retreat cooldown")
 		return false
 
+	if mission == EnemyUnitMission.Mission.CREEP and not allows_creep_orders():
+		_debug_combat("order blocked: strategic state forbids creep")
+		return false
+
+	if mission == EnemyUnitMission.Mission.ATTACK and not allows_offensive_orders():
+		_debug_combat("order blocked: strategic state forbids attack")
+		return false
+
 	if not try_claim_army_mode(mode, allow_attack_override_creep):
 		return false
+
+	if mission == EnemyUnitMission.Mission.ATTACK:
+		request_strategic_state(StrategicState.ATTACKING, "group attack move")
+	elif mission == EnemyUnitMission.Mission.CREEP:
+		request_strategic_state(StrategicState.CREEPING, "group creep move")
+	elif mission == EnemyUnitMission.Mission.DEFEND:
+		var defense_state: StrategicState = (
+			StrategicState.EMERGENCY_DEFENDING
+			if _emergency_defense_active
+			else StrategicState.DEFENDING
+		)
+		request_strategic_state(defense_state, "group defense move")
 
 	begin_fight_tracking(units, compute_army_center(units))
 	with_authorized_orders(func() -> void:
@@ -881,7 +1130,8 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 		EnemyUnitMission.Mission.DEFEND,
 		"emergency defense"
 	)
-	print("[AI] EMERGENCY DEFENSE START threat=%s" % String(reason))
+	request_strategic_state(StrategicState.EMERGENCY_DEFENDING, String(reason))
+	print("AI DEFENSE: Town Center under attack" if reason == &"town_center" else "[AI] EMERGENCY DEFENSE START threat=%s" % String(reason))
 
 
 static func update_emergency_defense_threat(threat: Dictionary) -> void:
@@ -903,7 +1153,8 @@ static func deactivate_emergency_defense() -> void:
 		EnemyUnitMission.Mission.REGROUP,
 		"emergency ended"
 	)
-	print("[AI] EMERGENCY DEFENSE END")
+	request_strategic_state(StrategicState.RECOVERING, "emergency ended")
+	print("AI DEFENSE: threat cleared, regrouping")
 
 
 static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
@@ -1026,6 +1277,7 @@ static func try_begin_attack_wave_preparation(
 	_commit_attack_wave_target(target_node, target_position)
 
 	_transition_attack_wave_state(AttackWaveState.PREPARING, "preparing wave")
+	request_strategic_state(StrategicState.PREPARING_ATTACK, "attack wave preparation")
 	_suspend_units_for_attack_wave(tree)
 	return true
 
@@ -3077,6 +3329,9 @@ static func evaluate_creep_contest_request(
 	if is_creep_contest_on_cooldown(camp):
 		return {"allowed": false, "reason": &"cooldown"}
 
+	if not allows_creep_orders():
+		return {"allowed": false, "reason": &"strategic_blocked"}
+
 	if is_retreat_on_cooldown():
 		return {"allowed": false, "reason": &"retreat_cooldown"}
 
@@ -3244,6 +3499,9 @@ static func tick_reinforcement_pool(tree: SceneTree, match_elapsed_seconds: floa
 
 	var army_mode: ArmyMode = get_army_mode()
 	if army_mode in [ArmyMode.RETREATING, ArmyMode.ASSEMBLING]:
+		return
+
+	if is_defense_blocking_offense():
 		return
 
 	if army_mode in [ArmyMode.ATTACKING, ArmyMode.CREEPING]:
@@ -3573,7 +3831,10 @@ static func should_allow_finishing_during_emergency(
 		return false
 
 	var reason: StringName = threat.get("reason", &"")
-	if reason == &"town_center" or reason == &"production":
+	if reason in [&"town_center", &"production", &"buildings", &"workers", &"base"]:
+		return false
+
+	if threat.get("force_recall", false):
 		return false
 
 	if not _is_attack_close_to_winning(tree):
@@ -3619,13 +3880,81 @@ static func pull_emergency_defense_reinforcements(
 
 static func build_defense_army(
 	tree: SceneTree,
-	_threat_anchor: Vector3 = Vector3.ZERO
+	threat_anchor: Vector3 = Vector3.ZERO
 ) -> Array:
-	if resolve_enemy_rally_position(tree) == Vector3.ZERO:
+	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
 		return []
 
-	# Rally every living combat unit so defense never trickles in one or two soldiers.
-	return collect_living_combat_units(tree)
+	var defense_army: Array = collect_living_combat_units(tree)
+	return ensure_defense_hero_included(tree, defense_army, threat_anchor)
+
+
+static func ensure_defense_hero_included(
+	tree: SceneTree,
+	defense_army: Array,
+	threat_anchor: Vector3 = Vector3.ZERO
+) -> Array:
+	defense_army = NodeSafety.clean_node_array(defense_army)
+	var hero: Hero = find_living_enemy_hero(tree)
+	if hero == null or not is_instance_valid(hero):
+		return defense_army
+
+	if get_health_ratio(hero) < EMERGENCY_HERO_JOIN_HP_RATIO:
+		return defense_army
+
+	if defense_army.has(hero):
+		return defense_army
+
+	if threat_anchor != Vector3.ZERO:
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		var max_distance: float = DEFENSE_GATHER_MAX_DISTANCE + DEFENSE_HERO_EXTRA_GATHER_DISTANCE
+		if (
+			rally_position != Vector3.ZERO
+			and horizontal_distance(hero.global_position, rally_position) > max_distance
+			and horizontal_distance(hero.global_position, threat_anchor) > max_distance
+		):
+			return defense_army
+
+	defense_army.append(hero)
+	return defense_army
+
+
+static func is_critical_defense_threat(threat: Dictionary) -> bool:
+	var reason: StringName = threat.get("reason", &"")
+	return (
+		threat.get("force_recall", false)
+		or threat.get("force_commit", false)
+		or reason in [
+			&"town_center",
+			&"production",
+			&"buildings",
+			&"workers",
+			&"base",
+		]
+	)
+
+
+static func is_meaningful_player_threat_to_army(
+	tree: SceneTree,
+	army_units: Array,
+	search_range: float
+) -> bool:
+	army_units = NodeSafety.clean_node_array(army_units)
+	var army_center: Vector3 = compute_army_center(army_units)
+	if army_center == Vector3.ZERO:
+		return false
+
+	var player_units: Array = collect_player_military_near(tree, army_center, search_range)
+	if player_units.is_empty():
+		return false
+
+	var ai_strength: float = estimate_combat_strength(army_units)
+	var player_strength: float = estimate_combat_strength(player_units)
+	if player_strength >= ai_strength * 0.3:
+		return true
+
+	return player_units.size() >= 3
 
 
 static func evaluate_defense_commitment(
@@ -3647,7 +3976,8 @@ static func evaluate_defense_commitment(
 		"can_commit": should_defense_commit_attack(
 			defense_army,
 			int(defender_strength),
-			int(threat_strength)
+			int(threat_strength),
+			_emergency_defense_active
 		),
 	}
 
@@ -3655,8 +3985,12 @@ static func evaluate_defense_commitment(
 static func should_defense_commit_attack(
 	defense_army: Array,
 	defender_power: int,
-	threat_power: int
+	threat_power: int,
+	force_commit: bool = false
 ) -> bool:
+	if force_commit:
+		return not defense_army.is_empty()
+
 	if defense_army.is_empty():
 		return false
 
@@ -3789,13 +4123,7 @@ static func is_enemy_army_under_attack(
 	army_units: Array,
 	search_range: float
 ) -> bool:
-	var army_center: Vector3 = compute_army_center(army_units)
-	if army_center == Vector3.ZERO:
-		return false
-
-	return (
-		_find_player_military_near_position(tree, army_center, search_range) != null
-	)
+	return is_meaningful_player_threat_to_army(tree, army_units, search_range)
 
 
 static func find_living_player_command_center(tree: SceneTree) -> CommandCenter:
@@ -4418,6 +4746,22 @@ static func _evaluate_emergency_command_center_threat(tree: SceneTree) -> Dictio
 				&"town_center",
 				true
 			)
+
+		if get_health_ratio(building) < 0.995:
+			var damage_attacker: Node3D = _find_player_military_near_position(
+				tree,
+				building_position,
+				BUILDING_THREAT_RANGE
+			)
+			if damage_attacker != null:
+				return _build_emergency_threat_result(
+					_resolve_player_threat_cluster_position(
+						tree,
+						damage_attacker.global_position
+					),
+					&"town_center",
+					true
+				)
 
 		var nearby_threat: Node3D = _find_player_military_near_position(
 			tree,

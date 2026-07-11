@@ -57,6 +57,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	EnemyArmyCommand.apply_pending_strategic_transition()
 	EnemyArmyCommand.update_finishing_mode(get_tree(), delta)
 	_cache_player_base_position()
 
@@ -137,7 +138,14 @@ func _update_hero_army_behavior() -> void:
 		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 			return
-		# Hero joins emergency defense only as part of the assembled defense group.
+		if emergency_objective != Vector3.ZERO:
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_attack_move(
+					[hero],
+					emergency_objective,
+					EnemyUnitMission.Mission.DEFEND
+				)
+			)
 		return
 
 	if EnemyArmyCommand.get_army_mode() in [
@@ -146,6 +154,19 @@ func _update_hero_army_behavior() -> void:
 	]:
 		if health_ratio < EnemyArmyCommand.HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO:
 			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
+			return
+		var defense_objective: Vector3 = EnemyArmyCommand.get_emergency_defense_objective()
+		if defense_objective == Vector3.ZERO:
+			var threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(get_tree())
+			defense_objective = threat.get("intercept_position", Vector3.ZERO)
+		if defense_objective != Vector3.ZERO:
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_attack_move(
+					[hero],
+					defense_objective,
+					EnemyUnitMission.Mission.DEFEND
+				)
+			)
 		return
 
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
@@ -343,7 +364,7 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 
 	EnemyArmyCommand.set_rebuilding_army(false)
 	print(
-		"AI ATTACK: engaging with hero and %d units"
+		"AI STRATEGY: launching attack with hero and %d units"
 		% wave_units.size()
 	)
 	if _director != null:
@@ -474,6 +495,10 @@ func _schedule_next_wave() -> void:
 
 func _on_wave_timer() -> void:
 	if not _wave_active:
+		return
+
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		_schedule_next_wave()
 		return
 
 	if EnemyArmyCommand.get_army_mode() in [
