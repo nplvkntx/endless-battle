@@ -885,15 +885,15 @@ func _production_icons_visible() -> bool:
 
 
 func _refresh_all_production_slots() -> void:
-	if _selected_barracks != null and is_instance_valid(_selected_barracks):
+	if _is_active_selected_building(_selected_barracks):
 		_refresh_barracks_production_slots()
-	if _selected_command_center != null and is_instance_valid(_selected_command_center):
+	if _is_active_command_center(_selected_command_center):
 		_refresh_town_center_production_slot()
-	if _selected_hero_altar != null and is_instance_valid(_selected_hero_altar):
+	if _is_active_selected_building(_selected_hero_altar):
 		_refresh_hero_altar_production_slot()
-	if _selected_stable != null and is_instance_valid(_selected_stable):
+	if _is_active_selected_building(_selected_stable):
 		_refresh_stable_production_slots()
-	if _selected_artillery_depot != null and is_instance_valid(_selected_artillery_depot):
+	if _is_active_selected_building(_selected_artillery_depot):
 		_refresh_artillery_depot_production_slots()
 
 
@@ -1022,11 +1022,7 @@ func _refresh_barracks_production_slots() -> void:
 
 
 func _refresh_town_center_production_slot() -> void:
-	if _town_center_worker_slot == null or _selected_command_center == null:
-		return
-
-	if not is_instance_valid(_selected_command_center):
-		_selected_command_center = null
+	if _town_center_worker_slot == null or not _is_active_command_center(_selected_command_center):
 		return
 
 	var command_center: CommandCenter = _selected_command_center
@@ -1042,11 +1038,7 @@ func _refresh_town_center_production_slot() -> void:
 
 
 func _refresh_town_center_upgrade_slot() -> void:
-	if _town_center_upgrade_slot == null or _selected_command_center == null:
-		return
-
-	if not is_instance_valid(_selected_command_center):
-		_selected_command_center = null
+	if _town_center_upgrade_slot == null or not _is_active_command_center(_selected_command_center):
 		return
 
 	var command_center: CommandCenter = _selected_command_center
@@ -1109,7 +1101,7 @@ func _set_production_icon_visibility(
 		_artillery_depot_cannon_slot.visible = show_artillery_depot
 	if _town_center_worker_slot != null:
 		_town_center_worker_slot.visible = show_town_center
-	if _town_center_upgrade_slot != null:
+	if _town_center_upgrade_slot != null and not show_town_center:
 		_town_center_upgrade_slot.visible = false
 	if _hero_altar_slot != null:
 		_hero_altar_slot.visible = show_hero_altar
@@ -1989,9 +1981,9 @@ func _update_auto_training_label() -> void:
 		return
 
 	var auto_training_name: String = ""
-	if _selected_command_center != null:
+	if _is_active_command_center(_selected_command_center):
 		auto_training_name = _selected_command_center.get_repeat_unit_display_name()
-	elif _selected_barracks != null:
+	elif _is_active_selected_building(_selected_barracks):
 		auto_training_name = _selected_barracks.get_repeat_unit_display_name()
 
 	if auto_training_name.is_empty():
@@ -2206,7 +2198,48 @@ func _get_barracks_for_queue_cancel() -> Barracks:
 	return null
 
 
-func _on_selection_changed(_units: Array[Unit]) -> void:
+func _get_authoritative_selected_building() -> Building:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return null
+
+	var building: Building = selection_manager.selected_building
+	if building != null and not is_instance_valid(building):
+		return null
+
+	return building
+
+
+func _is_active_selected_building(building: Building) -> bool:
+	if building == null or not is_instance_valid(building):
+		return false
+
+	return _get_authoritative_selected_building() == building
+
+
+func _is_active_command_center(command_center: CommandCenter) -> bool:
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	var selected_building: Building = _get_authoritative_selected_building()
+	return selected_building is CommandCenter and selected_building == command_center
+
+
+func _disconnect_all_building_tracking() -> void:
+	_disconnect_worker_queue_signal()
+	_disconnect_barracks_signals()
+	_disconnect_stable_signals()
+	_disconnect_artillery_depot_signals()
+	_disconnect_hero_altar_signals()
+	_disconnect_blacksmith_signals()
+	_disconnect_academy_signals()
+	_disconnect_shop_signals()
+	_disconnect_wall_gate_signals()
+
+
+func _on_selection_changed(units: Array[Unit]) -> void:
+	if not units.is_empty() and _get_authoritative_selected_building() == null:
+		_disconnect_all_building_tracking()
 	_refresh_command_visibility()
 
 
@@ -2538,16 +2571,7 @@ func _on_execute_upgrade_pressed() -> void:
 
 
 func _on_building_selection_changed(building: Building) -> void:
-	_disconnect_worker_queue_signal()
-	_disconnect_barracks_signals()
-	_disconnect_stable_signals()
-	_disconnect_artillery_depot_signals()
-	_disconnect_hero_altar_signals()
-	_disconnect_blacksmith_signals()
-	_disconnect_academy_signals()
-	_disconnect_shop_signals()
-	_disconnect_wall_gate_signals()
-	_selected_command_center = null
+	_disconnect_all_building_tracking()
 
 	if building != null and not is_instance_valid(building):
 		building = null
@@ -2662,11 +2686,17 @@ func _on_artillery_depot_state_changed(_state: StringName) -> void:
 
 
 func _on_artillery_depot_queue_changed(_queue_count: int) -> void:
+	if not _is_active_selected_building(_tracked_artillery_depot):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_artillery_depot_production_slots()
 
 
 func _on_artillery_depot_training_queue_changed() -> void:
+	if not _is_active_selected_building(_tracked_artillery_depot):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_artillery_depot_production_slots()
 	else:
@@ -2674,11 +2704,17 @@ func _on_artillery_depot_training_queue_changed() -> void:
 
 
 func _on_stable_queue_changed(_queue_count: int) -> void:
+	if not _is_active_selected_building(_tracked_stable):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_stable_production_slots()
 
 
 func _on_stable_training_queue_changed() -> void:
+	if not _is_active_selected_building(_tracked_stable):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_stable_production_slots()
 	else:
@@ -2686,6 +2722,9 @@ func _on_stable_training_queue_changed() -> void:
 
 
 func _on_stable_research_state_changed() -> void:
+	if not _is_active_selected_building(_tracked_stable):
+		return
+
 	_update_stable_upgrade_ui()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_stable_production_slots()
@@ -2804,6 +2843,11 @@ func _refresh_command_visibility() -> void:
 	_selected_wall_segment = (
 		selected_building as WallSegment if show_wall_gate_commands else null
 	)
+
+	if show_town_center_commands:
+		_selected_command_center = selected_building as CommandCenter
+	elif _selected_command_center != null:
+		_disconnect_worker_queue_signal()
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
@@ -3341,6 +3385,9 @@ func _on_attack_pressed() -> void:
 
 
 func _on_worker_queue_changed(_queue_count: int) -> void:
+	if not _is_active_command_center(_selected_command_center):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_town_center_production_slot()
 	else:
@@ -3348,8 +3395,7 @@ func _on_worker_queue_changed(_queue_count: int) -> void:
 
 
 func _on_command_center_tier_state_changed() -> void:
-	if _selected_command_center == null or not is_instance_valid(_selected_command_center):
-		_selected_command_center = null
+	if not _is_active_command_center(_selected_command_center):
 		return
 
 	_refresh_town_center_production_slot()
@@ -3358,6 +3404,9 @@ func _on_command_center_tier_state_changed() -> void:
 
 
 func _on_swordsman_queue_changed(_queue_count: int) -> void:
+	if not _is_active_selected_building(_tracked_barracks):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_barracks_production_slots()
 	else:
@@ -3365,6 +3414,9 @@ func _on_swordsman_queue_changed(_queue_count: int) -> void:
 
 
 func _on_archer_queue_changed(_queue_count: int) -> void:
+	if not _is_active_selected_building(_tracked_barracks):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_barracks_production_slots()
 	else:
@@ -3372,6 +3424,9 @@ func _on_archer_queue_changed(_queue_count: int) -> void:
 
 
 func _on_barracks_training_queue_changed() -> void:
+	if not _is_active_selected_building(_tracked_barracks):
+		return
+
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_barracks_production_slots()
 	else:
@@ -3380,8 +3435,10 @@ func _on_barracks_training_queue_changed() -> void:
 
 func _on_production_repeat_state_changed() -> void:
 	_update_auto_training_label()
-	_update_town_center_button_labels()
-	_update_barracks_button_labels()
+	if _is_active_command_center(_selected_command_center):
+		_update_town_center_button_labels()
+	if _is_active_selected_building(_selected_barracks):
+		_update_barracks_button_labels()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_all_production_slots()
 

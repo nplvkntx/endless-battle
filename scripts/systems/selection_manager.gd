@@ -634,7 +634,7 @@ func _set_selected_units(units: Array[Unit]) -> void:
 		return
 
 	_clear_inspection_without_signal()
-	_clear_building_selection_without_signal()
+	_clear_building_selection()
 	_apply_units_selection_diff(next_units)
 	selection_changed.emit(selected_units)
 
