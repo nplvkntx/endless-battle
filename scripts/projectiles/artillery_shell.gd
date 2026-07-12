@@ -51,6 +51,14 @@ func launch(
 	look_at(global_position + _direction, Vector3.UP)
 
 
+func _enter_tree() -> void:
+	PerfCounters.register_projectile()
+
+
+func _exit_tree() -> void:
+	PerfCounters.unregister_projectile()
+
+
 func _physics_process(delta: float) -> void:
 	_lifetime += delta
 	if _lifetime >= MAX_LIFETIME:

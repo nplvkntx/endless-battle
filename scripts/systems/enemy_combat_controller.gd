@@ -46,6 +46,7 @@ func get_match_elapsed_seconds() -> float:
 
 
 func _update_combat_control(delta: float) -> void:
+	PerfCounters.record_ai_combat_update()
 	var tree: SceneTree = get_tree()
 	var elapsed: float = get_match_elapsed_seconds()
 	EnemyArmyCommand.purge_and_rebuild_main_army(tree)

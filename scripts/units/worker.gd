@@ -542,6 +542,7 @@ func _refresh_task_navigation() -> void:
 		return
 
 	_navigation_agent.target_position = _task_movement_destination
+	PerfCounters.record_navigation_path_request()
 	_check_task_navigation_reachable.call_deferred()
 
 

@@ -193,6 +193,7 @@ func _on_build_tick() -> void:
 
 
 func _run_build_order() -> void:
+	PerfCounters.record_ai_economy_update()
 	_refresh_building_cache_if_needed()
 	_release_stale_build_workers()
 	_try_assign_idle_builder_to_construction()

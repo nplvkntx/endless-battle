@@ -170,6 +170,7 @@ func set_attack_target_position(position: Vector3) -> void:
 
 
 func _evaluate_fast() -> void:
+	PerfCounters.record_ai_decision_update()
 	EnemyArmyCommand.apply_pending_strategic_transition()
 	var tree: SceneTree = get_tree()
 	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
@@ -199,6 +200,7 @@ func _evaluate_fast() -> void:
 
 
 func _evaluate_normal() -> void:
+	PerfCounters.record_ai_decision_update()
 	snapshot = _build_world_snapshot()
 	_update_desires_from_snapshot()
 	_recommend_main_army_mission()
@@ -206,6 +208,7 @@ func _evaluate_normal() -> void:
 
 
 func _evaluate_strategic() -> void:
+	PerfCounters.record_ai_decision_update()
 	if desires["expansion"] >= DESIRE_MEDIUM and snapshot.get("economy_healthy", false):
 		desires["expansion"] = minf(1.0, desires["expansion"] + 0.15)
 
@@ -437,6 +440,7 @@ func _set_main_mission(mission: EnemyUnitMission.Mission, reason: String) -> voi
 
 
 func _run_recovery_checks() -> void:
+	PerfCounters.record_ai_decision_update()
 	if EnemyArmyCommand.is_attack_wave_controlling_hero():
 		return
 

@@ -49,6 +49,7 @@ static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> A
 
 	if not _cached_group_nodes.has(group_name):
 		var valid_nodes: Array = []
+		PerfCounters.record_get_nodes_in_group_call()
 		for node_variant: Variant in tree.get_nodes_in_group(group_name):
 			if node_variant != null and is_instance_valid(node_variant):
 				valid_nodes.append(node_variant)
@@ -291,6 +292,7 @@ static func is_tower_attack_target(target: Variant) -> bool:
 static func find_closest_tower_attack_target_in_range(
 	tower: Node3D, attack_range: float
 ) -> Node3D:
+	PerfCounters.record_enemy_target_search()
 	if tower == null or attack_range <= 0.0:
 		return null
 
@@ -493,6 +495,7 @@ static func get_enemy_defense_target_priority(
 static func _find_best_enemy_faction_attack_target(
 	attacker: Node3D, search_range: float
 ) -> Node3D:
+	PerfCounters.record_enemy_target_search()
 	var best_target: Node3D = null
 	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
 	var best_distance: float = INF
@@ -539,6 +542,7 @@ static func _find_best_enemy_faction_attack_target(
 static func _find_closest_hostile_attack_target_in_range(
 	attacker: Node3D, attack_range: float
 ) -> Node3D:
+	PerfCounters.record_enemy_target_search()
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
 	var groups_to_search: Array[StringName] = get_hostile_search_groups()

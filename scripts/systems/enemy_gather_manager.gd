@@ -105,6 +105,7 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false, force_recovery
 
 
 func _rebalance_gather_workers() -> void:
+	PerfCounters.record_ai_economy_update()
 	var command_center: CommandCenter = _resolve_enemy_command_center()
 	if command_center == null:
 		push_warning("EnemyGatherManager: enemy Command Center not found")

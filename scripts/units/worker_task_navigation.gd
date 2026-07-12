@@ -29,6 +29,7 @@ static func is_target_reachable(agent: NavigationAgent3D, target: Vector3) -> bo
 		return false
 
 	agent.target_position = target
+	PerfCounters.record_navigation_path_request()
 	return agent.is_target_reachable()
 
 
