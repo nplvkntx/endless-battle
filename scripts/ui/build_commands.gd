@@ -2777,6 +2777,44 @@ func _update_hero_altar_status() -> void:
 		_rebuild_hero_queue_slots()
 
 
+func _clear_all_command_ui() -> void:
+	_set_build_icon_visibility(false)
+	if USE_PRODUCTION_ICON_SLOTS:
+		_set_production_icon_visibility(false, false, false, false, false)
+
+	_buttons_row.visible = false
+	_train_worker_button.visible = false
+	_attack_button.visible = false
+	_train_spearman_button.visible = false
+	_train_swordsman_button.visible = false
+	_train_archer_button.visible = false
+	_train_hero_button.visible = false
+
+	_center_panel.visible = false
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
+	_stable_training_row.visible = false
+	_artillery_depot_panel.visible = false
+	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
+	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
+	_hero_panel.visible = false
+
+	_clear_queue_row(_worker_queue_row)
+	_clear_queue_row(_swordsman_queue_row)
+	_clear_queue_row(_archer_queue_row)
+	_clear_queue_row(_hero_queue_row)
+	_hide_all_hero_upgrade_buttons()
+
+	if _auto_training_label != null:
+		_auto_training_label.visible = false
+
+
 func _refresh_command_visibility() -> void:
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -2793,9 +2831,13 @@ func _refresh_command_visibility() -> void:
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
 	if nothing_selected:
+		_clear_all_command_ui()
 		_set_tracked_hero(null)
 		visible = false
+		_sync_ui_process()
 		return
+
+	_clear_all_command_ui()
 
 	var show_barracks_training: bool = (
 		selected_building is Barracks
@@ -2849,82 +2891,95 @@ func _refresh_command_visibility() -> void:
 	elif _selected_command_center != null:
 		_disconnect_worker_queue_signal()
 
+	var multi_worker_selection: bool = false
+	var multi_combat_selection: bool = false
+	var multi_hero_selection: bool = false
+	var single_unit: Unit = selected_units[0] if not selected_units.is_empty() else null
+	var single_worker: bool = false
+	var single_hero: bool = false
+	var single_combat_unit: bool = false
+
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
 		var primary_hero: Hero = multi_info.primary_hero
 		if primary_hero != null:
 			_apply_hero_command_visibility()
 			_set_tracked_hero(primary_hero)
-			visible = true
-			return
+			multi_hero_selection = true
+		else:
+			var multi_category: StringName = multi_info.category
+			if multi_category == &"workers":
+				_apply_worker_command_visibility()
+				_set_tracked_hero(null)
+				multi_worker_selection = true
+			elif multi_category == &"combat":
+				_apply_combat_command_visibility()
+				_set_tracked_hero(null)
+				multi_combat_selection = true
+			else:
+				_apply_hidden_command_buttons()
+				_set_tracked_hero(null)
+	elif not selected_units.is_empty() and not NodeSafety.is_alive_node(single_unit):
+		_set_tracked_hero(null)
+		visible = false
+		_sync_ui_process()
+		return
+	else:
+		single_worker = selected_units.size() == 1 and single_unit is Worker
+		single_hero = selected_units.size() == 1 and single_unit is Hero
+		single_combat_unit = (
+			selected_units.size() == 1
+			and (
+				single_unit is Spearman
+				or single_unit is Swordsman
+				or single_unit is Archer
+				or single_unit is HeavyCavalry
+				or single_unit is LightCavalry
+				or single_unit is CavalryArcher
+				or single_unit is Cannon
+				or single_unit is Hero
+			)
+		)
 
-		var multi_category: StringName = multi_info.category
-		if multi_category == &"workers":
+		if single_worker:
 			_apply_worker_command_visibility()
 			_set_tracked_hero(null)
-			visible = true
-			return
-		if multi_category == &"combat":
+		elif single_hero:
+			_apply_hero_command_visibility()
+			_set_tracked_hero(single_unit as Hero)
+		elif single_combat_unit:
 			_apply_combat_command_visibility()
 			_set_tracked_hero(null)
-			visible = true
-			return
-		_set_tracked_hero(null)
-		visible = false
-		return
-
-	var single_unit: Unit = selected_units[0] if not selected_units.is_empty() else null
-	if not selected_units.is_empty() and not NodeSafety.is_alive_node(single_unit):
-		_set_tracked_hero(null)
-		visible = false
-		return
-
-	var single_worker: bool = selected_units.size() == 1 and single_unit is Worker
-	var single_hero: bool = selected_units.size() == 1 and single_unit is Hero
-	var single_combat_unit: bool = (
-		selected_units.size() == 1
-		and (single_unit is Spearman or single_unit is Swordsman or single_unit is Archer or single_unit is HeavyCavalry or single_unit is LightCavalry or single_unit is CavalryArcher or single_unit is Cannon or single_unit is Hero)
-	)
-
-	if single_worker:
-		_apply_worker_command_visibility()
-		_set_tracked_hero(null)
-	elif single_hero:
-		_apply_hero_command_visibility()
-		_set_tracked_hero(single_unit as Hero)
-	elif single_combat_unit:
-		_apply_combat_command_visibility()
-		_set_tracked_hero(null)
-	elif show_town_center_commands:
-		_apply_town_center_command_visibility()
-		_set_tracked_hero(null)
-	elif show_blacksmith_upgrades:
-		_apply_blacksmith_command_visibility()
-		_set_tracked_hero(null)
-	elif show_stable_commands:
-		_apply_stable_command_visibility()
-		_set_tracked_hero(null)
-	elif show_artillery_depot_commands:
-		_apply_artillery_depot_command_visibility()
-		_set_tracked_hero(null)
-	elif show_academy_commands:
-		_apply_academy_command_visibility()
-		_set_tracked_hero(null)
-	elif show_shop_items:
-		_apply_shop_command_visibility()
-		_set_tracked_hero(null)
-	elif show_wall_gate_commands:
-		_apply_wall_gate_command_visibility()
-		_set_tracked_hero(null)
-	elif show_barracks_training:
-		_apply_barracks_command_visibility()
-		_set_tracked_hero(null)
-	elif show_hero_altar_training:
-		_apply_hero_altar_command_visibility()
-		_set_tracked_hero(null)
-	else:
-		_apply_hidden_command_buttons()
-		_set_tracked_hero(null)
+		elif show_town_center_commands:
+			_apply_town_center_command_visibility()
+			_set_tracked_hero(null)
+		elif show_blacksmith_upgrades:
+			_apply_blacksmith_command_visibility()
+			_set_tracked_hero(null)
+		elif show_stable_commands:
+			_apply_stable_command_visibility()
+			_set_tracked_hero(null)
+		elif show_artillery_depot_commands:
+			_apply_artillery_depot_command_visibility()
+			_set_tracked_hero(null)
+		elif show_academy_commands:
+			_apply_academy_command_visibility()
+			_set_tracked_hero(null)
+		elif show_shop_items:
+			_apply_shop_command_visibility()
+			_set_tracked_hero(null)
+		elif show_wall_gate_commands:
+			_apply_wall_gate_command_visibility()
+			_set_tracked_hero(null)
+		elif show_barracks_training:
+			_apply_barracks_command_visibility()
+			_set_tracked_hero(null)
+		elif show_hero_altar_training:
+			_apply_hero_altar_command_visibility()
+			_set_tracked_hero(null)
+		else:
+			_apply_hidden_command_buttons()
+			_set_tracked_hero(null)
 
 	_center_panel.visible = (
 		show_town_center_commands or show_barracks_training or show_hero_altar_training
@@ -2941,7 +2996,7 @@ func _refresh_command_visibility() -> void:
 	_academy_panel.visible = show_academy_commands
 	_shop_panel.visible = show_shop_items
 	_wall_gate_panel.visible = show_wall_gate_commands
-	_hero_panel.visible = single_hero
+	_hero_panel.visible = single_hero or multi_hero_selection
 
 	if show_blacksmith_upgrades:
 		_update_blacksmith_upgrade_ui()
@@ -2995,6 +3050,11 @@ func _refresh_command_visibility() -> void:
 
 	visible = (
 		single_worker
+		or multi_worker_selection
+		or multi_combat_selection
+		or multi_hero_selection
+		or single_hero
+		or single_combat_unit
 		or show_town_center_commands
 		or show_barracks_training
 		or show_hero_altar_training
@@ -3004,7 +3064,6 @@ func _refresh_command_visibility() -> void:
 		or show_academy_commands
 		or show_shop_items
 		or show_wall_gate_commands
-		or single_combat_unit
 	)
 	_sync_ui_process()
 
