@@ -85,6 +85,13 @@ static func log_phase(phase_name: String) -> void:
 	log_once("phase", "Phase -> %s" % phase_name)
 
 
+static func log_phase_transition(from_phase: String, to_phase: String, reason: String) -> void:
+	var message: String = "Phase %s -> %s" % [from_phase, to_phase]
+	if not reason.is_empty():
+		message += " | %s" % reason
+	log_once("phase", message)
+
+
 static func log_mission_change(
 	_previous: EnemyUnitMission.Mission,
 	mission: EnemyUnitMission.Mission,
@@ -134,6 +141,7 @@ static func log_town_hall_upgrade(tier: int) -> void:
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:
+	# Legacy time-bucket label; prefer EnemyStrategicDirector.get_strategic_phase_name().
 	if elapsed_seconds < EnemyArmyCommand.PHASE_EARLY_SECONDS:
 		return "Early Economy"
 	if elapsed_seconds < EnemyArmyCommand.PHASE_MID_SECONDS:

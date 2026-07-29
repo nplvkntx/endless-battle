@@ -93,7 +93,7 @@ func _update_creeping() -> void:
 		return
 
 	var elapsed: float = _get_match_elapsed_seconds()
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(elapsed)
+	var min_army: int = _get_phase_min_army_size()
 	var creep_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
 		rally_position,
@@ -180,7 +180,15 @@ func _update_creeping() -> void:
 
 
 func _get_match_elapsed_seconds() -> float:
+	if _director != null:
+		return _director.get_match_elapsed_seconds()
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _get_phase_min_army_size() -> int:
+	if _director != null:
+		return _director.get_min_army_size_for_current_phase()
+	return EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds())
 
 
 func _is_player_contesting_camp(tree: SceneTree, camp) -> bool:
@@ -230,7 +238,7 @@ func _retreat_creep_army(tree: SceneTree, rally_position: Vector3) -> void:
 
 
 func _should_abort_creep_push(tree: SceneTree, creep_army: Array) -> bool:
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds())
+	var min_army: int = _get_phase_min_army_size()
 	var non_hero_count: int = 0
 	for unit: Variant in NodeSafety.clean_node_array(creep_army):
 		if not NodeSafety.is_alive_node(unit):

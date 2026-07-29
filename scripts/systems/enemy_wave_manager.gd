@@ -219,9 +219,7 @@ func _update_hero_army_behavior() -> void:
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
-	if not finishing_mode and non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(
-		_get_match_elapsed_seconds()
-	):
+	if not finishing_mode and non_hero_units.size() < _get_phase_min_army_size():
 		_abort_active_offensive_push(rally_position)
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
@@ -236,7 +234,7 @@ func _update_hero_army_behavior() -> void:
 		EnemyArmyCommand.command_retreat_hero(hero, army_center)
 		return
 
-	if non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds()):
+	if non_hero_units.size() < _get_phase_min_army_size():
 		if finishing_mode:
 			return
 		var distance_to_rally: float = _horizontal_distance(hero.global_position, rally_position)
@@ -557,9 +555,11 @@ func _on_wave_timer() -> void:
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 	var match_elapsed_seconds: float = _get_match_elapsed_seconds()
-	var min_non_hero_units: int = EnemyArmyCommand.get_effective_attack_min_non_hero_units(
-		match_elapsed_seconds
-	)
+	var min_non_hero_units: int = _get_phase_min_army_size()
+	if _director == null:
+		min_non_hero_units = EnemyArmyCommand.get_effective_attack_min_non_hero_units(
+			_get_match_elapsed_seconds()
+		)
 
 	if _should_delay_offensive_wave(rally_position):
 		_log_wave_trigger_wait(&"creep_phase_delay", match_elapsed_seconds, min_non_hero_units)
@@ -701,7 +701,12 @@ func _begin_wave_gather(
 
 
 func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
-	if _get_match_elapsed_seconds() >= FIRST_ATTACK_FALLBACK_SECONDS:
+	if _director != null:
+		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME):
+			return false
+		if _director.is_phase_interrupted():
+			return true
+	elif _get_match_elapsed_seconds() >= FIRST_ATTACK_FALLBACK_SECONDS:
 		return false
 
 	if EnemyEarlyStrategy.should_attack_early(get_tree(), rally_position):
@@ -712,7 +717,11 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 	if hero != null and hero.level >= MIN_HERO_LEVEL_FOR_ATTACK:
-		return false
+		if (
+			_director == null
+			or _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.TIER_2)
+		):
+			return false
 
 	if _count_cleared_nearby_camps(rally_position) >= MIN_CLEARED_CAMPS_FOR_ATTACK:
 		return false
@@ -740,7 +749,15 @@ func _count_cleared_nearby_camps(rally_position: Vector3) -> int:
 
 
 func _get_match_elapsed_seconds() -> float:
+	if _director != null:
+		return _director.get_match_elapsed_seconds()
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _get_phase_min_army_size() -> int:
+	if _director != null:
+		return _director.get_min_army_size_for_current_phase()
+	return EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds())
 
 
 func _update_wave_rebuild_state(
@@ -895,7 +912,7 @@ func _hold_army_for_creep_phase(rally_position: Vector3) -> void:
 	var non_hero_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(
 		get_tree()
 	)
-	if non_hero_units.size() < EnemyArmyCommand.get_phase_min_army_size(_get_match_elapsed_seconds()):
+	if non_hero_units.size() < _get_phase_min_army_size():
 		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 		if hero != null and is_instance_valid(hero):
 			EnemyArmyCommand.command_hold_at_rally([hero], rally_position)
@@ -926,9 +943,7 @@ func _hold_army_until_ready(rally_position: Vector3, non_hero_count: int) -> voi
 	if not EnemyArmyCommand.is_hero_healthy_enough_for_wave(hero):
 		EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 
-	var min_non_hero_units: int = EnemyArmyCommand.get_effective_attack_min_non_hero_units(
-		_get_match_elapsed_seconds()
-	)
+	var min_non_hero_units: int = _get_phase_min_army_size()
 	if (
 		non_hero_count < min_non_hero_units
 		and EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING)

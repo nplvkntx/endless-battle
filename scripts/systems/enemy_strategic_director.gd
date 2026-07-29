@@ -1,8 +1,19 @@
 class_name EnemyStrategicDirector
 extends Node
 
-## High-level enemy AI coordinator. Evaluates world state and sets parallel strategic desires.
+## High-level enemy AI coordinator. Owns the strategic phase and sets parallel desires.
 ## Existing managers execute decisions; this node does not micromanage every unit.
+
+enum StrategicPhase {
+	OPENING,
+	EARLY_ARMY,
+	CREEPING,
+	TIER_2,
+	EXPANSION,
+	MID_GAME,
+	TIER_3,
+	LATE_GAME,
+}
 
 const FAST_TICK_SECONDS: float = 0.75
 const NORMAL_TICK_SECONDS: float = 3.0
@@ -13,6 +24,20 @@ const NODE_CLEANUP_INTERVAL_SECONDS: float = 0.5
 const DESIRE_HIGH: float = 0.75
 const DESIRE_MEDIUM: float = 0.45
 const DESIRE_LOW: float = 0.20
+
+const EARLY_ARMY_MIN_PIKEMEN: int = 5
+const EARLY_ARMY_TARGET_PIKEMEN: int = 10
+const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
+const EXPANSION_SATURATION_WORKERS: int = 16
+const EXPANSION_MINE_MIN_WORKERS: int = 5
+const MID_GAME_MIN_ARMY: int = 12
+const BASE_HEAVY_DAMAGE_RATIO: float = 0.35
+const RECOVERY_MIN_WORKERS: int = 4
+const PHASE_MIN_ARMY_OPENING: int = 5
+const PHASE_MIN_ARMY_CREEP: int = 6
+const PHASE_MIN_ARMY_MID: int = 12
+const PHASE_MIN_ARMY_LATE: int = 20
+const ENEMY_TEAM_ID: int = 1
 
 @export var debug_enabled: bool = true
 
@@ -28,6 +53,15 @@ var _creep_target: Node3D = null
 var _attack_target_position: Vector3 = Vector3.ZERO
 var _last_debug_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.IDLE
 var _last_debug_desires: Dictionary = {}
+
+## Owned progression phase. Managers must read this; only this director may change it.
+var _strategic_phase: StrategicPhase = StrategicPhase.OPENING
+## Highest phase reached before temporary interrupts or recovery regressions.
+var _highest_phase_reached: StrategicPhase = StrategicPhase.OPENING
+var _phase_changed_this_evaluation: bool = false
+var _phase_eval_frame: int = -1
+var _phase_interrupt_active: bool = false
+var _phase_interrupt_reason: String = ""
 
 var desires: Dictionary = {
 	"economy": 0.8,
@@ -55,7 +89,6 @@ func _run_initial_evaluation() -> void:
 
 	_evaluate_normal()
 	_evaluate_strategic()
-	EnemyAIDebug.log_phase(EnemyAIDebug.match_phase_label(_get_match_elapsed_seconds()))
 
 
 func _process(delta: float) -> void:
@@ -90,33 +123,158 @@ func _process(delta: float) -> void:
 		_run_recovery_checks()
 
 
+func get_strategic_phase() -> StrategicPhase:
+	return _strategic_phase
+
+
+func get_strategic_phase_name() -> String:
+	return strategic_phase_to_string(_strategic_phase)
+
+
+func get_highest_phase_reached() -> StrategicPhase:
+	return _highest_phase_reached
+
+
+func is_phase_at_least(phase: StrategicPhase) -> bool:
+	return int(_strategic_phase) >= int(phase)
+
+
+func is_phase_interrupted() -> bool:
+	return _phase_interrupt_active
+
+
+func get_phase_interrupt_reason() -> String:
+	return _phase_interrupt_reason
+
+
+func get_min_army_size_for_current_phase() -> int:
+	return get_min_army_size_for_phase(_strategic_phase)
+
+
+static func get_min_army_size_for_phase(phase: StrategicPhase) -> int:
+	match phase:
+		StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY:
+			return PHASE_MIN_ARMY_OPENING
+		StrategicPhase.CREEPING, StrategicPhase.TIER_2, StrategicPhase.EXPANSION:
+			return PHASE_MIN_ARMY_CREEP
+		StrategicPhase.MID_GAME, StrategicPhase.TIER_3:
+			return PHASE_MIN_ARMY_MID
+		StrategicPhase.LATE_GAME:
+			return PHASE_MIN_ARMY_LATE
+		_:
+			return PHASE_MIN_ARMY_OPENING
+
+
+static func strategic_phase_to_string(phase: StrategicPhase) -> String:
+	match phase:
+		StrategicPhase.OPENING:
+			return "OPENING"
+		StrategicPhase.EARLY_ARMY:
+			return "EARLY_ARMY"
+		StrategicPhase.CREEPING:
+			return "CREEPING"
+		StrategicPhase.TIER_2:
+			return "TIER_2"
+		StrategicPhase.EXPANSION:
+			return "EXPANSION"
+		StrategicPhase.MID_GAME:
+			return "MID_GAME"
+		StrategicPhase.TIER_3:
+			return "TIER_3"
+		StrategicPhase.LATE_GAME:
+			return "LATE_GAME"
+		_:
+			return "OPENING"
+
+
 func get_desire(key: String) -> float:
 	return float(desires.get(key, 0.0))
 
 
 func should_prioritize_creep() -> bool:
+	if _phase_interrupt_active or get_desire("defense") >= DESIRE_HIGH:
+		return false
+
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
+		return false
+
+	if _strategic_phase == StrategicPhase.CREEPING:
+		return true
+
 	return (
 		get_desire("creep") >= DESIRE_MEDIUM
-		and get_desire("defense") < DESIRE_HIGH
-		and EnemyArmyCommand.get_army_mode() not in [
-			EnemyArmyCommand.ArmyMode.DEFENDING,
-			EnemyArmyCommand.ArmyMode.INTERCEPTING,
-		]
+		and is_phase_at_least(StrategicPhase.EARLY_ARMY)
+		and not is_phase_at_least(StrategicPhase.TIER_2)
 	)
 
 
 func should_prioritize_attack() -> bool:
+	if _phase_interrupt_active:
+		return false
+
+	if get_desire("defense") >= DESIRE_HIGH:
+		return false
+
+	if is_phase_at_least(StrategicPhase.MID_GAME):
+		return get_desire("attack") >= DESIRE_MEDIUM
+
+	if is_phase_at_least(StrategicPhase.EXPANSION):
+		return get_desire("attack") >= DESIRE_MEDIUM
+
+	return get_desire("attack") >= DESIRE_HIGH
+
+
+func should_prioritize_expansion() -> bool:
+	if _phase_interrupt_active or _recent_attack_failed:
+		return false
+
+	if get_desire("defense") >= DESIRE_HIGH:
+		return false
+
+	if _strategic_phase == StrategicPhase.EXPANSION:
+		return true
+
 	return (
-		get_desire("attack") >= DESIRE_MEDIUM
+		get_desire("expansion") >= DESIRE_MEDIUM
+		and is_phase_at_least(StrategicPhase.EXPANSION)
+	)
+
+
+func should_prioritize_tier_upgrade(target_tier: int) -> bool:
+	if _phase_interrupt_active or get_desire("defense") >= DESIRE_HIGH:
+		return false
+
+	if target_tier <= 2:
+		return (
+			_strategic_phase == StrategicPhase.TIER_2
+			or get_desire("upgrade") >= DESIRE_MEDIUM and is_phase_at_least(StrategicPhase.TIER_2)
+		)
+
+	if target_tier >= 3:
+		return (
+			_strategic_phase == StrategicPhase.TIER_3
+			or get_desire("upgrade") >= DESIRE_MEDIUM and is_phase_at_least(StrategicPhase.TIER_3)
+		)
+
+	return false
+
+
+func should_prioritize_mid_game_tech() -> bool:
+	return (
+		not _phase_interrupt_active
+		and is_phase_at_least(StrategicPhase.MID_GAME)
 		and get_desire("defense") < DESIRE_HIGH
 	)
 
 
-func should_prioritize_expansion() -> bool:
+func should_prioritize_late_game_units() -> bool:
 	return (
-		get_desire("expansion") >= DESIRE_MEDIUM
+		not _phase_interrupt_active
+		and is_phase_at_least(StrategicPhase.LATE_GAME)
 		and get_desire("defense") < DESIRE_HIGH
-		and not _recent_attack_failed
 	)
 
 
@@ -125,7 +283,7 @@ func should_boost_army_production() -> bool:
 
 
 func should_boost_worker_production() -> bool:
-	return get_desire("economy") >= DESIRE_MEDIUM
+	return get_desire("economy") >= DESIRE_MEDIUM or _strategic_phase == StrategicPhase.OPENING
 
 
 func notify_attack_launched() -> void:
@@ -173,6 +331,8 @@ func set_attack_target_position(position: Vector3) -> void:
 
 func _evaluate_fast() -> void:
 	EnemyArmyCommand.apply_pending_strategic_transition()
+	_update_phase_interrupt()
+
 	var tree: SceneTree = get_tree()
 	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
 	if emergency_threat.get("threatened", false):
@@ -201,20 +361,241 @@ func _evaluate_fast() -> void:
 
 
 func _evaluate_normal() -> void:
+	_begin_phase_evaluation_gate()
 	snapshot = _build_world_snapshot()
+	_update_phase_interrupt()
+	_update_strategic_phase()
 	_update_desires_from_snapshot()
 	_recommend_main_army_mission()
 	_maybe_log_debug()
 
 
 func _evaluate_strategic() -> void:
-	EnemyAIDebug.log_phase(EnemyAIDebug.match_phase_label(_get_match_elapsed_seconds()))
+	_begin_phase_evaluation_gate()
+	if snapshot.is_empty():
+		snapshot = _build_world_snapshot()
+
+	_update_phase_interrupt()
+	_update_strategic_phase()
 
 	if desires["expansion"] >= DESIRE_MEDIUM and snapshot.get("economy_healthy", false):
 		desires["expansion"] = minf(1.0, desires["expansion"] + 0.15)
 
 	if snapshot.get("hero_alive", false) and int(snapshot.get("hero_level", 1)) >= 2:
 		desires["upgrade"] = minf(1.0, desires["upgrade"] + 0.1)
+
+
+func _begin_phase_evaluation_gate() -> void:
+	var frame: int = Engine.get_process_frames()
+	if frame == _phase_eval_frame:
+		return
+
+	_phase_eval_frame = frame
+	_phase_changed_this_evaluation = false
+
+
+func _update_phase_interrupt() -> void:
+	var strategic_state: EnemyArmyCommand.StrategicState = EnemyArmyCommand.get_strategic_state()
+	if (
+		EnemyArmyCommand.is_emergency_defense_active()
+		or strategic_state == EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING
+	):
+		_phase_interrupt_active = true
+		_phase_interrupt_reason = "emergency defense"
+		return
+
+	if strategic_state == EnemyArmyCommand.StrategicState.RETREATING:
+		_phase_interrupt_active = true
+		_phase_interrupt_reason = "retreat"
+		return
+
+	_phase_interrupt_active = false
+	_phase_interrupt_reason = ""
+
+
+func _update_strategic_phase() -> void:
+	if _phase_changed_this_evaluation:
+		return
+
+	if _try_recovery_phase_regression():
+		return
+
+	# Temporary interrupts must not advance or reset progression ownership.
+	if _phase_interrupt_active:
+		return
+
+	match _strategic_phase:
+		StrategicPhase.OPENING:
+			_try_advance_phase(
+				StrategicPhase.EARLY_ARMY,
+				_can_leave_opening(),
+				_opening_exit_reason()
+			)
+		StrategicPhase.EARLY_ARMY:
+			_try_advance_phase(
+				StrategicPhase.CREEPING,
+				_can_leave_early_army(),
+				_early_army_exit_reason()
+			)
+		StrategicPhase.CREEPING:
+			_try_advance_phase(
+				StrategicPhase.TIER_2,
+				_can_leave_creeping(),
+				_creeping_exit_reason()
+			)
+		StrategicPhase.TIER_2:
+			_try_advance_phase(
+				StrategicPhase.EXPANSION,
+				_can_leave_tier_2(),
+				_tier_2_exit_reason()
+			)
+		StrategicPhase.EXPANSION:
+			_try_advance_phase(
+				StrategicPhase.MID_GAME,
+				_can_leave_expansion(),
+				_expansion_exit_reason()
+			)
+		StrategicPhase.MID_GAME:
+			_try_advance_phase(
+				StrategicPhase.TIER_3,
+				_can_leave_mid_game(),
+				_mid_game_exit_reason()
+			)
+		StrategicPhase.TIER_3:
+			_try_advance_phase(
+				StrategicPhase.LATE_GAME,
+				_can_leave_tier_3(),
+				_tier_3_exit_reason()
+			)
+		StrategicPhase.LATE_GAME:
+			pass
+
+
+func _try_advance_phase(next_phase: StrategicPhase, can_advance: bool, reason: String) -> void:
+	if _phase_changed_this_evaluation or not can_advance:
+		return
+
+	if int(next_phase) <= int(_strategic_phase):
+		return
+
+	_set_strategic_phase(next_phase, reason)
+
+
+func _try_recovery_phase_regression() -> bool:
+	if _phase_changed_this_evaluation:
+		return false
+
+	if not snapshot.get("main_base_heavily_damaged", false):
+		return false
+
+	if not snapshot.get("recovery_required", false):
+		return false
+
+	var recovery_phase: StrategicPhase = StrategicPhase.EARLY_ARMY
+	if not snapshot.get("has_barracks", false) or not snapshot.get("has_hero_altar", false):
+		recovery_phase = StrategicPhase.OPENING
+
+	if int(recovery_phase) >= int(_strategic_phase):
+		return false
+
+	_set_strategic_phase(
+		recovery_phase,
+		"Main base heavily damaged, recovery required"
+	)
+	return true
+
+
+func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
+	if _phase_changed_this_evaluation:
+		return
+
+	if new_phase == _strategic_phase:
+		return
+
+	var previous: StrategicPhase = _strategic_phase
+	_strategic_phase = new_phase
+	_phase_changed_this_evaluation = true
+
+	if int(new_phase) > int(_highest_phase_reached):
+		_highest_phase_reached = new_phase
+
+	EnemyAIDebug.log_phase_transition(
+		strategic_phase_to_string(previous),
+		strategic_phase_to_string(new_phase),
+		reason
+	)
+
+
+func _can_leave_opening() -> bool:
+	return (
+		snapshot.get("has_hero_altar", false)
+		and snapshot.get("has_barracks", false)
+	)
+
+
+func _opening_exit_reason() -> String:
+	return "Altar and Barracks completed"
+
+
+func _can_leave_early_army() -> bool:
+	return (
+		snapshot.get("hero_alive", false)
+		and int(snapshot.get("pikemen_count", 0)) >= EARLY_ARMY_MIN_PIKEMEN
+	)
+
+
+func _early_army_exit_reason() -> String:
+	return "Hero ready, Pikemen: %d" % int(snapshot.get("pikemen_count", 0))
+
+
+func _can_leave_creeping() -> bool:
+	return (
+		snapshot.get("hero_alive", false)
+		and int(snapshot.get("hero_level", 0)) >= CREEP_HERO_LEVEL_REQUIREMENT
+	)
+
+
+func _creeping_exit_reason() -> String:
+	return "Hero reached level %d" % CREEP_HERO_LEVEL_REQUIREMENT
+
+
+func _can_leave_tier_2() -> bool:
+	return int(snapshot.get("town_hall_tier", 1)) >= 2
+
+
+func _tier_2_exit_reason() -> String:
+	return "Town Hall Tier 2 completed"
+
+
+func _can_leave_expansion() -> bool:
+	return (
+		snapshot.get("expansion_completed", false)
+		and snapshot.get("expansion_saturated", false)
+	)
+
+
+func _expansion_exit_reason() -> String:
+	return "Expansion completed and saturated"
+
+
+func _can_leave_mid_game() -> bool:
+	return (
+		snapshot.get("has_blacksmith", false)
+		and snapshot.get("economy_healthy", false)
+		and int(snapshot.get("combat_unit_count", 0)) >= MID_GAME_MIN_ARMY
+	)
+
+
+func _mid_game_exit_reason() -> String:
+	return "Blacksmith ready, army and economy stable"
+
+
+func _can_leave_tier_3() -> bool:
+	return int(snapshot.get("town_hall_tier", 1)) >= 3
+
+
+func _tier_3_exit_reason() -> String:
+	return "Town Hall Tier 3 completed"
 
 
 func _build_world_snapshot() -> Dictionary:
@@ -261,6 +642,35 @@ func _build_world_snapshot() -> Dictionary:
 		EnemyResourceManager.food_max - EnemyResourceManager.food_current
 	)
 	var supply_block_risk: bool = food_headroom <= 3
+	var building_counts: Dictionary = _count_enemy_buildings(tree)
+	var town_hall_tier: int = TechTree.get_highest_command_center_tier(ENEMY_TEAM_ID)
+	var town_centers: int = int(building_counts.get("command_centers", 0))
+	var expansion_count: int = maxi(0, town_centers - 1)
+	var main_base_health_ratio: float = _get_primary_command_center_health_ratio(tree)
+	var main_base_heavily_damaged: bool = (
+		main_base_health_ratio >= 0.0
+		and main_base_health_ratio <= BASE_HEAVY_DAMAGE_RATIO
+	)
+	var economy_healthy: bool = (
+		workers.size() >= 8
+		and EnemyResourceManager.gold >= 100
+		and EnemyResourceManager.wood >= 80
+	)
+	var expansion_saturated: bool = (
+		expansion_count >= 1
+		and workers.size() >= EXPANSION_SATURATION_WORKERS
+		and gold_workers >= EXPANSION_MINE_MIN_WORKERS
+		and economy_healthy
+	)
+	var pikemen_count: int = _count_pikemen(non_hero_army)
+	var recovery_required: bool = (
+		main_base_heavily_damaged
+		and (
+			workers.size() < RECOVERY_MIN_WORKERS
+			or not bool(building_counts.get("has_barracks", false))
+			or army_power < 120
+		)
+	)
 
 	return {
 		"workers": workers.size(),
@@ -272,23 +682,39 @@ func _build_world_snapshot() -> Dictionary:
 		"food_used": EnemyResourceManager.food_current,
 		"food_cap": EnemyResourceManager.food_max,
 		"supply_block_risk": supply_block_risk,
-		"town_centers": _count_group(tree, &"enemy_command_center"),
-		"production_buildings": _count_barracks(tree),
-		"expansion_count": maxi(0, _count_group(tree, &"enemy_command_center") - 1),
+		"town_centers": town_centers,
+		"production_buildings": int(building_counts.get("barracks", 0)),
+		"expansion_count": expansion_count,
+		"expansion_completed": expansion_count >= 1,
+		"expansion_saturated": expansion_saturated,
 		"base_under_attack": EnemyArmyCommand.is_enemy_base_threatened(tree),
 		"hero_alive": hero != null,
 		"hero_level": hero.level if hero != null else 0,
 		"combat_unit_count": non_hero_army.size(),
+		"pikemen_count": pikemen_count,
 		"army_power": army_power,
 		"army_mode": EnemyArmyCommand.get_army_mode(),
 		"visible_enemy_power": visible_threat_power,
-		"economy_healthy": (
-			workers.size() >= 8
-			and EnemyResourceManager.gold >= 100
-			and EnemyResourceManager.wood >= 80
+		"economy_healthy": economy_healthy,
+		"economy_strong": (
+			workers.size() >= 14
+			and EnemyResourceManager.gold >= 250
+			and EnemyResourceManager.wood >= 200
 		),
 		"match_elapsed_seconds": _get_match_elapsed_seconds(),
 		"recent_losses": _recent_loss_timer > 0.0,
+		"has_farm": bool(building_counts.get("has_farm", false)),
+		"has_barracks": bool(building_counts.get("has_barracks", false)),
+		"has_hero_altar": bool(building_counts.get("has_hero_altar", false)),
+		"has_blacksmith": bool(building_counts.get("has_blacksmith", false)),
+		"has_shop": bool(building_counts.get("has_shop", false)),
+		"has_stable": bool(building_counts.get("has_stable", false)),
+		"town_hall_tier": town_hall_tier,
+		"main_base_health_ratio": main_base_health_ratio,
+		"main_base_heavily_damaged": main_base_heavily_damaged,
+		"recovery_required": recovery_required,
+		"strategic_phase": _strategic_phase,
+		"phase_interrupted": _phase_interrupt_active,
 	}
 
 
@@ -302,9 +728,10 @@ func _update_desires_from_snapshot() -> void:
 	var supply_block_risk: bool = snapshot.get("supply_block_risk", false)
 	var economy_healthy: bool = snapshot.get("economy_healthy", false)
 	var visible_enemy_power: int = int(snapshot.get("visible_enemy_power", 0))
-	var elapsed: float = float(snapshot.get("match_elapsed_seconds", 0.0))
+	var combat_units: int = int(snapshot.get("combat_unit_count", 0))
+	var pikemen_count: int = int(snapshot.get("pikemen_count", 0))
 
-	if base_under_attack or get_desire("defense") >= DESIRE_HIGH:
+	if _phase_interrupt_active or base_under_attack or get_desire("defense") >= DESIRE_HIGH:
 		desires["defense"] = maxf(desires["defense"], DESIRE_HIGH)
 		desires["attack"] = DESIRE_LOW
 		desires["creep"] = DESIRE_LOW
@@ -312,8 +739,10 @@ func _update_desires_from_snapshot() -> void:
 	else:
 		desires["defense"] = maxf(0.0, desires["defense"] - 0.15)
 
+	_apply_phase_desire_baseline()
+
 	desires["economy"] = clampf(
-		0.55
+		desires["economy"]
 		+ float(maxi(0, 14 - workers)) * 0.04
 		+ float(idle_workers) * 0.08
 		+ (0.15 if supply_block_risk else 0.0),
@@ -322,30 +751,37 @@ func _update_desires_from_snapshot() -> void:
 	)
 
 	var army_target_power: float = float(EnemyArmyCommand.MIN_ATTACK_ARMY_POWER)
+	var phase_army_desire: float = desires["army"]
 	desires["army"] = clampf(
-		float(army_power) / army_target_power,
+		maxf(phase_army_desire, float(army_power) / army_target_power),
 		0.0,
 		1.0
 	)
+	if _strategic_phase == StrategicPhase.EARLY_ARMY and pikemen_count < EARLY_ARMY_TARGET_PIKEMEN:
+		desires["army"] = maxf(desires["army"], DESIRE_HIGH)
 	if _recent_loss_timer > 0.0:
 		desires["army"] = maxf(desires["army"], DESIRE_HIGH)
 
-	if hero_alive and army_power >= int(army_target_power * 0.6):
+	if _strategic_phase == StrategicPhase.CREEPING:
+		desires["creep"] = DESIRE_HIGH if hero_alive else DESIRE_LOW
+	elif hero_alive and army_power >= int(army_target_power * 0.6) and not is_phase_at_least(StrategicPhase.MID_GAME):
 		desires["creep"] = clampf(
 			0.35 + float(hero_level) * 0.08 + (0.2 if army_power >= 400 else 0.0),
 			0.0,
 			1.0
 		)
 	else:
-		desires["creep"] = DESIRE_LOW
+		desires["creep"] = minf(desires["creep"], DESIRE_LOW)
 
 	if (
-		not hero_alive
+		_phase_interrupt_active
+		or not hero_alive
 		or EnemyArmyCommand.is_rebuilding_army()
 		or _recent_loss_timer > 0.0
 		or _recent_attack_failed
+		or not is_phase_at_least(StrategicPhase.EXPANSION)
 	):
-		desires["attack"] = DESIRE_LOW
+		desires["attack"] = minf(desires["attack"], DESIRE_LOW)
 	elif not _can_launch_offensive_attack():
 		desires["attack"] = DESIRE_LOW
 	elif visible_enemy_power > 0 and army_power >= int(float(visible_enemy_power) * EnemyArmyCommand.PLAYER_ARMY_STRENGTH_RATIO):
@@ -354,8 +790,10 @@ func _update_desires_from_snapshot() -> void:
 			DESIRE_MEDIUM,
 			1.0
 		)
-	elif elapsed >= 420.0 and army_power >= EnemyArmyCommand.MIN_ATTACK_ARMY_POWER:
-		desires["attack"] = DESIRE_MEDIUM
+	elif is_phase_at_least(StrategicPhase.LATE_GAME) and army_power >= EnemyArmyCommand.MIN_ATTACK_ARMY_POWER:
+		desires["attack"] = maxf(desires["attack"], DESIRE_HIGH)
+	elif is_phase_at_least(StrategicPhase.MID_GAME) and army_power >= EnemyArmyCommand.MIN_ATTACK_ARMY_POWER:
+		desires["attack"] = maxf(desires["attack"], DESIRE_MEDIUM)
 	else:
 		desires["attack"] = clampf(
 			float(army_power) / (army_target_power * 1.4),
@@ -363,24 +801,100 @@ func _update_desires_from_snapshot() -> void:
 			DESIRE_MEDIUM
 		)
 
-	if economy_healthy and elapsed > 300.0 and desires["defense"] < DESIRE_MEDIUM:
+	if _strategic_phase == StrategicPhase.EXPANSION:
+		desires["expansion"] = DESIRE_HIGH if economy_healthy else DESIRE_MEDIUM
+	elif economy_healthy and is_phase_at_least(StrategicPhase.EXPANSION) and desires["defense"] < DESIRE_MEDIUM:
 		desires["expansion"] = clampf(
-			0.25 + float(snapshot.get("expansion_count", 0)) * -0.1 + (0.2 if workers >= 16 else 0.0),
+			0.25
+			+ float(snapshot.get("expansion_count", 0)) * -0.1
+			+ (0.2 if workers >= 16 else 0.0),
 			0.0,
 			0.85
 		)
 	else:
 		desires["expansion"] = minf(desires["expansion"], DESIRE_LOW)
 
-	if hero_alive and hero_level >= 2 and economy_healthy:
+	if _strategic_phase in [StrategicPhase.TIER_2, StrategicPhase.TIER_3]:
+		desires["upgrade"] = DESIRE_HIGH
+	elif hero_alive and hero_level >= 2 and economy_healthy and is_phase_at_least(StrategicPhase.TIER_2):
 		desires["upgrade"] = clampf(0.3 + float(hero_level) * 0.05, DESIRE_LOW, 0.9)
 	else:
-		desires["upgrade"] = DESIRE_LOW
+		desires["upgrade"] = minf(desires["upgrade"], DESIRE_LOW)
+
+	if combat_units < get_min_army_size_for_current_phase():
+		desires["army"] = maxf(desires["army"], DESIRE_MEDIUM)
+
+
+func _apply_phase_desire_baseline() -> void:
+	match _strategic_phase:
+		StrategicPhase.OPENING:
+			desires["economy"] = 0.9
+			desires["army"] = 0.15
+			desires["creep"] = 0.0
+			desires["attack"] = 0.0
+			desires["expansion"] = 0.0
+			desires["upgrade"] = 0.0
+		StrategicPhase.EARLY_ARMY:
+			desires["economy"] = 0.55
+			desires["army"] = 0.85
+			desires["creep"] = 0.15
+			desires["attack"] = 0.05
+			desires["expansion"] = 0.0
+			desires["upgrade"] = 0.1
+		StrategicPhase.CREEPING:
+			desires["economy"] = 0.45
+			desires["army"] = 0.55
+			desires["creep"] = 0.85
+			desires["attack"] = 0.1
+			desires["expansion"] = 0.05
+			desires["upgrade"] = 0.2
+		StrategicPhase.TIER_2:
+			desires["economy"] = 0.5
+			desires["army"] = 0.45
+			desires["creep"] = 0.2
+			desires["attack"] = 0.15
+			desires["expansion"] = 0.15
+			desires["upgrade"] = 0.85
+		StrategicPhase.EXPANSION:
+			desires["economy"] = 0.8
+			desires["army"] = 0.4
+			desires["creep"] = 0.15
+			desires["attack"] = 0.2
+			desires["expansion"] = 0.9
+			desires["upgrade"] = 0.25
+		StrategicPhase.MID_GAME:
+			desires["economy"] = 0.55
+			desires["army"] = 0.7
+			desires["creep"] = 0.2
+			desires["attack"] = 0.45
+			desires["expansion"] = 0.25
+			desires["upgrade"] = 0.55
+		StrategicPhase.TIER_3:
+			desires["economy"] = 0.5
+			desires["army"] = 0.55
+			desires["creep"] = 0.1
+			desires["attack"] = 0.35
+			desires["expansion"] = 0.2
+			desires["upgrade"] = 0.9
+		StrategicPhase.LATE_GAME:
+			desires["economy"] = 0.45
+			desires["army"] = 0.8
+			desires["creep"] = 0.1
+			desires["attack"] = 0.75
+			desires["expansion"] = 0.3
+			desires["upgrade"] = 0.6
 
 
 func _recommend_main_army_mission() -> void:
-	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING:
+	if (
+		_phase_interrupt_active
+		or EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING
+	):
 		_set_main_mission(EnemyUnitMission.Mission.DEFEND, "emergency defending")
+		return
+
+	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
+		_set_main_mission(EnemyUnitMission.Mission.RETREAT, "retreating")
 		return
 
 	if desires["defense"] >= DESIRE_HIGH:
@@ -553,6 +1067,91 @@ func _count_barracks(tree: SceneTree) -> int:
 		if node is Barracks:
 			count += 1
 	return count
+
+
+func _count_enemy_buildings(tree: SceneTree) -> Dictionary:
+	var farms: int = 0
+	var barracks: int = 0
+	var altars: int = 0
+	var blacksmiths: int = 0
+	var shops: int = 0
+	var stables: int = 0
+	var command_centers: int = 0
+
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not NodeSafety.is_alive_node(node):
+			continue
+
+		if not node is Building:
+			continue
+
+		var building: Building = node as Building
+		if building.building_state != Building.STATE_COMPLETED:
+			continue
+
+		var health_component: HealthComponent = building.get_node_or_null(
+			"HealthComponent"
+		) as HealthComponent
+		if health_component != null and health_component.current_health <= 0:
+			continue
+
+		if building is CommandCenter:
+			command_centers += 1
+		elif building is Farm:
+			farms += 1
+		elif building is Barracks:
+			barracks += 1
+		elif building is HeroAltar:
+			altars += 1
+		elif building is Blacksmith:
+			blacksmiths += 1
+		elif building is Shop:
+			shops += 1
+		elif building is Stable:
+			stables += 1
+
+	return {
+		"command_centers": command_centers,
+		"farms": farms,
+		"barracks": barracks,
+		"has_farm": farms > 0,
+		"has_barracks": barracks > 0,
+		"has_hero_altar": altars > 0,
+		"has_blacksmith": blacksmiths > 0,
+		"has_shop": shops > 0,
+		"has_stable": stables > 0,
+	}
+
+
+func _count_pikemen(units: Array) -> int:
+	var count: int = 0
+	for unit: Variant in units:
+		if unit is Spearman:
+			count += 1
+	return count
+
+
+func _get_primary_command_center_health_ratio(tree: SceneTree) -> float:
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is CommandCenter:
+			continue
+
+		var command_center: CommandCenter = node as CommandCenter
+		if not NodeSafety.is_alive_node(command_center):
+			continue
+
+		if command_center.building_state != Building.STATE_COMPLETED:
+			continue
+
+		var health_component: HealthComponent = command_center.get_node_or_null(
+			"HealthComponent"
+		) as HealthComponent
+		if health_component == null or health_component.max_health <= 0:
+			return 1.0
+
+		return float(health_component.current_health) / float(health_component.max_health)
+
+	return 1.0
 
 
 func get_match_elapsed_seconds() -> float:

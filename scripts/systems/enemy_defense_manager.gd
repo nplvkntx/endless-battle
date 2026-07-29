@@ -15,12 +15,14 @@ var _defense_maintain_timer: float = 0.0
 var _logged_recall: bool = false
 var _logged_engagement: bool = false
 var _combat_controller: EnemyCombatController = null
+var _director: EnemyStrategicDirector = null
 var _match_start_msec: int = 0
 
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
+	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 
 
 func _process(delta: float) -> void:
@@ -34,6 +36,8 @@ func _process(delta: float) -> void:
 
 
 func _get_match_elapsed_seconds() -> float:
+	if _director != null:
+		return _director.get_match_elapsed_seconds()
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
 
 

@@ -8,6 +8,8 @@ const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
 const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const REASSIGN_INTERVAL_SECONDS: float = 3.0
 const EARLY_GAME_GOLD_RATIO: float = 0.7
+const MID_GAME_GOLD_RATIO: float = 0.6
+const LATE_GAME_GOLD_RATIO: float = 0.55
 const BUILDING_PRESSURE_GOLD_RATIO: float = 0.45
 const WORKER_TRAIN_GOLD_COST: int = 50
 const FARM_WOOD_COST: int = 20
@@ -33,6 +35,7 @@ var _cached_target_gold: int = -1
 var _starting_gold_mine: GoldMine = null
 var _cached_active_gold_mines: Array[GoldMine] = []
 var _cached_active_gold_mines_frame: int = -1
+var _director: EnemyStrategicDirector = null
 
 
 func _ready() -> void:
@@ -40,6 +43,7 @@ func _ready() -> void:
 
 
 func _initial_assign_and_schedule() -> void:
+	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	# Wait for scene nodes, navigation agents, and the nav mesh bake to settle.
 	var frames_waited: int = 0
 	while frames_waited < NAV_READY_MAX_FRAMES:
@@ -238,14 +242,32 @@ func _compute_target_gold_workers(total_gather_workers: int) -> int:
 	if total_gather_workers == 1:
 		return 1
 
-	var gold_ratio: float = EARLY_GAME_GOLD_RATIO
+	var gold_ratio: float = _get_phase_gold_ratio()
 	if _enemy_needs_wood_for_farms() or _enemy_needs_wood_for_buildings() or _is_wood_heavy_imbalance():
 		gold_ratio = BUILDING_PRESSURE_GOLD_RATIO
 	elif _enemy_needs_gold_for_worker_training() or _is_gold_heavy_imbalance():
-		gold_ratio = 0.72
+		gold_ratio = maxf(gold_ratio, 0.72)
 
 	var gold_target: int = int(round(float(total_gather_workers) * gold_ratio))
 	return clampi(gold_target, 1, total_gather_workers - 1)
+
+
+func _get_phase_gold_ratio() -> float:
+	if _director == null:
+		return EARLY_GAME_GOLD_RATIO
+
+	match _director.get_strategic_phase():
+		EnemyStrategicDirector.StrategicPhase.OPENING, \
+		EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+		EnemyStrategicDirector.StrategicPhase.CREEPING, \
+		EnemyStrategicDirector.StrategicPhase.TIER_2:
+			return EARLY_GAME_GOLD_RATIO
+		EnemyStrategicDirector.StrategicPhase.EXPANSION, \
+		EnemyStrategicDirector.StrategicPhase.MID_GAME, \
+		EnemyStrategicDirector.StrategicPhase.TIER_3:
+			return MID_GAME_GOLD_RATIO
+		_:
+			return LATE_GAME_GOLD_RATIO
 
 
 func _enemy_needs_gold_for_worker_training() -> bool:

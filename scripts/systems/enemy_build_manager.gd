@@ -426,6 +426,12 @@ func _should_build_blacksmith() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
+	if (
+		_director != null
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME)
+	):
+		return false
+
 	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
 		return false
 
@@ -453,6 +459,9 @@ func _should_upgrade_command_center_to_tier_2(command_center: CommandCenter) -> 
 	if not is_instance_valid(command_center):
 		return false
 
+	if _director != null and not _director.should_prioritize_tier_upgrade(2):
+		return false
+
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
@@ -467,6 +476,9 @@ func _should_upgrade_command_center_to_tier_2(command_center: CommandCenter) -> 
 
 func _should_upgrade_command_center_to_tier_3(command_center: CommandCenter) -> bool:
 	if not is_instance_valid(command_center):
+		return false
+
+	if _director != null and not _director.should_prioritize_tier_upgrade(3):
 		return false
 
 	if command_center.command_center_tier < 2:
@@ -669,6 +681,12 @@ func _should_build_artillery_depot() -> bool:
 	if _is_building_type_in_progress(PLACEMENT_ARTILLERY_DEPOT):
 		return false
 
+	if (
+		_director != null
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME)
+	):
+		return false
+
 	if not (
 		_has_completed_building(PLACEMENT_BLACKSMITH)
 		or _is_building_type_in_progress(PLACEMENT_BLACKSMITH)
@@ -686,6 +704,12 @@ func _should_build_academy() -> bool:
 		return false
 
 	if _is_building_type_in_progress(PLACEMENT_ACADEMY):
+		return false
+
+	if (
+		_director != null
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.TIER_3)
+	):
 		return false
 
 	if not (
@@ -774,6 +798,12 @@ func _should_build_shop() -> bool:
 		return false
 
 	if _is_building_type_in_progress(PLACEMENT_SHOP):
+		return false
+
+	if (
+		_director != null
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME)
+	):
 		return false
 
 	if not _has_living_enemy_hero():
@@ -939,12 +969,25 @@ func _get_projected_free_population() -> int:
 
 
 func _get_farm_headroom_threshold() -> int:
-	var elapsed_seconds: float = _get_match_elapsed_seconds()
-	if elapsed_seconds < WORKER_PHASE_MID_SECONDS:
-		return FARM_HEADROOM_EARLY
-	if elapsed_seconds < WORKER_PHASE_ENDGAME_SECONDS:
-		return FARM_HEADROOM_MID
-	return FARM_HEADROOM_LATE
+	if _director == null:
+		var elapsed_seconds: float = _get_match_elapsed_seconds()
+		if elapsed_seconds < WORKER_PHASE_MID_SECONDS:
+			return FARM_HEADROOM_EARLY
+		if elapsed_seconds < WORKER_PHASE_ENDGAME_SECONDS:
+			return FARM_HEADROOM_MID
+		return FARM_HEADROOM_LATE
+
+	match _director.get_strategic_phase():
+		EnemyStrategicDirector.StrategicPhase.OPENING, \
+		EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+		EnemyStrategicDirector.StrategicPhase.CREEPING:
+			return FARM_HEADROOM_EARLY
+		EnemyStrategicDirector.StrategicPhase.TIER_2, \
+		EnemyStrategicDirector.StrategicPhase.EXPANSION, \
+		EnemyStrategicDirector.StrategicPhase.MID_GAME:
+			return FARM_HEADROOM_MID
+		_:
+			return FARM_HEADROOM_LATE
 
 
 func _get_match_elapsed_seconds() -> float:
@@ -1174,18 +1217,37 @@ func _log_worker_production_blocker(command_center: CommandCenter, target_worker
 
 
 func _compute_base_worker_target() -> int:
-	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	var target: int = TARGET_WORKERS_EARLY
-	if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
-		target = (
-			TARGET_WORKERS_ENDGAME_HIGH
-			if _has_abundant_resources()
-			else TARGET_WORKERS_ENDGAME
-		)
-	elif elapsed_seconds >= WORKER_PHASE_LATE_SECONDS:
-		target = TARGET_WORKERS_LATE
-	elif elapsed_seconds >= WORKER_PHASE_MID_SECONDS:
-		target = TARGET_WORKERS_MID
+	if _director != null:
+		match _director.get_strategic_phase():
+			EnemyStrategicDirector.StrategicPhase.OPENING, \
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+			EnemyStrategicDirector.StrategicPhase.CREEPING:
+				target = TARGET_WORKERS_EARLY
+			EnemyStrategicDirector.StrategicPhase.TIER_2, \
+			EnemyStrategicDirector.StrategicPhase.EXPANSION, \
+			EnemyStrategicDirector.StrategicPhase.MID_GAME:
+				target = TARGET_WORKERS_MID
+			EnemyStrategicDirector.StrategicPhase.TIER_3:
+				target = TARGET_WORKERS_LATE
+			EnemyStrategicDirector.StrategicPhase.LATE_GAME:
+				target = (
+					TARGET_WORKERS_ENDGAME_HIGH
+					if _has_abundant_resources()
+					else TARGET_WORKERS_ENDGAME
+				)
+	else:
+		var elapsed_seconds: float = _get_match_elapsed_seconds()
+		if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
+			target = (
+				TARGET_WORKERS_ENDGAME_HIGH
+				if _has_abundant_resources()
+				else TARGET_WORKERS_ENDGAME
+			)
+		elif elapsed_seconds >= WORKER_PHASE_LATE_SECONDS:
+			target = TARGET_WORKERS_LATE
+		elif elapsed_seconds >= WORKER_PHASE_MID_SECONDS:
+			target = TARGET_WORKERS_MID
 
 	if _director != null and _director.should_boost_worker_production():
 		target = maxi(target, TARGET_WORKERS_MID)
@@ -1207,6 +1269,21 @@ func _get_target_worker_count() -> int:
 
 
 func _get_phase_worker_target() -> int:
+	if _director != null:
+		match _director.get_strategic_phase():
+			EnemyStrategicDirector.StrategicPhase.OPENING, \
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+			EnemyStrategicDirector.StrategicPhase.CREEPING:
+				return TARGET_WORKERS_EARLY
+			EnemyStrategicDirector.StrategicPhase.TIER_2, \
+			EnemyStrategicDirector.StrategicPhase.EXPANSION, \
+			EnemyStrategicDirector.StrategicPhase.MID_GAME:
+				return TARGET_WORKERS_MID
+			EnemyStrategicDirector.StrategicPhase.TIER_3:
+				return TARGET_WORKERS_LATE
+			_:
+				return TARGET_WORKERS_ENDGAME
+
 	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
 		return TARGET_WORKERS_ENDGAME
@@ -1259,6 +1336,20 @@ func _has_wasted_resources() -> bool:
 
 
 func _get_max_barracks() -> int:
+	if _director != null:
+		match _director.get_strategic_phase():
+			EnemyStrategicDirector.StrategicPhase.OPENING, \
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+			EnemyStrategicDirector.StrategicPhase.CREEPING, \
+			EnemyStrategicDirector.StrategicPhase.TIER_2, \
+			EnemyStrategicDirector.StrategicPhase.EXPANSION:
+				return maxi(max_barracks, 3)
+			EnemyStrategicDirector.StrategicPhase.MID_GAME, \
+			EnemyStrategicDirector.StrategicPhase.TIER_3:
+				return MAX_BARRACKS_MID
+			_:
+				return MAX_BARRACKS_LATE
+
 	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
 		return maxi(max_barracks, 3)
@@ -1283,6 +1374,10 @@ func _should_build_stable() -> bool:
 	if not TechTree.player_has_tier_2(ENEMY_TEAM_ID):
 		return false
 
+	if _director != null and not _director.should_prioritize_late_game_units():
+		if not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME):
+			return false
+
 	return (
 		_has_excess_resources()
 		and EnemyResourceManager.can_afford(STABLE_GOLD_COST, STABLE_WOOD_COST)
@@ -1290,6 +1385,11 @@ func _should_build_stable() -> bool:
 
 
 func _get_max_stables() -> int:
+	if _director != null:
+		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME):
+			return MAX_STABLES_LATE
+		return 1
+
 	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
 		return 1
@@ -1558,6 +1658,20 @@ func _log_idle_production_if_needed() -> void:
 
 
 func _get_desired_army_size() -> int:
+	if _director != null:
+		match _director.get_strategic_phase():
+			EnemyStrategicDirector.StrategicPhase.OPENING, \
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+			EnemyStrategicDirector.StrategicPhase.CREEPING, \
+			EnemyStrategicDirector.StrategicPhase.TIER_2, \
+			EnemyStrategicDirector.StrategicPhase.EXPANSION:
+				return DESIRED_ARMY_EARLY
+			EnemyStrategicDirector.StrategicPhase.MID_GAME, \
+			EnemyStrategicDirector.StrategicPhase.TIER_3:
+				return DESIRED_ARMY_MID
+			_:
+				return DESIRED_ARMY_LATE
+
 	var elapsed_seconds: float = _get_match_elapsed_seconds()
 	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
 		return DESIRED_ARMY_EARLY

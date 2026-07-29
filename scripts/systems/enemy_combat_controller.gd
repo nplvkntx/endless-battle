@@ -42,7 +42,15 @@ func _process(delta: float) -> void:
 
 
 func get_match_elapsed_seconds() -> float:
+	if _director != null:
+		return _director.get_match_elapsed_seconds()
 	return float(Time.get_ticks_msec() - _match_start_msec) / 1000.0
+
+
+func _get_phase_min_army_size() -> int:
+	if _director != null:
+		return _director.get_min_army_size_for_current_phase()
+	return EnemyArmyCommand.get_phase_min_army_size(get_match_elapsed_seconds())
 
 
 func _update_combat_control(delta: float) -> void:
@@ -93,10 +101,17 @@ func _update_combat_control(delta: float) -> void:
 
 
 func _update_opening_phase(tree: SceneTree) -> void:
-	var elapsed: float = get_match_elapsed_seconds()
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	var still_opening: bool = true
+	if _director != null:
+		still_opening = (
+			_director.get_strategic_phase()
+			== EnemyStrategicDirector.StrategicPhase.OPENING
+		)
+	else:
+		still_opening = get_match_elapsed_seconds() <= OPENING_PHASE_SECONDS
 
-	if elapsed > OPENING_PHASE_SECONDS:
+	if not still_opening:
 		if army_mode == EnemyArmyCommand.ArmyMode.OPENING:
 			EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.OPENING)
 		return
@@ -120,7 +135,7 @@ func _maintain_regrouping(tree: SceneTree) -> void:
 		return
 
 	EnemyArmyCommand.pull_reinforcement_units_to_rally(tree, rally_position)
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(get_match_elapsed_seconds())
+	var min_army: int = _get_phase_min_army_size()
 	var plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
 		rally_position,
@@ -199,7 +214,7 @@ func request_assembled_group_move(
 
 	var tree: SceneTree = get_tree()
 	var elapsed: float = get_match_elapsed_seconds()
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(elapsed)
+	var min_army: int = _get_phase_min_army_size()
 	if (
 		not skip_min_army_gate
 		and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
@@ -386,7 +401,7 @@ func _evaluate_player_creep_request(
 	var ai_plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
 		rally_position,
-		EnemyArmyCommand.get_phase_min_army_size(match_elapsed_seconds),
+		_get_phase_min_army_size(),
 		true
 	)
 	var ai_units: Array = ai_plan.get("units", [])
@@ -493,7 +508,7 @@ func _hold_defense_near_base(tree: SceneTree, rally_position: Vector3) -> void:
 	]:
 		return
 
-	var min_army: int = EnemyArmyCommand.get_phase_min_army_size(get_match_elapsed_seconds())
+	var min_army: int = _get_phase_min_army_size()
 	var plan: Dictionary = EnemyArmyCommand.build_coordinated_combat_group(
 		tree,
 		rally_position,
