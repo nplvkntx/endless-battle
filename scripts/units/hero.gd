@@ -279,16 +279,16 @@ func _sanitize_ability_targets() -> void:
 		_cancel_execute()
 
 
-func set_movement_target(target: Vector3) -> void:
+func set_movement_target(target: Vector3) -> bool:
 	_cancel_power_strike()
 	_cancel_execute()
 	cancel_attack_move()
 	cancel_attack()
-	_set_move_destination(target)
+	return _set_move_destination(target)
 
 
-func _set_move_destination(target: Vector3) -> void:
-	super.set_movement_target(target)
+func _set_move_destination(target: Vector3) -> bool:
+	return super.set_movement_target(target)
 
 
 func get_ground_slam_cooldown_remaining() -> float:

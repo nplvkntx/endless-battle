@@ -141,14 +141,14 @@ func cancel_attack() -> void:
 	_has_chase_target = false
 
 
-func set_movement_target(target: Vector3) -> void:
+func set_movement_target(target: Vector3) -> bool:
 	cancel_attack_move()
 	cancel_attack()
-	_set_move_destination(target)
+	return _set_move_destination(target)
 
 
-func _set_move_destination(target: Vector3) -> void:
-	super.set_movement_target(target)
+func _set_move_destination(target: Vector3) -> bool:
+	return super.set_movement_target(target)
 
 
 func _physics_process(delta: float) -> void:

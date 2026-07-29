@@ -537,9 +537,10 @@ func _count_player_military_near_hero(hero) -> int:
 
 	var count: int = 0
 	var search_range: float = EnemyArmyCommand.HERO_AOE_CHECK_RANGE
+	var tree: SceneTree = get_tree()
 
 	for group_name: StringName in [&"units", &"heroes"]:
-		for node_variant: Variant in get_tree().get_nodes_in_group(group_name):
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if node_variant == null or not is_instance_valid(node_variant):
 				continue
 			if not node_variant is Node:

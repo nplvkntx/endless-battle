@@ -102,7 +102,11 @@ const OBJECTIVE_EVAL_INTERVAL_SECONDS := 1.0
 const OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS := 0.5
 const MAX_GROUP_ORDERS_PER_FRAME := 12
 const PERF_DIAG_INTERVAL_SECONDS := 5.0
-const FORMATION_CACHE_DEST_THRESHOLD := 2.5
+const FORMATION_CACHE_DEST_THRESHOLD := 3.0
+const FORMATION_SLOT_SKIP_DISTANCE := 1.5
+const FORMATION_CACHE_REFRESH_SECONDS := 2.5
+const GROUP_ORDER_DEST_TOLERANCE := 3.0
+const GROUP_ORDER_SIGNATURE_TTL_SECONDS := 2.0
 const DEFENSE_THREAT_CACHE_SECONDS := 0.35
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
@@ -252,6 +256,15 @@ static var _formation_cache_unit_ids: Array[int] = []
 static var _formation_cache_center: Vector3 = Vector3.ZERO
 static var _formation_cache_use_attack_move: bool = false
 static var _formation_cache_targets: Array[Vector3] = []
+static var _formation_cache_msec: int = 0
+static var _formation_cache_army_mode: int = -1
+static var _active_group_order_signature: String = ""
+static var _active_group_order_dest: Vector3 = Vector3.ZERO
+static var _active_group_order_mission: int = -1
+static var _active_group_order_generation: int = 0
+static var _active_group_order_msec: int = 0
+static var _group_order_generation: int = 0
+static var _issuing_group_order_batch: bool = false
 static var _defense_threat_cache: Dictionary = {}
 static var _defense_threat_cache_msec: int = 0
 static var _emergency_threat_cache: Dictionary = {}
@@ -434,6 +447,15 @@ static func reset_match_state() -> void:
 	_formation_cache_center = Vector3.ZERO
 	_formation_cache_use_attack_move = false
 	_formation_cache_targets.clear()
+	_formation_cache_msec = 0
+	_formation_cache_army_mode = -1
+	_active_group_order_signature = ""
+	_active_group_order_dest = Vector3.ZERO
+	_active_group_order_mission = -1
+	_active_group_order_generation = 0
+	_active_group_order_msec = 0
+	_group_order_generation = 0
+	_issuing_group_order_batch = false
 	_defense_threat_cache.clear()
 	_defense_threat_cache_msec = 0
 	_emergency_threat_cache.clear()
@@ -1044,12 +1066,17 @@ static func get_retreat_destination(tree: SceneTree) -> Vector3:
 	if rally != Vector3.ZERO:
 		return rally
 
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, ENEMY_COMBAT_GROUP):
+		var node: Node = node_variant as Node
 		if node is Barracks or node is Stable:
 			if _is_living_building(node as Building):
 				return (node as Node3D).global_position
 
-	for node: Node in tree.get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		ENEMY_COMMAND_CENTER_GROUP
+	):
+		var node: Node = node_variant as Node
 		if node is CommandCenter and _is_living_building(node as CommandCenter):
 			return (node as Node3D).global_position
 
@@ -2550,7 +2577,7 @@ static func _command_focus_attack_objective(
 
 	var had_pending: bool = not _pending_group_orders.is_empty()
 	_pending_group_orders.append_array(pending_orders)
-	if not had_pending:
+	if not had_pending and not _issuing_group_order_batch:
 		tick_group_order_batch(null)
 
 
@@ -2592,7 +2619,7 @@ static func _command_assault_objective(
 		if not pending_orders.is_empty():
 			var had_pending: bool = not _pending_group_orders.is_empty()
 			_pending_group_orders.append_array(pending_orders)
-			if not had_pending:
+			if not had_pending and not _issuing_group_order_batch:
 				tick_group_order_batch(null)
 		return
 
@@ -2781,6 +2808,11 @@ static func _can_transition_army_mode(requested_mode: ArmyMode) -> bool:
 static func _set_army_mode(requested_mode: ArmyMode, previous_mode: ArmyMode) -> void:
 	_army_mode = requested_mode
 	_mode_claim_msec = Time.get_ticks_msec()
+	_active_group_order_signature = ""
+	_active_group_order_dest = Vector3.ZERO
+	_active_group_order_mission = -1
+	_active_group_order_msec = 0
+	_formation_cache_msec = 0
 	_debug_state_change(previous_mode, requested_mode)
 
 
@@ -2791,6 +2823,10 @@ static func release_army_mode(mode: ArmyMode) -> bool:
 	var previous_mode: ArmyMode = _army_mode
 	_army_mode = ArmyMode.IDLE
 	_mode_claim_msec = Time.get_ticks_msec()
+	_active_group_order_signature = ""
+	_active_group_order_dest = Vector3.ZERO
+	_active_group_order_mission = -1
+	_active_group_order_msec = 0
 	_debug_state_change(previous_mode, ArmyMode.IDLE)
 	return true
 
@@ -4823,6 +4859,10 @@ static func _issue_spaced_group_orders(
 	if ordered_units.is_empty():
 		return
 
+	if _is_duplicate_group_order(ordered_units, center, mission, use_attack_move):
+		PerfCounters.warn_duplicate_group_order()
+		return
+
 	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
 		ordered_units,
 		center,
@@ -4836,6 +4876,17 @@ static func _issue_spaced_group_orders(
 			continue
 
 		var target: Vector3 = move_targets[index]
+		var unit_node: Node3D = unit as Node3D
+		if unit_node != null:
+			var slot_distance: float = horizontal_distance(unit_node.global_position, target)
+			if slot_distance <= FORMATION_SLOT_SKIP_DISTANCE:
+				var is_stuck: bool = (
+					unit_node.has_method("is_confirmed_stuck")
+					and bool(unit_node.call("is_confirmed_stuck"))
+				)
+				if not is_stuck:
+					continue
+
 		if not EnemyUnitMission.should_reissue_move_order(unit as Node, target, mission):
 			continue
 
@@ -4849,11 +4900,83 @@ static func _issue_spaced_group_orders(
 	if pending_orders.is_empty():
 		return
 
+	_record_group_order_signature(ordered_units, center, mission, use_attack_move)
 	var had_pending: bool = not _pending_group_orders.is_empty()
 	_pending_group_orders.append_array(pending_orders)
 	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
-	if not had_pending:
+	# Never recurse into batch processing while a batch is already draining.
+	if not had_pending and not _issuing_group_order_batch:
 		tick_group_order_batch(null)
+
+
+static func _build_group_order_signature(
+	ordered_units: Array,
+	center: Vector3,
+	mission: EnemyUnitMission.Mission,
+	use_attack_move: bool
+) -> String:
+	var unit_ids: Array[int] = []
+	for unit: Variant in ordered_units:
+		if NodeSafety.is_alive_node(unit):
+			unit_ids.append((unit as Node).get_instance_id())
+	unit_ids.sort()
+
+	return "%d|%d|%d|%.1f|%.1f|%d" % [
+		int(mission),
+		1 if use_attack_move else 0,
+		ordered_units.size(),
+		center.x,
+		center.z,
+		hash(unit_ids),
+	]
+
+
+static func _is_duplicate_group_order(
+	ordered_units: Array,
+	center: Vector3,
+	mission: EnemyUnitMission.Mission,
+	use_attack_move: bool
+) -> bool:
+	if _active_group_order_signature.is_empty():
+		return false
+
+	var age_sec: float = float(Time.get_ticks_msec() - _active_group_order_msec) / 1000.0
+	if age_sec > GROUP_ORDER_SIGNATURE_TTL_SECONDS and _pending_group_orders.is_empty():
+		_active_group_order_signature = ""
+		return false
+
+	if int(mission) != _active_group_order_mission:
+		return false
+
+	if horizontal_distance(center, _active_group_order_dest) > GROUP_ORDER_DEST_TOLERANCE:
+		return false
+
+	var signature_new: String = _build_group_order_signature(
+		ordered_units,
+		_active_group_order_dest,
+		mission,
+		use_attack_move
+	)
+	return signature_new == _active_group_order_signature
+
+
+static func _record_group_order_signature(
+	ordered_units: Array,
+	center: Vector3,
+	mission: EnemyUnitMission.Mission,
+	use_attack_move: bool
+) -> void:
+	_group_order_generation += 1
+	_active_group_order_generation = _group_order_generation
+	_active_group_order_dest = center
+	_active_group_order_mission = int(mission)
+	_active_group_order_msec = Time.get_ticks_msec()
+	_active_group_order_signature = _build_group_order_signature(
+		ordered_units,
+		center,
+		mission,
+		use_attack_move
+	)
 
 
 static func _get_or_compute_formation_targets(
@@ -4866,11 +4989,16 @@ static func _get_or_compute_formation_targets(
 		if NodeSafety.is_alive_node(unit):
 			unit_ids.append((unit as Node).get_instance_id())
 
+	var now_msec: int = Time.get_ticks_msec()
+	var cache_age_sec: float = float(now_msec - _formation_cache_msec) / 1000.0
+	var army_mode_value: int = int(_army_mode)
 	if (
 		use_attack_move == _formation_cache_use_attack_move
 		and unit_ids == _formation_cache_unit_ids
+		and army_mode_value == _formation_cache_army_mode
 		and horizontal_distance(center, _formation_cache_center) <= FORMATION_CACHE_DEST_THRESHOLD
 		and _formation_cache_targets.size() == ordered_units.size()
+		and cache_age_sec < FORMATION_CACHE_REFRESH_SECONDS
 	):
 		return _formation_cache_targets.duplicate()
 
@@ -4890,6 +5018,8 @@ static func _get_or_compute_formation_targets(
 	_formation_cache_center = center
 	_formation_cache_use_attack_move = use_attack_move
 	_formation_cache_targets = move_targets.duplicate()
+	_formation_cache_msec = now_msec
+	_formation_cache_army_mode = army_mode_value
 	return move_targets
 
 
@@ -4898,13 +5028,20 @@ static func tick_group_order_batch(_tree: SceneTree) -> void:
 		PerfCounters.set_pending_group_orders(0)
 		return
 
-	var next_index: int = _issue_group_order_batch(_pending_group_orders, 0)
-	if next_index >= _pending_group_orders.size():
-		_pending_group_orders.clear()
-	else:
-		_pending_group_orders = _pending_group_orders.slice(next_index)
+	if _issuing_group_order_batch:
+		return
+
+	_issuing_group_order_batch = true
+	var snapshot: Array = _pending_group_orders.duplicate()
+	_pending_group_orders.clear()
+	var next_index: int = _issue_group_order_batch(snapshot, 0)
+	if next_index < snapshot.size():
+		var remaining: Array = snapshot.slice(next_index)
+		remaining.append_array(_pending_group_orders)
+		_pending_group_orders = remaining
 		PerfCounters.warn_order_budget_reached(MAX_GROUP_ORDERS_PER_FRAME)
 
+	_issuing_group_order_batch = false
 	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
 
 

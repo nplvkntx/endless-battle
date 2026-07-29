@@ -456,28 +456,32 @@ func _physics_process(delta: float) -> void:
 	_update_build_trip()
 
 
-func set_movement_target(target: Vector3) -> void:
+func set_movement_target(target: Vector3) -> bool:
 	if (
 		_is_enemy_worker()
 		and WorkerAiUnstuck.blocks_external_commands(self)
 		and not _ai_unstuck_internal_move
 	):
-		return
+		return false
 
 	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
 		_cancel_build_trip()
 	elif _build_trip_state == BuildTripState.TO_BUILDING:
 		if _try_commit_construction_if_in_range():
-			return
+			return false
 		if not _is_construction_approach_move_target(target):
 			_cancel_build_trip()
 
-	super.set_movement_target(target)
+	var applied: bool = super.set_movement_target(target)
+	if not applied:
+		return false
+
 	if _is_on_task_movement():
 		_task_movement_destination = Vector3(target.x, global_position.y, target.z)
 		_task_has_saved_destination = true
 		_refresh_task_navigation()
 	_reset_task_corner_nudge()
+	return true
 
 
 func _is_on_task_movement() -> bool:

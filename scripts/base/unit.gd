@@ -14,18 +14,35 @@ signal died(unit: Unit)
 @export var stopping_distance: float = 0.25
 
 const UNSTUCK_STUCK_MOVE_RATIO := 0.2
-const UNSTUCK_DETOUR_START_DELAY := 0.25
+const UNSTUCK_CONFIRM_SECONDS := 1.25
+const UNSTUCK_DETOUR_START_DELAY := 1.25
 const UNSTUCK_DETOUR_COMMIT_TIME := 0.75
 const UNSTUCK_DETOUR_MAX_TIME := 2.0
 const UNSTUCK_MAX_SIDE_FLIPS := 1
 const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
+const UNSTUCK_RECOVERY_COOLDOWN_SECONDS := 1.5
+const UNSTUCK_MIN_REMAINING_DISTANCE := 1.5
+const MOVE_DEST_TOLERANCE := 1.0
+const MOVE_DEST_NEAR_SKIP := 0.35
+const REPATH_COOLDOWN_NORMAL_SECONDS := 0.7
+const REPATH_COOLDOWN_FORMATION_SECONDS := 1.0
+const REPATH_COOLDOWN_URGENT_SECONDS := 0.35
+const REPATH_COOLDOWN_STUCK_SECONDS := 0.75
+const REPATH_STAGGER_OFFSET_SECONDS := 0.08
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
 const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
 const VISUAL_FACING_TURN_SPEED := 12.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.04
+
+enum RepathUrgency {
+	NORMAL,
+	FORMATION,
+	URGENT,
+	STUCK_RECOVERY,
+}
 
 var team_id: int = -1
 var is_selected: bool = false
@@ -37,16 +54,22 @@ var _max_health: float = 0.0
 var _selection_indicator: Node3D
 var _movement_target: Vector3 = Vector3.ZERO
 var _stuck_time: float = 0.0
+var _is_confirmed_stuck: bool = false
 var _detour_active: bool = false
 var _detour_side: float = 1.0
 var _detour_time: float = 0.0
 var _detour_flips: int = 0
 var _detour_gave_up: bool = false
 var _distance_at_detour_start: float = 0.0
+var _stuck_recovery_cooldown: float = 0.0
+var _stuck_repath_attempted: bool = false
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _last_issued_move_destination: Vector3 = Vector3.ZERO
+var _last_requested_destination: Vector3 = Vector3.ZERO
+var _last_path_request_msec: int = 0
 var _last_move_order_msec: int = 0
+var _previous_position: Vector3 = Vector3.ZERO
 var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
@@ -100,27 +123,107 @@ func set_inspected(inspected: bool) -> void:
 
 
 ## Sets a single move target. Called only when a move command is issued.
-func set_movement_target(target: Vector3) -> void:
+## Returns true when a real destination update was applied.
+func set_movement_target(target: Vector3) -> bool:
+	return request_movement_target(target, RepathUrgency.NORMAL)
+
+
+## Request a movement destination with urgency-aware repath cooldowns.
+## Returns true only when a real path/destination update was applied.
+func request_movement_target(
+	target: Vector3,
+	urgency: RepathUrgency = RepathUrgency.NORMAL
+) -> bool:
 	var next_target: Vector3 = Vector3(target.x, global_position.y, target.z)
+	_last_requested_destination = next_target
 	var now_msec: int = Time.get_ticks_msec()
+
+	var distance_to_new: float = Vector3(
+		global_position.x - next_target.x,
+		0.0,
+		global_position.z - next_target.z
+	).length()
+	if distance_to_new <= stopping_distance + MOVE_DEST_NEAR_SKIP:
+		if has_move_target:
+			var current_delta: float = Vector3(
+				_movement_target.x - next_target.x,
+				0.0,
+				_movement_target.z - next_target.z
+			).length()
+			if current_delta <= MOVE_DEST_TOLERANCE:
+				return false
+		else:
+			return false
+
 	if has_move_target:
 		var destination_delta: float = Vector3(
 			_movement_target.x - next_target.x,
 			0.0,
 			_movement_target.z - next_target.z
 		).length()
-		var since_last_order_msec: int = now_msec - _last_move_order_msec
-		if destination_delta < 1.25 and since_last_order_msec < 400:
-			return
-		if destination_delta < 0.35:
-			return
+		if urgency != RepathUrgency.STUCK_RECOVERY:
+			if destination_delta < MOVE_DEST_NEAR_SKIP:
+				return false
+
+			if urgency != RepathUrgency.URGENT and destination_delta < MOVE_DEST_TOLERANCE:
+				return false
+
+		if not _can_request_repath(destination_delta, urgency, now_msec):
+			return false
 
 	_movement_target = next_target
 	has_move_target = true
 	_last_issued_move_destination = next_target
+	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
-	_reset_unstuck_state()
+	if urgency == RepathUrgency.STUCK_RECOVERY:
+		_stuck_repath_attempted = true
+		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
+		_stuck_time = 0.0
+	else:
+		_reset_unstuck_state()
 	PerfCounters.record_repath_request()
+	return true
+
+
+func get_movement_destination() -> Vector3:
+	return _movement_target
+
+
+func is_confirmed_stuck() -> bool:
+	return _is_confirmed_stuck
+
+
+func get_repath_stagger_offset_seconds() -> float:
+	return float(abs(get_instance_id()) % 7) * REPATH_STAGGER_OFFSET_SECONDS
+
+
+func _can_request_repath(
+	destination_delta: float,
+	urgency: RepathUrgency,
+	now_msec: int
+) -> bool:
+	var cooldown: float = REPATH_COOLDOWN_NORMAL_SECONDS
+	match urgency:
+		RepathUrgency.FORMATION:
+			cooldown = REPATH_COOLDOWN_FORMATION_SECONDS
+		RepathUrgency.URGENT:
+			cooldown = REPATH_COOLDOWN_URGENT_SECONDS
+		RepathUrgency.STUCK_RECOVERY:
+			cooldown = REPATH_COOLDOWN_STUCK_SECONDS
+		_:
+			cooldown = REPATH_COOLDOWN_NORMAL_SECONDS
+
+	# Meaningful destination changes stay responsive even under normal urgency.
+	if destination_delta >= MOVE_DEST_TOLERANCE * 4.0 and urgency != RepathUrgency.STUCK_RECOVERY:
+		cooldown = minf(cooldown, REPATH_COOLDOWN_URGENT_SECONDS)
+
+	cooldown += get_repath_stagger_offset_seconds()
+	var elapsed_sec: float = float(now_msec - _last_path_request_msec) / 1000.0
+	if urgency == RepathUrgency.STUCK_RECOVERY:
+		return elapsed_sec >= cooldown and _stuck_recovery_cooldown <= 0.0
+
+	return elapsed_sec >= cooldown
 
 
 ## Returns true when a throttled combat target scan is due (auto-attack, engage, retarget).
@@ -158,6 +261,9 @@ func should_run_staggered_update(bucket_count: int = 4) -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	if _stuck_recovery_cooldown > 0.0:
+		_stuck_recovery_cooldown = maxf(0.0, _stuck_recovery_cooldown - delta)
+
 	if not has_move_target:
 		_reset_unstuck_state()
 		velocity = Vector3.ZERO
@@ -180,6 +286,7 @@ func _physics_process(delta: float) -> void:
 	velocity.y = 0.0
 
 	var position_before: Vector3 = global_position
+	_previous_position = position_before
 	move_and_slide()
 	_update_unstuck(delta, position_before, direction, distance)
 
@@ -425,6 +532,7 @@ func _update_unstuck(
 			else:
 				_detour_gave_up = true
 				_detour_active = false
+				_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
 
 		return
 
@@ -433,27 +541,50 @@ func _update_unstuck(
 			_reset_unstuck_state()
 		return
 
-	if moving_toward_target or _is_direct_path_clear(forward, distance):
+	if moving_toward_target or distance <= UNSTUCK_MIN_REMAINING_DISTANCE:
 		_stuck_time = 0.0
+		_is_confirmed_stuck = false
 		return
 
-	if not hit_obstacle and _stuck_time <= 0.0:
+	if not hit_obstacle and making_progress:
+		_stuck_time = 0.0
+		_is_confirmed_stuck = false
+		return
+
+	if not hit_obstacle and _stuck_time <= 0.0 and making_progress:
 		return
 
 	_stuck_time += delta
+	if _stuck_time < UNSTUCK_CONFIRM_SECONDS:
+		return
+
+	_is_confirmed_stuck = true
+	if _stuck_recovery_cooldown > 0.0:
+		return
+
+	# First recovery: one controlled repath to the same destination.
+	if not _stuck_repath_attempted:
+		_stuck_repath_attempted = true
+		request_movement_target(_movement_target, RepathUrgency.STUCK_RECOVERY)
+		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
+		_stuck_time = 0.0
+		return
+
+	# Second recovery: lateral unstuck nudge, then cooldown.
 	if _stuck_time >= UNSTUCK_DETOUR_START_DELAY:
 		_begin_detour(forward, distance)
 
 
 func _reset_unstuck_state() -> void:
 	_stuck_time = 0.0
+	_is_confirmed_stuck = false
 	_detour_active = false
 	_detour_side = 1.0
 	_detour_time = 0.0
 	_detour_flips = 0
 	_detour_gave_up = false
 	_distance_at_detour_start = 0.0
-
+	_stuck_repath_attempted = false
 
 ## Loads runtime state from unit_data when the data pipeline is available.
 func _apply_unit_data() -> void:

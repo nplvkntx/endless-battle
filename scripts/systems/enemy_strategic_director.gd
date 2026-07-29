@@ -1263,7 +1263,8 @@ func _maybe_log_debug() -> void:
 
 func _collect_workers(tree: SceneTree) -> Array:
 	var workers: Array = []
-	for node: Node in tree.get_nodes_in_group(&"enemy_workers"):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"enemy_workers"):
+		var node: Node = node_variant as Node
 		if not NodeSafety.is_alive_node(node):
 			continue
 
@@ -1289,12 +1290,16 @@ func _is_idle_worker(worker) -> bool:
 
 
 func _count_group(tree: SceneTree, group_name: StringName) -> int:
-	return tree.get_nodes_in_group(group_name).size()
+	return CombatTargetValidation.get_cached_group_nodes(tree, group_name).size()
 
 
 func _count_barracks(tree: SceneTree) -> int:
 	var count: int = 0
-	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		&"enemy_command_center"
+	):
+		var node: Node = node_variant as Node
 		if node is Barracks:
 			count += 1
 	return count
@@ -1309,7 +1314,11 @@ func _count_enemy_buildings(tree: SceneTree) -> Dictionary:
 	var stables: int = 0
 	var command_centers: int = 0
 
-	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		&"enemy_command_center"
+	):
+		var node: Node = node_variant as Node
 		if not NodeSafety.is_alive_node(node):
 			continue
 
@@ -1396,7 +1405,11 @@ func _is_early_army_rallied(
 
 
 func _get_primary_command_center_health_ratio(tree: SceneTree) -> float:
-	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		&"enemy_command_center"
+	):
+		var node: Node = node_variant as Node
 		if not node is CommandCenter:
 			continue
 

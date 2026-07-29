@@ -121,8 +121,8 @@ func get_current_health() -> int:
 	return _health_component.current_health
 
 
-func set_movement_target(_target: Vector3) -> void:
-	pass
+func set_movement_target(_target: Vector3) -> bool:
+	return false
 
 
 func _physics_process(delta: float) -> void:
