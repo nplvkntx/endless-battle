@@ -14,6 +14,13 @@ const WAVE_GATHER_PULL_INTERVAL_SECONDS: float = 1.0
 const FALLBACK_ATTACK_MIN_COMBAT_UNITS: int = 12
 const FALLBACK_ATTACK_READY_SECONDS: float = 10.0
 const HERO_EXECUTE_SEARCH_RANGE := 14.0
+## Enemy ability upgrade order: main damage, survival, secondary damage, then ultimate.
+const ENEMY_ABILITY_UPGRADE_PRIORITY: Array[StringName] = [
+	HeroAbilityProgression.ABILITY_Q,
+	HeroAbilityProgression.ABILITY_W,
+	HeroAbilityProgression.ABILITY_E,
+	HeroAbilityProgression.ABILITY_R,
+]
 
 @export var player_command_center_path: NodePath
 @export var wave_interval_seconds: float = 35.0
@@ -394,7 +401,10 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 	if not CombatTargetValidation.is_enemy_faction(hero):
 		return
 
-	_ensure_enemy_hero_combat_abilities(hero)
+	_spend_enemy_hero_ability_points(hero)
+
+	if not NodeSafety.is_alive_node(hero):
+		return
 
 	if (
 		health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO
@@ -402,6 +412,9 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 		and hero.can_use_divine_protection()
 	):
 		hero.try_divine_protection()
+
+	if not NodeSafety.is_alive_node(hero):
+		return
 
 	if hero.has_method("can_use_execute") and hero.can_use_execute(
 		HERO_EXECUTE_SEARCH_RANGE
@@ -412,6 +425,9 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 	):
 		hero.try_power_strike()
 
+	if not NodeSafety.is_alive_node(hero):
+		return
+
 	if (
 		hero.has_method("can_use_ground_slam")
 		and hero.can_use_ground_slam()
@@ -420,21 +436,36 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 		hero.try_ground_slam()
 
 
-func _ensure_enemy_hero_combat_abilities(hero) -> void:
+func _spend_enemy_hero_ability_points(hero) -> void:
 	if not NodeSafety.is_alive_node(hero):
 		return
 
 	if not hero is Hero:
 		return
+	if not CombatTargetValidation.is_enemy_faction(hero):
+		return
 	if hero.ability_progression == null:
 		return
+	if hero.ability_points <= 0:
+		return
 
-	for ability_id: StringName in HeroAbilityProgression.BASIC_ABILITIES:
-		while hero.get_ability_rank(ability_id) < HeroAbilityProgression.MAX_BASIC_RANK:
-			hero.ability_progression.learn_ability(ability_id)
+	## Spend every available point using shared learn rules (AP, max rank, ultimate levels).
+	var spend_guard: int = 0
+	var max_spends: int = hero.ability_points
+	while hero.ability_points > 0 and spend_guard < max_spends:
+		spend_guard += 1
 
-	while hero.get_ability_rank(HeroAbilityProgression.ABILITY_R) < HeroAbilityProgression.MAX_ULTIMATE_RANK:
-		hero.ability_progression.learn_ability(HeroAbilityProgression.ABILITY_R)
+		if not NodeSafety.is_alive_node(hero):
+			return
+
+		var learned_ability: bool = false
+		for ability_id: StringName in ENEMY_ABILITY_UPGRADE_PRIORITY:
+			if hero.try_learn_ability(ability_id, false):
+				learned_ability = true
+				break
+
+		if not learned_ability:
+			break
 
 
 func _count_player_military_near_hero(hero) -> int:

@@ -79,6 +79,8 @@ func _ready() -> void:
 	_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
 	if CombatTargetValidation.is_enemy_faction(self):
+		if HeroProgressionStore.has_saved_enemy_progression():
+			HeroProgressionStore.apply_to_hero(self)
 		current_mana = max_mana
 		mana_changed.emit(current_mana, max_mana)
 	elif HeroProgressionStore.has_saved_progression():
@@ -1257,9 +1259,8 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
-	if not CombatTargetValidation.is_enemy_faction(self):
-		HeroProgressionStore.save_from_hero(self)
-	else:
+	HeroProgressionStore.save_from_hero(self)
+	if CombatTargetValidation.is_enemy_faction(self):
 		HeroXpRewards.notify_unit_killed(self)
 		if is_in_group(&"enemy_combat_units"):
 			remove_from_group(&"enemy_combat_units")
