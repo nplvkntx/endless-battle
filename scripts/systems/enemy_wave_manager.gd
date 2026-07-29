@@ -370,9 +370,8 @@ func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void
 	)
 
 	EnemyArmyCommand.set_rebuilding_army(false)
-	print(
-		"AI STRATEGY: launching attack with hero and %d units"
-		% wave_units.size()
+	EnemyAIDebug.log_event(
+		"Launching attack with hero and %d units" % wave_units.size()
 	)
 	if _director != null:
 		_director.notify_attack_launched()

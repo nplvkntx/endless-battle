@@ -2,31 +2,44 @@ class_name EnemyUnitMission
 extends RefCounted
 
 ## Per-unit mission ownership for enemy AI. Prevents managers from fighting over the same units.
+## Military missions: IDLE, RALLY, CREEP, ATTACK, DEFEND, RETREAT, SHOP.
+## Worker-only: ECONOMY, BUILD.
 
 enum Mission {
 	IDLE,
 	ECONOMY,
 	BUILD,
+	RALLY,
+	SHOP,
 	CREEP,
-	REGROUP,
-	REINFORCEMENT_WAIT,
 	ATTACK,
-	DEFEND,
 	RETREAT,
+	DEFEND,
 }
 
 const COMMITMENT_SECONDS: float = 3.0
 const BUILD_COMMITMENT_SECONDS: float = 12.0
+const SHOP_COMMITMENT_SECONDS: float = 8.0
 const ORDER_REISSUE_MIN_SECONDS: float = 2.0
 const ORDER_MOVE_THRESHOLD: float = 4.0
+
+## Lower number = higher priority. DEFEND > RETREAT > ATTACK > CREEP > RALLY > IDLE.
+const PRIORITY_DEFEND: int = 1
+const PRIORITY_RETREAT: int = 2
+const PRIORITY_ATTACK: int = 3
+const PRIORITY_CREEP: int = 4
+const PRIORITY_RALLY: int = 5
+const PRIORITY_SHOP: int = 5
+const PRIORITY_WORKER: int = 6
+const PRIORITY_IDLE: int = 7
 
 static var _unit_missions: Dictionary = {}
 static var _mission_locked_until_msec: Dictionary = {}
 static var _last_order_msec: Dictionary = {}
 static var _last_order_destination: Dictionary = {}
 static var _last_order_mission: Dictionary = {}
-static var _main_army_mission: Mission = Mission.REGROUP
-static var _main_army_mission_reason: String = "initial regroup"
+static var _main_army_mission: Mission = Mission.RALLY
+static var _main_army_mission_reason: String = "initial rally"
 
 
 static func get_main_army_mission() -> Mission:
@@ -41,8 +54,10 @@ static func set_main_army_mission(mission: Mission, reason: String = "") -> bool
 	if mission == _main_army_mission:
 		return false
 
+	var previous: Mission = _main_army_mission
 	_main_army_mission = mission
 	_main_army_mission_reason = reason
+	EnemyAIDebug.log_mission_change(previous, mission, reason)
 	return true
 
 
@@ -55,22 +70,36 @@ static func get_unit_mission(unit) -> Mission:
 
 static func get_mission_priority(mission: Mission) -> int:
 	match mission:
-		Mission.RETREAT:
-			return 1
 		Mission.DEFEND:
-			return 2
+			return PRIORITY_DEFEND
+		Mission.RETREAT:
+			return PRIORITY_RETREAT
 		Mission.ATTACK:
-			return 3
+			return PRIORITY_ATTACK
 		Mission.CREEP:
-			return 4
-		Mission.REGROUP, Mission.REINFORCEMENT_WAIT:
-			return 6
+			return PRIORITY_CREEP
+		Mission.RALLY:
+			return PRIORITY_RALLY
+		Mission.SHOP:
+			return PRIORITY_SHOP
 		Mission.BUILD, Mission.ECONOMY:
-			return 7
+			return PRIORITY_WORKER
 		Mission.IDLE:
-			return 8
+			return PRIORITY_IDLE
 		_:
-			return 9
+			return PRIORITY_IDLE + 1
+
+
+static func is_military_mission(mission: Mission) -> bool:
+	return mission in [
+		Mission.IDLE,
+		Mission.RALLY,
+		Mission.CREEP,
+		Mission.ATTACK,
+		Mission.DEFEND,
+		Mission.RETREAT,
+		Mission.SHOP,
+	]
 
 
 static func can_override_mission(unit, new_mission: Mission) -> bool:
@@ -78,13 +107,13 @@ static func can_override_mission(unit, new_mission: Mission) -> bool:
 		return false
 
 	if EnemyArmyCommand.is_attack_wave_active():
-		if new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE]:
+		if new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE, Mission.SHOP]:
 			return false
 
 	if (
 		EnemyArmyCommand.is_attack_wave_controlling_hero()
 		and unit is Hero
-		and new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE]
+		and new_mission in [Mission.CREEP, Mission.ECONOMY, Mission.BUILD, Mission.IDLE, Mission.SHOP]
 	):
 		return false
 
@@ -92,6 +121,14 @@ static func can_override_mission(unit, new_mission: Mission) -> bool:
 	var current: Mission = get_unit_mission(unit)
 	if current == new_mission:
 		return not _is_mission_locked(unit_id)
+
+	## Attack must never interrupt defend or retreat.
+	if new_mission == Mission.ATTACK and current in [Mission.DEFEND, Mission.RETREAT]:
+		return false
+
+	## Creep must never interrupt defend, retreat, or attack.
+	if new_mission == Mission.CREEP and current in [Mission.DEFEND, Mission.RETREAT, Mission.ATTACK]:
+		return false
 
 	var current_priority: int = get_mission_priority(current)
 	var new_priority: int = get_mission_priority(new_mission)
@@ -102,6 +139,18 @@ static func can_override_mission(unit, new_mission: Mission) -> bool:
 		return false
 
 	return not _is_mission_locked(unit_id)
+
+
+## True when this mission system currently owns the unit, or can claim it.
+static func owns_order_authority(unit, mission: Mission) -> bool:
+	if not NodeSafety.is_alive_node(unit):
+		return false
+
+	var current: Mission = get_unit_mission(unit)
+	if current == mission:
+		return true
+
+	return can_override_mission(unit, mission)
 
 
 static func try_set_mission(
@@ -116,6 +165,7 @@ static func try_set_mission(
 		return false
 
 	var unit_id: int = unit.get_instance_id()
+	var previous: Mission = get_unit_mission(unit)
 	_unit_missions[unit_id] = mission
 	if lock_seconds > 0.0:
 		_mission_locked_until_msec[unit_id] = (
@@ -123,6 +173,9 @@ static func try_set_mission(
 		)
 	else:
 		_mission_locked_until_msec.erase(unit_id)
+
+	if previous != mission and unit is Hero:
+		EnemyAIDebug.log_hero_mission(previous, mission)
 
 	return true
 
@@ -160,10 +213,33 @@ static func filter_commandable_units(units: Array, mission: Mission) -> Array:
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
-		if can_override_mission(unit, mission):
+		if owns_order_authority(unit, mission):
 			result.append(unit)
 
 	return result
+
+
+## Claim mission ownership for units that can be overridden, then return those claimed.
+static func claim_units_for_mission(
+	units: Array,
+	mission: Mission,
+	lock_seconds: float = COMMITMENT_SECONDS
+) -> Array:
+	units = NodeSafety.clean_node_array(units)
+	var claimed: Array = []
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+
+		var current: Mission = get_unit_mission(unit)
+		if current == mission:
+			claimed.append(unit)
+			continue
+
+		if try_set_mission(unit, mission, lock_seconds):
+			claimed.append(unit)
+
+	return claimed
 
 
 static func allows_combat_micro(unit) -> bool:
@@ -186,6 +262,9 @@ static func should_reissue_move_order(
 	mission: Mission
 ) -> bool:
 	if not NodeSafety.is_alive_node(unit):
+		return false
+
+	if not owns_order_authority(unit, mission):
 		return false
 
 	var unit_id: int = unit.get_instance_id()
@@ -218,12 +297,37 @@ static func assign_missions_to_units(
 	mission: Mission,
 	lock_seconds: float = COMMITMENT_SECONDS
 ) -> void:
-	units = NodeSafety.clean_node_array(units)
-	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit):
-			continue
+	claim_units_for_mission(units, mission, lock_seconds)
 
-		try_set_mission(unit, mission, lock_seconds)
+
+## Keep the enemy hero on the main army mission unless shopping or unavailable.
+static func sync_hero_to_main_army(hero, force_leave_shop: bool = false) -> bool:
+	if not NodeSafety.is_alive_node(hero):
+		return false
+
+	if not hero is Hero:
+		return false
+
+	var current: Mission = get_unit_mission(hero)
+	var main_mission: Mission = get_main_army_mission()
+	if main_mission == Mission.SHOP or main_mission == Mission.IDLE:
+		main_mission = Mission.RALLY
+
+	## Allow shopping while the army is idle/rallying; combat missions pull the hero back.
+	if (
+		current == Mission.SHOP
+		and not force_leave_shop
+		and get_mission_priority(main_mission) >= PRIORITY_SHOP
+	):
+		return false
+
+	if current == main_mission:
+		return true
+
+	if current == Mission.SHOP and force_leave_shop:
+		_mission_locked_until_msec.erase(hero.get_instance_id())
+
+	return try_set_mission(hero, main_mission, 0.0)
 
 
 static func mission_to_label(mission: Mission) -> String:
@@ -234,10 +338,10 @@ static func mission_to_label(mission: Mission) -> String:
 			return "BUILD"
 		Mission.CREEP:
 			return "CREEP"
-		Mission.REGROUP:
-			return "REGROUP"
-		Mission.REINFORCEMENT_WAIT:
-			return "REINFORCEMENT_WAIT"
+		Mission.RALLY:
+			return "RALLY"
+		Mission.SHOP:
+			return "SHOP"
 		Mission.ATTACK:
 			return "ATTACK"
 		Mission.DEFEND:
@@ -246,6 +350,28 @@ static func mission_to_label(mission: Mission) -> String:
 			return "RETREAT"
 		_:
 			return "IDLE"
+
+
+static func mission_to_debug_phrase(mission: Mission) -> String:
+	match mission:
+		Mission.CREEP:
+			return "Creeping"
+		Mission.ATTACK:
+			return "Attacking Player"
+		Mission.DEFEND:
+			return "Defending Base"
+		Mission.RETREAT:
+			return "Retreating"
+		Mission.RALLY:
+			return "Rallying"
+		Mission.SHOP:
+			return "Shopping"
+		Mission.ECONOMY:
+			return "Economy"
+		Mission.BUILD:
+			return "Building"
+		_:
+			return "Idle"
 
 
 static func _is_mission_locked(unit_id: int) -> bool:

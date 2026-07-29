@@ -13,7 +13,7 @@ var _tick_timer: float = 0.0
 var _match_start_msec: int = 0
 var _assembly_target_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.ArmyMode.IDLE
 var _assembly_destination: Vector3 = Vector3.ZERO
-var _assembly_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.REGROUP
+var _assembly_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.RALLY
 var _assembly_units: Array = []
 var _assembly_use_attack_move: bool = true
 var _pending_player_creep_ambush: Vector3 = Vector3.ZERO
@@ -481,7 +481,7 @@ func _stage_ambush_after_creep(
 		units,
 		staging_position,
 		EnemyArmyCommand.ArmyMode.REGROUPING,
-		EnemyUnitMission.Mission.REGROUP,
+		EnemyUnitMission.Mission.RALLY,
 		false
 	)
 

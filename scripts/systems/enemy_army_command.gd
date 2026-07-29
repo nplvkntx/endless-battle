@@ -509,7 +509,6 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 		if mission in [
 			EnemyUnitMission.Mission.ATTACK,
 			EnemyUnitMission.Mission.CREEP,
-			EnemyUnitMission.Mission.DEFEND,
 		]:
 			return false
 
@@ -529,7 +528,7 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 			return false
 
 	match mission:
-		EnemyUnitMission.Mission.RETREAT, EnemyUnitMission.Mission.REGROUP, EnemyUnitMission.Mission.IDLE, EnemyUnitMission.Mission.REINFORCEMENT_WAIT:
+		EnemyUnitMission.Mission.RETREAT, EnemyUnitMission.Mission.RALLY, EnemyUnitMission.Mission.IDLE, EnemyUnitMission.Mission.SHOP:
 			return true
 		EnemyUnitMission.Mission.ATTACK:
 			return _army_mode == ArmyMode.ATTACKING or _army_mode == ArmyMode.ASSEMBLING
@@ -547,6 +546,7 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 
 static func set_debug_enabled(enabled: bool) -> void:
 	_debug_enabled_override = enabled
+	EnemyAIDebug.set_enabled(enabled)
 
 
 static func _debug_combat(message: String) -> void:
@@ -750,17 +750,20 @@ static func should_retreat_from_fight(tree: SceneTree) -> bool:
 			return false
 
 	if player_strength > 0.0 and ratio <= RETREAT_STRENGTH_RATIO:
+		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 		_debug_combat("retreating: ratio %.2f" % ratio)
 		return true
 
 	var hero: Hero = find_living_enemy_hero(tree)
 	if hero != null and get_health_ratio(hero) < HERO_RETREAT_HP_RATIO:
+		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 		_debug_combat("retreating: hero low health")
 		return true
 
 	if _fight_start_strength > 0.0:
 		var current_strength: float = estimate_combat_strength(balance.get("ai_units", []))
 		if current_strength <= _fight_start_strength * (1.0 - EMERGENCY_RETREAT_ARMY_LOSS_RATIO):
+			EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 			_debug_combat("retreating: army lost %.0f%%" % (EMERGENCY_RETREAT_ARMY_LOSS_RATIO * 100.0))
 			return true
 
@@ -825,6 +828,11 @@ static func initiate_group_retreat(tree: SceneTree, reason: String = "") -> bool
 
 	cancel_offensive_orders(tree)
 	var survivors: Array = collect_living_combat_units(tree)
+	survivors = EnemyUnitMission.claim_units_for_mission(
+		survivors,
+		EnemyUnitMission.Mission.RETREAT,
+		EnemyUnitMission.COMMITMENT_SECONDS
+	)
 	with_authorized_orders(func() -> void:
 		command_retreat_to(survivors, destination)
 	)
@@ -850,7 +858,7 @@ static func complete_retreat_to_regroup(tree: SceneTree) -> void:
 	if try_claim_army_mode(ArmyMode.REGROUPING):
 		set_rebuilding_army(true)
 		command_regroup_at_rally(tree, rally)
-		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat")
+		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "post-retreat")
 		request_strategic_state(StrategicState.RECOVERING, "post-retreat")
 		if _attack_wave_state == AttackWaveState.RETREATING:
 			notify_attack_wave_retreat_complete(tree)
@@ -886,7 +894,7 @@ static func begin_assembly(
 	_debug_state_change(previous_mode, ArmyMode.ASSEMBLING)
 
 	with_authorized_orders(func() -> void:
-		command_hold_at_rally(required_units, _assembly_rally, EnemyUnitMission.Mission.REGROUP)
+		command_hold_at_rally(required_units, _assembly_rally, EnemyUnitMission.Mission.RALLY)
 	)
 
 	return true
@@ -1131,7 +1139,7 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 		"emergency defense"
 	)
 	request_strategic_state(StrategicState.EMERGENCY_DEFENDING, String(reason))
-	print("AI DEFENSE: Town Center under attack" if reason == &"town_center" else "[AI] EMERGENCY DEFENSE START threat=%s" % String(reason))
+	EnemyAIDebug.log_event("Emergency Defense (%s)" % String(reason))
 
 
 static func update_emergency_defense_threat(threat: Dictionary) -> void:
@@ -1150,11 +1158,11 @@ static func deactivate_emergency_defense() -> void:
 	_emergency_threat_position = Vector3.ZERO
 	_emergency_reason = &""
 	EnemyUnitMission.set_main_army_mission(
-		EnemyUnitMission.Mission.REGROUP,
+		EnemyUnitMission.Mission.RALLY,
 		"emergency ended"
 	)
 	request_strategic_state(StrategicState.RECOVERING, "emergency ended")
-	print("AI DEFENSE: threat cleared, regrouping")
+	EnemyAIDebug.log_event("Threat cleared, regrouping")
 
 
 static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
@@ -1317,14 +1325,14 @@ static func abort_attack_wave(tree: SceneTree, reason: String) -> void:
 	if _attack_wave_state == AttackWaveState.NONE:
 		return
 
-	print("AI ATTACK: aborted because %s" % reason)
+	EnemyAIDebug.log_event("Attack aborted: %s" % reason)
 	_attack_wave_ready_to_advance = false
 	_clear_attack_wave_unit_missions()
 	clear_offensive_wave_tracking()
 	_transition_attack_wave_state(AttackWaveState.RECOVERING, reason)
 	set_rebuilding_army(true)
 	_attack_wave_recovery_timer = 0.0
-	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "attack aborted: %s" % reason)
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "attack aborted: %s" % reason)
 
 
 static func notify_attack_wave_retreat_started(reason: String = "") -> void:
@@ -1344,7 +1352,7 @@ static func notify_attack_wave_retreat_complete(tree: SceneTree) -> void:
 	_attack_wave_recovery_timer = 0.0
 	_clear_attack_wave_unit_missions()
 	clear_offensive_wave_tracking()
-	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.REGROUP, "post-retreat recovery")
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "post-retreat recovery")
 
 
 static func resolve_attack_staging_point(
@@ -1398,12 +1406,14 @@ static func _apply_pending_attack_wave_transition() -> void:
 	_attack_wave_command_refresh_timer = 0.0
 
 	if reason.is_empty():
-		print("AI ATTACK: %s" % _attack_wave_state_label(new_state))
+		EnemyAIDebug.log_event("Attack: %s" % _attack_wave_state_label(new_state))
 	else:
-		print("AI ATTACK: %s (%s)" % [_attack_wave_state_label(new_state), reason])
+		EnemyAIDebug.log_event(
+			"Attack: %s (%s)" % [_attack_wave_state_label(new_state), reason]
+		)
 
 	if previous_state != new_state and new_state == AttackWaveState.GATHERING:
-		print("AI ATTACK: gathering %d units" % _attack_wave_units.size())
+		EnemyAIDebug.log_event("Attack: gathering %d units" % _attack_wave_units.size())
 
 
 static func _attack_wave_state_label(state: AttackWaveState) -> String:
@@ -1491,7 +1501,7 @@ static func _clear_attack_wave_unit_missions() -> void:
 
 		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
 		if mission == EnemyUnitMission.Mission.ATTACK:
-			EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP, 0.0)
+			EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.RALLY, 0.0)
 
 
 static func _commit_attack_wave_target(target_node: Node3D, target_position: Vector3) -> void:
@@ -1719,7 +1729,7 @@ static func _tick_attack_wave_waiting_for_hero(tree: SceneTree, delta: float) ->
 	_issue_hero_to_staging(hero)
 
 	if _is_hero_at_staging(hero):
-		print("AI ATTACK: hero joined wave")
+		EnemyAIDebug.log_event("Attack: hero joined wave")
 		_transition_attack_wave_state(AttackWaveState.REGROUPING, "hero joined wave")
 		return
 
@@ -2373,7 +2383,13 @@ static func try_claim_army_mode(
 				return true
 			return false
 		ArmyMode.RETREATING:
-			if requested_mode in [ArmyMode.REGROUPING, ArmyMode.IDLE, ArmyMode.OPENING]:
+			if requested_mode in [
+				ArmyMode.REGROUPING,
+				ArmyMode.IDLE,
+				ArmyMode.OPENING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+			]:
 				_set_army_mode(requested_mode, previous_mode)
 				return true
 			return requested_mode == ArmyMode.RETREATING
@@ -2555,7 +2571,7 @@ static func pull_straggler_units_to_rally(
 	if stragglers.is_empty():
 		return
 
-	command_hold_at_rally(stragglers, rally_position, EnemyUnitMission.Mission.REGROUP)
+	command_hold_at_rally(stragglers, rally_position, EnemyUnitMission.Mission.RALLY)
 
 
 static func is_hero_isolated_near_player_threat(tree: SceneTree, hero) -> bool:
@@ -2863,8 +2879,22 @@ static func _finalize_attack_gate(
 	debug_context: Dictionary,
 	match_elapsed_seconds: float
 ) -> Dictionary:
+	var can_commit: bool = result.get("can_commit", false)
+	var ai_strength: float = float(
+		result.get("wave_strength", debug_context.get("wave_strength", result.get("wave_power", 0)))
+	)
+	var player_strength: float = float(
+		result.get(
+			"player_strength",
+			debug_context.get("player_strength", result.get("known_player_power", 0))
+		)
+	)
+	if can_commit:
+		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Attack")
+	elif String(result.get("reason", &"")) in ["outpowered", "strength_ratio"]:
+		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Hold")
+
 	if DEBUG_ATTACK_GATE:
-		var can_commit: bool = result.get("can_commit", false)
 		var action: String = "ATTACK" if can_commit else "WAIT"
 		var player_strength_value: Variant = debug_context.get("player_strength", "unknown")
 		var player_strength_text: String = (
@@ -3133,7 +3163,7 @@ static func command_regroup_at_rally(tree: SceneTree, rally_position: Vector3) -
 
 	cancel_offensive_orders(tree)
 	var units: Array = collect_living_combat_units(tree)
-	command_hold_at_rally(units, rally_position, EnemyUnitMission.Mission.REGROUP)
+	command_hold_at_rally(units, rally_position, EnemyUnitMission.Mission.RALLY)
 
 
 static func get_min_reinforcement_release_size(match_elapsed_seconds: float) -> int:
@@ -3148,10 +3178,8 @@ static func is_reinforcement_waiting(unit) -> bool:
 	if not NodeSafety.is_alive_node(unit):
 		return false
 
-	return (
-		EnemyUnitMission.get_unit_mission(unit)
-		== EnemyUnitMission.Mission.REINFORCEMENT_WAIT
-	)
+	purge_stale_reinforcement_pool()
+	return _reinforcement_pool.has(unit.get_instance_id())
 
 
 static func clear_stale_combat_targets(unit: Variant) -> void:
@@ -3230,7 +3258,7 @@ static func _register_reinforcement_waiting(
 	clear_stale_combat_targets(unit)
 	if not EnemyUnitMission.try_set_mission(
 		unit,
-		EnemyUnitMission.Mission.REINFORCEMENT_WAIT,
+		EnemyUnitMission.Mission.RALLY,
 		0.0
 	):
 		return
@@ -3242,12 +3270,12 @@ static func _register_reinforcement_waiting(
 	command_hold_at_rally(
 		[unit],
 		rally_position,
-		EnemyUnitMission.Mission.REINFORCEMENT_WAIT
+		EnemyUnitMission.Mission.RALLY
 	)
 	log_ai_order(
 		unit,
 		"assign_reinforcement_regroup",
-		"REINFORCEMENT_WAIT",
+		"RALLY",
 		rally_position,
 		reason
 	)
@@ -3459,7 +3487,7 @@ static func check_destroyed_army_regroup(
 		if rally_position != Vector3.ZERO:
 			command_regroup_at_rally(tree, rally_position)
 		EnemyUnitMission.set_main_army_mission(
-			EnemyUnitMission.Mission.REGROUP,
+			EnemyUnitMission.Mission.RALLY,
 			"destroyed army: %s" % reason
 		)
 	debug_combat_log("force regroup: %s" % reason)
@@ -3485,12 +3513,12 @@ static func tick_reinforcement_pool(tree: SceneTree, match_elapsed_seconds: floa
 			if EnemyUnitMission.should_reissue_move_order(
 				unit as Node,
 				rally_position,
-				EnemyUnitMission.Mission.REINFORCEMENT_WAIT
+				EnemyUnitMission.Mission.RALLY
 			):
 				command_hold_at_rally(
 					[unit],
 					rally_position,
-					EnemyUnitMission.Mission.REINFORCEMENT_WAIT
+					EnemyUnitMission.Mission.RALLY
 				)
 
 	var min_release: int = get_min_reinforcement_release_size(match_elapsed_seconds)
@@ -3559,8 +3587,7 @@ static func _count_pending_reinforcement_units(tree: SceneTree) -> int:
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
-		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
-		if mission == EnemyUnitMission.Mission.REGROUP or mission == EnemyUnitMission.Mission.REINFORCEMENT_WAIT:
+		if is_reinforcement_waiting(unit) or EnemyUnitMission.get_unit_mission(unit as Node) == EnemyUnitMission.Mission.RALLY:
 			count += 1
 
 	return count
@@ -3580,11 +3607,7 @@ static func pull_reinforcement_units_to_rally(
 			continue
 
 		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
-		if (
-			mission != EnemyUnitMission.Mission.REGROUP
-			and mission != EnemyUnitMission.Mission.IDLE
-			and mission != EnemyUnitMission.Mission.REINFORCEMENT_WAIT
-		):
+		if mission != EnemyUnitMission.Mission.RALLY and mission != EnemyUnitMission.Mission.IDLE:
 			continue
 
 		if horizontal_distance((unit as Node3D).global_position, rally_position) > max_distance:
@@ -3593,7 +3616,7 @@ static func pull_reinforcement_units_to_rally(
 	if reinforcements.is_empty():
 		return
 
-	command_hold_at_rally(reinforcements, rally_position, EnemyUnitMission.Mission.REGROUP)
+	command_hold_at_rally(reinforcements, rally_position, EnemyUnitMission.Mission.RALLY)
 
 
 static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
@@ -3622,9 +3645,8 @@ static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
 			continue
 
 		if (
-			mission != EnemyUnitMission.Mission.REGROUP
+			mission != EnemyUnitMission.Mission.RALLY
 			and mission != EnemyUnitMission.Mission.IDLE
-			and mission != EnemyUnitMission.Mission.REINFORCEMENT_WAIT
 		):
 			continue
 
@@ -4314,6 +4336,10 @@ static func command_attack_move(
 		return
 
 	units = filter_units_for_field_combat(units, mission)
+	units = EnemyUnitMission.claim_units_for_mission(units, mission)
+	if units.is_empty():
+		return
+
 	_issue_spaced_group_orders(units, destination, true, mission)
 
 
@@ -4322,6 +4348,10 @@ static func command_defend_position(units: Array, position: Vector3) -> void:
 
 
 static func command_retreat_to(units: Array, position: Vector3) -> void:
+	units = EnemyUnitMission.claim_units_for_mission(units, EnemyUnitMission.Mission.RETREAT)
+	if units.is_empty():
+		return
+
 	_issue_spaced_group_orders(
 		units,
 		position,
@@ -4333,8 +4363,12 @@ static func command_retreat_to(units: Array, position: Vector3) -> void:
 static func command_hold_at_rally(
 	units: Array,
 	rally_position: Vector3,
-	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.REGROUP
+	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.RALLY
 ) -> void:
+	units = EnemyUnitMission.claim_units_for_mission(units, mission)
+	if units.is_empty():
+		return
+
 	_issue_spaced_group_orders(units, rally_position, false, mission)
 
 
@@ -4696,9 +4730,9 @@ static func _assign_reinforcement_to_emergency_defense(tree: SceneTree, unit) ->
 		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 		if rally_position == Vector3.ZERO:
 			return
-		if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.REGROUP):
+		if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.RALLY):
 			return
-		command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.REGROUP)
+		command_hold_at_rally([unit], rally_position, EnemyUnitMission.Mission.RALLY)
 		return
 
 	if not EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.DEFEND):

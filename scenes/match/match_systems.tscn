@@ -16,6 +16,7 @@
 
 [node name="EnemyStrategicDirector" type="Node" parent="."]
 script = ExtResource("10_enemy_strategic_director")
+debug_enabled = true
 
 [node name="EnemyCombatController" type="Node" parent="."]
 script = ExtResource("11_enemy_combat_controller")

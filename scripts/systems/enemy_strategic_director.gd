@@ -14,7 +14,7 @@ const DESIRE_HIGH: float = 0.75
 const DESIRE_MEDIUM: float = 0.45
 const DESIRE_LOW: float = 0.20
 
-@export var debug_enabled: bool = false
+@export var debug_enabled: bool = true
 
 var _fast_timer: float = 0.0
 var _normal_timer: float = 0.0
@@ -44,6 +44,7 @@ var snapshot: Dictionary = {}
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	EnemyAIDebug.set_enabled(debug_enabled)
 	EnemyArmyCommand.set_debug_enabled(debug_enabled)
 	call_deferred("_run_initial_evaluation")
 
@@ -54,6 +55,7 @@ func _run_initial_evaluation() -> void:
 
 	_evaluate_normal()
 	_evaluate_strategic()
+	EnemyAIDebug.log_phase(EnemyAIDebug.match_phase_label(_get_match_elapsed_seconds()))
 
 
 func _process(delta: float) -> void:
@@ -134,7 +136,7 @@ func notify_attack_launched() -> void:
 func notify_attack_failed() -> void:
 	_recent_attack_failed = true
 	_recent_loss_timer = 45.0
-	_set_main_mission(EnemyUnitMission.Mission.REGROUP, "attack failed, rebuilding")
+	_set_main_mission(EnemyUnitMission.Mission.RALLY, "attack failed, rebuilding")
 
 
 func notify_army_losses() -> void:
@@ -162,7 +164,7 @@ func _run_node_reference_cleanup() -> void:
 	removed += CombatTargetValidation.purge_stale_attack_slots()
 
 	if debug_enabled and removed > 0:
-		print("AI cleanup: purged %d stale node references" % removed)
+		EnemyAIDebug.log_event("Cleanup: purged %d stale node references" % removed)
 
 
 func set_attack_target_position(position: Vector3) -> void:
@@ -206,6 +208,8 @@ func _evaluate_normal() -> void:
 
 
 func _evaluate_strategic() -> void:
+	EnemyAIDebug.log_phase(EnemyAIDebug.match_phase_label(_get_match_elapsed_seconds()))
+
 	if desires["expansion"] >= DESIRE_MEDIUM and snapshot.get("economy_healthy", false):
 		desires["expansion"] = minf(1.0, desires["expansion"] + 0.15)
 
@@ -396,7 +400,7 @@ func _recommend_main_army_mission() -> void:
 
 	if _recent_loss_timer > 0.0 or desires["army"] >= DESIRE_HIGH:
 		_set_main_mission(
-			EnemyUnitMission.Mission.REGROUP,
+			EnemyUnitMission.Mission.RALLY,
 			"rebuilding army (power %d)" % int(snapshot.get("army_power", 0))
 		)
 		return
@@ -411,7 +415,7 @@ func _recommend_main_army_mission() -> void:
 	if should_prioritize_attack():
 		if not _can_launch_offensive_attack():
 			_set_main_mission(
-				EnemyUnitMission.Mission.REGROUP,
+				EnemyUnitMission.Mission.RALLY,
 				"attack gate not met, army power %d" % int(snapshot.get("army_power", 0))
 			)
 			return
@@ -426,14 +430,29 @@ func _recommend_main_army_mission() -> void:
 		return
 
 	_set_main_mission(
-		EnemyUnitMission.Mission.REGROUP,
+		EnemyUnitMission.Mission.RALLY,
 		"holding at rally, army power %d" % int(snapshot.get("army_power", 0))
 	)
 
 
 func _set_main_mission(mission: EnemyUnitMission.Mission, reason: String) -> void:
-	if EnemyUnitMission.set_main_army_mission(mission, reason):
-		_maybe_log_mission_change(mission, reason)
+	if not EnemyUnitMission.set_main_army_mission(mission, reason):
+		return
+
+	_last_debug_mission = mission
+	_sync_hero_to_main_mission()
+
+
+func _sync_hero_to_main_mission() -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero == null:
+		return
+
+	EnemyUnitMission.sync_hero_to_main_army(hero)
 
 
 func _run_recovery_checks() -> void:
@@ -453,7 +472,7 @@ func _run_recovery_checks() -> void:
 
 	var main_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_main_army_mission()
 	if (
-		main_mission == EnemyUnitMission.Mission.REGROUP
+		main_mission == EnemyUnitMission.Mission.RALLY
 		or main_mission == EnemyUnitMission.Mission.ATTACK
 		or main_mission == EnemyUnitMission.Mission.CREEP
 	):
@@ -461,6 +480,10 @@ func _run_recovery_checks() -> void:
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
 	if hero == null:
+		return
+
+	EnemyUnitMission.sync_hero_to_main_army(hero)
+	if EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.SHOP:
 		return
 
 	var non_hero: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(tree)
@@ -483,55 +506,14 @@ func _maybe_log_debug() -> void:
 	if not debug_enabled:
 		return
 
-	var desires_changed: bool = false
+	EnemyAIDebug.set_enabled(true)
+
 	for key: String in desires.keys():
 		var current: float = float(desires[key])
 		var previous: float = float(_last_debug_desires.get(key, -1.0))
 		if absf(current - previous) >= 0.15:
-			desires_changed = true
-			break
-
-	if desires_changed:
-		print(
-			"AI desires: economy=%.2f army=%.2f creep=%.2f attack=%.2f defense=%.2f expansion=%.2f upgrade=%.2f"
-			% [
-				get_desire("economy"),
-				get_desire("army"),
-				get_desire("creep"),
-				get_desire("attack"),
-				get_desire("defense"),
-				get_desire("expansion"),
-				get_desire("upgrade"),
-			]
-		)
-		_last_debug_desires = desires.duplicate()
-
-
-func _maybe_log_mission_change(mission: EnemyUnitMission.Mission, reason: String) -> void:
-	if not debug_enabled:
-		return
-
-	if mission == _last_debug_mission:
-		return
-
-	print(
-		"AI mission: %s -> %s\nReason: %s"
-		% [
-			EnemyUnitMission.mission_to_label(_last_debug_mission),
-			EnemyUnitMission.mission_to_label(mission),
-			reason,
-		]
-	)
-	print(
-		"AI status: army strength %d, workers %d, creep target %s, attack target %s"
-		% [
-			int(snapshot.get("army_power", 0)),
-			int(snapshot.get("workers", 0)),
-			_creep_target.name if _creep_target != null and is_instance_valid(_creep_target) else "none",
-			str(_attack_target_position) if _attack_target_position != Vector3.ZERO else "none",
-		]
-	)
-	_last_debug_mission = mission
+			_last_debug_desires = desires.duplicate()
+			return
 
 
 func _collect_workers(tree: SceneTree) -> Array:

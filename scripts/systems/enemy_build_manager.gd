@@ -360,7 +360,8 @@ func _update_enemy_hero_restoration() -> bool:
 		_try_place_building(PLACEMENT_HERO_ALTAR)
 
 	if hero_altar != null:
-		hero_altar.try_train_enemy_hero()
+		if hero_altar.try_train_enemy_hero():
+			EnemyAIDebug.log_training("Hero")
 
 	return true
 
@@ -528,7 +529,8 @@ func _try_upgrade_command_center_tier() -> void:
 	var target_max_tier: int = 3 if (
 		TechTree.player_has_tier_2(ENEMY_TEAM_ID) or command_center.command_center_tier >= 2
 	) else 2
-	command_center.try_upgrade_enemy_tier(target_max_tier)
+	if command_center.try_upgrade_enemy_tier(target_max_tier):
+		EnemyAIDebug.log_town_hall_upgrade(target_max_tier)
 
 
 func _should_hold_workers_for_pending_tier_upgrade() -> bool:
@@ -597,6 +599,7 @@ func _try_sustain_blacksmith_research() -> void:
 			return
 
 		blacksmith.try_research_upgrade(upgrade_id)
+		EnemyAIDebug.log_research("Blacksmith Upgrade")
 		return
 
 
@@ -727,6 +730,7 @@ func _try_sustain_academy_research() -> void:
 			return
 
 		if academy.try_research_upgrade(upgrade_id):
+			EnemyAIDebug.log_research("Academy Upgrade")
 			return
 
 		_academy_research_fail_cooldown_ticks = ACADEMY_RESEARCH_FAIL_COOLDOWN_TICKS
@@ -803,6 +807,8 @@ func _try_sustain_shop_purchases() -> void:
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
 	if hero == null or hero.is_inventory_full():
+		if hero != null and EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.SHOP:
+			EnemyUnitMission.sync_hero_to_main_army(hero, true)
 		return
 
 	if not HeroItemService.is_hero_in_shop_range(shop, hero):
@@ -812,6 +818,10 @@ func _try_sustain_shop_purchases() -> void:
 
 	if _try_buy_next_useful_shop_item(shop):
 		_shop_purchase_cooldown_ticks = SHOP_PURCHASE_COOLDOWN_TICKS
+		return
+
+	if EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.SHOP:
+		EnemyUnitMission.sync_hero_to_main_army(hero, true)
 
 
 func _try_buy_next_useful_shop_item(shop: Shop) -> bool:
@@ -851,7 +861,18 @@ func _should_send_hero_to_shop(hero: Hero) -> bool:
 		or army_mode == EnemyArmyCommand.ArmyMode.REGROUPING
 		or army_mode == EnemyArmyCommand.ArmyMode.DEFENDING
 		or army_mode == EnemyArmyCommand.ArmyMode.INTERCEPTING
+		or army_mode == EnemyArmyCommand.ArmyMode.RETREATING
+		or army_mode == EnemyArmyCommand.ArmyMode.CREEPING
 	):
+		return false
+
+	var main_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_main_army_mission()
+	if main_mission in [
+		EnemyUnitMission.Mission.ATTACK,
+		EnemyUnitMission.Mission.DEFEND,
+		EnemyUnitMission.Mission.RETREAT,
+		EnemyUnitMission.Mission.CREEP,
+	]:
 		return false
 
 	if (
@@ -870,9 +891,24 @@ func _should_send_hero_to_shop(hero: Hero) -> bool:
 
 
 func _command_hero_to_shop(hero: Hero, shop: Shop) -> void:
+	if not EnemyUnitMission.try_set_mission(
+		hero,
+		EnemyUnitMission.Mission.SHOP,
+		EnemyUnitMission.SHOP_COMMITMENT_SECONDS
+	):
+		return
+
 	var target: Vector3 = shop.global_position
 	target.y = hero.global_position.y
+	if not EnemyUnitMission.should_reissue_move_order(
+		hero,
+		target,
+		EnemyUnitMission.Mission.SHOP
+	):
+		return
+
 	hero.set_movement_target(target)
+	EnemyUnitMission.record_move_order(hero, target, EnemyUnitMission.Mission.SHOP)
 
 
 func _find_completed_enemy_shop() -> Shop:
@@ -1570,21 +1606,31 @@ func _try_train_military(barracks: Barracks) -> bool:
 		if _train_swordsman_next:
 			if barracks.try_train_enemy_swordsman():
 				_train_swordsman_next = false
+				EnemyAIDebug.log_training("Swordsman")
 				return true
 			if barracks.try_train_enemy_archer():
 				_train_swordsman_next = true
+				EnemyAIDebug.log_training("Archer")
 				return true
 		else:
 			if barracks.try_train_enemy_archer():
 				_train_swordsman_next = true
+				EnemyAIDebug.log_training("Archer")
 				return true
 			if barracks.try_train_enemy_swordsman():
 				_train_swordsman_next = false
+				EnemyAIDebug.log_training("Swordsman")
 				return true
 
-		return barracks.try_train_enemy_spearman()
+		if barracks.try_train_enemy_spearman():
+			EnemyAIDebug.log_training("Pikeman")
+			return true
+		return false
 
-	return barracks.try_train_enemy_spearman()
+	if barracks.try_train_enemy_spearman():
+		EnemyAIDebug.log_training("Pikeman")
+		return true
+	return false
 
 
 func _try_place_expansion_command_center() -> bool:
@@ -1890,9 +1936,34 @@ func _try_place_building_at_anchor(
 		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
 	)
 	_assign_nearest_builder(building)
+	_log_building_started(building_type)
 	if building_type == PLACEMENT_BARRACKS and _has_excess_resources():
 		EnemyArmyCommand.debug_combat_log("building additional barracks: excess resources")
 	return true
+
+
+func _log_building_started(building_type: StringName) -> void:
+	match building_type:
+		PLACEMENT_HERO_ALTAR:
+			EnemyAIDebug.log_building("Hero Altar")
+		PLACEMENT_BARRACKS:
+			EnemyAIDebug.log_building("Barracks")
+		PLACEMENT_BLACKSMITH:
+			EnemyAIDebug.log_building("Blacksmith")
+		PLACEMENT_ACADEMY:
+			EnemyAIDebug.log_building("Academy")
+		PLACEMENT_SHOP:
+			EnemyAIDebug.log_building("Shop")
+		PLACEMENT_STABLE:
+			EnemyAIDebug.log_building("Stable")
+		PLACEMENT_ARTILLERY_DEPOT:
+			EnemyAIDebug.log_building("Artillery Depot")
+		PLACEMENT_COMMAND_CENTER:
+			EnemyAIDebug.log_expanding()
+		PLACEMENT_FARM:
+			EnemyAIDebug.log_building("Farm")
+		_:
+			pass
 
 
 func _instantiate_building(building_type: StringName) -> Building:

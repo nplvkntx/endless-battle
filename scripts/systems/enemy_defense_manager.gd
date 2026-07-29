@@ -125,7 +125,7 @@ func _commit_emergency_defense(
 		EnemyArmyCommand.prepare_defense_recall(tree)
 		if not _logged_recall:
 			var defender_count: int = EnemyArmyCommand.collect_living_combat_units(tree).size()
-			print("AI DEFENSE: recalling attack army defenders=%d" % defender_count)
+			EnemyAIDebug.log_event("Recalling attack army defenders=%d" % defender_count)
 			_logged_recall = true
 
 	if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING):
@@ -270,7 +270,7 @@ func _issue_defense_group(
 			intercept_position,
 			EnemyArmyCommand.DEFENSE_THREAT_POWER_RANGE
 		).size()
-		print("AI DEFENSE: engaging %d enemies near Town Center" % enemy_count)
+		EnemyAIDebug.log_event("Engaging %d enemies near Town Center" % enemy_count)
 		_logged_engagement = true
 
 	var use_immediate: bool = (
