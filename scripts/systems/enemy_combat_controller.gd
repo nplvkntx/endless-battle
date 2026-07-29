@@ -296,6 +296,19 @@ func _process_assembly(tree: SceneTree, delta: float) -> void:
 
 	EnemyArmyCommand.finish_assembly(_assembly_target_mode)
 	if _assembly_target_mode == EnemyArmyCommand.ArmyMode.ATTACKING:
+		if not EnemyArmyCommand.can_launch_player_attack(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(tree)
+			)
+			EnemyArmyCommand.abort_attack_wave(
+				tree,
+				EnemyArmyCommand.get_player_offense_block_reason(tree)
+			)
+			_assembly_units.clear()
+			_assembly_destination = Vector3.ZERO
+			_assembly_use_attack_move = true
+			return
 		EnemyArmyCommand.begin_offensive_wave(_assembly_units)
 
 	if _assembly_use_attack_move:
@@ -340,7 +353,7 @@ func request_assembled_group_move(
 	if mission == EnemyUnitMission.Mission.ATTACK:
 		if not EnemyArmyCommand.allows_attack_wave_orders():
 			return false
-		if EnemyArmyCommand.blocks_player_offense(get_tree()):
+		if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 			EnemyAIDebug.log_once(
 				"player_attack_blocked",
 				"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -436,8 +449,8 @@ func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if not can_launch_offensive_action():
 		return
 
-	# EARLY_ARMY / CREEPING / OPENING own the army — no player contests or harassment.
-	if EnemyArmyCommand.blocks_player_offense(tree):
+	# EARLY_ARMY / CREEPING / OPENING / TIER_2 own the army — no player contests or harassment.
+	if not EnemyArmyCommand.can_launch_player_attack(tree):
 		return
 
 	if _director != null and not _director.should_prioritize_creep():

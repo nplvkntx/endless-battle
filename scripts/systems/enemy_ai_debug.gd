@@ -294,7 +294,7 @@ static func log_creeping_complete() -> void:
 	if _creeping_complete_logged:
 		return
 	_creeping_complete_logged = true
-	log_event("Creeping complete -> Advancing to Tier 2")
+	log_event("Creeping complete -> TIER_2")
 
 
 static func log_tier_2(message: String) -> void:

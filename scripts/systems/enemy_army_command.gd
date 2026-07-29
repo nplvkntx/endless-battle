@@ -353,26 +353,29 @@ static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
 	return root.find_child("EnemyStrategicDirector", true, false) as EnemyStrategicDirector
 
 
-## Hard strategic-phase gate for player attacks. DEFEND is never blocked by this.
-static func blocks_player_offense(tree: SceneTree) -> bool:
+## Shared player-attack gate. Fail-closed when the strategic director is missing.
+## DEFEND / emergency defense intentionally bypass this — callers must allow Mission.DEFEND.
+static func can_launch_player_attack(tree: SceneTree) -> bool:
 	var director: EnemyStrategicDirector = find_strategic_director(tree)
 	if director == null:
 		return false
-	return director.blocks_player_offense()
+	return director.can_launch_player_attack()
+
+
+## Inverse of can_launch_player_attack. Prefer can_launch_player_attack at call sites.
+static func blocks_player_offense(tree: SceneTree) -> bool:
+	return not can_launch_player_attack(tree)
 
 
 static func get_player_offense_block_reason(tree: SceneTree) -> String:
 	var director: EnemyStrategicDirector = find_strategic_director(tree)
-	if director == null or not director.blocks_player_offense():
+	if director == null:
+		return "phase unknown"
+
+	if director.can_launch_player_attack():
 		return ""
 
-	match director.get_strategic_phase():
-		EnemyStrategicDirector.StrategicPhase.CREEPING:
-			return "creeping phase owns army"
-		EnemyStrategicDirector.StrategicPhase.EARLY_ARMY:
-			return "early army phase owns army"
-		_:
-			return "opening phase owns army"
+	return "phase %s" % director.get_strategic_phase_name()
 
 
 ## Validates hero + army cohesion before creep / coordinated missions.
@@ -1215,7 +1218,7 @@ static func issue_group_combat_move(
 		if not allows_offensive_orders():
 			_debug_combat("order blocked: strategic state forbids attack")
 			return false
-		if blocks_player_offense(tree):
+		if not can_launch_player_attack(tree):
 			EnemyAIDebug.log_once(
 				"player_attack_blocked",
 				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
@@ -1225,7 +1228,7 @@ static func issue_group_combat_move(
 		if get_army_mode() == ArmyMode.CREEPING and not allow_attack_override_creep:
 			EnemyAIDebug.log_once(
 				"player_attack_blocked",
-				"Player attack blocked: creeping phase owns army"
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
 			)
 			return false
 
@@ -1322,11 +1325,14 @@ static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
 
 	if _finishing_mode_active:
 		var exit_eval: Dictionary = _evaluate_finishing_exit(tree)
-		if exit_eval.get("should_exit", false):
-			_set_finishing_mode(false, String(exit_eval.get("reason", "unknown")))
+		if exit_eval.get("should_exit", false) or not can_launch_player_attack(tree):
+			_set_finishing_mode(false, String(exit_eval.get("reason", "early_phase")))
 		return
 
 	if _finishing_mode_exit_cooldown > 0.0:
+		return
+
+	if not can_launch_player_attack(tree):
 		return
 
 	var enter_eval: Dictionary = _evaluate_finishing_activation(tree)
@@ -1393,7 +1399,7 @@ static func try_begin_attack_wave_preparation(
 	if is_retreat_on_cooldown():
 		return false
 
-	if blocks_player_offense(tree):
+	if not can_launch_player_attack(tree):
 		EnemyAIDebug.log_once(
 			"player_attack_blocked",
 			"Player attack blocked: %s" % get_player_offense_block_reason(tree)
@@ -2488,6 +2494,13 @@ static func try_claim_army_mode(
 	if requested_mode == _army_mode:
 		return true
 
+	# Mid-map INTERCEPTING is a player-attack bypass during early strategic phases.
+	# Emergency defense uses DEFENDING; only that may override early phases.
+	if requested_mode == ArmyMode.INTERCEPTING:
+		var tree: SceneTree = Engine.get_main_loop() as SceneTree
+		if tree != null and not can_launch_player_attack(tree):
+			return false
+
 	if not _can_transition_army_mode(requested_mode):
 		return false
 
@@ -2509,9 +2522,8 @@ static func try_claim_army_mode(
 		ArmyMode.CREEPING:
 			if requested_mode == ArmyMode.ATTACKING and allow_attack_override_creep:
 				# Strategic early phases own the army — attack waves must not steal it.
-				# tree is not passed here; check via Engine.get_main_loop().
 				var tree: SceneTree = Engine.get_main_loop() as SceneTree
-				if tree != null and blocks_player_offense(tree):
+				if tree != null and not can_launch_player_attack(tree):
 					return false
 				_set_army_mode(requested_mode, previous_mode)
 				return true
@@ -2809,7 +2821,7 @@ static func evaluate_attack_gate(
 			match_elapsed_seconds
 		)
 
-	if blocks_player_offense(tree) and not _finishing_mode_active:
+	if not can_launch_player_attack(tree):
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"early_phase"},
 			{"elapsed_seconds": match_elapsed_seconds},
@@ -3813,6 +3825,9 @@ static func pull_reinforcement_units_to_rally(
 
 static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
 	if not _finishing_mode_active:
+		return
+
+	if not can_launch_player_attack(tree):
 		return
 
 	var objective_position: Vector3 = get_attack_objective_position()

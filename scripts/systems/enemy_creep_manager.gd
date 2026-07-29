@@ -307,6 +307,8 @@ func _update_creeping() -> void:
 				_record_creep_setback()
 			if _director != null:
 				_director.clear_creep_target()
+			# No safe camp: rally and rebuild. Never fall through to player attack.
+			_hold_army_until_rallied(tree, rally_position)
 			return
 		_select_camp(camp, army_center if army_center != Vector3.ZERO else rally_position)
 
@@ -338,7 +340,7 @@ func _update_creeping() -> void:
 
 	if not _army_moving_logged:
 		_army_moving_logged = true
-		EnemyAIDebug.log_creeping("Creeping: Army grouped, moving out")
+		EnemyAIDebug.log_creeping("Creeping: Moving to camp")
 
 	# First departure from base waits for a full rally; later camps keep the group moving.
 	if army_mode == EnemyArmyCommand.ArmyMode.CREEPING:
@@ -401,7 +403,14 @@ func _collect_field_creep_army(tree: SceneTree, min_army: int) -> Array:
 
 
 func _hold_army_until_rallied(tree: SceneTree, rally_position: Vector3, _elapsed: float = 0.0) -> void:
-	EnemyAIDebug.log_creeping("Creeping: Army regrouping")
+	var pikemen: int = 0
+	for unit: Variant in EnemyArmyCommand.collect_living_non_hero_combat_units(tree):
+		if unit is Spearman:
+			pikemen += 1
+	if pikemen < EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN:
+		EnemyAIDebug.log_creeping("Creeping paused: rebuilding army")
+	else:
+		EnemyAIDebug.log_creeping("Creeping: Regrouping Hero and %d Pikemen" % pikemen)
 	_army_moving_logged = false
 	if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
 		if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.REGROUPING:
@@ -436,7 +445,11 @@ func _regroup_creep_army(army: Array) -> void:
 	if center == Vector3.ZERO:
 		return
 
-	EnemyAIDebug.log_creeping("Creeping: Army regrouping")
+	var pikemen: int = 0
+	for unit: Variant in army:
+		if unit is Spearman:
+			pikemen += 1
+	EnemyAIDebug.log_creeping("Creeping: Regrouping Hero and %d Pikemen" % maxi(pikemen, 1))
 	_army_moving_logged = false
 	_regroup_hold_timer = REGROUP_HOLD_SECONDS
 	EnemyArmyCommand.with_authorized_orders(func() -> void:
@@ -500,7 +513,7 @@ func _select_camp(camp: Node3D, from_position: Vector3) -> void:
 	_selected_camp_index = get_cleared_early_camp_count() + 1
 	_army_moving_logged = false
 
-	EnemyAIDebug.log_creeping("Creeping: Selected camp %d" % _selected_camp_index)
+	EnemyAIDebug.log_creeping("Creeping: Selected nearby camp")
 	var distance: float = EnemyArmyCommand.horizontal_distance(camp.global_position, from_position)
 	EnemyAIDebug.log_creeping_camp_selected(_format_camp_name(camp), distance)
 
@@ -539,7 +552,7 @@ func _sanitize_active_camp(tree: SceneTree) -> void:
 
 
 func _engage_camp_focus_fire(tree: SceneTree, army: Array, camp: Node3D) -> void:
-	EnemyAIDebug.log_creeping("Engaging creep camp")
+	EnemyAIDebug.log_creeping("Creeping: Engaging camp")
 
 	if not NodeSafety.is_alive_node(_focus_creep) or not _is_living_creep(_focus_creep):
 		_focus_creep = _pick_focus_creep(tree, camp, army)

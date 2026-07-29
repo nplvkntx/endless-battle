@@ -103,7 +103,7 @@ func _process_attack_wave_advance() -> void:
 	if advance_request.is_empty():
 		return
 
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		EnemyArmyCommand.abort_attack_wave(
 			get_tree(),
 			EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -349,7 +349,7 @@ func _process_wave_gather(delta: float) -> void:
 			_director.notify_attack_failed()
 		return
 
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		EnemyArmyCommand.abort_attack_wave(
 			get_tree(),
 			EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -361,7 +361,7 @@ func _process_wave_gather(delta: float) -> void:
 
 
 func _launch_attack_wave(wave_units: Array, attack_destination: Vector3) -> void:
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		EnemyArmyCommand.abort_attack_wave(
 			get_tree(),
 			EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -597,8 +597,8 @@ func _on_wave_timer() -> void:
 
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 
-	# EARLY_ARMY / CREEPING own the army — no player attack path may proceed.
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	# Shared strategic gate: no player attacks until EXPANSION+ (after TIER_2).
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		EnemyAIDebug.log_once(
 			"player_attack_blocked",
 			"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -759,24 +759,11 @@ func _begin_wave_gather(
 
 
 func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	# Hard gate: OPENING / EARLY_ARMY / CREEPING / TIER_2 never open player attacks.
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		return true
 
 	if _director != null:
-		if not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.CREEPING):
-			return true
-		# Stay on creep objective until the CREEPING phase completes.
-		if (
-			_director.get_strategic_phase()
-			== EnemyStrategicDirector.StrategicPhase.CREEPING
-		):
-			return true
-		# No major player attacks while preparing the Tier 2 Town Hall upgrade.
-		if (
-			_director.get_strategic_phase()
-			== EnemyStrategicDirector.StrategicPhase.TIER_2
-		):
-			return true
 		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME):
 			return false
 		if _director.is_phase_interrupted():
@@ -1055,7 +1042,7 @@ func _cache_player_base_position() -> void:
 
 
 func _process_large_army_fallback(delta: float) -> void:
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		_large_army_ready_timer = 0.0
 		return
 
@@ -1090,7 +1077,7 @@ func _process_large_army_fallback(delta: float) -> void:
 
 
 func _try_launch_fallback_attack() -> void:
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		EnemyAIDebug.log_once(
 			"player_attack_blocked",
 			"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(get_tree())
@@ -1134,7 +1121,7 @@ func _try_launch_finishing_attack() -> void:
 	if not EnemyArmyCommand.is_finishing_mode_active():
 		return
 
-	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		return
 
 	if EnemyArmyCommand.is_emergency_defense_active():

@@ -181,6 +181,11 @@ func _should_emergency_recall_army(tree: SceneTree, threat: Dictionary) -> bool:
 func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 	var threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(tree)
 	if threat.get("threatened", false):
+		# Early strategic phases: only emergency/base defense. Never chase mid-map.
+		if EnemyArmyCommand.blocks_player_offense(tree):
+			threat = _filter_early_phase_defense_threat(tree, rally_position, threat)
+
+	if threat.get("threatened", false):
 		_threat_clear_timer = 0.0
 
 		var intercept_position: Vector3 = EnemyArmyCommand.resolve_defense_intercept_position(
@@ -194,6 +199,9 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 			if threat.get("reason", &"") == &"approach"
 			else EnemyArmyCommand.ArmyMode.DEFENDING
 		)
+		# Never INTERCEPT outside the base while strategic phases own the army.
+		if EnemyArmyCommand.blocks_player_offense(tree):
+			defense_mode = EnemyArmyCommand.ArmyMode.DEFENDING
 
 		var already_defending: bool = EnemyArmyCommand.get_army_mode() in [
 			EnemyArmyCommand.ArmyMode.DEFENDING,
@@ -237,6 +245,40 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 		EnemyArmyCommand.with_authorized_orders(func() -> void:
 			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
 		)
+
+
+## During OPENING/EARLY_ARMY/CREEPING/TIER_2 only defend threats inside the base radius.
+func _filter_early_phase_defense_threat(
+	tree: SceneTree,
+	rally_position: Vector3,
+	threat: Dictionary
+) -> Dictionary:
+	if not threat.get("threatened", false):
+		return {"threatened": false}
+
+	var reason: StringName = threat.get("reason", &"")
+	# Mid-map approach chases look like early player attacks — block them.
+	if reason == &"approach":
+		return {"threatened": false}
+
+	var intercept_position: Vector3 = threat.get("intercept_position", Vector3.ZERO)
+	if intercept_position == Vector3.ZERO:
+		intercept_position = EnemyArmyCommand.resolve_defense_intercept_position(
+			tree,
+			threat,
+			rally_position
+		)
+
+	if intercept_position == Vector3.ZERO:
+		return {"threatened": false}
+
+	if (
+		EnemyArmyCommand.horizontal_distance(intercept_position, rally_position)
+		> EnemyArmyCommand.CORE_BASE_DEFENSE_RADIUS
+	):
+		return {"threatened": false}
+
+	return threat
 
 
 func _issue_defense_group(

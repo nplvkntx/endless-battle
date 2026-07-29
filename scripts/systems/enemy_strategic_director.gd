@@ -155,14 +155,16 @@ func get_phase_interrupt_reason() -> String:
 	return _phase_interrupt_reason
 
 
-## True while EARLY_ARMY / CREEPING (and OPENING) own the army. Player attacks must not launch.
+## True while early strategic phases own the army. Player attacks must not launch.
+## OPENING / EARLY_ARMY / CREEPING / TIER_2 block normal offense.
 ## DEFEND / emergency defense intentionally bypass this — callers must allow Mission.DEFEND.
 func blocks_player_offense() -> bool:
-	return _strategic_phase in [
-		StrategicPhase.OPENING,
-		StrategicPhase.EARLY_ARMY,
-		StrategicPhase.CREEPING,
-	]
+	return not can_launch_player_attack()
+
+
+## Shared offensive gate. True only from EXPANSION onward (after TIER_2).
+func can_launch_player_attack() -> bool:
+	return is_phase_at_least(StrategicPhase.EXPANSION)
 
 
 func get_creep_camps_target() -> int:
@@ -249,10 +251,7 @@ func should_prioritize_attack() -> bool:
 	if _phase_interrupt_active:
 		return false
 
-	if blocks_player_offense():
-		return false
-
-	if _strategic_phase == StrategicPhase.TIER_2:
+	if not can_launch_player_attack():
 		return false
 
 	if get_desire("defense") >= DESIRE_HIGH:
@@ -633,10 +632,14 @@ func _can_leave_creeping() -> bool:
 		return false
 
 	var cleared_camps: int = int(snapshot.get("cleared_early_camps", 0))
+	# Must clear at least one camp — never skip CREEPING into offense.
+	if cleared_camps < CREEP_REQUIRED_EARLY_CAMPS_MIN:
+		return false
+
 	if cleared_camps >= _creep_camps_target:
 		return true
 
-	# No more safe camps left to clear — advance once hero is leveled.
+	# Prefer more camps while safe ones remain; otherwise advance with level + 1 camp.
 	return not snapshot.get("has_safe_creep_camp", true)
 
 
@@ -1392,7 +1395,7 @@ func _get_match_elapsed_seconds() -> float:
 
 
 func _can_launch_offensive_attack() -> bool:
-	if blocks_player_offense():
+	if not can_launch_player_attack():
 		return false
 
 	var tree: SceneTree = get_tree()
