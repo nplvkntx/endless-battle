@@ -21,6 +21,8 @@ func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: No
 	_attacker = NodeSafety.safe_node(attacker) as Node
 	_damage = damage
 	global_position = spawn_position
+	PerfCounters.register_projectile()
+	tree_exiting.connect(_on_arrow_tree_exiting, CONNECT_ONE_SHOT)
 
 	if not _is_target_alive():
 		queue_free()
@@ -36,6 +38,10 @@ func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: No
 	_direction = to_target.normalized()
 	_max_travel = to_target.length() + HIT_DISTANCE
 	look_at(global_position + _direction, Vector3.UP)
+
+
+func _on_arrow_tree_exiting() -> void:
+	PerfCounters.unregister_projectile()
 
 
 func _physics_process(delta: float) -> void:

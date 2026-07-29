@@ -85,7 +85,14 @@ var snapshot: Dictionary = {}
 
 
 func _ready() -> void:
+	EnemyArmyCommand.reset_match_state()
+	EnemyAIDebug.reset_match_state()
 	_match_start_msec = Time.get_ticks_msec()
+	# Stagger strategic ticks away from combat/defense shared frames.
+	_fast_timer = FAST_TICK_SECONDS * 0.2
+	_normal_timer = NORMAL_TICK_SECONDS * 0.4
+	_strategic_timer = STRATEGIC_TICK_SECONDS * 0.15
+	_recovery_timer = RECOVERY_TICK_SECONDS * 0.6
 	EnemyAIDebug.set_enabled(debug_enabled)
 	EnemyArmyCommand.set_debug_enabled(debug_enabled)
 	call_deferred("_run_initial_evaluation")
@@ -116,19 +123,36 @@ func _process(delta: float) -> void:
 
 	if _fast_timer >= FAST_TICK_SECONDS:
 		_fast_timer = 0.0
+		var start_usec: int = PerfCounters.begin_section()
 		_evaluate_fast()
+		PerfCounters.end_section("Strategic fast update", start_usec)
+		PerfCounters.record_ai_decision_update()
+		_publish_perf_status()
 
 	if _normal_timer >= NORMAL_TICK_SECONDS:
 		_normal_timer = 0.0
+		var start_usec_normal: int = PerfCounters.begin_section()
 		_evaluate_normal()
+		PerfCounters.end_section("Strategic normal update", start_usec_normal)
+		PerfCounters.record_ai_decision_update()
+		_publish_perf_status()
 
 	if _strategic_timer >= STRATEGIC_TICK_SECONDS:
 		_strategic_timer = 0.0
 		_evaluate_strategic()
+		_publish_perf_status()
 
 	if _recovery_timer >= RECOVERY_TICK_SECONDS:
 		_recovery_timer = 0.0
 		_run_recovery_checks()
+
+
+func _publish_perf_status() -> void:
+	PerfCounters.set_ai_status(
+		get_strategic_phase_name(),
+		EnemyArmyCommand.ArmyMode.keys()[EnemyArmyCommand.get_army_mode()],
+		EnemyUnitMission.mission_to_label(EnemyUnitMission.get_main_army_mission())
+	)
 
 
 func get_strategic_phase() -> StrategicPhase:
@@ -359,8 +383,9 @@ func _run_node_reference_cleanup() -> void:
 	var removed: int = 0
 	removed += EnemyUnitMission.purge_stale_entries()
 	removed += CombatTargetValidation.purge_stale_attack_slots()
+	EnemyArmyCommand.purge_stale_runtime_caches()
 
-	if debug_enabled and removed > 0:
+	if debug_enabled and removed > 0 and PerfCounters.verbose_ai_logging:
 		EnemyAIDebug.log_event("Cleanup: purged %d stale node references" % removed)
 
 
@@ -567,6 +592,11 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 			CREEP_REQUIRED_EARLY_CAMPS_MIN,
 			CREEP_REQUIRED_EARLY_CAMPS_MAX
 		)
+		# Unlock creep orders after defense/retreat recovery (RECOVERING blocked creeping).
+		EnemyArmyCommand.request_strategic_state(
+			EnemyArmyCommand.StrategicState.CREEPING,
+			"creeping phase ownership"
+		)
 
 	if previous == StrategicPhase.OPENING:
 		EnemyAIDebug.log_opening_complete(
@@ -597,16 +627,11 @@ func _can_leave_opening() -> bool:
 		snapshot.get("has_farm", false)
 		and snapshot.get("has_hero_altar", false)
 		and snapshot.get("has_barracks", false)
-		and int(snapshot.get("workers", 0)) >= OPENING_WORKER_TARGET
 	)
 
 
 func _opening_exit_reason() -> String:
-	var workers: int = int(snapshot.get("workers", 0))
-	return (
-		"Farm, Altar, Barracks ready | Workers: %d/%d"
-		% [workers, OPENING_WORKER_TARGET]
-	)
+	return "Farm, Altar, Barracks ready"
 
 
 func _can_leave_early_army() -> bool:
@@ -1076,6 +1101,13 @@ func _recommend_main_army_mission() -> void:
 		_set_main_mission(
 			EnemyUnitMission.Mission.RALLY,
 			"early army assembling at rally"
+		)
+		return
+
+	if _strategic_phase == StrategicPhase.CREEPING:
+		_set_main_mission(
+			EnemyUnitMission.Mission.CREEP,
+			"creeping phase owns army"
 		)
 		return
 

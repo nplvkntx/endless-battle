@@ -45,6 +45,7 @@ var _selected_camp_index: int = 0
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	_tick_timer = CREEP_TICK_INTERVAL_SECONDS * 0.7
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 
@@ -62,7 +63,9 @@ func _process(delta: float) -> void:
 		return
 
 	_tick_timer = 0.0
+	var start_usec: int = PerfCounters.begin_section()
 	_update_creeping()
+	PerfCounters.end_section("Creep update", start_usec)
 
 
 func should_abandon_creep_phase() -> bool:

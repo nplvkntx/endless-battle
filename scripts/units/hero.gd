@@ -718,6 +718,7 @@ func find_execute_target(search_range: float) -> Node3D:
 	if search_range <= 0.0:
 		return null
 
+	PerfCounters.record_target_search()
 	var best_hero: Node3D = null
 	var best_hero_distance: float = INF
 	var best_unit: Node3D = null

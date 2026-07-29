@@ -24,6 +24,8 @@ var _director: EnemyStrategicDirector = null
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	# Stagger first combat tick away from defense/director fast ticks.
+	_tick_timer = TICK_INTERVAL_SECONDS * 0.35
 	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 
@@ -38,7 +40,11 @@ func _process(delta: float) -> void:
 		return
 
 	_tick_timer = 0.0
+	var start_usec: int = PerfCounters.begin_section()
 	_update_combat_control(delta * (1.0 / TICK_INTERVAL_SECONDS))
+	PerfCounters.end_section("Combat update", start_usec)
+	PerfCounters.record_ai_combat_update()
+	PerfCounters.record_ai_decision_update()
 
 
 func get_match_elapsed_seconds() -> float:
@@ -77,12 +83,21 @@ func _update_combat_control(delta: float) -> void:
 		_process_assembly(tree, delta)
 		return
 
+	# EARLY_ARMY owns the army before generic REGROUPING / contest logic.
+	if _update_early_army_phase(tree):
+		_abort_blocked_player_attack(tree)
+		return
+
 	if army_mode in [
 		EnemyArmyCommand.ArmyMode.ATTACKING,
 		EnemyArmyCommand.ArmyMode.CREEPING,
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]:
+		if army_mode == EnemyArmyCommand.ArmyMode.ATTACKING:
+			_abort_blocked_player_attack(tree)
+			if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.ATTACKING:
+				return
 		if EnemyArmyCommand.should_retreat_from_fight(tree):
 			if _active_player_creep_contest_camp != null:
 				EnemyArmyCommand.record_creep_contest_cooldown(
@@ -99,13 +114,32 @@ func _update_combat_control(delta: float) -> void:
 		_maintain_regrouping(tree)
 		return
 
-	if _update_early_army_phase(tree):
-		return
-
 	if _update_tier_2_phase(tree):
 		return
 
 	_evaluate_player_creep_opportunities(tree)
+
+
+func _abort_blocked_player_attack(tree: SceneTree) -> void:
+	if EnemyArmyCommand.can_launch_player_attack(tree):
+		return
+
+	var reason: String = EnemyArmyCommand.get_player_offense_block_reason(tree)
+	if EnemyArmyCommand.is_attack_wave_active():
+		EnemyArmyCommand.abort_attack_wave(tree, reason)
+		EnemyAIDebug.log_once(
+			"player_attack_blocked",
+			"Player attack blocked: %s" % reason
+		)
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+		EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING)
+		var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+		if rally_position != Vector3.ZERO:
+			EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING)
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
+			)
 
 
 func _log_creeping_retreat(tree: SceneTree) -> void:
@@ -186,14 +220,14 @@ func _update_early_army_phase(tree: SceneTree) -> bool:
 		EnemyAIDebug.log_early_army("Waiting for Hero")
 		return true
 
-	var non_hero_count: int = 0
+	var pikemen_count: int = 0
 	for unit: Variant in army:
-		if EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
-			non_hero_count += 1
+		if unit is Spearman:
+			pikemen_count += 1
 
 	var min_pikemen: int = EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
-	if non_hero_count < min_pikemen:
-		EnemyAIDebug.log_early_army_pikemen(non_hero_count, min_pikemen)
+	if pikemen_count < min_pikemen:
+		EnemyAIDebug.log_early_army_pikemen(pikemen_count, min_pikemen)
 
 	var nearby: Array = EnemyArmyCommand.filter_units_near_rally(
 		army,

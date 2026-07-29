@@ -102,6 +102,8 @@ const OBJECTIVE_EVAL_INTERVAL_SECONDS := 1.0
 const OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS := 0.5
 const MAX_GROUP_ORDERS_PER_FRAME := 12
 const PERF_DIAG_INTERVAL_SECONDS := 5.0
+const FORMATION_CACHE_DEST_THRESHOLD := 2.5
+const DEFENSE_THREAT_CACHE_SECONDS := 0.35
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
 const ATTACK_OBJECTIVE_SPREAD_MULTIPLIER := 1.35
@@ -246,6 +248,15 @@ static var _objective_eval_timer: float = 0.0
 static var _objective_stuck_check_timer: float = 0.0
 static var _perf_diag_timer: float = 0.0
 static var _orders_issued_since_diag: int = 0
+static var _formation_cache_unit_ids: Array[int] = []
+static var _formation_cache_center: Vector3 = Vector3.ZERO
+static var _formation_cache_use_attack_move: bool = false
+static var _formation_cache_targets: Array[Vector3] = []
+static var _defense_threat_cache: Dictionary = {}
+static var _defense_threat_cache_msec: int = 0
+static var _emergency_threat_cache: Dictionary = {}
+static var _emergency_threat_cache_msec: int = 0
+static var _perf_overlay_status_timer: float = 0.0
 static var _creep_contest_cooldowns: Dictionary = {}
 static var _reinforcement_pool: Dictionary = {}
 static var _attack_wave_state: AttackWaveState = AttackWaveState.NONE
@@ -269,6 +280,20 @@ static var _attack_wave_pending_transition_reason: String = ""
 
 static func get_army_mode() -> ArmyMode:
 	return _army_mode
+
+
+static func purge_stale_runtime_caches() -> void:
+	_main_army_cache = NodeSafety.clean_and_dedupe_nodes(_main_army_cache)
+	_attack_wave_units = NodeSafety.clean_and_dedupe_nodes(_attack_wave_units)
+	_cached_offensive_wave_units = NodeSafety.clean_and_dedupe_nodes(_cached_offensive_wave_units)
+	_pending_group_orders = _pending_group_orders.filter(
+		func(entry: Variant) -> bool:
+			if not entry is Dictionary:
+				return false
+			return NodeSafety.is_alive_node((entry as Dictionary).get("unit"))
+	)
+	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
+	PerfCounters.set_combat_group_size(_main_army_cache.size())
 
 
 static func get_strategic_state() -> StrategicState:
@@ -340,6 +365,99 @@ static func allows_offensive_orders() -> bool:
 		StrategicState.RETREATING,
 		StrategicState.RECOVERING,
 	]
+
+
+## Neutral-camp creeping is allowed while recovering/economy. Player attacks stay gated separately.
+static func allows_creep_orders() -> bool:
+	if is_defense_blocking_offense():
+		return false
+
+	if _strategic_state == StrategicState.RETREATING:
+		return false
+
+	if _strategic_state in [
+		StrategicState.PREPARING_ATTACK,
+		StrategicState.ATTACKING,
+	]:
+		return false
+
+	return _strategic_state in [
+		StrategicState.ECONOMY,
+		StrategicState.CREEPING,
+		StrategicState.RECOVERING,
+	]
+
+
+## Clear static army ownership between matches. Class-level state otherwise persists in-editor.
+static func reset_match_state() -> void:
+	_army_mode = ArmyMode.IDLE
+	_mode_claim_msec = 0
+	_strategic_state = StrategicState.ECONOMY
+	_strategic_state_msec = 0
+	_pending_strategic_state = StrategicState.ECONOMY
+	_pending_strategic_reason = ""
+	_has_pending_strategic_transition = false
+	_orders_authorized = false
+	_assembly_timer = 0.0
+	_assembly_rally = Vector3.ZERO
+	_assembly_required_count = 0
+	_retreat_cooldown = 0.0
+	_fight_start_strength = 0.0
+	_fight_anchor_position = Vector3.ZERO
+	_fight_start_msec = 0
+	_last_combat_eval_msec = 0
+	_main_army_cache.clear()
+	_player_army_memory = {
+		"strength": 0.0,
+		"position": Vector3.ZERO,
+		"hero_level": 0,
+		"timestamp_msec": 0,
+		"unit_count": 0,
+	}
+	_is_rebuilding_army = false
+	_active_wave_start_unit_count = 0
+	_reset_objective_tracking()
+	_finishing_mode_active = false
+	_finishing_mode_exit_cooldown = 0.0
+	_finishing_mode_eval_timer = 0.0
+	_last_finishing_objective = null
+	_emergency_defense_active = false
+	_emergency_threat_position = Vector3.ZERO
+	_emergency_reason = &""
+	_combat_units_cache_frame = -1
+	_cached_offensive_wave_units_frame = -1
+	_cached_offensive_wave_units.clear()
+	_pending_group_orders.clear()
+	_objective_eval_timer = 0.0
+	_objective_stuck_check_timer = 0.0
+	_formation_cache_unit_ids.clear()
+	_formation_cache_center = Vector3.ZERO
+	_formation_cache_use_attack_move = false
+	_formation_cache_targets.clear()
+	_defense_threat_cache.clear()
+	_defense_threat_cache_msec = 0
+	_emergency_threat_cache.clear()
+	_emergency_threat_cache_msec = 0
+	_creep_contest_cooldowns.clear()
+	_reinforcement_pool.clear()
+	_attack_wave_state = AttackWaveState.NONE
+	_attack_wave_state_msec = 0
+	_attack_wave_units.clear()
+	_attack_wave_staging_point = Vector3.ZERO
+	_attack_wave_target_position = Vector3.ZERO
+	_attack_wave_target_node = null
+	_attack_wave_target_committed_until_msec = 0
+	_attack_wave_gather_pull_timer = 0.0
+	_attack_wave_hero_wait_timer = 0.0
+	_attack_wave_regroup_timer = 0.0
+	_attack_wave_recovery_timer = 0.0
+	_attack_wave_command_refresh_timer = 0.0
+	_attack_wave_hero_unreachable_retries = 0
+	_attack_wave_min_non_hero_units = 0
+	_attack_wave_ready_to_advance = false
+	_attack_wave_pending_transition = AttackWaveState.NONE
+	_attack_wave_pending_transition_reason = ""
+	EnemyUnitMission.reset_match_state()
 
 
 static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
@@ -457,17 +575,6 @@ static func can_start_group_mission(
 		"non_hero_count": non_hero.size(),
 		"army_center": army_center,
 	}
-
-
-static func allows_creep_orders() -> bool:
-	if not allows_offensive_orders():
-		return false
-
-	return _strategic_state in [
-		StrategicState.ECONOMY,
-		StrategicState.CREEPING,
-		StrategicState.RECOVERING,
-	]
 
 
 static func allows_attack_wave_orders() -> bool:
@@ -644,7 +751,7 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 			return false
 
 	if _strategic_state == StrategicState.RECOVERING:
-		if mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]:
+		if mission == EnemyUnitMission.Mission.ATTACK:
 			return false
 
 	if _strategic_state == StrategicState.CREEPING:
@@ -994,7 +1101,12 @@ static func complete_retreat_to_regroup(tree: SceneTree) -> void:
 		set_rebuilding_army(true)
 		command_regroup_at_rally(tree, rally)
 		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "post-retreat")
-		request_strategic_state(StrategicState.RECOVERING, "post-retreat")
+		var recover_state: StrategicState = (
+			StrategicState.ECONOMY
+			if blocks_player_offense(tree)
+			else StrategicState.RECOVERING
+		)
+		request_strategic_state(recover_state, "post-retreat")
 		if _attack_wave_state == AttackWaveState.RETREATING:
 			notify_attack_wave_retreat_complete(tree)
 
@@ -1084,6 +1196,15 @@ static func finish_assembly(target_mode: ArmyMode) -> void:
 		return
 
 	release_army_mode(ArmyMode.ASSEMBLING)
+	if target_mode == ArmyMode.ATTACKING:
+		var tree: SceneTree = Engine.get_main_loop() as SceneTree
+		if tree != null and not can_launch_player_attack(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+			)
+			try_claim_army_mode(ArmyMode.REGROUPING)
+			return
 	try_claim_army_mode(target_mode)
 
 
@@ -1309,7 +1430,13 @@ static func deactivate_emergency_defense() -> void:
 		EnemyUnitMission.Mission.RALLY,
 		"emergency ended"
 	)
-	request_strategic_state(StrategicState.RECOVERING, "emergency ended")
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	var recover_state: StrategicState = (
+		StrategicState.ECONOMY
+		if tree != null and blocks_player_offense(tree)
+		else StrategicState.RECOVERING
+	)
+	request_strategic_state(recover_state, "emergency ended")
 	EnemyAIDebug.log_event("Threat cleared, regrouping")
 
 
@@ -1457,6 +1584,18 @@ static func tick_attack_wave_state(
 	if _attack_wave_state == AttackWaveState.NONE:
 		return
 
+	# Kill any stale/timer wave that started while strategic phases own the army.
+	if (
+		not can_launch_player_attack(tree)
+		and _attack_wave_state not in [
+			AttackWaveState.NONE,
+			AttackWaveState.RETREATING,
+			AttackWaveState.RECOVERING,
+		]
+	):
+		abort_attack_wave(tree, get_player_offense_block_reason(tree))
+		return
+
 	_attack_wave_units = _sanitize_attack_wave_units(_attack_wave_units)
 	_attack_wave_command_refresh_timer += delta
 
@@ -1491,6 +1630,18 @@ static func abort_attack_wave(tree: SceneTree, reason: String) -> void:
 	set_rebuilding_army(true)
 	_attack_wave_recovery_timer = 0.0
 	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "attack aborted: %s" % reason)
+
+	if tree != null:
+		cancel_offensive_orders(tree)
+		if get_army_mode() == ArmyMode.ATTACKING:
+			release_army_mode(ArmyMode.ATTACKING)
+		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
+		if rally_position != Vector3.ZERO and try_claim_army_mode(ArmyMode.REGROUPING):
+			command_regroup_at_rally(tree, rally_position)
+		if blocks_player_offense(tree):
+			request_strategic_state(StrategicState.ECONOMY, "attack aborted early phase")
+		else:
+			request_strategic_state(StrategicState.RECOVERING, "attack aborted")
 
 
 static func notify_attack_wave_retreat_started(reason: String = "") -> void:
@@ -2357,6 +2508,15 @@ static func _command_focus_attack_objective(
 	objective: Node3D,
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
 ) -> void:
+	if mission == EnemyUnitMission.Mission.ATTACK:
+		var tree: SceneTree = Engine.get_main_loop() as SceneTree
+		if tree != null and not can_launch_player_attack(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+			)
+			return
+
 	if not NodeSafety.is_alive_node(objective):
 		return
 
@@ -2499,6 +2659,16 @@ static func try_claim_army_mode(
 	if requested_mode == ArmyMode.INTERCEPTING:
 		var tree: SceneTree = Engine.get_main_loop() as SceneTree
 		if tree != null and not can_launch_player_attack(tree):
+			return false
+
+	# ATTACKING must never be claimed while strategic phases own the army.
+	if requested_mode == ArmyMode.ATTACKING:
+		var tree: SceneTree = Engine.get_main_loop() as SceneTree
+		if tree != null and not can_launch_player_attack(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+			)
 			return false
 
 	if not _can_transition_army_mode(requested_mode):
@@ -3940,6 +4110,22 @@ static func is_enemy_base_threatened(tree: SceneTree) -> bool:
 
 
 static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
+	var now_msec: int = Time.get_ticks_msec()
+	if (
+		not _defense_threat_cache.is_empty()
+		and now_msec - _defense_threat_cache_msec < int(DEFENSE_THREAT_CACHE_SECONDS * 1000.0)
+	):
+		return _defense_threat_cache.duplicate()
+
+	var start_usec: int = PerfCounters.begin_section()
+	var result: Dictionary = _evaluate_defense_threat_uncached(tree)
+	PerfCounters.end_section("Defense threat eval", start_usec)
+	_defense_threat_cache = result.duplicate()
+	_defense_threat_cache_msec = now_msec
+	return result
+
+
+static func _evaluate_defense_threat_uncached(tree: SceneTree) -> Dictionary:
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
 		return {"threatened": false}
@@ -3986,6 +4172,22 @@ static func evaluate_defense_threat(tree: SceneTree) -> Dictionary:
 
 
 static func evaluate_emergency_defense_threat(tree: SceneTree) -> Dictionary:
+	var now_msec: int = Time.get_ticks_msec()
+	if (
+		not _emergency_threat_cache.is_empty()
+		and now_msec - _emergency_threat_cache_msec < int(DEFENSE_THREAT_CACHE_SECONDS * 1000.0)
+	):
+		return _emergency_threat_cache.duplicate()
+
+	var start_usec: int = PerfCounters.begin_section()
+	var result: Dictionary = _evaluate_emergency_defense_threat_uncached(tree)
+	PerfCounters.end_section("Emergency defense eval", start_usec)
+	_emergency_threat_cache = result.duplicate()
+	_emergency_threat_cache_msec = now_msec
+	return result
+
+
+static func _evaluate_emergency_defense_threat_uncached(tree: SceneTree) -> Dictionary:
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
 		return {"threatened": false}
@@ -4547,6 +4749,15 @@ static func command_attack_move(
 	destination: Vector3,
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
 ) -> void:
+	if mission == EnemyUnitMission.Mission.ATTACK:
+		var tree: SceneTree = Engine.get_main_loop() as SceneTree
+		if tree != null and not can_launch_player_attack(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+			)
+			return
+
 	if not _combat_orders_allowed(mission):
 		return
 
@@ -4606,20 +4817,16 @@ static func _issue_spaced_group_orders(
 	use_attack_move: bool,
 	mission: EnemyUnitMission.Mission
 ) -> void:
-	units = NodeSafety.clean_node_array(units)
+	units = NodeSafety.clean_and_dedupe_nodes(units)
 	var commandable_units: Array = EnemyUnitMission.filter_commandable_units(units, mission)
 	var ordered_units: Array = _order_units_for_formation(commandable_units)
 	if ordered_units.is_empty():
 		return
 
-	var move_targets: Array[Vector3] = (
-		_compute_attack_formation_targets(ordered_units, center, FORMATION_SPACING)
-		if use_attack_move
-		else GroupMoveSpacing.compute_targets(
-			center,
-			ordered_units.size(),
-			FORMATION_SPACING
-		)
+	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
+		ordered_units,
+		center,
+		use_attack_move
 	)
 
 	var pending_orders: Array = []
@@ -4644,12 +4851,51 @@ static func _issue_spaced_group_orders(
 
 	var had_pending: bool = not _pending_group_orders.is_empty()
 	_pending_group_orders.append_array(pending_orders)
+	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
 	if not had_pending:
 		tick_group_order_batch(null)
 
 
+static func _get_or_compute_formation_targets(
+	ordered_units: Array,
+	center: Vector3,
+	use_attack_move: bool
+) -> Array[Vector3]:
+	var unit_ids: Array[int] = []
+	for unit: Variant in ordered_units:
+		if NodeSafety.is_alive_node(unit):
+			unit_ids.append((unit as Node).get_instance_id())
+
+	if (
+		use_attack_move == _formation_cache_use_attack_move
+		and unit_ids == _formation_cache_unit_ids
+		and horizontal_distance(center, _formation_cache_center) <= FORMATION_CACHE_DEST_THRESHOLD
+		and _formation_cache_targets.size() == ordered_units.size()
+	):
+		return _formation_cache_targets.duplicate()
+
+	var start_usec: int = PerfCounters.begin_section()
+	var move_targets: Array[Vector3] = (
+		_compute_attack_formation_targets(ordered_units, center, FORMATION_SPACING)
+		if use_attack_move
+		else GroupMoveSpacing.compute_targets(
+			center,
+			ordered_units.size(),
+			FORMATION_SPACING
+		)
+	)
+	PerfCounters.end_section("Formation update", start_usec, ordered_units.size())
+
+	_formation_cache_unit_ids = unit_ids
+	_formation_cache_center = center
+	_formation_cache_use_attack_move = use_attack_move
+	_formation_cache_targets = move_targets.duplicate()
+	return move_targets
+
+
 static func tick_group_order_batch(_tree: SceneTree) -> void:
 	if _pending_group_orders.is_empty():
+		PerfCounters.set_pending_group_orders(0)
 		return
 
 	var next_index: int = _issue_group_order_batch(_pending_group_orders, 0)
@@ -4657,6 +4903,9 @@ static func tick_group_order_batch(_tree: SceneTree) -> void:
 		_pending_group_orders.clear()
 	else:
 		_pending_group_orders = _pending_group_orders.slice(next_index)
+		PerfCounters.warn_order_budget_reached(MAX_GROUP_ORDERS_PER_FRAME)
+
+	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
 
 
 static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
@@ -4688,6 +4937,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				EnemyUnitMission.try_set_mission(unit as Node, mission)
 				EnemyUnitMission.record_move_order(unit as Node, target, mission)
 				_orders_issued_since_diag += 1
+				PerfCounters.record_ai_order()
 				issued += 1
 				continue
 
@@ -4700,6 +4950,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 			EnemyUnitMission.try_set_mission(unit as Node, mission)
 			EnemyUnitMission.record_move_order(unit as Node, target, mission)
 			_orders_issued_since_diag += 1
+			PerfCounters.record_ai_order()
 			issued += 1
 			continue
 
@@ -4719,12 +4970,18 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 		EnemyUnitMission.try_set_mission(unit as Node, mission)
 		EnemyUnitMission.record_move_order(unit as Node, target, mission)
 		_orders_issued_since_diag += 1
+		PerfCounters.record_ai_order()
 		issued += 1
 
 	return index
 
 
 static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
+	_perf_overlay_status_timer += delta
+	if _perf_overlay_status_timer >= 0.25:
+		_perf_overlay_status_timer = 0.0
+		_refresh_perf_overlay_status(tree)
+
 	if not DEBUG_COMBAT_AI and not _debug_enabled_override:
 		return
 
@@ -4761,6 +5018,17 @@ static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
 	)
 	_orders_issued_since_diag = 0
 
+
+static func _refresh_perf_overlay_status(_tree: SceneTree) -> void:
+	PerfCounters.set_combat_group_size(
+		NodeSafety.clean_node_array(_main_army_cache).size()
+	)
+	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
+	PerfCounters.set_ai_status(
+		PerfCounters.get_ai_phase(),
+		ArmyMode.keys()[_army_mode],
+		EnemyUnitMission.mission_to_label(EnemyUnitMission.get_main_army_mission())
+	)
 
 static func _order_units_for_formation(units: Array) -> Array:
 	var melee_units: Array = []

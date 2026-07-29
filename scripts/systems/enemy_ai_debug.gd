@@ -38,6 +38,36 @@ static func set_enabled(value: bool) -> void:
 	enabled = value
 
 
+static func reset_match_state() -> void:
+	_last_phase = ""
+	_last_mission_phrase = ""
+	_last_strength_decision = ""
+	_last_build_action = ""
+	_last_train_action = ""
+	_last_research_action = ""
+	_last_expand_action = ""
+	_last_upgrade_action = ""
+	_last_hero_mission = ""
+	_last_opening_action = ""
+	_opening_complete_logged = false
+	_last_early_army_action = ""
+	_last_early_army_pikemen = ""
+	_last_early_army_rally = ""
+	_early_army_complete_logged = false
+	_last_creeping_action = ""
+	_last_creeping_camp = ""
+	_last_creeping_hero_level = 0
+	_creeping_complete_logged = false
+	_last_tier_2_action = ""
+	_last_tier_2_missing = ""
+	_last_tier_2_save = ""
+	_last_tier_2_upgrade = ""
+	_tier_2_complete_logged = false
+	_last_strategic_state = ""
+	_last_retreat = ""
+	_last_player_attack_blocked = ""
+
+
 static func is_enabled() -> bool:
 	return enabled
 

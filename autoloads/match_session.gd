@@ -13,6 +13,9 @@ func prepare_new_match() -> void:
 	ResourceManager.reset_to_starting_values()
 	EnemyResourceManager.reset_to_starting_values()
 	HeroProgressionStore.clear()
+	EnemyArmyCommand.reset_match_state()
+	EnemyAIDebug.reset_match_state()
+	PerfCounters.reset_all()
 
 
 func start_match() -> void:

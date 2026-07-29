@@ -21,6 +21,8 @@ var _match_start_msec: int = 0
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	# Offset from combat controller so defense and combat ticks rarely share a frame.
+	_tick_timer = DEFENSE_TICK_INTERVAL_SECONDS * 0.55
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 
@@ -32,7 +34,10 @@ func _process(delta: float) -> void:
 		return
 
 	_tick_timer = 0.0
+	var start_usec: int = PerfCounters.begin_section()
 	_update_defense()
+	PerfCounters.end_section("Defense update", start_usec)
+	PerfCounters.record_ai_decision_update()
 
 
 func _get_match_elapsed_seconds() -> float:
@@ -238,8 +243,13 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 	_threat_clear_timer = 0.0
 
 	if EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
+		var recover_state: EnemyArmyCommand.StrategicState = (
+			EnemyArmyCommand.StrategicState.ECONOMY
+			if EnemyArmyCommand.blocks_player_offense(tree)
+			else EnemyArmyCommand.StrategicState.RECOVERING
+		)
 		EnemyArmyCommand.request_strategic_state(
-			EnemyArmyCommand.StrategicState.RECOVERING,
+			recover_state,
 			"local defense cleared"
 		)
 		EnemyArmyCommand.with_authorized_orders(func() -> void:

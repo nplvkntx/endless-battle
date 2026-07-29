@@ -21,7 +21,9 @@ const UNSTUCK_MAX_SIDE_FLIPS := 1
 const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
-const COMBAT_TARGET_SCAN_INTERVAL := 0.3
+const COMBAT_TARGET_SCAN_INTERVAL := 0.45
+const COMBAT_TARGET_SCAN_JITTER := 0.30
+const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
 const VISUAL_FACING_TURN_SPEED := 12.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.04
 
@@ -42,6 +44,9 @@ var _detour_flips: int = 0
 var _detour_gave_up: bool = false
 var _distance_at_detour_start: float = 0.0
 var _combat_target_scan_timer: float = 0.0
+var _combat_target_validate_timer: float = 0.0
+var _last_issued_move_destination: Vector3 = Vector3.ZERO
+var _last_move_order_msec: int = 0
 var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
@@ -50,7 +55,8 @@ var _population_food_released: bool = false
 
 
 func _ready() -> void:
-	_combat_target_scan_timer = randf() * COMBAT_TARGET_SCAN_INTERVAL
+	_combat_target_scan_timer = randf() * (COMBAT_TARGET_SCAN_INTERVAL + COMBAT_TARGET_SCAN_JITTER)
+	_combat_target_validate_timer = randf() * COMBAT_TARGET_VALIDATE_INTERVAL
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.UNITS
 	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
@@ -95,9 +101,26 @@ func set_inspected(inspected: bool) -> void:
 
 ## Sets a single move target. Called only when a move command is issued.
 func set_movement_target(target: Vector3) -> void:
-	_movement_target = Vector3(target.x, global_position.y, target.z)
+	var next_target: Vector3 = Vector3(target.x, global_position.y, target.z)
+	var now_msec: int = Time.get_ticks_msec()
+	if has_move_target:
+		var destination_delta: float = Vector3(
+			_movement_target.x - next_target.x,
+			0.0,
+			_movement_target.z - next_target.z
+		).length()
+		var since_last_order_msec: int = now_msec - _last_move_order_msec
+		if destination_delta < 1.25 and since_last_order_msec < 400:
+			return
+		if destination_delta < 0.35:
+			return
+
+	_movement_target = next_target
 	has_move_target = true
+	_last_issued_move_destination = next_target
+	_last_move_order_msec = now_msec
 	_reset_unstuck_state()
+	PerfCounters.record_repath_request()
 
 
 ## Returns true when a throttled combat target scan is due (auto-attack, engage, retarget).
@@ -108,8 +131,30 @@ func tick_combat_target_scan_timer(
 	if _combat_target_scan_timer > 0.0:
 		return false
 
-	_combat_target_scan_timer = interval + randf() * 0.05
+	_combat_target_scan_timer = interval + randf() * COMBAT_TARGET_SCAN_JITTER
 	return true
+
+
+## Lightweight cadence for validating an existing attack target (not full acquisition).
+func tick_combat_target_validate_timer(
+	delta: float, interval: float = COMBAT_TARGET_VALIDATE_INTERVAL
+) -> bool:
+	_combat_target_validate_timer -= delta
+	if _combat_target_validate_timer > 0.0:
+		return false
+
+	_combat_target_validate_timer = interval + randf() * 0.04
+	return true
+
+
+## Bucket index for staggered expensive unit maintenance (0..bucket_count-1).
+func get_update_bucket(bucket_count: int = 4) -> int:
+	return abs(get_instance_id()) % maxi(1, bucket_count)
+
+
+## True when this unit should run expensive maintenance on the current process frame.
+func should_run_staggered_update(bucket_count: int = 4) -> bool:
+	return (Engine.get_process_frames() % maxi(1, bucket_count)) == get_update_bucket(bucket_count)
 
 
 func _physics_process(delta: float) -> void:

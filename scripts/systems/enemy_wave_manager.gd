@@ -51,6 +51,8 @@ var _offensive_monitor_timer: float = 0.0
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
+	_hero_behavior_timer = HERO_BEHAVIOR_INTERVAL_SECONDS * 0.3
+	_offensive_monitor_timer = OFFENSIVE_MONITOR_INTERVAL_SECONDS * 0.6
 	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
@@ -69,6 +71,20 @@ func _process(delta: float) -> void:
 	_cache_player_base_position()
 
 	var match_elapsed_seconds: float = _get_match_elapsed_seconds()
+	if (
+		not EnemyArmyCommand.can_launch_player_attack(get_tree())
+		and EnemyArmyCommand.is_attack_wave_active()
+	):
+		EnemyArmyCommand.abort_attack_wave(
+			get_tree(),
+			EnemyArmyCommand.get_player_offense_block_reason(get_tree())
+		)
+		EnemyAIDebug.log_once(
+			"player_attack_blocked",
+			"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(get_tree())
+		)
+		_cancel_pending_wave_gather()
+
 	EnemyArmyCommand.tick_attack_wave_state(get_tree(), delta, match_elapsed_seconds)
 	_process_attack_wave_advance()
 

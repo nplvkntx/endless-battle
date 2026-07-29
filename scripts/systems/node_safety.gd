@@ -36,6 +36,41 @@ static func clean_invalid_units(arr: Array) -> Array:
 	return clean_node_array(arr)
 
 
+## Removes null/freed/dead entries and duplicates while preserving first-seen order.
+static func clean_and_dedupe_nodes(arr: Array) -> Array:
+	var cleaned: Array = []
+	var seen_ids: Dictionary = {}
+
+	for entry: Variant in arr:
+		if not is_alive_node(entry):
+			continue
+
+		var node: Node = entry as Node
+		var instance_id: int = node.get_instance_id()
+		if seen_ids.has(instance_id):
+			continue
+
+		seen_ids[instance_id] = true
+		cleaned.append(node)
+
+	return cleaned
+
+
+## Removes invalid entries and units that fail an optional alive callable/method.
+static func clean_living_units(arr: Array, is_alive_callable: Callable = Callable()) -> Array:
+	var cleaned: Array = []
+	for entry: Variant in arr:
+		if not is_alive_node(entry):
+			continue
+
+		if is_alive_callable.is_valid() and not bool(is_alive_callable.call(entry)):
+			continue
+
+		cleaned.append(entry)
+
+	return cleaned
+
+
 static func clean_node_dict_keys(dict: Dictionary) -> void:
 	for key: Variant in dict.keys():
 		if not is_alive_node(key):

@@ -9,8 +9,12 @@ extends Building
 
 const ARROW_SCENE: PackedScene = preload("res://scenes/projectiles/arrow.tscn")
 const PROJECTILE_SPAWN_HEIGHT := 2.5
+const TARGET_SEARCH_INTERVAL := 0.4
+const TARGET_SEARCH_JITTER := 0.25
 
 var _attack_cooldown_timer: float = 0.0
+var _target_search_timer: float = 0.0
+var _cached_attack_target: Node3D = null
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -19,6 +23,7 @@ var _attack_cooldown_timer: float = 0.0
 
 func _ready() -> void:
 	super._ready()
+	_target_search_timer = randf() * (TARGET_SEARCH_INTERVAL + TARGET_SEARCH_JITTER)
 
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
@@ -74,18 +79,41 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_attack_cooldown_timer -= delta
+	_target_search_timer -= delta
+
+	if not _is_cached_target_valid():
+		_cached_attack_target = null
+		if _target_search_timer <= 0.0:
+			_cached_attack_target = _find_closest_enemy_in_range()
+			_target_search_timer = TARGET_SEARCH_INTERVAL + randf() * TARGET_SEARCH_JITTER
+
 	if _attack_cooldown_timer > 0.0:
 		return
 
-	var target: Node3D = _find_closest_enemy_in_range()
+	var target: Node3D = _cached_attack_target
 	if target == null:
 		return
 
 	if not CombatTargetValidation.is_within_attack_range(self, target, attack_range):
+		_cached_attack_target = null
 		return
 
 	_fire_projectile(target)
 	_attack_cooldown_timer = attack_cooldown
+
+
+func _is_cached_target_valid() -> bool:
+	if not NodeSafety.is_alive_node(_cached_attack_target):
+		return false
+
+	if not CombatTargetValidation.is_tower_attack_target(_cached_attack_target):
+		return false
+
+	return CombatTargetValidation.is_within_attack_range(
+		self,
+		_cached_attack_target,
+		attack_range
+	)
 
 
 func _find_closest_enemy_in_range() -> Node3D:

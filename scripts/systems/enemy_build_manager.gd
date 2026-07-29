@@ -222,7 +222,10 @@ func _on_build_tick() -> void:
 		_tick_active = false
 		return
 
+	var start_usec: int = PerfCounters.begin_section()
 	_run_build_order()
+	PerfCounters.end_section("Production update", start_usec)
+	PerfCounters.record_ai_decision_update()
 	_schedule_tick()
 
 

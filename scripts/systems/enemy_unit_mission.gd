@@ -20,8 +20,10 @@ enum Mission {
 const COMMITMENT_SECONDS: float = 3.0
 const BUILD_COMMITMENT_SECONDS: float = 12.0
 const SHOP_COMMITMENT_SECONDS: float = 8.0
-const ORDER_REISSUE_MIN_SECONDS: float = 2.0
-const ORDER_MOVE_THRESHOLD: float = 4.0
+const ORDER_REISSUE_MIN_SECONDS: float = 0.6
+const ORDER_SAME_DEST_REFRESH_SECONDS: float = 2.0
+const ORDER_MOVE_THRESHOLD: float = 5.0
+const ORDER_NEAR_DESTINATION_SKIP: float = 1.75
 
 ## Lower number = higher priority. DEFEND > RETREAT > ATTACK > CREEP > RALLY > IDLE.
 const PRIORITY_DEFEND: int = 1
@@ -188,6 +190,16 @@ static func clear_unit_mission(unit) -> void:
 	_erase_unit_mission_records(unit_id)
 
 
+static func reset_match_state() -> void:
+	_unit_missions.clear()
+	_mission_locked_until_msec.clear()
+	_last_order_msec.clear()
+	_last_order_destination.clear()
+	_last_order_mission.clear()
+	_main_army_mission = Mission.RALLY
+	_main_army_mission_reason = "initial rally"
+
+
 static func purge_stale_entries() -> int:
 	var removed: int = 0
 	removed += NodeSafety.purge_stale_instance_id_dict(_unit_missions)
@@ -274,12 +286,28 @@ static func should_reissue_move_order(
 	if _last_order_mission.get(unit_id, Mission.IDLE) != mission:
 		return true
 
-	var elapsed_msec: int = Time.get_ticks_msec() - int(_last_order_msec[unit_id])
-	if elapsed_msec >= int(ORDER_REISSUE_MIN_SECONDS * 1000.0):
-		return true
+	var unit_node: Node3D = unit as Node3D
+	if unit_node != null:
+		var distance_to_destination: float = EnemyArmyCommand.horizontal_distance(
+			unit_node.global_position,
+			destination
+		)
+		if distance_to_destination <= ORDER_NEAR_DESTINATION_SKIP:
+			return false
 
+	var elapsed_sec: float = float(Time.get_ticks_msec() - int(_last_order_msec[unit_id])) / 1000.0
 	var last_destination: Vector3 = _last_order_destination.get(unit_id, Vector3.ZERO)
-	return EnemyArmyCommand.horizontal_distance(last_destination, destination) > ORDER_MOVE_THRESHOLD
+	var destination_delta: float = EnemyArmyCommand.horizontal_distance(
+		last_destination,
+		destination
+	)
+
+	if destination_delta <= ORDER_MOVE_THRESHOLD:
+		# Same/nearby destination: only periodic refresh for stuck recovery.
+		return elapsed_sec >= ORDER_SAME_DEST_REFRESH_SECONDS
+
+	# Meaningful destination change still respects a minimum repath cooldown.
+	return elapsed_sec >= ORDER_REISSUE_MIN_SECONDS
 
 
 static func record_move_order(unit, destination: Vector3, mission: Mission) -> void:

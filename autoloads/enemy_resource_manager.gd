@@ -173,6 +173,9 @@ func _log_totals_if_debug() -> void:
 	if not OS.is_debug_build():
 		return
 
+	if not PerfCounters.verbose_ai_logging:
+		return
+
 	print(
 		"Enemy stockpile: gold=%d wood=%d food=%d/%d"
 		% [gold, wood, food_current, food_max]

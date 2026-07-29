@@ -75,8 +75,11 @@ func _on_reassign_timer() -> void:
 	if not _reassign_active or not is_inside_tree():
 		return
 
+	var start_usec: int = PerfCounters.begin_section()
 	_rebalance_gather_workers()
 	_scan_fallback_idle_enemy_workers()
+	PerfCounters.end_section("Economy update", start_usec)
+	PerfCounters.record_ai_economy_update()
 	_schedule_reassign()
 
 
