@@ -61,6 +61,15 @@ const ACADEMY_UPGRADE_ORDER: Array[StringName] = [
 	UPGRADE_BALLISTICS,
 ]
 
+const STABLE_UPGRADE_ORDER: Array[StringName] = [
+	UPGRADE_LIGHT_CAVALRY_ATTACK,
+	UPGRADE_LIGHT_CAVALRY_DEFENSE,
+	UPGRADE_CAVALRY_ARCHER_ATTACK,
+	UPGRADE_CAVALRY_ARCHER_DEFENSE,
+	UPGRADE_HEAVY_CAVALRY_ATTACK,
+	UPGRADE_HEAVY_CAVALRY_DEFENSE,
+]
+
 const ACADEMY_UPGRADE_COSTS: Dictionary = {
 	UPGRADE_FASTER_GATHERING: {"gold": 1000, "wood": 700},
 	UPGRADE_FASTER_UNIT_TRAINING: {"gold": 1200, "wood": 900},
@@ -141,16 +150,6 @@ var _enemy_levels: Dictionary = {
 	UPGRADE_CAVALRY_ARCHER_DEFENSE: 0,
 }
 
-const _STABLE_CAVALRY_UPGRADE_IDS: Array[StringName] = [
-	UPGRADE_HEAVY_CAVALRY_ATTACK,
-	UPGRADE_HEAVY_CAVALRY_DEFENSE,
-	UPGRADE_LIGHT_CAVALRY_ATTACK,
-	UPGRADE_LIGHT_CAVALRY_DEFENSE,
-	UPGRADE_CAVALRY_ARCHER_ATTACK,
-	UPGRADE_CAVALRY_ARCHER_DEFENSE,
-]
-
-
 static func get_cavalry_attack_upgrade_id(cavalry_unit_id: StringName) -> StringName:
 	return StringName("%s_attack" % cavalry_unit_id)
 
@@ -160,7 +159,7 @@ static func get_cavalry_defense_upgrade_id(cavalry_unit_id: StringName) -> Strin
 
 
 static func is_stable_cavalry_upgrade(upgrade_id: StringName) -> bool:
-	return upgrade_id in _STABLE_CAVALRY_UPGRADE_IDS
+	return upgrade_id in STABLE_UPGRADE_ORDER
 
 
 static func is_cavalry_attack_upgrade(upgrade_id: StringName) -> bool:

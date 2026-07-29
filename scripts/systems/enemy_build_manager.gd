@@ -270,6 +270,8 @@ func _run_build_order() -> void:
 		if _try_place_building(PLACEMENT_STABLE):
 			return
 
+	_try_sustain_stable_research()
+
 	if _should_build_shop():
 		if _try_place_building(PLACEMENT_SHOP):
 			return
@@ -604,6 +606,50 @@ func _find_completed_enemy_blacksmith() -> Blacksmith:
 			return blacksmith
 
 	return null
+
+
+func _try_sustain_stable_research() -> void:
+	if _needs_farm():
+		return
+
+	var stable: Stable = _find_completed_enemy_stable()
+	if stable == null or not is_instance_valid(stable):
+		return
+
+	if stable.is_researching():
+		return
+
+	for upgrade_id: StringName in UpgradeManager.STABLE_UPGRADE_ORDER:
+		if UpgradeManager.is_enemy_max_level(upgrade_id):
+			continue
+
+		if not UpgradeManager.can_enemy_afford_upgrade(upgrade_id):
+			return
+
+		if not _can_afford_stable_research_without_starving_army(upgrade_id):
+			return
+
+		stable.try_research_upgrade(upgrade_id)
+		return
+
+
+func _can_afford_stable_research_without_starving_army(upgrade_id: StringName) -> bool:
+	if _has_excess_resources():
+		return true
+
+	var cost: Dictionary = UpgradeManager.get_enemy_next_level_cost(upgrade_id)
+	return EnemyResourceManager.can_afford(
+		int(cost.gold) + Stable.LIGHT_CAVALRY_TRAIN_GOLD_COST,
+		int(cost.wood)
+	)
+
+
+func _find_completed_enemy_stable() -> Stable:
+	var stables: Array = _find_all_completed_enemy_stables()
+	if stables.is_empty():
+		return null
+
+	return stables[0] as Stable
 
 
 func _should_build_artillery_depot() -> bool:
