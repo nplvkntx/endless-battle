@@ -26,7 +26,9 @@ const DESIRE_MEDIUM: float = 0.45
 const DESIRE_LOW: float = 0.20
 
 const EARLY_ARMY_MIN_PIKEMEN: int = 5
+const EARLY_ARMY_SOFT_PIKEMEN: int = 8
 const EARLY_ARMY_TARGET_PIKEMEN: int = 10
+const EARLY_ARMY_RALLY_RATIO: float = 0.75
 const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
 const EXPANSION_SATURATION_WORKERS: int = 16
 const EXPANSION_MINE_MIN_WORKERS: int = 5
@@ -196,6 +198,9 @@ func should_prioritize_creep() -> bool:
 	if _phase_interrupt_active or get_desire("defense") >= DESIRE_HIGH:
 		return false
 
+	if _strategic_phase in [StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY]:
+		return false
+
 	if EnemyArmyCommand.get_army_mode() in [
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
@@ -207,13 +212,16 @@ func should_prioritize_creep() -> bool:
 
 	return (
 		get_desire("creep") >= DESIRE_MEDIUM
-		and is_phase_at_least(StrategicPhase.EARLY_ARMY)
+		and is_phase_at_least(StrategicPhase.CREEPING)
 		and not is_phase_at_least(StrategicPhase.TIER_2)
 	)
 
 
 func should_prioritize_attack() -> bool:
 	if _phase_interrupt_active:
+		return false
+
+	if _strategic_phase in [StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY]:
 		return false
 
 	if get_desire("defense") >= DESIRE_HIGH:
@@ -532,6 +540,9 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 			bool(snapshot.get("has_barracks", false))
 		)
 
+	if previous == StrategicPhase.EARLY_ARMY:
+		EnemyAIDebug.log_early_army_complete(int(snapshot.get("pikemen_count", 0)))
+
 	EnemyAIDebug.log_phase_transition(
 		strategic_phase_to_string(previous),
 		strategic_phase_to_string(new_phase),
@@ -560,6 +571,7 @@ func _can_leave_early_army() -> bool:
 	return (
 		snapshot.get("hero_alive", false)
 		and int(snapshot.get("pikemen_count", 0)) >= EARLY_ARMY_MIN_PIKEMEN
+		and snapshot.get("early_army_rallied", false)
 	)
 
 
@@ -682,6 +694,11 @@ func _build_world_snapshot() -> Dictionary:
 		and economy_healthy
 	)
 	var pikemen_count: int = _count_pikemen(non_hero_army)
+	var early_army_rallied: bool = _is_early_army_rallied(
+		rally_position,
+		all_combat,
+		hero
+	)
 	var recovery_required: bool = (
 		main_base_heavily_damaged
 		and (
@@ -711,6 +728,7 @@ func _build_world_snapshot() -> Dictionary:
 		"hero_level": hero.level if hero != null else 0,
 		"combat_unit_count": non_hero_army.size(),
 		"pikemen_count": pikemen_count,
+		"early_army_rallied": early_army_rallied,
 		"army_power": army_power,
 		"army_mode": EnemyArmyCommand.get_army_mode(),
 		"visible_enemy_power": visible_threat_power,
@@ -783,7 +801,13 @@ func _update_desires_from_snapshot() -> void:
 
 	if _strategic_phase == StrategicPhase.CREEPING:
 		desires["creep"] = DESIRE_HIGH if hero_alive else DESIRE_LOW
-	elif hero_alive and army_power >= int(army_target_power * 0.6) and not is_phase_at_least(StrategicPhase.MID_GAME):
+	elif (
+		_strategic_phase != StrategicPhase.EARLY_ARMY
+		and _strategic_phase != StrategicPhase.OPENING
+		and hero_alive
+		and army_power >= int(army_target_power * 0.6)
+		and not is_phase_at_least(StrategicPhase.MID_GAME)
+	):
 		desires["creep"] = clampf(
 			0.35 + float(hero_level) * 0.08 + (0.2 if army_power >= 400 else 0.0),
 			0.0,
@@ -856,10 +880,10 @@ func _apply_phase_desire_baseline() -> void:
 		StrategicPhase.EARLY_ARMY:
 			desires["economy"] = 0.55
 			desires["army"] = 0.85
-			desires["creep"] = 0.15
-			desires["attack"] = 0.05
+			desires["creep"] = 0.0
+			desires["attack"] = 0.0
 			desires["expansion"] = 0.0
-			desires["upgrade"] = 0.1
+			desires["upgrade"] = 0.0
 		StrategicPhase.CREEPING:
 			desires["economy"] = 0.45
 			desires["army"] = 0.55
@@ -917,6 +941,13 @@ func _recommend_main_army_mission() -> void:
 		return
 
 	if desires["defense"] >= DESIRE_HIGH:
+		return
+
+	if _strategic_phase in [StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY]:
+		_set_main_mission(
+			EnemyUnitMission.Mission.RALLY,
+			"early army assembling at rally"
+		)
 		return
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
@@ -1148,6 +1179,39 @@ func _count_pikemen(units: Array) -> int:
 		if unit is Spearman:
 			count += 1
 	return count
+
+
+func _is_early_army_rallied(
+	rally_position: Vector3,
+	combat_units: Array,
+	hero: Hero
+) -> bool:
+	if rally_position == Vector3.ZERO:
+		return false
+
+	if combat_units.is_empty():
+		return false
+
+	var nearby: Array = EnemyArmyCommand.filter_units_near_rally(
+		combat_units,
+		rally_position,
+		EnemyArmyCommand.ASSEMBLY_RADIUS * 2.0
+	)
+	var required_nearby: int = maxi(
+		1,
+		int(ceil(float(combat_units.size()) * EARLY_ARMY_RALLY_RATIO))
+	)
+	if nearby.size() < required_nearby:
+		return false
+
+	if hero != null:
+		if (
+			EnemyArmyCommand.horizontal_distance(hero.global_position, rally_position)
+			> EnemyArmyCommand.ASSEMBLY_RADIUS * 2.0
+		):
+			return false
+
+	return true
 
 
 func _get_primary_command_center_health_ratio(tree: SceneTree) -> float:

@@ -16,6 +16,10 @@ static var _last_upgrade_action: String = ""
 static var _last_hero_mission: String = ""
 static var _last_opening_action: String = ""
 static var _opening_complete_logged: bool = false
+static var _last_early_army_action: String = ""
+static var _last_early_army_pikemen: String = ""
+static var _last_early_army_rally: String = ""
+static var _early_army_complete_logged: bool = false
 
 
 static func set_enabled(value: bool) -> void:
@@ -81,6 +85,18 @@ static func log_once(key: String, message: String) -> void:
 			if message == _last_opening_action:
 				return
 			_last_opening_action = message
+		"early_army":
+			if message == _last_early_army_action:
+				return
+			_last_early_army_action = message
+		"early_army_pikemen":
+			if message == _last_early_army_pikemen:
+				return
+			_last_early_army_pikemen = message
+		"early_army_rally":
+			if message == _last_early_army_rally:
+				return
+			_last_early_army_rally = message
 		_:
 			pass
 
@@ -174,6 +190,29 @@ static func log_opening_complete(
 			"ready" if barracks_ready else "pending",
 		]
 	)
+
+
+static func log_early_army(message: String) -> void:
+	if message.is_empty():
+		return
+	if message == "Rallying army":
+		log_once("early_army_rally", "Early Army: %s" % message)
+		return
+	log_once("early_army", "Early Army: %s" % message)
+
+
+static func log_early_army_pikemen(current: int, target: int) -> void:
+	log_once(
+		"early_army_pikemen",
+		"Early Army: Pikemen %d/%d" % [current, target]
+	)
+
+
+static func log_early_army_complete(pikemen: int) -> void:
+	if _early_army_complete_logged:
+		return
+	_early_army_complete_logged = true
+	log_event("Early Army complete | Hero ready, Pikemen: %d" % pikemen)
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:

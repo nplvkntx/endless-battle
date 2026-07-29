@@ -97,6 +97,9 @@ func _update_combat_control(delta: float) -> void:
 		_maintain_regrouping(tree)
 		return
 
+	if _update_early_army_phase(tree):
+		return
+
 	_evaluate_player_creep_opportunities(tree)
 
 
@@ -104,10 +107,11 @@ func _update_opening_phase(tree: SceneTree) -> void:
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	var still_opening: bool = true
 	if _director != null:
-		still_opening = (
-			_director.get_strategic_phase()
-			== EnemyStrategicDirector.StrategicPhase.OPENING
-		)
+		var phase: EnemyStrategicDirector.StrategicPhase = _director.get_strategic_phase()
+		still_opening = phase in [
+			EnemyStrategicDirector.StrategicPhase.OPENING,
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY,
+		]
 	else:
 		still_opening = get_match_elapsed_seconds() <= OPENING_PHASE_SECONDS
 
@@ -127,6 +131,59 @@ func _update_opening_phase(tree: SceneTree) -> void:
 		return
 
 	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.OPENING)
+
+
+func _update_early_army_phase(tree: SceneTree) -> bool:
+	var in_early_army: bool = false
+	if _director != null:
+		in_early_army = (
+			_director.get_strategic_phase()
+			== EnemyStrategicDirector.StrategicPhase.EARLY_ARMY
+		)
+
+	if not in_early_army:
+		return false
+
+	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	if army_mode in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		EnemyArmyCommand.ArmyMode.RETREATING,
+		EnemyArmyCommand.ArmyMode.ASSEMBLING,
+	]:
+		return false
+
+	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.OPENING)
+
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return true
+
+	var army: Array = EnemyArmyCommand.collect_living_combat_units(tree)
+	army = NodeSafety.clean_node_array(army)
+	if army.is_empty():
+		return true
+
+	var nearby: Array = EnemyArmyCommand.filter_units_near_rally(
+		army,
+		rally_position,
+		EnemyArmyCommand.ASSEMBLY_RADIUS * 2.0
+	)
+	if nearby.size() < army.size():
+		EnemyAIDebug.log_early_army("Rallying army")
+
+	EnemyUnitMission.set_main_army_mission(
+		EnemyUnitMission.Mission.RALLY,
+		"early army gather"
+	)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			army,
+			rally_position,
+			EnemyUnitMission.Mission.RALLY
+		)
+	)
+	return true
 
 
 func _maintain_regrouping(tree: SceneTree) -> void:
@@ -287,6 +344,9 @@ func can_launch_offensive_action() -> bool:
 
 func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if not can_launch_offensive_action():
+		return
+
+	if _director != null and not _director.should_prioritize_creep():
 		return
 
 	if not EnemyArmyCommand.allows_creep_orders():

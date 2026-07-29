@@ -232,6 +232,10 @@ func _run_build_order() -> void:
 		_run_opening_build_order()
 		return
 
+	if _is_early_army_phase():
+		_run_early_army_build_order()
+		return
+
 	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
 		if _try_place_farm(true):
 			return
@@ -314,6 +318,13 @@ func _is_opening_phase() -> bool:
 	)
 
 
+func _is_early_army_phase() -> bool:
+	return (
+		_director != null
+		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.EARLY_ARMY
+	)
+
+
 func _run_opening_build_order() -> void:
 	## Strict OPENING sequence: Farm -> Hero Altar -> Barracks, with worker growth.
 	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
@@ -347,6 +358,131 @@ func _run_opening_build_order() -> void:
 
 	if _needs_farm():
 		_try_place_farm(false)
+
+
+func _run_early_army_build_order() -> void:
+	## EARLY_ARMY: train hero, build 5–10 Pikemen, farms, workers. No offense.
+	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
+		_try_place_farm(true)
+
+	_try_train_enemy_workers()
+
+	if _needs_farm():
+		_try_place_farm(false)
+
+	if not _has_completed_building(PLACEMENT_BARRACKS) and not _is_building_type_in_progress(
+		PLACEMENT_BARRACKS
+	):
+		_try_place_building(PLACEMENT_BARRACKS)
+
+	if not _has_completed_building(PLACEMENT_HERO_ALTAR) and not _is_building_type_in_progress(
+		PLACEMENT_HERO_ALTAR
+	):
+		_try_place_building(PLACEMENT_HERO_ALTAR)
+
+	_try_train_early_army_hero()
+	_try_train_early_army_pikemen()
+
+	if _needs_farm():
+		_try_place_farm(false)
+
+
+func _try_train_early_army_hero() -> void:
+	if _has_living_enemy_hero():
+		return
+
+	var hero_altar: HeroAltar = _find_enemy_hero_altar()
+	if hero_altar == null:
+		return
+
+	if hero_altar.is_training_hero():
+		return
+
+	if hero_altar.try_train_enemy_hero():
+		EnemyAIDebug.log_early_army("Training Hero")
+
+
+func _count_living_pikemen() -> int:
+	var count: int = 0
+	for unit: Variant in EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()):
+		if unit is Spearman:
+			count += 1
+	return count
+
+
+func _count_pending_pikemen() -> int:
+	var pending: int = 0
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		if not is_instance_valid(barracks):
+			continue
+		pending += barracks.get_spearman_queue_count()
+	return pending
+
+
+func _get_early_army_pikemen_target() -> int:
+	var alive: int = _count_living_pikemen()
+	var pending: int = _count_pending_pikemen()
+	var total: int = alive + pending
+
+	if total < EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN:
+		return EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+
+	if (
+		EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST)
+		and EnemyResourceManager.can_afford_training(Barracks.SPEARMAN_TRAIN_GOLD_COST, MILITARY_TRAIN_FOOD_COST)
+	):
+		if (
+			total < EnemyStrategicDirector.EARLY_ARMY_SOFT_PIKEMEN
+			or (
+				total < EnemyStrategicDirector.EARLY_ARMY_TARGET_PIKEMEN
+				and (
+					_has_excess_resources()
+					or EnemyResourceManager.gold >= Barracks.SPEARMAN_TRAIN_GOLD_COST * 2
+				)
+			)
+		):
+			return EnemyStrategicDirector.EARLY_ARMY_TARGET_PIKEMEN
+
+	return EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+
+
+func _try_train_early_army_pikemen() -> void:
+	var alive: int = _count_living_pikemen()
+	var pending: int = _count_pending_pikemen()
+	var total: int = alive + pending
+	var target: int = _get_early_army_pikemen_target()
+
+	EnemyAIDebug.log_early_army_pikemen(
+		alive,
+		EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+	)
+
+	if total >= target:
+		return
+
+	if not EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST):
+		if _needs_farm() or _count_completed_farms() + _count_farms_under_construction() < MAX_FARMS:
+			_try_place_farm(true)
+		return
+
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		if not is_instance_valid(barracks):
+			continue
+
+		while barracks.get_enemy_pending_unit_count() < Barracks.MAX_ENEMY_UNIT_QUEUE:
+			alive = _count_living_pikemen()
+			pending = _count_pending_pikemen()
+			total = alive + pending
+			if total >= target:
+				return
+
+			if not barracks.try_train_enemy_spearman():
+				break
+
+			EnemyAIDebug.log_early_army_pikemen(
+				_count_living_pikemen(),
+				EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+			)
 
 
 func _try_place_opening_first_farm() -> bool:
