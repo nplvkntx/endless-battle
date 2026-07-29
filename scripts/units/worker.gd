@@ -1822,6 +1822,13 @@ func _try_reassign_gather_source() -> bool:
 		var gold_mine: GoldMine = null
 		if _is_enemy_worker():
 			gold_mine = get_pinned_starting_gold_mine()
+			if gold_mine != null and not gold_mine.can_gather():
+				_pinned_starting_gold_mine = null
+				gold_mine = null
+			# Keep enemy mine choice under the gather manager so expansion /
+			# starting mines stay balanced instead of nearest-mine hopping.
+			if gold_mine == null:
+				return false
 		if gold_mine == null:
 			var scene_root: Node = get_tree().current_scene
 			if scene_root == null:

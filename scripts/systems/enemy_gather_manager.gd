@@ -5,8 +5,9 @@ extends Node
 
 const ENEMY_WORKER_GROUP := &"enemy_workers"
 const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
+const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const REASSIGN_INTERVAL_SECONDS: float = 3.0
-const EARLY_GAME_GOLD_RATIO: float = 0.6
+const EARLY_GAME_GOLD_RATIO: float = 0.7
 const BUILDING_PRESSURE_GOLD_RATIO: float = 0.45
 const WORKER_TRAIN_GOLD_COST: int = 50
 const FARM_WOOD_COST: int = 20
@@ -19,6 +20,8 @@ const TARGET_GOLD_SHIFT_THRESHOLD: int = 2
 const MIN_WOOD_WORKERS_WHEN_TREES_EXIST: int = 1
 const FALLBACK_IDLE_NEAR_CC_RADIUS: float = 8.0
 const STARTING_GOLD_WORKERS: int = 4
+const GOLD_MINE_NEAR_CC_DISTANCE: float = 22.0
+const MAX_GOLD_MINE_TRANSFERS_PER_REBALANCE: int = 2
 const NAV_READY_MAX_FRAMES: int = 60
 const DEBUG_AI_WORKER_GATHER: bool = false
 
@@ -28,6 +31,8 @@ const DEBUG_AI_WORKER_GATHER: bool = false
 var _reassign_active: bool = true
 var _cached_target_gold: int = -1
 var _starting_gold_mine: GoldMine = null
+var _cached_active_gold_mines: Array[GoldMine] = []
+var _cached_active_gold_mines_frame: int = -1
 
 
 func _ready() -> void:
@@ -179,6 +184,7 @@ func _rebalance_gather_workers() -> void:
 
 	_assign_still_idle_workers(gather_pool, target_gold)
 	_ensure_wood_worker_coverage(gather_pool, target_gold)
+	_rebalance_gold_mine_assignments(gather_pool)
 	_recover_workers_needing_attention()
 	_scan_fallback_idle_enemy_workers()
 
@@ -360,7 +366,11 @@ func _recover_workers_needing_attention() -> void:
 		return
 
 	var trees: Array[WoodTree] = _resolve_safe_trees()
-	var has_any_resources: bool = _resolve_starting_gold_mine() != null or not trees.is_empty()
+	var has_any_resources: bool = (
+		not _collect_active_gold_mines().is_empty()
+		or _resolve_starting_gold_mine() != null
+		or not trees.is_empty()
+	)
 	if not has_any_resources:
 		return
 
@@ -425,9 +435,12 @@ func _force_recover_worker(worker: Worker, prefer_gold: bool) -> bool:
 
 
 func _scan_fallback_idle_enemy_workers() -> void:
-	var command_center: CommandCenter = _resolve_enemy_command_center()
-	if command_center == null:
-		return
+	var command_centers: Array[CommandCenter] = _collect_completed_enemy_command_centers()
+	if command_centers.is_empty():
+		var primary: CommandCenter = _resolve_enemy_command_center()
+		if primary == null:
+			return
+		command_centers.append(primary)
 
 	var trees: Array[WoodTree] = _resolve_safe_trees()
 	var gold_mine: GoldMine = _resolve_safe_gold_mine()
@@ -448,7 +461,7 @@ func _scan_fallback_idle_enemy_workers() -> void:
 
 		total_gather_workers += 1
 
-		if _is_fallback_idle_enemy_worker(worker, command_center):
+		if _is_fallback_idle_enemy_worker(worker, command_centers):
 			idle_workers.append(worker)
 			continue
 
@@ -464,7 +477,7 @@ func _scan_fallback_idle_enemy_workers() -> void:
 	)
 
 	for worker: Worker in idle_workers:
-		if not _is_fallback_idle_enemy_worker(worker, command_center):
+		if not _is_fallback_idle_enemy_worker(worker, command_centers):
 			continue
 
 		var assigned_id: StringName = worker.get_assigned_gather_resource_id()
@@ -482,12 +495,18 @@ func _scan_fallback_idle_enemy_workers() -> void:
 
 
 func _is_fallback_idle_enemy_worker(
-	worker: Worker, command_center: CommandCenter
+	worker: Worker, command_centers: Array[CommandCenter]
 ) -> bool:
 	if not _is_idle_gather_worker(worker):
 		return false
 
-	return _is_near_command_center(worker, command_center, FALLBACK_IDLE_NEAR_CC_RADIUS)
+	for command_center: CommandCenter in command_centers:
+		if not NodeSafety.is_alive_node(command_center):
+			continue
+		if _is_near_command_center(worker, command_center, FALLBACK_IDLE_NEAR_CC_RADIUS):
+			return true
+
+	return false
 
 
 func _is_near_command_center(
@@ -498,14 +517,23 @@ func _is_near_command_center(
 	return offset.length_squared() <= radius * radius
 
 
-func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine, force_recovery: bool = false) -> bool:
+func _try_assign_gold_gather(
+	worker: Worker,
+	gold_mine: GoldMine,
+	force_recovery: bool = false,
+	allow_active_transfer: bool = false
+) -> bool:
 	if gold_mine == null or worker.is_enemy_gather_target_blacklisted(gold_mine):
 		return false
 
 	if not _is_valid_gold_mine(gold_mine):
 		return false
 
-	if not _can_assign_gather_job(worker, force_recovery):
+	if _is_worker_already_gathering_from_mine(worker, gold_mine):
+		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
+		return true
+
+	if not _can_assign_gather_job(worker, force_recovery, allow_active_transfer):
 		return false
 
 	worker.pin_starting_gold_mine(gold_mine)
@@ -669,8 +697,12 @@ func _can_reassign_worker(worker: Worker) -> bool:
 	return not worker.is_carrying_gathered_resources()
 
 
-func _can_assign_gather_job(worker: Worker, force_recovery: bool = false) -> bool:
-	if worker == null or not is_instance_valid(worker):
+func _can_assign_gather_job(
+	worker: Worker,
+	force_recovery: bool = false,
+	allow_active_transfer: bool = false
+) -> bool:
+	if not NodeSafety.is_alive_node(worker) or not worker is Worker:
 		return false
 
 	if WorkerAiUnstuck.blocks_external_commands(worker):
@@ -686,6 +718,9 @@ func _can_assign_gather_job(worker: Worker, force_recovery: bool = false) -> boo
 	if force_recovery:
 		if not worker.needs_enemy_worker_recovery():
 			return false
+		if not worker.can_enemy_economy_force_reassign():
+			return false
+	elif allow_active_transfer:
 		if not worker.can_enemy_economy_force_reassign():
 			return false
 	elif worker.has_method(&"is_enemy_gather_fallback_idle"):
@@ -741,18 +776,452 @@ func _pick_tree_for_worker(worker: Worker, trees: Array[WoodTree]) -> WoodTree:
 
 
 func _resolve_gold_mine_for_worker(worker: Worker) -> GoldMine:
-	var starting_mine: GoldMine = _resolve_starting_gold_mine()
-	if _is_valid_gold_mine(starting_mine) and not worker.is_enemy_gather_target_blacklisted(starting_mine):
-		return starting_mine
+	if not NodeSafety.is_alive_node(worker):
+		return null
 
-	var nearest_mine: GoldMine = _resolve_best_safe_gold_mine(worker.global_position)
-	if nearest_mine != null and not worker.is_enemy_gather_target_blacklisted(nearest_mine):
-		return nearest_mine
+	var active_mines: Array[GoldMine] = _collect_active_gold_mines()
+	if active_mines.is_empty():
+		var starting_mine: GoldMine = _resolve_starting_gold_mine()
+		if (
+			_is_valid_gold_mine(starting_mine)
+			and not worker.is_enemy_gather_target_blacklisted(starting_mine)
+		):
+			return starting_mine
+		return null
+
+	var current_mine: GoldMine = _get_worker_assigned_gold_mine(worker)
+	if (
+		_is_valid_gold_mine(current_mine)
+		and active_mines.has(current_mine)
+		and not worker.is_enemy_gather_target_blacklisted(current_mine)
+		and not worker.needs_gather_target_reassignment()
+	):
+		return current_mine
+
+	return _pick_understaffed_gold_mine(
+		worker,
+		active_mines,
+		_count_workers_per_active_mine(active_mines)
+	)
+
+
+func _count_workers_per_active_mine(active_mines: Array[GoldMine]) -> Dictionary:
+	var assigned_counts: Dictionary = {}
+	for mine: GoldMine in active_mines:
+		assigned_counts[mine.get_instance_id()] = 0
+
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not _is_valid_worker(node):
+			continue
+
+		var worker: Worker = node as Worker
+		if worker.get_assigned_gather_resource_id() != &"gold":
+			continue
+
+		var mine: GoldMine = _get_worker_assigned_gold_mine(worker)
+		if mine == null or not assigned_counts.has(mine.get_instance_id()):
+			continue
+
+		assigned_counts[mine.get_instance_id()] = int(assigned_counts[mine.get_instance_id()]) + 1
+
+	return assigned_counts
+
+
+func _rebalance_gold_mine_assignments(gather_pool: Array[Worker]) -> void:
+	var active_mines: Array[GoldMine] = _collect_active_gold_mines()
+	if active_mines.is_empty():
+		return
+
+	var gold_workers: Array[Worker] = []
+	for worker: Worker in gather_pool:
+		if not NodeSafety.is_alive_node(worker):
+			continue
+		if worker.get_assigned_gather_resource_id() != &"gold":
+			continue
+		gold_workers.append(worker)
+
+	if gold_workers.is_empty():
+		return
+
+	var assigned_counts: Dictionary = {}
+	for mine: GoldMine in active_mines:
+		assigned_counts[mine.get_instance_id()] = 0
+
+	var invalid_workers: Array[Worker] = []
+	for worker: Worker in gold_workers:
+		var mine: GoldMine = _get_worker_assigned_gold_mine(worker)
+		if (
+			_is_valid_gold_mine(mine)
+			and assigned_counts.has(mine.get_instance_id())
+			and not worker.is_enemy_gather_target_blacklisted(mine)
+			and not worker.needs_gather_target_reassignment()
+		):
+			assigned_counts[mine.get_instance_id()] = (
+				int(assigned_counts[mine.get_instance_id()]) + 1
+			)
+		else:
+			invalid_workers.append(worker)
+
+	var transfers_remaining: int = MAX_GOLD_MINE_TRANSFERS_PER_REBALANCE
+
+	# Always repair invalid / depleted / blocked mine assignments first.
+	for worker: Worker in invalid_workers:
+		if transfers_remaining <= 0:
+			break
+		var target_mine: GoldMine = _pick_understaffed_gold_mine(
+			worker,
+			active_mines,
+			assigned_counts
+		)
+		if target_mine == null:
+			continue
+		if _try_assign_gold_gather(worker, target_mine, false, true):
+			_increment_mine_count(assigned_counts, target_mine)
+			transfers_remaining -= 1
+
+	if transfers_remaining <= 0 or active_mines.size() <= 1:
+		return
+
+	var target_counts: Dictionary = _compute_gold_mine_target_counts(
+		gold_workers.size(),
+		active_mines
+	)
+
+	while transfers_remaining > 0:
+		var overstaffed: GoldMine = _find_most_overstaffed_mine(
+			active_mines,
+			assigned_counts,
+			target_counts
+		)
+		var understaffed: GoldMine = _find_most_understaffed_mine(
+			active_mines,
+			assigned_counts,
+			target_counts
+		)
+		if overstaffed == null or understaffed == null or overstaffed == understaffed:
+			break
+
+		var transfer_worker: Worker = _pick_gold_worker_from_mine(
+			gold_workers,
+			overstaffed,
+			true
+		)
+		if transfer_worker == null:
+			transfer_worker = _pick_gold_worker_from_mine(gold_workers, overstaffed, false)
+		if transfer_worker == null:
+			break
+
+		if not _try_assign_gold_gather(transfer_worker, understaffed, false, true):
+			break
+
+		_decrement_mine_count(assigned_counts, overstaffed)
+		_increment_mine_count(assigned_counts, understaffed)
+		transfers_remaining -= 1
+
+
+func _compute_gold_mine_target_counts(
+	gold_worker_count: int,
+	active_mines: Array[GoldMine]
+) -> Dictionary:
+	var targets: Dictionary = {}
+	var mine_count: int = active_mines.size()
+	if mine_count <= 0 or gold_worker_count <= 0:
+		for mine: GoldMine in active_mines:
+			targets[mine.get_instance_id()] = 0
+		return targets
+
+	var base_share: int = gold_worker_count / mine_count
+	var remainder: int = gold_worker_count % mine_count
+
+	# Prefer keeping leftover workers on the starting mine when present.
+	var starting_mine: GoldMine = _resolve_starting_gold_mine()
+	var ordered_mines: Array[GoldMine] = active_mines.duplicate()
+	if _is_valid_gold_mine(starting_mine) and ordered_mines.has(starting_mine):
+		ordered_mines.erase(starting_mine)
+		ordered_mines.push_front(starting_mine)
+
+	for index: int in range(ordered_mines.size()):
+		var share: int = base_share
+		if index < remainder:
+			share += 1
+		targets[ordered_mines[index].get_instance_id()] = share
+
+	return targets
+
+
+func _pick_understaffed_gold_mine(
+	worker: Worker,
+	active_mines: Array[GoldMine],
+	assigned_counts: Dictionary
+) -> GoldMine:
+	var best_mine: GoldMine = null
+	var best_count: int = 999999
+	var best_distance_sq: float = INF
+
+	for mine: GoldMine in active_mines:
+		if not _is_valid_gold_mine(mine):
+			continue
+		if worker.is_enemy_gather_target_blacklisted(mine):
+			continue
+
+		var count: int = int(assigned_counts.get(mine.get_instance_id(), 0))
+		var distance_sq: float = worker.global_position.distance_squared_to(mine.global_position)
+		if count < best_count or (count == best_count and distance_sq < best_distance_sq):
+			best_count = count
+			best_distance_sq = distance_sq
+			best_mine = mine
+
+	return best_mine
+
+
+func _find_most_overstaffed_mine(
+	active_mines: Array[GoldMine],
+	assigned_counts: Dictionary,
+	target_counts: Dictionary
+) -> GoldMine:
+	var best_mine: GoldMine = null
+	var best_excess: int = 0
+
+	for mine: GoldMine in active_mines:
+		var assigned: int = int(assigned_counts.get(mine.get_instance_id(), 0))
+		var target: int = int(target_counts.get(mine.get_instance_id(), 0))
+		var excess: int = assigned - target
+		if excess > best_excess:
+			best_excess = excess
+			best_mine = mine
+
+	return best_mine
+
+
+func _find_most_understaffed_mine(
+	active_mines: Array[GoldMine],
+	assigned_counts: Dictionary,
+	target_counts: Dictionary
+) -> GoldMine:
+	var best_mine: GoldMine = null
+	var best_deficit: int = 0
+
+	for mine: GoldMine in active_mines:
+		var assigned: int = int(assigned_counts.get(mine.get_instance_id(), 0))
+		var target: int = int(target_counts.get(mine.get_instance_id(), 0))
+		var deficit: int = target - assigned
+		if deficit > best_deficit:
+			best_deficit = deficit
+			best_mine = mine
+
+	return best_mine
+
+
+func _pick_gold_worker_from_mine(
+	gold_workers: Array[Worker],
+	mine: GoldMine,
+	prefer_idle: bool
+) -> Worker:
+	for worker: Worker in gold_workers:
+		if not NodeSafety.is_alive_node(worker):
+			continue
+		if _get_worker_assigned_gold_mine(worker) != mine:
+			continue
+		if worker.is_carrying_gathered_resources() or worker.is_on_construction_trip():
+			continue
+
+		match EnemyUnitMission.get_unit_mission(worker):
+			EnemyUnitMission.Mission.BUILD:
+				continue
+			EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.DEFEND:
+				continue
+			EnemyUnitMission.Mission.CREEP, EnemyUnitMission.Mission.RETREAT:
+				continue
+			_:
+				pass
+
+		if prefer_idle and not _is_idle_gather_worker(worker):
+			continue
+		if not prefer_idle and _is_idle_gather_worker(worker):
+			continue
+		if not worker.can_enemy_economy_force_reassign():
+			continue
+		return worker
 
 	return null
 
 
+func _increment_mine_count(assigned_counts: Dictionary, mine: GoldMine) -> void:
+	if mine == null:
+		return
+	var mine_id: int = mine.get_instance_id()
+	assigned_counts[mine_id] = int(assigned_counts.get(mine_id, 0)) + 1
+
+
+func _decrement_mine_count(assigned_counts: Dictionary, mine: GoldMine) -> void:
+	if mine == null:
+		return
+	var mine_id: int = mine.get_instance_id()
+	assigned_counts[mine_id] = maxi(0, int(assigned_counts.get(mine_id, 0)) - 1)
+
+
+func _get_worker_assigned_gold_mine(worker: Worker) -> GoldMine:
+	if not NodeSafety.is_alive_node(worker):
+		return null
+
+	var pinned_mine: GoldMine = worker.get_pinned_starting_gold_mine()
+	if NodeSafety.is_alive_node(pinned_mine) and pinned_mine is GoldMine:
+		return pinned_mine as GoldMine
+
+	return null
+
+
+func _is_worker_already_gathering_from_mine(worker: Worker, gold_mine: GoldMine) -> bool:
+	if not NodeSafety.is_alive_node(worker) or not _is_valid_gold_mine(gold_mine):
+		return false
+
+	if worker.get_assigned_gather_resource_id() != &"gold":
+		return false
+
+	if worker.needs_gather_target_reassignment():
+		return false
+
+	var pinned_mine: GoldMine = worker.get_pinned_starting_gold_mine()
+	return pinned_mine == gold_mine
+
+
+func _collect_active_gold_mines() -> Array[GoldMine]:
+	var frame: int = Engine.get_process_frames()
+	if frame == _cached_active_gold_mines_frame:
+		return _cached_active_gold_mines
+
+	_cached_active_gold_mines_frame = frame
+	_cached_active_gold_mines.clear()
+
+	var command_centers: Array[CommandCenter] = _collect_completed_enemy_command_centers()
+	if command_centers.is_empty():
+		return _cached_active_gold_mines
+
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return _cached_active_gold_mines
+
+	var seen_ids: Dictionary = {}
+	for command_center: CommandCenter in command_centers:
+		var mine: GoldMine = _find_gold_mine_near_command_center(command_center, scene_root)
+		if not _is_valid_gold_mine(mine):
+			continue
+		if _is_mine_occupied_by_player(mine):
+			continue
+
+		var mine_id: int = mine.get_instance_id()
+		if seen_ids.has(mine_id):
+			continue
+
+		seen_ids[mine_id] = true
+		_cached_active_gold_mines.append(mine)
+
+	return _cached_active_gold_mines
+
+
+func _collect_completed_enemy_command_centers() -> Array[CommandCenter]:
+	var centers: Array[CommandCenter] = []
+
+	if not enemy_command_center_path.is_empty():
+		var path_node: Node = get_node_or_null(enemy_command_center_path)
+		if _is_completed_enemy_command_center(path_node):
+			centers.append(path_node as CommandCenter)
+
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not _is_completed_enemy_command_center(node):
+			continue
+		if centers.has(node):
+			continue
+		centers.append(node as CommandCenter)
+
+	return centers
+
+
+func _is_completed_enemy_command_center(node: Variant) -> bool:
+	if not NodeSafety.is_alive_node(node) or not node is CommandCenter:
+		return false
+
+	var command_center: CommandCenter = node as CommandCenter
+	if command_center.building_state != Building.STATE_COMPLETED:
+		return false
+
+	var health_component: HealthComponent = (
+		command_center.get_node_or_null("HealthComponent") as HealthComponent
+	)
+	if health_component != null and health_component.current_health <= 0:
+		return false
+
+	return true
+
+
+func _find_gold_mine_near_command_center(
+	command_center: CommandCenter,
+	scene_root: Node
+) -> GoldMine:
+	if not NodeSafety.is_alive_node(command_center) or scene_root == null:
+		return null
+
+	var best_mine: GoldMine = null
+	var best_distance: float = INF
+	for child: Node in WorkerGathering._map_resource_children(scene_root):
+		if not NodeSafety.is_alive_node(child) or not child is GoldMine:
+			continue
+
+		var mine: GoldMine = child as GoldMine
+		if not mine.can_gather():
+			continue
+		if not WorkerGathering.is_safe_gather_source(mine, get_tree()):
+			continue
+
+		var distance: float = EnemyArmyCommand.horizontal_distance(
+			mine.global_position,
+			command_center.global_position
+		)
+		if distance > GOLD_MINE_NEAR_CC_DISTANCE:
+			continue
+
+		if distance < best_distance:
+			best_distance = distance
+			best_mine = mine
+
+	return best_mine
+
+
+func _is_mine_occupied_by_player(mine: GoldMine) -> bool:
+	if not NodeSafety.is_alive_node(mine):
+		return true
+
+	for node: Node in get_tree().get_nodes_in_group(PLAYER_COMMAND_CENTER_GROUP):
+		if not NodeSafety.is_alive_node(node) or not node is CommandCenter:
+			continue
+
+		var command_center: CommandCenter = node as CommandCenter
+		if command_center.building_state != Building.STATE_COMPLETED:
+			continue
+
+		var health_component: HealthComponent = (
+			command_center.get_node_or_null("HealthComponent") as HealthComponent
+		)
+		if health_component != null and health_component.current_health <= 0:
+			continue
+
+		if (
+			EnemyArmyCommand.horizontal_distance(
+				mine.global_position,
+				command_center.global_position
+			)
+			<= GOLD_MINE_NEAR_CC_DISTANCE
+		):
+			return true
+
+	return false
+
+
 func _resolve_enemy_command_center() -> CommandCenter:
+	var centers: Array[CommandCenter] = _collect_completed_enemy_command_centers()
+	if not centers.is_empty():
+		return centers[0]
+
 	if not enemy_command_center_path.is_empty():
 		var path_node: Node = get_node_or_null(enemy_command_center_path)
 		if path_node is CommandCenter:
@@ -779,6 +1248,20 @@ func _resolve_starting_gold_mine() -> GoldMine:
 
 
 func _resolve_best_safe_gold_mine(near_position: Vector3) -> GoldMine:
+	var active_mines: Array[GoldMine] = _collect_active_gold_mines()
+	var best_mine: GoldMine = null
+	var best_distance_sq: float = INF
+	for mine: GoldMine in active_mines:
+		if not _is_valid_gold_mine(mine):
+			continue
+		var distance_sq: float = near_position.distance_squared_to(mine.global_position)
+		if distance_sq < best_distance_sq:
+			best_distance_sq = distance_sq
+			best_mine = mine
+
+	if best_mine != null:
+		return best_mine
+
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
 		return null
@@ -798,6 +1281,11 @@ func _resolve_best_safe_gold_mine(near_position: Vector3) -> GoldMine:
 
 
 func _resolve_safe_gold_mine() -> GoldMine:
+	var active_mines: Array[GoldMine] = _collect_active_gold_mines()
+	for mine: GoldMine in active_mines:
+		if _is_valid_gold_mine(mine):
+			return mine
+
 	return _resolve_starting_gold_mine()
 
 
@@ -885,9 +1373,8 @@ func _is_valid_worker(node) -> bool:
 
 func _is_valid_gold_mine(gold_mine: GoldMine) -> bool:
 	return (
-		gold_mine != null
-		and is_instance_valid(gold_mine)
-		and not gold_mine.is_queued_for_deletion()
+		NodeSafety.is_alive_node(gold_mine)
+		and gold_mine is GoldMine
 		and gold_mine.can_gather()
 		and WorkerGathering.is_safe_gather_source(gold_mine, get_tree())
 	)

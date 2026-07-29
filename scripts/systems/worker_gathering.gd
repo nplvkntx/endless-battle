@@ -203,18 +203,24 @@ static func _map_resource_children(scene_root: Node) -> Array[Node]:
 static func _is_matching_gather_source(
 	node: Node, resource_id: StringName, for_enemy: bool
 ) -> bool:
-	if for_enemy:
-		if not node.name.begins_with("Enemy"):
-			return false
-	else:
-		if node.name.begins_with("Enemy"):
-			return false
-
 	match resource_id:
 		&"wood":
+			if for_enemy:
+				if not node.name.begins_with("Enemy"):
+					return false
+			else:
+				if node.name.begins_with("Enemy"):
+					return false
 			return node is WoodTree
 		&"gold":
-			return node is GoldMine
+			if not node is GoldMine:
+				return false
+			if for_enemy:
+				return (
+					node.name.begins_with("Enemy")
+					or node.name.begins_with("Expansion")
+				)
+			return not node.name.begins_with("Enemy")
 		_:
 			return false
 
