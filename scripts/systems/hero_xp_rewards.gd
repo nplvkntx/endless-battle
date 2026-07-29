@@ -18,6 +18,7 @@ const ENEMY_HERO_XP: int = 150
 const ENEMY_HERO_GOLD: int = 50
 
 const CREEP_XP_SHARE_RANGE: float = 18.0
+const REWARDS_GRANTED_META := &"_hero_xp_rewards_granted"
 
 
 static func notify_unit_killed(victim: Node) -> void:
@@ -32,6 +33,11 @@ static func grant_for_kill(victim: Node, killer: Node) -> void:
 	if not NodeSafety.is_alive_node(victim):
 		return
 
+	# Prevent duplicate XP/gold if death is signaled more than once.
+	if victim.has_meta(REWARDS_GRANTED_META):
+		return
+	victim.set_meta(REWARDS_GRANTED_META, true)
+
 	var granted_xp: int = 0
 	var xp_amount: int = get_xp_amount_for_victim(victim)
 	if xp_amount > 0:
@@ -40,14 +46,20 @@ static func grant_for_kill(victim: Node, killer: Node) -> void:
 			hero.add_xp(float(xp_amount))
 			granted_xp = xp_amount
 
-	var granted_gold: int = 0
+	# Popup gold stays player-only; enemy gold is stockpile-only.
+	var popup_gold: int = 0
 	var gold_amount: int = get_gold_amount_for_victim(victim)
-	if gold_amount > 0 and _should_grant_player_gold(victim, killer):
-		ResourceManager.add_gold(gold_amount)
-		granted_gold = gold_amount
+	if gold_amount > 0:
+		if _should_grant_player_gold(victim, killer):
+			if is_instance_valid(ResourceManager):
+				ResourceManager.add_gold(gold_amount)
+				popup_gold = gold_amount
+		elif _should_grant_enemy_gold(victim, killer):
+			if is_instance_valid(EnemyResourceManager):
+				EnemyResourceManager.add_gold(gold_amount)
 
-	if granted_xp > 0 or granted_gold > 0:
-		FloatingRewardText.spawn(victim, granted_xp, granted_gold)
+	if granted_xp > 0 or popup_gold > 0:
+		FloatingRewardText.spawn(victim, granted_xp, popup_gold)
 
 
 static func get_xp_amount_for_victim(victim: Node) -> int:
@@ -120,7 +132,10 @@ static func _get_creep_reward_tier(victim: Node) -> Dictionary:
 
 
 static func _should_grant_player_gold(victim: Node, killer: Node) -> bool:
-	if killer != null and CombatTargetValidation.is_enemy_faction(killer):
+	if not NodeSafety.is_alive_node(killer):
+		return false
+
+	if CombatTargetValidation.is_enemy_faction(killer):
 		return false
 
 	if CombatTargetValidation.is_neutral_creep(victim):
@@ -129,6 +144,20 @@ static func _should_grant_player_gold(victim: Node, killer: Node) -> bool:
 	return _is_enemy_army_victim(victim) and (
 		_is_player_controlled_unit(killer) or _is_player_hero(killer)
 	)
+
+
+static func _should_grant_enemy_gold(victim: Node, killer: Node) -> bool:
+	if not NodeSafety.is_alive_node(killer):
+		return false
+
+	if not CombatTargetValidation.is_enemy_faction(killer):
+		return false
+
+	# Creep gold follows last-hit side credit; army-kill gold remains player-only.
+	if CombatTargetValidation.is_neutral_creep(victim):
+		return _is_enemy_controlled_unit(killer)
+
+	return false
 
 
 static func _resolve_hero_recipient(victim: Node, killer: Node) -> Hero:
@@ -260,6 +289,22 @@ static func _is_player_controlled_unit(node: Node) -> bool:
 
 	if node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Worker:
 		return (node as Node).is_in_group(&"units")
+
+	return false
+
+
+static func _is_enemy_controlled_unit(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if not CombatTargetValidation.is_enemy_faction(node):
+		return false
+
+	if node is Hero:
+		return true
+
+	if node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Worker:
+		return true
 
 	return false
 
