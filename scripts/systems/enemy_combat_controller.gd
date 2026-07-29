@@ -102,6 +102,9 @@ func _update_combat_control(delta: float) -> void:
 	if _update_early_army_phase(tree):
 		return
 
+	if _update_tier_2_phase(tree):
+		return
+
 	_evaluate_player_creep_opportunities(tree)
 
 
@@ -188,6 +191,50 @@ func _update_early_army_phase(tree: SceneTree) -> bool:
 	EnemyUnitMission.set_main_army_mission(
 		EnemyUnitMission.Mission.RALLY,
 		"early army gather"
+	)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			army,
+			rally_position,
+			EnemyUnitMission.Mission.RALLY
+		)
+	)
+	return true
+
+
+func _update_tier_2_phase(tree: SceneTree) -> bool:
+	## Hold hero + army together; defend or finish a safe camp; no major player attack.
+	if _director == null:
+		return false
+
+	if _director.get_strategic_phase() != EnemyStrategicDirector.StrategicPhase.TIER_2:
+		return false
+
+	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	if army_mode in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		EnemyArmyCommand.ArmyMode.RETREATING,
+		EnemyArmyCommand.ArmyMode.ASSEMBLING,
+		EnemyArmyCommand.ArmyMode.CREEPING,
+	]:
+		return false
+
+	if _director.should_prioritize_creep():
+		return false
+
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return true
+
+	var army: Array = EnemyArmyCommand.collect_living_combat_units(tree)
+	army = NodeSafety.clean_node_array(army)
+	if army.is_empty():
+		return true
+
+	EnemyUnitMission.set_main_army_mission(
+		EnemyUnitMission.Mission.RALLY,
+		"tier 2 hold together"
 	)
 	EnemyArmyCommand.with_authorized_orders(func() -> void:
 		EnemyArmyCommand.command_hold_at_rally(

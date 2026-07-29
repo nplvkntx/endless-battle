@@ -24,6 +24,11 @@ static var _last_creeping_action: String = ""
 static var _last_creeping_camp: String = ""
 static var _last_creeping_hero_level: int = 0
 static var _creeping_complete_logged: bool = false
+static var _last_tier_2_action: String = ""
+static var _last_tier_2_missing: String = ""
+static var _last_tier_2_save: String = ""
+static var _last_tier_2_upgrade: String = ""
+static var _tier_2_complete_logged: bool = false
 
 
 static func set_enabled(value: bool) -> void:
@@ -109,6 +114,22 @@ static func log_once(key: String, message: String) -> void:
 			if message == _last_creeping_camp:
 				return
 			_last_creeping_camp = message
+		"tier_2":
+			if message == _last_tier_2_action:
+				return
+			_last_tier_2_action = message
+		"tier_2_missing":
+			if message == _last_tier_2_missing:
+				return
+			_last_tier_2_missing = message
+		"tier_2_save":
+			if message == _last_tier_2_save:
+				return
+			_last_tier_2_save = message
+		"tier_2_upgrade":
+			if message == _last_tier_2_upgrade:
+				return
+			_last_tier_2_upgrade = message
 		_:
 			pass
 
@@ -260,6 +281,39 @@ static func log_creeping_complete() -> void:
 		return
 	_creeping_complete_logged = true
 	log_event("Creeping complete -> Advancing to Tier 2")
+
+
+static func log_tier_2(message: String) -> void:
+	if message.is_empty():
+		return
+	log_once("tier_2", "Tier 2: %s" % message)
+
+
+static func log_tier_2_missing_building(building_name: String) -> void:
+	if building_name.is_empty():
+		return
+	log_once("tier_2_missing", "Tier 2: Missing Tier 1 building -> %s" % building_name)
+
+
+static func log_tier_2_saving(gold: int, gold_needed: int, wood: int, wood_needed: int) -> void:
+	log_once(
+		"tier_2_save",
+		"Tier 2: Saving resources | Gold %d/%d, Wood %d/%d"
+		% [gold, gold_needed, wood, wood_needed]
+	)
+
+
+static func log_tier_2_upgrade(message: String) -> void:
+	if message.is_empty():
+		return
+	log_once("tier_2_upgrade", "Tier 2: %s" % message)
+
+
+static func log_tier_2_complete() -> void:
+	if _tier_2_complete_logged:
+		return
+	_tier_2_complete_logged = true
+	log_event("Tier 2 complete | Town Hall reached Tier 2")
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:

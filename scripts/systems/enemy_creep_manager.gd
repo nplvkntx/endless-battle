@@ -160,8 +160,20 @@ func _is_creeping_phase() -> bool:
 	)
 
 
+func _is_tier_2_safe_creep_phase() -> bool:
+	return (
+		_director != null
+		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.TIER_2
+		and _director.should_prioritize_creep()
+	)
+
+
+func _allows_creep_objective() -> bool:
+	return _is_creeping_phase() or _is_tier_2_safe_creep_phase()
+
+
 func _update_creeping() -> void:
-	if not _is_creeping_phase():
+	if not _allows_creep_objective():
 		_clear_active_camp()
 		return
 

@@ -707,7 +707,58 @@ func _enemy_needs_wood_for_buildings() -> bool:
 	if _has_unfinished_enemy_construction():
 		return true
 
+	if _has_missing_tier_1_setup_buildings():
+		return true
+
 	return EnemyResourceManager.wood < WOOD_STOCK_COMFORT
+
+
+func _has_missing_tier_1_setup_buildings() -> bool:
+	if _director == null:
+		return false
+
+	if _director.get_strategic_phase() != EnemyStrategicDirector.StrategicPhase.TIER_2:
+		return false
+
+	for building_type: StringName in TechTree.get_core_setup_buildings_for_command_center_tier(1):
+		if not _enemy_has_building_type_completed_or_building(building_type):
+			return true
+	return false
+
+
+func _enemy_has_building_type_completed_or_building(building_type: StringName) -> bool:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Building:
+			continue
+		var building: Building = node as Building
+		if not is_instance_valid(building) or building.is_queued_for_deletion():
+			continue
+		if not _node_matches_core_building_type(building, building_type):
+			continue
+		var state: StringName = building.building_state
+		if (
+			state == Building.STATE_COMPLETED
+			or state == Building.STATE_UNDER_CONSTRUCTION
+			or state == Building.STATE_CONSTRUCTING
+		):
+			return true
+	return false
+
+
+func _node_matches_core_building_type(node: Building, building_type: StringName) -> bool:
+	match building_type:
+		&"farm":
+			return node is Farm
+		&"barracks":
+			return node is Barracks
+		&"hero_altar":
+			return node is HeroAltar
+		&"shop":
+			return node is Shop
+		&"blacksmith":
+			return node is Blacksmith
+		_:
+			return false
 
 
 func _enemy_needs_gold_for_training() -> bool:

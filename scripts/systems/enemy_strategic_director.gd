@@ -211,6 +211,15 @@ func should_prioritize_creep() -> bool:
 	if _strategic_phase == StrategicPhase.CREEPING:
 		return true
 
+	# During TIER_2, only finish a nearby safe camp — never a major push.
+	if _strategic_phase == StrategicPhase.TIER_2:
+		return (
+			get_desire("creep") >= DESIRE_LOW
+			and snapshot.get("has_safe_creep_camp", false)
+			and snapshot.get("creeping_army_healthy", false)
+			and not snapshot.get("base_under_attack", false)
+		)
+
 	return (
 		get_desire("creep") >= DESIRE_MEDIUM
 		and is_phase_at_least(StrategicPhase.CREEPING)
@@ -226,6 +235,7 @@ func should_prioritize_attack() -> bool:
 		StrategicPhase.OPENING,
 		StrategicPhase.EARLY_ARMY,
 		StrategicPhase.CREEPING,
+		StrategicPhase.TIER_2,
 	]:
 		return false
 
@@ -551,6 +561,9 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 	if previous == StrategicPhase.CREEPING:
 		EnemyAIDebug.log_creeping_complete()
 
+	if previous == StrategicPhase.TIER_2:
+		EnemyAIDebug.log_tier_2_complete()
+
 	EnemyAIDebug.log_phase_transition(
 		strategic_phase_to_string(previous),
 		strategic_phase_to_string(new_phase),
@@ -616,11 +629,49 @@ func _creeping_exit_reason() -> String:
 
 
 func _can_leave_tier_2() -> bool:
-	return int(snapshot.get("town_hall_tier", 1)) >= 2
+	if int(snapshot.get("town_hall_tier", 1)) < 2:
+		return false
+
+	if not _has_required_tier_1_buildings_intact():
+		return false
+
+	if not snapshot.get("economy_healthy", false):
+		return false
+
+	if _phase_interrupt_active:
+		return false
+
+	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
+		return false
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+		return false
+
+	return true
 
 
 func _tier_2_exit_reason() -> String:
 	return "Town Hall Tier 2 completed"
+
+
+func _has_required_tier_1_buildings_intact() -> bool:
+	for building_type: StringName in TechTree.get_core_setup_buildings_for_command_center_tier(1):
+		match building_type:
+			&"farm":
+				if not snapshot.get("has_farm", false):
+					return false
+			&"barracks":
+				if not snapshot.get("has_barracks", false):
+					return false
+			&"hero_altar":
+				if not snapshot.get("has_hero_altar", false):
+					return false
+			&"shop":
+				if not snapshot.get("has_shop", false):
+					return false
+			_:
+				pass
+	return true
 
 
 func _can_leave_expansion() -> bool:
@@ -999,6 +1050,26 @@ func _recommend_main_army_mission() -> void:
 		_set_main_mission(
 			EnemyUnitMission.Mission.RALLY,
 			"early army assembling at rally"
+		)
+		return
+
+	if _strategic_phase == StrategicPhase.TIER_2:
+		var army_mode_tier_2: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+		if army_mode_tier_2 in [
+			EnemyArmyCommand.ArmyMode.DEFENDING,
+			EnemyArmyCommand.ArmyMode.INTERCEPTING,
+		]:
+			_set_main_mission(EnemyUnitMission.Mission.DEFEND, "tier 2 defending")
+			return
+		if army_mode_tier_2 == EnemyArmyCommand.ArmyMode.CREEPING or should_prioritize_creep():
+			_set_main_mission(
+				EnemyUnitMission.Mission.CREEP,
+				"tier 2 safe creep camp"
+			)
+			return
+		_set_main_mission(
+			EnemyUnitMission.Mission.RALLY,
+			"tier 2 holding hero and army together"
 		)
 		return
 

@@ -209,3 +209,89 @@ func can_build_academy(team_id: int = PLAYER_TEAM_ID) -> bool:
 
 func can_train_swordsman_or_archer(team_id: int = PLAYER_TEAM_ID) -> bool:
 	return player_has_completed_blacksmith(team_id)
+
+
+## Core economy/production buildings the AI expects before advancing past each CC tier.
+## Excludes defensive towers/walls and expansion Command Centers.
+const CORE_SETUP_BUILDING_CANDIDATES: Array[StringName] = [
+	&"farm",
+	&"barracks",
+	&"hero_altar",
+	&"shop",
+	&"blacksmith",
+	&"stable",
+	&"artillery_depot",
+	&"academy",
+]
+
+
+func is_building_type_unlocked_at_command_center_tier(
+	building_type: StringName,
+	command_center_tier: int,
+	has_completed_blacksmith: bool = false
+) -> bool:
+	match building_type:
+		&"blacksmith":
+			return command_center_tier >= 2
+		&"stable":
+			return command_center_tier >= 2 and has_completed_blacksmith
+		&"artillery_depot", &"academy":
+			return command_center_tier >= 3 and has_completed_blacksmith
+		&"farm", &"barracks", &"hero_altar", &"shop":
+			return true
+		_:
+			return false
+
+
+func get_core_setup_buildings_for_command_center_tier(
+	command_center_tier: int,
+	has_completed_blacksmith: bool = false
+) -> Array[StringName]:
+	var unlocked: Array[StringName] = []
+	for building_type: StringName in CORE_SETUP_BUILDING_CANDIDATES:
+		if is_building_type_unlocked_at_command_center_tier(
+			building_type,
+			command_center_tier,
+			has_completed_blacksmith
+		):
+			unlocked.append(building_type)
+	return unlocked
+
+
+func is_building_type_unlocked(building_type: StringName, team_id: int = PLAYER_TEAM_ID) -> bool:
+	return is_building_type_unlocked_at_command_center_tier(
+		building_type,
+		get_highest_command_center_tier(team_id),
+		player_has_completed_blacksmith(team_id)
+	)
+
+
+func get_unlocked_core_setup_buildings(team_id: int = PLAYER_TEAM_ID) -> Array[StringName]:
+	return get_core_setup_buildings_for_command_center_tier(
+		get_highest_command_center_tier(team_id),
+		player_has_completed_blacksmith(team_id)
+	)
+
+
+func get_building_type_display_name(building_type: StringName) -> String:
+	match building_type:
+		&"farm":
+			return "Farm"
+		&"barracks":
+			return "Barracks"
+		&"hero_altar":
+			return "Hero Altar"
+		&"shop":
+			return "Shop"
+		&"blacksmith":
+			return "Blacksmith"
+		&"stable":
+			return "Stable"
+		&"artillery_depot":
+			return "Artillery Depot"
+		&"academy":
+			return "Academy"
+		&"command_center":
+			return "Command Center"
+		_:
+			return String(building_type).capitalize()

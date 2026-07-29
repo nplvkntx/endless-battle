@@ -710,6 +710,12 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 			== EnemyStrategicDirector.StrategicPhase.CREEPING
 		):
 			return true
+		# No major player attacks while preparing the Tier 2 Town Hall upgrade.
+		if (
+			_director.get_strategic_phase()
+			== EnemyStrategicDirector.StrategicPhase.TIER_2
+		):
+			return true
 		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME):
 			return false
 		if _director.is_phase_interrupted():
@@ -727,7 +733,7 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 	if hero != null and hero.level >= MIN_HERO_LEVEL_FOR_ATTACK:
 		if (
 			_director == null
-			or _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.TIER_2)
+			or _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.EXPANSION)
 		):
 			return false
 

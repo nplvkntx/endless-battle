@@ -146,6 +146,10 @@ var _expansion_placement_cooldown_until: float = -1.0
 var _expansion_order_active: bool = false
 var _expansion_failed_mine_cooldowns: Dictionary = {}
 var _opening_first_farm_builder_logged: bool = false
+var _tier_2_upgrade_was_progressing: bool = false
+var _tier_2_upgrade_started_logged: bool = false
+var _tier_2_last_block_reason: String = ""
+var _tier_2_last_missing_building: StringName = &""
 
 
 func _ready() -> void:
@@ -236,6 +240,10 @@ func _run_build_order() -> void:
 		_run_early_army_build_order()
 		return
 
+	if _is_tier_2_phase():
+		_run_tier_2_build_order()
+		return
+
 	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
 		if _try_place_farm(true):
 			return
@@ -322,6 +330,13 @@ func _is_early_army_phase() -> bool:
 	return (
 		_director != null
 		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.EARLY_ARMY
+	)
+
+
+func _is_tier_2_phase() -> bool:
+	return (
+		_director != null
+		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.TIER_2
 	)
 
 
@@ -483,6 +498,328 @@ func _try_train_early_army_pikemen() -> void:
 				_count_living_pikemen(),
 				EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
 			)
+
+
+func _run_tier_2_build_order() -> void:
+	## TIER_2: finish Tier 1 setup, save for Town Hall upgrade, keep economy alive.
+	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
+		_try_place_farm(true)
+
+	# Leave the Command Center idle once the upgrade is otherwise ready.
+	if not _should_hold_workers_for_imminent_tier_2_upgrade():
+		_try_train_enemy_workers()
+
+	if _needs_farm() or _needs_farm_headroom_for_tier_2_upgrade():
+		_try_place_farm(false)
+
+	var missing_tier_1: Array[StringName] = _get_missing_tier_1_setup_buildings()
+	_log_tier_2_missing_buildings(missing_tier_1)
+	if not missing_tier_1.is_empty():
+		_try_place_missing_tier_1_building(missing_tier_1[0])
+		_log_tier_2_block_reason("Missing Tier 1 buildings")
+		return
+
+	# Essential early-army replacement only — avoid spending the Tier 2 stockpile.
+	_try_replace_essential_tier_2_pikemen()
+
+	if _update_tier_2_town_hall_upgrade():
+		return
+
+	if _needs_farm():
+		_try_place_farm(false)
+
+
+func _should_hold_workers_for_imminent_tier_2_upgrade() -> bool:
+	if not _is_tier_2_phase():
+		return false
+
+	if TechTree.player_has_tier_2(ENEMY_TEAM_ID) or _is_any_enemy_command_center_upgrading():
+		return false
+
+	if not _has_required_tier_1_setup_present():
+		return false
+
+	if _get_enemy_hero_level() < EnemyStrategicDirector.CREEP_HERO_LEVEL_REQUIREMENT:
+		return false
+
+	if not _is_tier_2_army_ready_for_upgrade():
+		return false
+
+	if not _is_tier_2_base_safe_for_upgrade():
+		return false
+
+	if not _can_afford_tier_2_upgrade():
+		return false
+
+	if _needs_farm_headroom_for_tier_2_upgrade():
+		return false
+
+	# Only pause once the economy target is already met (or nearly met).
+	return _get_effective_worker_count() >= _get_target_worker_count() - 1
+
+
+func _get_required_tier_1_setup_buildings() -> Array[StringName]:
+	return TechTree.get_core_setup_buildings_for_command_center_tier(1)
+
+
+func _get_missing_tier_1_setup_buildings() -> Array[StringName]:
+	var missing: Array[StringName] = []
+	for building_type: StringName in _get_required_tier_1_setup_buildings():
+		if _has_completed_building(building_type):
+			continue
+		if _is_building_type_in_progress(building_type):
+			continue
+		missing.append(building_type)
+	return missing
+
+
+func _has_required_tier_1_setup_present() -> bool:
+	for building_type: StringName in _get_required_tier_1_setup_buildings():
+		if _has_completed_building(building_type):
+			continue
+		if _is_building_type_in_progress(building_type):
+			continue
+		return false
+	return true
+
+
+func _try_place_missing_tier_1_building(building_type: StringName) -> bool:
+	if building_type == PLACEMENT_FARM:
+		return _try_place_farm(false)
+
+	if _has_completed_building(building_type) or _is_building_type_in_progress(building_type):
+		return false
+
+	if _has_unfinished_construction():
+		return false
+
+	return _try_place_building(building_type)
+
+
+func _log_tier_2_missing_buildings(missing: Array[StringName]) -> void:
+	if missing.is_empty():
+		if _tier_2_last_missing_building != &"":
+			_tier_2_last_missing_building = &""
+		return
+
+	var first_missing: StringName = missing[0]
+	if first_missing == _tier_2_last_missing_building:
+		return
+
+	_tier_2_last_missing_building = first_missing
+	EnemyAIDebug.log_tier_2_missing_building(
+		TechTree.get_building_type_display_name(first_missing)
+	)
+
+
+func _needs_farm_headroom_for_tier_2_upgrade() -> bool:
+	if _is_any_enemy_command_center_upgrading():
+		return _get_projected_free_population() <= FARM_HEADROOM_MID
+
+	if TechTree.player_has_tier_2(ENEMY_TEAM_ID):
+		return false
+
+	# Keep spare population so workers/pikemen can still train during the 60s upgrade.
+	return _get_projected_free_population() <= FARM_HEADROOM_MID + 2
+
+
+func _try_replace_essential_tier_2_pikemen() -> void:
+	var alive: int = _count_living_pikemen()
+	var pending: int = _count_pending_pikemen()
+	var total: int = alive + pending
+	var min_pikemen: int = EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+	if total >= min_pikemen:
+		return
+
+	# Do not drain the upgrade stockpile for replacements unless army is critically thin.
+	if _can_afford_tier_2_upgrade() and total >= maxi(3, min_pikemen - 2):
+		return
+
+	if not EnemyResourceManager.has_food_supply(MILITARY_TRAIN_FOOD_COST):
+		if _needs_farm():
+			_try_place_farm(true)
+		return
+
+	for barracks: Barracks in _find_all_completed_enemy_barracks():
+		if not is_instance_valid(barracks):
+			continue
+
+		while barracks.get_enemy_pending_unit_count() < Barracks.MAX_ENEMY_UNIT_QUEUE:
+			alive = _count_living_pikemen()
+			pending = _count_pending_pikemen()
+			total = alive + pending
+			if total >= min_pikemen:
+				return
+
+			if not EnemyResourceManager.can_afford_training(
+				Barracks.SPEARMAN_TRAIN_GOLD_COST,
+				MILITARY_TRAIN_FOOD_COST
+			):
+				return
+
+			if not barracks.try_train_enemy_spearman():
+				break
+
+
+func _get_enemy_hero_level() -> int:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+	if hero == null:
+		return 0
+	return hero.level
+
+
+func _is_tier_2_army_ready_for_upgrade() -> bool:
+	if not _has_living_enemy_hero():
+		return false
+
+	if _count_living_pikemen() < EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN:
+		return false
+
+	if EnemyArmyCommand.is_rebuilding_army():
+		return false
+
+	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
+		return false
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+		return false
+
+	return true
+
+
+func _is_tier_2_base_safe_for_upgrade() -> bool:
+	if _director != null and _director.is_phase_interrupted():
+		return false
+
+	if EnemyArmyCommand.is_emergency_defense_active():
+		return false
+
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		return false
+
+	var tree: SceneTree = get_tree()
+	if EnemyArmyCommand.is_enemy_base_threatened(tree):
+		return false
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	var health_component: HealthComponent = (
+		command_center.get_node_or_null("HealthComponent") as HealthComponent
+	)
+	if health_component != null:
+		var max_health: float = float(health_component.max_health)
+		if max_health > 0.0:
+			var ratio: float = float(health_component.current_health) / max_health
+			if ratio <= EnemyStrategicDirector.BASE_HEAVY_DAMAGE_RATIO:
+				return false
+
+	return true
+
+
+func _can_afford_tier_2_upgrade() -> bool:
+	return (
+		EnemyResourceManager.gold >= TIER_2_GOLD_COST
+		and EnemyResourceManager.wood >= TIER_2_WOOD_COST
+	)
+
+
+func _log_tier_2_block_reason(reason: String) -> void:
+	if reason.is_empty() or reason == _tier_2_last_block_reason:
+		return
+
+	_tier_2_last_block_reason = reason
+	match reason:
+		"Base under attack":
+			EnemyAIDebug.log_tier_2_upgrade("Upgrade delayed | Base under attack")
+		"Hero below level 3":
+			EnemyAIDebug.log_tier_2("Upgrade delayed | Hero below level 3")
+		"Army recovering":
+			EnemyAIDebug.log_tier_2("Upgrade delayed | Army recovering")
+		"Missing Tier 1 buildings":
+			pass
+		_:
+			EnemyAIDebug.log_tier_2(reason)
+
+
+func _update_tier_2_town_hall_upgrade() -> bool:
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or not is_instance_valid(command_center):
+		_log_tier_2_block_reason("Command Center destroyed")
+		_tier_2_upgrade_was_progressing = false
+		_tier_2_upgrade_started_logged = false
+		return true
+
+	if command_center.command_center_tier >= 2 or TechTree.player_has_tier_2(ENEMY_TEAM_ID):
+		if _tier_2_upgrade_was_progressing or _tier_2_upgrade_started_logged:
+			EnemyAIDebug.log_tier_2_complete()
+		_tier_2_upgrade_was_progressing = false
+		_tier_2_last_block_reason = ""
+		return false
+
+	if command_center.is_upgrading_tier():
+		if not _tier_2_upgrade_was_progressing:
+			_tier_2_upgrade_was_progressing = true
+			EnemyAIDebug.log_tier_2_upgrade("Upgrade progress started")
+		_tier_2_last_block_reason = ""
+		return true
+
+	# Upgrade was interrupted (e.g. Command Center destroyed mid-upgrade and rebuilt).
+	if _tier_2_upgrade_was_progressing:
+		_tier_2_upgrade_was_progressing = false
+		_tier_2_upgrade_started_logged = false
+		EnemyAIDebug.log_tier_2_upgrade("Upgrade interrupted | Command Center lost progress")
+
+	if _get_enemy_hero_level() < EnemyStrategicDirector.CREEP_HERO_LEVEL_REQUIREMENT:
+		_log_tier_2_block_reason("Hero below level 3")
+		return true
+
+	if not _is_tier_2_army_ready_for_upgrade():
+		_log_tier_2_block_reason("Army recovering")
+		return true
+
+	if not _is_tier_2_base_safe_for_upgrade():
+		_log_tier_2_block_reason("Base under attack")
+		return true
+
+	if not _can_afford_tier_2_upgrade():
+		if _tier_2_last_block_reason != "Saving resources":
+			EnemyAIDebug.log_tier_2_saving(
+				EnemyResourceManager.gold,
+				TIER_2_GOLD_COST,
+				EnemyResourceManager.wood,
+				TIER_2_WOOD_COST
+			)
+		_tier_2_last_block_reason = "Saving resources"
+		return true
+
+	if _needs_farm_headroom_for_tier_2_upgrade():
+		if _try_place_farm(false):
+			_log_tier_2_block_reason("Building Farm for upgrade headroom")
+			return true
+		_log_tier_2_block_reason("Waiting for Farm headroom")
+		return true
+
+	if command_center.is_training_worker() or command_center.get_worker_queue_count() > 0:
+		_log_tier_2_block_reason("Waiting for Command Center idle")
+		return true
+
+	if not command_center.can_try_enemy_upgrade_tier(2):
+		# Affordable but otherwise blocked — keep gathering, do not spam requests.
+		_log_tier_2_block_reason("Upgrade not ready")
+		return true
+
+	if command_center.try_upgrade_enemy_tier(2):
+		_tier_2_upgrade_started_logged = true
+		_tier_2_upgrade_was_progressing = true
+		_tier_2_last_block_reason = ""
+		EnemyAIDebug.log_tier_2_upgrade("Town Hall upgrade started")
+		EnemyAIDebug.log_town_hall_upgrade(2)
+		return true
+
+	_log_tier_2_block_reason("Upgrade request failed")
+	return true
 
 
 func _try_place_opening_first_farm() -> bool:
@@ -857,10 +1194,19 @@ func _should_upgrade_command_center_to_tier_2(command_center: CommandCenter) -> 
 	if _director != null and not _director.should_prioritize_tier_upgrade(2):
 		return false
 
-	if not _has_completed_building(PLACEMENT_BARRACKS):
+	if _get_enemy_hero_level() < EnemyStrategicDirector.CREEP_HERO_LEVEL_REQUIREMENT:
+		return false
+
+	if not _has_required_tier_1_setup_present():
 		return false
 
 	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
+		return false
+
+	if not _is_tier_2_base_safe_for_upgrade():
+		return false
+
+	if not _is_tier_2_army_ready_for_upgrade():
 		return false
 
 	if not _has_stable_enemy_economy_for_tier_2_upgrade():
@@ -942,6 +1288,9 @@ func _try_upgrade_command_center_tier() -> void:
 
 func _should_hold_workers_for_pending_tier_upgrade() -> bool:
 	if _is_any_enemy_command_center_upgrading():
+		return true
+
+	if _should_hold_workers_for_imminent_tier_2_upgrade():
 		return true
 
 	var command_center: CommandCenter = _resolve_primary_command_center()
