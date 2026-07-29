@@ -31,6 +31,7 @@ const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
 const EXPANSION_SATURATION_WORKERS: int = 16
 const EXPANSION_MINE_MIN_WORKERS: int = 5
 const MID_GAME_MIN_ARMY: int = 12
+const OPENING_WORKER_TARGET: int = 12
 const BASE_HEAVY_DAMAGE_RATIO: float = 0.35
 const RECOVERY_MIN_WORKERS: int = 4
 const PHASE_MIN_ARMY_OPENING: int = 5
@@ -492,7 +493,11 @@ func _try_recovery_phase_regression() -> bool:
 		return false
 
 	var recovery_phase: StrategicPhase = StrategicPhase.EARLY_ARMY
-	if not snapshot.get("has_barracks", false) or not snapshot.get("has_hero_altar", false):
+	if (
+		not snapshot.get("has_farm", false)
+		or not snapshot.get("has_barracks", false)
+		or not snapshot.get("has_hero_altar", false)
+	):
 		recovery_phase = StrategicPhase.OPENING
 
 	if int(recovery_phase) >= int(_strategic_phase):
@@ -519,6 +524,14 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 	if int(new_phase) > int(_highest_phase_reached):
 		_highest_phase_reached = new_phase
 
+	if previous == StrategicPhase.OPENING:
+		EnemyAIDebug.log_opening_complete(
+			int(snapshot.get("workers", 0)),
+			bool(snapshot.get("has_farm", false)),
+			bool(snapshot.get("has_hero_altar", false)),
+			bool(snapshot.get("has_barracks", false))
+		)
+
 	EnemyAIDebug.log_phase_transition(
 		strategic_phase_to_string(previous),
 		strategic_phase_to_string(new_phase),
@@ -528,13 +541,19 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 
 func _can_leave_opening() -> bool:
 	return (
-		snapshot.get("has_hero_altar", false)
+		snapshot.get("has_farm", false)
+		and snapshot.get("has_hero_altar", false)
 		and snapshot.get("has_barracks", false)
+		and int(snapshot.get("workers", 0)) >= OPENING_WORKER_TARGET
 	)
 
 
 func _opening_exit_reason() -> String:
-	return "Altar and Barracks completed"
+	var workers: int = int(snapshot.get("workers", 0))
+	return (
+		"Farm, Altar, Barracks ready | Workers: %d/%d"
+		% [workers, OPENING_WORKER_TARGET]
+	)
 
 
 func _can_leave_early_army() -> bool:

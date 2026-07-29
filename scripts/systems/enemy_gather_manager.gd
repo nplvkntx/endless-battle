@@ -123,6 +123,10 @@ func _rebalance_gather_workers() -> void:
 	if gather_pool.is_empty():
 		return
 
+	_reserve_opening_farm_builder(gather_pool)
+	if gather_pool.is_empty():
+		return
+
 	var gold_workers: Array[Worker] = []
 	var wood_workers: Array[Worker] = []
 	var unassigned_workers: Array[Worker] = []
@@ -193,6 +197,65 @@ func _rebalance_gather_workers() -> void:
 	_scan_fallback_idle_enemy_workers()
 
 
+func _reserve_opening_farm_builder(gather_pool: Array[Worker]) -> void:
+	if not _should_reserve_opening_farm_builder():
+		return
+
+	if gather_pool.size() <= STARTING_GOLD_WORKERS:
+		return
+
+	var reserved: Worker = null
+	for worker: Worker in gather_pool:
+		if worker.get_assigned_gather_resource_id() == &"gold":
+			continue
+		reserved = worker
+		break
+
+	if reserved == null:
+		for worker: Worker in gather_pool:
+			if worker.get_assigned_gather_resource_id() != &"gold":
+				continue
+			if not _can_reassign_worker(worker):
+				continue
+			reserved = worker
+			break
+
+	if reserved == null:
+		return
+
+	gather_pool.erase(reserved)
+
+
+func _should_reserve_opening_farm_builder() -> bool:
+	if _director == null:
+		return false
+
+	if _director.get_strategic_phase() != EnemyStrategicDirector.StrategicPhase.OPENING:
+		return false
+
+	return not _has_enemy_farm_started()
+
+
+func _has_enemy_farm_started() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_COMMAND_CENTER_GROUP):
+		if not node is Farm:
+			continue
+
+		var farm: Farm = node as Farm
+		if not is_instance_valid(farm) or farm.is_queued_for_deletion():
+			continue
+
+		var state: StringName = farm.building_state
+		if (
+			state == Building.STATE_COMPLETED
+			or state == Building.STATE_UNDER_CONSTRUCTION
+			or state == Building.STATE_CONSTRUCTING
+		):
+			return true
+
+	return false
+
+
 func _assign_starting_workers() -> void:
 	var command_center: CommandCenter = _resolve_enemy_command_center()
 	if command_center == null:
@@ -204,11 +267,15 @@ func _assign_starting_workers() -> void:
 
 	var gold_assigned: int = 0
 	for worker: Worker in gather_pool:
-		if gold_assigned < STARTING_GOLD_WORKERS:
-			if assign_gather_job(worker, true):
-				gold_assigned += 1
-		else:
-			assign_gather_job(worker, false)
+		if gold_assigned >= STARTING_GOLD_WORKERS:
+			# Leave the fifth+ worker free for the opening first Farm builder.
+			break
+
+		if assign_gather_job(worker, true):
+			gold_assigned += 1
+
+	if gold_assigned > 0:
+		EnemyAIDebug.log_opening("%d workers assigned to gold" % gold_assigned)
 
 
 func _is_enemy_navigation_ready() -> bool:
@@ -238,6 +305,10 @@ func _append_worker_to_gather_bucket(
 func _compute_target_gold_workers(total_gather_workers: int) -> int:
 	if total_gather_workers <= 0:
 		return 0
+
+	# Until the opening Farm starts, keep the reserved gather pool on gold.
+	if _should_reserve_opening_farm_builder():
+		return total_gather_workers
 
 	if total_gather_workers == 1:
 		return 1
@@ -492,6 +563,17 @@ func _scan_fallback_idle_enemy_workers() -> void:
 
 	if idle_workers.is_empty():
 		return
+
+	if _should_reserve_opening_farm_builder() and idle_workers.size() > 0:
+		# Keep one idle worker free for the opening first Farm.
+		var reserved_index: int = 0
+		for index: int in range(idle_workers.size()):
+			if idle_workers[index].get_assigned_gather_resource_id() != &"gold":
+				reserved_index = index
+				break
+		idle_workers.remove_at(reserved_index)
+		if idle_workers.is_empty():
+			return
 
 	var target_gold: int = _apply_target_hysteresis(
 		_compute_target_gold_workers(total_gather_workers),

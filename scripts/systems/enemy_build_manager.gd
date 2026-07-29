@@ -18,6 +18,7 @@ const HARD_WORKER_SAFETY_CAP: int = 50
 const WORKER_QUEUE_TARGET: int = 2
 const MIN_WORKERS_BEFORE_MILITARY: int = 6
 const MIN_WORKERS_BEFORE_MILITARY_ABUNDANT: int = 4
+const OPENING_FIRST_FARM_WORKER_COUNT: int = 5
 const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.60
 const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
 const EXPANSION_PLACEMENT_RETRY_SECONDS: float = 10.0
@@ -144,6 +145,7 @@ var _expansion_target_mine: GoldMine = null
 var _expansion_placement_cooldown_until: float = -1.0
 var _expansion_order_active: bool = false
 var _expansion_failed_mine_cooldowns: Dictionary = {}
+var _opening_first_farm_builder_logged: bool = false
 
 
 func _ready() -> void:
@@ -226,6 +228,10 @@ func _run_build_order() -> void:
 	_try_assign_idle_builder_to_construction()
 	_run_macro_emergency_checks()
 
+	if _is_opening_phase():
+		_run_opening_build_order()
+		return
+
 	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
 		if _try_place_farm(true):
 			return
@@ -299,6 +305,259 @@ func _run_build_order() -> void:
 
 	if _should_build_expansion_command_center():
 		_try_place_expansion_command_center()
+
+
+func _is_opening_phase() -> bool:
+	return (
+		_director != null
+		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.OPENING
+	)
+
+
+func _run_opening_build_order() -> void:
+	## Strict OPENING sequence: Farm -> Hero Altar -> Barracks, with worker growth.
+	if not EnemyResourceManager.has_food_supply(1) and _needs_farm():
+		_try_place_farm(true)
+
+	# Rebuild construction assignments if the farm builder died mid-opening.
+	_ensure_opening_first_farm_builder()
+	_log_opening_first_farm_builder_if_needed()
+
+	## Keep training workers toward opening target (no military yet).
+	_try_train_enemy_workers()
+
+	if _try_place_opening_first_farm():
+		return
+
+	# Extra farms before the population cap while the core sequence continues.
+	if _has_completed_building(PLACEMENT_FARM) and _needs_farm():
+		_try_place_farm(false)
+
+	if not _has_completed_building(PLACEMENT_FARM):
+		return
+
+	if _try_place_opening_core_building(PLACEMENT_HERO_ALTAR):
+		return
+
+	if not _has_completed_building(PLACEMENT_HERO_ALTAR):
+		return
+
+	if _try_place_opening_core_building(PLACEMENT_BARRACKS):
+		return
+
+	if _needs_farm():
+		_try_place_farm(false)
+
+
+func _try_place_opening_first_farm() -> bool:
+	if _has_completed_building(PLACEMENT_FARM) or _is_building_type_in_progress(PLACEMENT_FARM):
+		_log_opening_first_farm_builder_if_needed()
+		return false
+
+	if _count_enemy_workers() < OPENING_FIRST_FARM_WORKER_COUNT:
+		return false
+
+	if not EnemyResourceManager.can_afford(FARM_GOLD_COST, FARM_WOOD_COST):
+		return false
+
+	if not _try_place_building(PLACEMENT_FARM, false, false):
+		return false
+
+	_prefer_non_gold_opening_farm_builder()
+	_log_opening_first_farm_builder_if_needed()
+	return true
+
+
+func _try_place_opening_core_building(building_type: StringName) -> bool:
+	if _has_completed_building(building_type) or _is_building_type_in_progress(building_type):
+		return false
+
+	if _has_unfinished_construction():
+		return false
+
+	return _try_place_building(building_type)
+
+
+func _ensure_opening_first_farm_builder() -> void:
+	var farm: Building = _find_opening_first_farm_under_construction()
+	if farm == null:
+		return
+
+	# Only replace a missing builder (e.g. construction worker died).
+	if _building_has_active_builder(farm):
+		return
+
+	_assign_opening_farm_builder(farm)
+
+
+func _prefer_non_gold_opening_farm_builder() -> void:
+	var farm: Building = _find_opening_first_farm_under_construction()
+	if farm == null:
+		return
+
+	var active_builder: Worker = _find_builder_assigned_to(farm)
+	if not NodeSafety.is_alive_node(active_builder):
+		_assign_opening_farm_builder(farm)
+		return
+
+	if active_builder.get_assigned_gather_resource_id() != &"gold":
+		return
+
+	var preferred: Worker = _find_nearest_available_enemy_worker_matching(
+		farm.global_position,
+		true,
+		true
+	)
+	if not NodeSafety.is_alive_node(preferred) or preferred == active_builder:
+		return
+
+	active_builder.prepare_for_enemy_economy_reassign(
+		"opening farm prefers non-gold builder"
+	)
+	notify_enemy_worker_spawned(active_builder)
+	preferred.command_build(farm)
+	EnemyUnitMission.try_set_mission(
+		preferred,
+		EnemyUnitMission.Mission.BUILD,
+		EnemyUnitMission.BUILD_COMMITMENT_SECONDS
+	)
+
+
+func _log_opening_first_farm_builder_if_needed() -> void:
+	if _opening_first_farm_builder_logged:
+		return
+
+	var farm: Building = _find_opening_first_farm_under_construction()
+	if farm == null:
+		farm = _find_completed_opening_farm()
+	if farm == null:
+		return
+
+	if not _building_has_active_builder(farm) and farm.building_state != Building.STATE_COMPLETED:
+		return
+
+	_opening_first_farm_builder_logged = true
+	EnemyAIDebug.log_opening("Worker assigned to first Farm")
+
+
+func _find_opening_first_farm_under_construction() -> Building:
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Farm or not _is_living_building(node as Building):
+			continue
+
+		var state: StringName = (node as Building).building_state
+		if (
+			state == Building.STATE_UNDER_CONSTRUCTION
+			or state == Building.STATE_CONSTRUCTING
+		):
+			return node as Building
+
+	return null
+
+
+func _find_completed_opening_farm() -> Building:
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Farm or not _is_living_building(node as Building):
+			continue
+		if (node as Building).building_state == Building.STATE_COMPLETED:
+			return node as Building
+
+	return null
+
+
+func _find_builder_assigned_to(building: Building) -> Worker:
+	if not NodeSafety.is_alive_node(building):
+		return null
+
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not node is Worker:
+			continue
+
+		var worker: Worker = node as Worker
+		if not NodeSafety.is_alive_node(worker):
+			continue
+
+		if worker.is_assigned_to_build(building):
+			return worker
+
+	return null
+
+
+func _assign_opening_farm_builder(building: Building) -> void:
+	if not NodeSafety.is_alive_node(building):
+		return
+
+	var worker: Worker = _find_opening_farm_builder(building.global_position)
+	if not NodeSafety.is_alive_node(worker):
+		return
+
+	worker.command_build(building)
+	EnemyUnitMission.try_set_mission(
+		worker,
+		EnemyUnitMission.Mission.BUILD,
+		EnemyUnitMission.BUILD_COMMITMENT_SECONDS
+	)
+
+
+func _find_opening_farm_builder(near_position: Vector3) -> Worker:
+	var preferred: Worker = _find_nearest_available_enemy_worker_matching(
+		near_position,
+		false,
+		true
+	)
+	if NodeSafety.is_alive_node(preferred):
+		return preferred
+
+	preferred = _find_nearest_available_enemy_worker(near_position, false)
+	if NodeSafety.is_alive_node(preferred):
+		return preferred
+
+	preferred = _find_nearest_available_enemy_worker_matching(
+		near_position,
+		true,
+		true
+	)
+	if NodeSafety.is_alive_node(preferred):
+		return preferred
+
+	return _find_nearest_available_enemy_worker(near_position, true)
+
+
+func _find_nearest_available_enemy_worker_matching(
+	near_position: Vector3,
+	allow_gather_interrupt: bool,
+	prefer_non_gold: bool
+) -> Worker:
+	var closest_worker: Worker = null
+	var closest_distance_squared: float = INF
+
+	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
+		if not node is Worker:
+			continue
+
+		var worker: Worker = node as Worker
+		if not NodeSafety.is_alive_node(worker):
+			continue
+
+		if WorkerAiUnstuck.blocks_external_commands(worker):
+			continue
+
+		if not worker.is_available_for_construction_assignment(allow_gather_interrupt):
+			continue
+
+		if prefer_non_gold and worker.get_assigned_gather_resource_id() == &"gold":
+			continue
+
+		var offset: Vector3 = worker.global_position - near_position
+		offset.y = 0.0
+		var distance_squared: float = offset.length_squared()
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_worker = worker
+
+	return closest_worker
 
 
 func _should_place_barracks() -> bool:
@@ -1163,6 +1422,12 @@ func _try_train_enemy_workers() -> bool:
 		trained_any = true
 		trained_this_tick += 1
 
+	if trained_any and _is_opening_phase():
+		EnemyAIDebug.log_opening_training(
+			_get_effective_worker_count(),
+			_get_target_worker_count()
+		)
+
 	return trained_any
 
 
@@ -1217,10 +1482,12 @@ func _log_worker_production_blocker(command_center: CommandCenter, target_worker
 
 
 func _compute_base_worker_target() -> int:
+	if _is_opening_phase():
+		return EnemyStrategicDirector.OPENING_WORKER_TARGET
+
 	var target: int = TARGET_WORKERS_EARLY
 	if _director != null:
 		match _director.get_strategic_phase():
-			EnemyStrategicDirector.StrategicPhase.OPENING, \
 			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
 			EnemyStrategicDirector.StrategicPhase.CREEPING:
 				target = TARGET_WORKERS_EARLY
@@ -1236,6 +1503,8 @@ func _compute_base_worker_target() -> int:
 					if _has_abundant_resources()
 					else TARGET_WORKERS_ENDGAME
 				)
+			_:
+				target = TARGET_WORKERS_EARLY
 	else:
 		var elapsed_seconds: float = _get_match_elapsed_seconds()
 		if elapsed_seconds >= WORKER_PHASE_ENDGAME_SECONDS:
@@ -1271,7 +1540,8 @@ func _get_target_worker_count() -> int:
 func _get_phase_worker_target() -> int:
 	if _director != null:
 		match _director.get_strategic_phase():
-			EnemyStrategicDirector.StrategicPhase.OPENING, \
+			EnemyStrategicDirector.StrategicPhase.OPENING:
+				return EnemyStrategicDirector.OPENING_WORKER_TARGET
 			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
 			EnemyStrategicDirector.StrategicPhase.CREEPING:
 				return TARGET_WORKERS_EARLY
@@ -2057,6 +2327,23 @@ func _try_place_building_at_anchor(
 
 
 func _log_building_started(building_type: StringName) -> void:
+	if _is_opening_phase():
+		match building_type:
+			PLACEMENT_HERO_ALTAR:
+				EnemyAIDebug.log_opening("Building Hero Altar")
+				return
+			PLACEMENT_BARRACKS:
+				EnemyAIDebug.log_opening("Building Barracks")
+				return
+			PLACEMENT_FARM:
+				# First farm uses Opening: Worker assigned to first Farm.
+				if _count_completed_farms() == 0:
+					return
+				EnemyAIDebug.log_opening("Building Farm")
+				return
+			_:
+				pass
+
 	match building_type:
 		PLACEMENT_HERO_ALTAR:
 			EnemyAIDebug.log_building("Hero Altar")
@@ -2147,7 +2434,15 @@ func _try_assign_idle_builder_to_construction() -> void:
 		if _building_has_active_builder(building):
 			continue
 
-		_assign_nearest_builder(building)
+		if (
+			_is_opening_phase()
+			and building is Farm
+			and not _has_completed_building(PLACEMENT_FARM)
+		):
+			_assign_opening_farm_builder(building)
+			_log_opening_first_farm_builder_if_needed()
+		else:
+			_assign_nearest_builder(building)
 
 
 func _release_stale_build_workers() -> void:

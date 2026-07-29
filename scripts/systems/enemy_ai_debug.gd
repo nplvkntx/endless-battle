@@ -14,6 +14,8 @@ static var _last_research_action: String = ""
 static var _last_expand_action: String = ""
 static var _last_upgrade_action: String = ""
 static var _last_hero_mission: String = ""
+static var _last_opening_action: String = ""
+static var _opening_complete_logged: bool = false
 
 
 static func set_enabled(value: bool) -> void:
@@ -75,6 +77,10 @@ static func log_once(key: String, message: String) -> void:
 			if message == _last_hero_mission:
 				return
 			_last_hero_mission = message
+		"opening":
+			if message == _last_opening_action:
+				return
+			_last_opening_action = message
 		_:
 			pass
 
@@ -138,6 +144,36 @@ static func log_expanding() -> void:
 
 static func log_town_hall_upgrade(tier: int) -> void:
 	log_once("upgrade", "Upgrading Town Hall to T%d" % tier)
+
+
+static func log_opening(message: String) -> void:
+	if message.is_empty():
+		return
+	log_once("opening", "Opening: %s" % message)
+
+
+static func log_opening_training(current_workers: int, target_workers: int) -> void:
+	log_opening("Training worker %d/%d" % [current_workers, target_workers])
+
+
+static func log_opening_complete(
+	workers: int,
+	farm_ready: bool,
+	altar_ready: bool,
+	barracks_ready: bool
+) -> void:
+	if _opening_complete_logged:
+		return
+	_opening_complete_logged = true
+	log_event(
+		"Opening complete | Workers: %d, Farm: %s, Altar: %s, Barracks: %s"
+		% [
+			workers,
+			"ready" if farm_ready else "pending",
+			"ready" if altar_ready else "pending",
+			"ready" if barracks_ready else "pending",
+		]
+	)
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:
