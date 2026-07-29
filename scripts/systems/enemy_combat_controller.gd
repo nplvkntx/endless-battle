@@ -175,10 +175,25 @@ func _update_early_army_phase(tree: SceneTree) -> bool:
 	if rally_position == Vector3.ZERO:
 		return true
 
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero == null:
+		EnemyAIDebug.log_early_army("Waiting for Hero")
+		return true
+
 	var army: Array = EnemyArmyCommand.collect_living_combat_units(tree)
 	army = NodeSafety.clean_node_array(army)
 	if army.is_empty():
+		EnemyAIDebug.log_early_army("Waiting for Hero")
 		return true
+
+	var non_hero_count: int = 0
+	for unit: Variant in army:
+		if EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
+			non_hero_count += 1
+
+	var min_pikemen: int = EnemyStrategicDirector.EARLY_ARMY_MIN_PIKEMEN
+	if non_hero_count < min_pikemen:
+		EnemyAIDebug.log_early_army_pikemen(non_hero_count, min_pikemen)
 
 	var nearby: Array = EnemyArmyCommand.filter_units_near_rally(
 		army,
@@ -186,7 +201,7 @@ func _update_early_army_phase(tree: SceneTree) -> bool:
 		EnemyArmyCommand.ASSEMBLY_RADIUS * 2.0
 	)
 	if nearby.size() < army.size():
-		EnemyAIDebug.log_early_army("Rallying army")
+		EnemyAIDebug.log_early_army("Regrouping")
 
 	EnemyUnitMission.set_main_army_mission(
 		EnemyUnitMission.Mission.RALLY,
@@ -322,28 +337,43 @@ func request_assembled_group_move(
 	if mission == EnemyUnitMission.Mission.DEFEND and EnemyArmyCommand.is_defense_blocking_offense():
 		skip_min_army_gate = true
 
-	if mission == EnemyUnitMission.Mission.ATTACK and not EnemyArmyCommand.allows_attack_wave_orders():
-		return false
+	if mission == EnemyUnitMission.Mission.ATTACK:
+		if not EnemyArmyCommand.allows_attack_wave_orders():
+			return false
+		if EnemyArmyCommand.blocks_player_offense(get_tree()):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % EnemyArmyCommand.get_player_offense_block_reason(get_tree())
+			)
+			return false
 
 	if mission == EnemyUnitMission.Mission.CREEP and not EnemyArmyCommand.allows_creep_orders():
 		EnemyArmyCommand.debug_combat_log("AI CREEP: ignoring player creep activity, no favorable interception")
 		return false
 
 	var tree: SceneTree = get_tree()
-	var elapsed: float = get_match_elapsed_seconds()
 	var min_army: int = _get_phase_min_army_size()
 	if (
 		not skip_min_army_gate
 		and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
 	):
 		var non_hero_count: int = 0
+		var has_hero: bool = false
 		for unit: Variant in units:
-			if EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
+			if unit is Hero:
+				has_hero = true
+			elif EnemyArmyCommand.is_non_hero_combat_unit(unit as Node):
 				non_hero_count += 1
 		if non_hero_count < min_army:
 			EnemyArmyCommand.debug_combat_log(
 				"assembly blocked: %d/%d units" % [non_hero_count, min_army]
 			)
+			return false
+		if mission == EnemyUnitMission.Mission.ATTACK and not has_hero:
+			EnemyArmyCommand.debug_combat_log("assembly blocked: attack requires hero")
+			return false
+		if mission == EnemyUnitMission.Mission.CREEP and not has_hero:
+			EnemyArmyCommand.debug_combat_log("assembly blocked: creep requires hero")
 			return false
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
@@ -406,11 +436,8 @@ func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if not can_launch_offensive_action():
 		return
 
-	# Dedicated CREEPING phase focuses on neutral camps, not player contests.
-	if (
-		_director != null
-		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.CREEPING
-	):
+	# EARLY_ARMY / CREEPING / OPENING own the army — no player contests or harassment.
+	if EnemyArmyCommand.blocks_player_offense(tree):
 		return
 
 	if _director != null and not _director.should_prioritize_creep():

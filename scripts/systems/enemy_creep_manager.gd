@@ -38,6 +38,9 @@ var _cleared_camp_ids: Dictionary = {}
 var _last_logged_hero_level: int = 0
 var _phase_entered_logged: bool = false
 var _was_in_creeping_phase: bool = false
+var _needs_post_camp_regroup: bool = false
+var _army_moving_logged: bool = false
+var _selected_camp_index: int = 0
 
 
 func _ready() -> void:
@@ -97,7 +100,8 @@ func is_creeping_objective_complete() -> bool:
 	if hero == null or hero.level < EnemyStrategicDirector.CREEP_HERO_LEVEL_REQUIREMENT:
 		return false
 
-	if get_cleared_early_camp_count() < REQUIRED_EARLY_CAMPS:
+	var camps_target: int = _get_required_early_camps()
+	if get_cleared_early_camp_count() < camps_target:
 		var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 		if has_safe_creep_camp_available():
 			return false
@@ -109,6 +113,21 @@ func is_creeping_objective_complete() -> bool:
 			return false
 
 	return is_army_healthy_after_creeping()
+
+
+func _get_required_early_camps() -> int:
+	if _director != null:
+		return _director.get_creep_camps_target()
+	return REQUIRED_EARLY_CAMPS
+
+
+func _can_start_group_mission(units: Array = []) -> bool:
+	var validation: Dictionary = EnemyArmyCommand.can_start_group_mission(
+		get_tree(),
+		units,
+		_get_phase_min_army_size()
+	)
+	return bool(validation.get("ok", false))
 
 
 func is_army_healthy_after_creeping() -> bool:
@@ -149,6 +168,7 @@ func _track_hero_level() -> void:
 		return
 
 	if hero.level > _last_logged_hero_level and hero.level >= 2:
+		EnemyAIDebug.log_creeping("Creeping: Hero level %d" % hero.level)
 		EnemyAIDebug.log_creeping_hero_level(hero.level)
 	_last_logged_hero_level = maxi(_last_logged_hero_level, hero.level)
 
@@ -215,7 +235,7 @@ func _update_creeping() -> void:
 
 	if army_mode == EnemyArmyCommand.ArmyMode.CREEPING:
 		creep_army = _collect_field_creep_army(tree, min_army)
-		if creep_army.is_empty():
+		if creep_army.is_empty() or not _can_start_group_mission(creep_army):
 			_hold_army_until_rallied(tree, rally_position)
 			return
 	else:
@@ -230,14 +250,12 @@ func _update_creeping() -> void:
 			return
 
 		creep_army = NodeSafety.clean_node_array(creep_plan.get("units", []))
-		if creep_army.is_empty():
+		if creep_army.is_empty() or not _can_start_group_mission(creep_army):
+			_hold_army_until_rallied(tree, rally_position)
 			return
 
 		if not creep_plan.get("hero_included", false):
-			EnemyAIDebug.log_creeping("Army regrouping")
-			EnemyArmyCommand.with_authorized_orders(func() -> void:
-				EnemyArmyCommand.command_hold_at_rally(creep_army, rally_position)
-			)
+			_hold_army_until_rallied(tree, rally_position)
 			return
 
 	creep_army = NodeSafety.clean_node_array(creep_army)
@@ -250,20 +268,31 @@ func _update_creeping() -> void:
 	if _regroup_hold_timer > 0.0:
 		return
 
-	if _needs_army_regroup(creep_army):
+	if _needs_post_camp_regroup or _needs_army_regroup(creep_army):
 		_regroup_creep_army(creep_army)
-		return
+		if _can_start_group_mission(creep_army) and not _needs_army_regroup(creep_army):
+			_needs_post_camp_regroup = false
+		else:
+			return
 
 	_sanitize_active_camp(tree)
 	if _active_camp != null and _is_camp_cleared(tree, _active_camp):
 		_on_camp_cleared(_active_camp)
 		_clear_active_camp()
+		_needs_post_camp_regroup = true
+		_regroup_creep_army(creep_army)
+		return
 
 	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(creep_army)
 	if army_center == Vector3.ZERO:
 		return
 
 	if not _army_available_for_creeping(tree, army_center, rally_position):
+		return
+
+	# Final group validation before selecting or engaging a camp.
+	if not _can_start_group_mission(creep_army):
+		_hold_army_until_rallied(tree, rally_position)
 		return
 
 	var army_power: int = int(EnemyArmyCommand.estimate_combat_strength(creep_army))
@@ -291,6 +320,7 @@ func _update_creeping() -> void:
 		_on_camp_cleared(camp)
 		_clear_active_camp()
 		_reset_creep_setbacks()
+		_needs_post_camp_regroup = true
 		return
 
 	if _is_army_engaging_camp(tree, creep_army, camp):
@@ -305,6 +335,10 @@ func _update_creeping() -> void:
 
 	if _combat_controller == null:
 		return
+
+	if not _army_moving_logged:
+		_army_moving_logged = true
+		EnemyAIDebug.log_creeping("Creeping: Army grouped, moving out")
 
 	# First departure from base waits for a full rally; later camps keep the group moving.
 	if army_mode == EnemyArmyCommand.ArmyMode.CREEPING:
@@ -367,7 +401,8 @@ func _collect_field_creep_army(tree: SceneTree, min_army: int) -> Array:
 
 
 func _hold_army_until_rallied(tree: SceneTree, rally_position: Vector3, _elapsed: float = 0.0) -> void:
-	EnemyAIDebug.log_creeping("Army regrouping")
+	EnemyAIDebug.log_creeping("Creeping: Army regrouping")
+	_army_moving_logged = false
 	if not EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING):
 		if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.REGROUPING:
 			return
@@ -401,7 +436,8 @@ func _regroup_creep_army(army: Array) -> void:
 	if center == Vector3.ZERO:
 		return
 
-	EnemyAIDebug.log_creeping("Army regrouping")
+	EnemyAIDebug.log_creeping("Creeping: Army regrouping")
+	_army_moving_logged = false
 	_regroup_hold_timer = REGROUP_HOLD_SECONDS
 	EnemyArmyCommand.with_authorized_orders(func() -> void:
 		EnemyArmyCommand.command_hold_at_rally(
@@ -415,7 +451,8 @@ func _regroup_creep_army(army: Array) -> void:
 func _should_retreat_from_creeping(tree: SceneTree, creep_army: Array) -> bool:
 	if EnemyArmyCommand.is_enemy_army_under_attack(tree, creep_army, ARMY_UNDER_ATTACK_RANGE):
 		_record_creep_setback()
-		_retreat_creep_army(tree, "under attack")
+		EnemyAIDebug.log_once("retreat", "Retreat: Army weaker than enemy")
+		_retreat_creep_army(tree, "under attack", false)
 		return true
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
@@ -423,13 +460,16 @@ func _should_retreat_from_creeping(tree: SceneTree, creep_army: Array) -> bool:
 		var hero_hp_ratio: float = EnemyArmyCommand.get_health_ratio(hero)
 		if hero_hp_ratio < HERO_RETREAT_HP_RATIO:
 			_record_creep_setback()
-			EnemyAIDebug.log_creeping_retreat_hero_hp(hero_hp_ratio)
+			EnemyAIDebug.log_once(
+				"retreat",
+				"Retreat: Hero HP %d%%" % int(round(hero_hp_ratio * 100.0))
+			)
 			_retreat_creep_army(tree, "hero low hp", false)
 			return true
 
 	if _should_abort_creep_push(tree, creep_army):
 		_record_creep_setback()
-		EnemyAIDebug.log_creeping("Retreating from creep camp (army too weak)")
+		EnemyAIDebug.log_once("retreat", "Retreat: Army weaker than enemy")
 		_retreat_creep_army(tree, "army too weak", false)
 		return true
 
@@ -437,7 +477,7 @@ func _should_retreat_from_creeping(tree: SceneTree, creep_army: Array) -> bool:
 		var current_power: float = float(EnemyArmyCommand.estimate_combat_strength(creep_army))
 		if current_power <= _creep_push_start_power * ARMY_SAFE_STRENGTH_RATIO:
 			_record_creep_setback()
-			EnemyAIDebug.log_creeping("Retreating from creep camp (army strength low)")
+			EnemyAIDebug.log_once("retreat", "Retreat: Army weaker than enemy")
 			_retreat_creep_army(tree, "army strength low", false)
 			return true
 
@@ -457,7 +497,10 @@ func _select_camp(camp: Node3D, from_position: Vector3) -> void:
 	_active_camp_id = camp_id
 	_focus_creep = null
 	_creep_push_start_power = 0.0
+	_selected_camp_index = get_cleared_early_camp_count() + 1
+	_army_moving_logged = false
 
+	EnemyAIDebug.log_creeping("Creeping: Selected camp %d" % _selected_camp_index)
 	var distance: float = EnemyArmyCommand.horizontal_distance(camp.global_position, from_position)
 	EnemyAIDebug.log_creeping_camp_selected(_format_camp_name(camp), distance)
 
@@ -465,9 +508,13 @@ func _select_camp(camp: Node3D, from_position: Vector3) -> void:
 func _on_camp_cleared(camp: Node3D) -> void:
 	if camp != null and is_instance_valid(camp):
 		_cleared_camp_ids[camp.get_instance_id()] = true
-	EnemyAIDebug.log_creeping("Camp cleared")
+	var cleared: int = get_cleared_early_camp_count()
+	var target: int = _get_required_early_camps()
+	EnemyAIDebug.log_creeping("Creeping: Camp cleared %d/%d" % [cleared, target])
 	_reset_creep_setbacks()
 	_creep_push_start_power = 0.0
+	_army_moving_logged = false
+	_needs_post_camp_regroup = true
 
 
 func _clear_active_camp() -> void:
@@ -588,6 +635,8 @@ func _has_uncleared_enemy_side_camps(tree: SceneTree, rally_position: Vector3) -
 func _retreat_creep_army(tree: SceneTree, reason: String, log_generic: bool = true) -> void:
 	_clear_active_camp()
 	_creep_push_start_power = 0.0
+	_army_moving_logged = false
+	_needs_post_camp_regroup = true
 	if log_generic and not reason.is_empty():
 		EnemyAIDebug.log_creeping("Retreating from creep camp (%s)" % reason)
 
@@ -596,12 +645,10 @@ func _retreat_creep_army(tree: SceneTree, reason: String, log_generic: bool = tr
 		_combat_controller.issue_group_retreat(reason)
 		return
 
-	var creep_plan: Dictionary = EnemyArmyCommand.build_creep_army(tree, _get_match_elapsed_seconds())
-	var creep_army: Array = NodeSafety.clean_node_array(creep_plan.get("units", []))
+	# Never leave the hero behind — retreat every living combat unit together.
+	var creep_army: Array = EnemyArmyCommand.collect_living_combat_units(tree)
+	creep_army = NodeSafety.clean_node_array(creep_army)
 	if creep_army.is_empty():
-		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
-		if hero != null and NodeSafety.is_alive_node(hero):
-			EnemyArmyCommand.command_retreat_hero(hero, rally_position)
 		return
 
 	EnemyArmyCommand.cancel_offensive_orders(tree)

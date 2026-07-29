@@ -29,6 +29,9 @@ static var _last_tier_2_missing: String = ""
 static var _last_tier_2_save: String = ""
 static var _last_tier_2_upgrade: String = ""
 static var _tier_2_complete_logged: bool = false
+static var _last_strategic_state: String = ""
+static var _last_retreat: String = ""
+static var _last_player_attack_blocked: String = ""
 
 
 static func set_enabled(value: bool) -> void:
@@ -130,6 +133,18 @@ static func log_once(key: String, message: String) -> void:
 			if message == _last_tier_2_upgrade:
 				return
 			_last_tier_2_upgrade = message
+		"strategic_state":
+			if message == _last_strategic_state:
+				return
+			_last_strategic_state = message
+		"retreat":
+			if message == _last_retreat:
+				return
+			_last_retreat = message
+		"player_attack_blocked":
+			if message == _last_player_attack_blocked:
+				return
+			_last_player_attack_blocked = message
 		_:
 			pass
 
@@ -228,8 +243,8 @@ static func log_opening_complete(
 static func log_early_army(message: String) -> void:
 	if message.is_empty():
 		return
-	if message == "Rallying army":
-		log_once("early_army_rally", "Early Army: %s" % message)
+	if message == "Rallying army" or message == "Regrouping":
+		log_once("early_army_rally", "Early Army: Regrouping")
 		return
 	log_once("early_army", "Early Army: %s" % message)
 
@@ -241,12 +256,11 @@ static func log_early_army_pikemen(current: int, target: int) -> void:
 	)
 
 
-static func log_early_army_complete(pikemen: int) -> void:
+static func log_early_army_complete(_pikemen: int) -> void:
 	if _early_army_complete_logged:
 		return
 	_early_army_complete_logged = true
-	log_event("Early Army complete | Hero ready, Pikemen: %d" % pikemen)
-
+	log_event("Early Army complete -> CREEPING")
 
 static func log_creeping_phase() -> void:
 	log_once("phase", "Phase: CREEPING")
@@ -269,11 +283,11 @@ static func log_creeping_hero_level(level: int) -> void:
 	if level <= _last_creeping_hero_level:
 		return
 	_last_creeping_hero_level = level
-	log_event("Hero reached Level %d" % level)
+	# Prefer the explicit "Creeping: Hero level N" message from the creep manager.
 
 
 static func log_creeping_retreat_hero_hp(hp_ratio: float) -> void:
-	log_creeping("Retreating from creep camp (Hero HP %d%%)" % int(round(hp_ratio * 100.0)))
+	log_once("retreat", "Retreat: Hero HP %d%%" % int(round(hp_ratio * 100.0)))
 
 
 static func log_creeping_complete() -> void:

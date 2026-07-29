@@ -22,16 +22,16 @@ const FORMATION_SPACING := 2.0
 const RANGED_ROW_DEPTH_MULTIPLIER := 1.5
 const HERO_ROW_DEPTH_MULTIPLIER := 1.25
 
-const MIN_NON_HERO_FOR_HERO_JOIN := 4
+const MIN_NON_HERO_FOR_HERO_JOIN := 5
 const MIN_ARMY_UNITS_TO_CONTINUE_ATTACK := 6
 const MIN_TOTAL_COMBAT_UNITS_FOR_ATTACK := 12
 const MIN_MELEE_UNITS_FOR_ATTACK := 3
 const MIN_RANGED_UNITS_FOR_ATTACK := 2
-const ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS := 4
+const ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS := 5
 const ATTACK_STANDARD_MIN_NON_HERO_UNITS := 6
 const ATTACK_TIMER_MIN_NON_HERO_UNITS := 12
 const ATTACK_DESPERATE_MIN_NON_HERO_UNITS := 6
-const ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS := 4
+const ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS := 5
 const ATTACK_TIMER_STANDARD_SECONDS := 240.0
 const ATTACK_TIMER_DESPERATE_SECONDS := 360.0
 const DEBUG_ATTACK_GATE := false
@@ -56,9 +56,11 @@ const PLAYER_CREEP_DETECT_RADIUS := 28.0
 const CREEP_HERO_WAIT_RADIUS := 18.0
 const PHASE_EARLY_SECONDS := 300.0
 const PHASE_MID_SECONDS := 600.0
-const PHASE_EARLY_MIN_ARMY := 6
+const PHASE_EARLY_MIN_ARMY := 5
 const PHASE_MID_MIN_ARMY := 12
 const PHASE_LATE_MIN_ARMY := 20
+const GROUP_MISSION_COHESION_RATIO := 0.75
+const GROUP_MISSION_HERO_MAX_DISTANCE := 16.0
 const STRENGTH_SPEARMAN := 1.0
 const STRENGTH_SWORDSMAN := 1.2
 const STRENGTH_ARCHER := 1.2
@@ -340,6 +342,120 @@ static func allows_offensive_orders() -> bool:
 	]
 
 
+static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
+	if tree == null:
+		return null
+
+	var root: Node = tree.root
+	if root == null:
+		return null
+
+	return root.find_child("EnemyStrategicDirector", true, false) as EnemyStrategicDirector
+
+
+## Hard strategic-phase gate for player attacks. DEFEND is never blocked by this.
+static func blocks_player_offense(tree: SceneTree) -> bool:
+	var director: EnemyStrategicDirector = find_strategic_director(tree)
+	if director == null:
+		return false
+	return director.blocks_player_offense()
+
+
+static func get_player_offense_block_reason(tree: SceneTree) -> String:
+	var director: EnemyStrategicDirector = find_strategic_director(tree)
+	if director == null or not director.blocks_player_offense():
+		return ""
+
+	match director.get_strategic_phase():
+		EnemyStrategicDirector.StrategicPhase.CREEPING:
+			return "creeping phase owns army"
+		EnemyStrategicDirector.StrategicPhase.EARLY_ARMY:
+			return "early army phase owns army"
+		_:
+			return "opening phase owns army"
+
+
+## Validates hero + army cohesion before creep / coordinated missions.
+static func can_start_group_mission(
+	tree: SceneTree,
+	units: Array = [],
+	min_non_hero: int = ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS
+) -> Dictionary:
+	if tree == null:
+		return {"ok": false, "reason": &"no_tree"}
+
+	if get_army_mode() == ArmyMode.RETREATING or is_retreat_on_cooldown():
+		return {"ok": false, "reason": &"retreat_active"}
+
+	if get_army_mode() in [ArmyMode.DEFENDING, ArmyMode.INTERCEPTING]:
+		return {"ok": false, "reason": &"defense_owns_army"}
+
+	if get_army_mode() == ArmyMode.ATTACKING and is_attack_wave_active():
+		return {"ok": false, "reason": &"attack_owns_army"}
+
+	var army: Array = NodeSafety.clean_node_array(
+		units if not units.is_empty() else collect_living_combat_units(tree)
+	)
+	if army.is_empty():
+		return {"ok": false, "reason": &"no_army"}
+
+	var hero: Hero = null
+	var non_hero: Array = []
+	for unit: Variant in army:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		if unit is Hero:
+			hero = unit as Hero
+		elif is_non_hero_combat_unit(unit as Node):
+			non_hero.append(unit)
+
+	if hero == null or not is_living_combat_unit(hero):
+		return {"ok": false, "reason": &"no_hero"}
+
+	if get_health_ratio(hero) <= 0.0:
+		return {"ok": false, "reason": &"hero_dead"}
+
+	if non_hero.size() < min_non_hero:
+		return {
+			"ok": false,
+			"reason": &"army_too_small",
+			"non_hero_count": non_hero.size(),
+			"required": min_non_hero,
+		}
+
+	var army_center: Vector3 = compute_army_center(army)
+	if army_center == Vector3.ZERO:
+		return {"ok": false, "reason": &"no_army_center"}
+
+	if (
+		horizontal_distance(hero.global_position, army_center)
+		> GROUP_MISSION_HERO_MAX_DISTANCE
+	):
+		return {"ok": false, "reason": &"hero_separated"}
+
+	var near_count: int = filter_units_near_rally(
+		non_hero,
+		army_center,
+		ASSEMBLY_RADIUS * 2.0
+	).size()
+	if float(near_count) / float(non_hero.size()) < GROUP_MISSION_COHESION_RATIO:
+		return {
+			"ok": false,
+			"reason": &"army_scattered",
+			"near_count": near_count,
+			"non_hero_count": non_hero.size(),
+		}
+
+	return {
+		"ok": true,
+		"reason": &"ready",
+		"units": army,
+		"hero": hero,
+		"non_hero_count": non_hero.size(),
+		"army_center": army_center,
+	}
+
+
 static func allows_creep_orders() -> bool:
 	if not allows_offensive_orders():
 		return false
@@ -378,27 +494,39 @@ static func _log_strategic_state_change(
 	var message: String = ""
 	match to_state:
 		StrategicState.PREPARING_ATTACK:
-			message = "AI STRATEGY: preparing coordinated attack"
+			message = "Preparing coordinated attack"
 		StrategicState.ATTACKING:
-			message = "AI STRATEGY: launching attack"
+			message = "Launching attack"
 		StrategicState.EMERGENCY_DEFENDING:
-			message = "AI DEFENSE: emergency override activated"
+			message = "Emergency defense override"
 		StrategicState.DEFENDING:
-			message = "AI DEFENSE: defending base"
+			message = "Defending base"
 		StrategicState.RETREATING:
-			if reason.contains("pursuit"):
-				message = "AI ATTACK: player retreating, continuing limited pursuit"
+			if reason.contains("Hero HP") or reason.contains("hero"):
+				message = reason if reason.begins_with("Retreat:") else "Retreat: %s" % reason
+			elif reason.contains("weaker") or reason.contains("strength") or reason.contains("unfavorable"):
+				message = "Retreat: Army weaker than enemy"
 			else:
-				message = "AI ATTACK: retreating due to unfavorable strength"
+				message = "Retreat: %s" % (reason if not reason.is_empty() else "unfavorable fight")
 		StrategicState.CREEPING:
-			message = "AI CREEP: clearing neutral camps"
+			message = "Creeping: clearing camps"
 		StrategicState.RECOVERING:
-			message = "AI DEFENSE: threat cleared, regrouping"
+			if from_state == StrategicState.RETREATING:
+				message = "Retreat complete: rebuilding army"
+			else:
+				message = "Threat cleared, regrouping"
 		_:
 			pass
 
 	if not message.is_empty():
-		print(message if reason.is_empty() else "%s (%s)" % [message, reason])
+		var log_message: String = message
+		if (
+			not reason.is_empty()
+			and to_state != StrategicState.RETREATING
+			and to_state != StrategicState.RECOVERING
+		):
+			log_message = "%s (%s)" % [message, reason]
+		EnemyAIDebug.log_once("strategic_state", log_message)
 
 
 static func _strategic_state_label(state: StrategicState) -> String:
@@ -750,12 +878,15 @@ static func should_retreat_from_fight(tree: SceneTree) -> bool:
 			return false
 
 	if player_strength > 0.0 and ratio <= RETREAT_STRENGTH_RATIO:
+		EnemyAIDebug.log_once("retreat", "Retreat: Army weaker than enemy")
 		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 		_debug_combat("retreating: ratio %.2f" % ratio)
 		return true
 
 	var hero: Hero = find_living_enemy_hero(tree)
 	if hero != null and get_health_ratio(hero) < HERO_RETREAT_HP_RATIO:
+		var hp_pct: int = int(round(get_health_ratio(hero) * 100.0))
+		EnemyAIDebug.log_once("retreat", "Retreat: Hero HP %d%%" % hp_pct)
 		EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 		_debug_combat("retreating: hero low health")
 		return true
@@ -763,6 +894,7 @@ static func should_retreat_from_fight(tree: SceneTree) -> bool:
 	if _fight_start_strength > 0.0:
 		var current_strength: float = estimate_combat_strength(balance.get("ai_units", []))
 		if current_strength <= _fight_start_strength * (1.0 - EMERGENCY_RETREAT_ARMY_LOSS_RATIO):
+			EnemyAIDebug.log_once("retreat", "Retreat: Army weaker than enemy")
 			EnemyAIDebug.log_army_strength_decision(ai_strength, player_strength, "Retreat")
 			_debug_combat("retreating: army lost %.0f%%" % (EMERGENCY_RETREAT_ARMY_LOSS_RATIO * 100.0))
 			return true
@@ -1079,9 +1211,23 @@ static func issue_group_combat_move(
 		_debug_combat("order blocked: strategic state forbids creep")
 		return false
 
-	if mission == EnemyUnitMission.Mission.ATTACK and not allows_offensive_orders():
-		_debug_combat("order blocked: strategic state forbids attack")
-		return false
+	if mission == EnemyUnitMission.Mission.ATTACK:
+		if not allows_offensive_orders():
+			_debug_combat("order blocked: strategic state forbids attack")
+			return false
+		if blocks_player_offense(tree):
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+			)
+			return false
+		# Never let a thin wave steal the army from CREEPING during early phases.
+		if get_army_mode() == ArmyMode.CREEPING and not allow_attack_override_creep:
+			EnemyAIDebug.log_once(
+				"player_attack_blocked",
+				"Player attack blocked: creeping phase owns army"
+			)
+			return false
 
 	if not try_claim_army_mode(mode, allow_attack_override_creep):
 		return false
@@ -1102,7 +1248,6 @@ static func issue_group_combat_move(
 	with_authorized_orders(func() -> void:
 		command_attack_move(units, destination, mission)
 	)
-
 	return true
 
 
@@ -1246,6 +1391,13 @@ static func try_begin_attack_wave_preparation(
 		return false
 
 	if is_retreat_on_cooldown():
+		return false
+
+	if blocks_player_offense(tree):
+		EnemyAIDebug.log_once(
+			"player_attack_blocked",
+			"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+		)
 		return false
 
 	wave_units = _sanitize_attack_wave_units(wave_units)
@@ -2356,6 +2508,11 @@ static func try_claim_army_mode(
 			return requested_mode == ArmyMode.ASSEMBLING
 		ArmyMode.CREEPING:
 			if requested_mode == ArmyMode.ATTACKING and allow_attack_override_creep:
+				# Strategic early phases own the army — attack waves must not steal it.
+				# tree is not passed here; check via Engine.get_main_loop().
+				var tree: SceneTree = Engine.get_main_loop() as SceneTree
+				if tree != null and blocks_player_offense(tree):
+					return false
 				_set_army_mode(requested_mode, previous_mode)
 				return true
 			if requested_mode in [
@@ -2642,12 +2799,20 @@ static func evaluate_attack_gate(
 	var effective_min_non_hero: int = get_effective_attack_min_non_hero_units(
 		match_elapsed_seconds
 	)
-	var required_non_hero: int = mini(min_non_hero_units, effective_min_non_hero)
+	var required_non_hero: int = maxi(min_non_hero_units, effective_min_non_hero)
+	required_non_hero = maxi(required_non_hero, ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS)
 
 	if rally_position == Vector3.ZERO:
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"no_rally"},
 			{},
+			match_elapsed_seconds
+		)
+
+	if blocks_player_offense(tree) and not _finishing_mode_active:
+		return _finalize_attack_gate(
+			{"can_commit": false, "reason": &"early_phase"},
+			{"elapsed_seconds": match_elapsed_seconds},
 			match_elapsed_seconds
 		)
 
@@ -2707,6 +2872,25 @@ static func evaluate_attack_gate(
 	if non_hero_count < ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS:
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"suicide_attack"},
+			debug_context,
+			match_elapsed_seconds
+		)
+
+	if not hero_alive:
+		return _finalize_attack_gate(
+			{"can_commit": false, "reason": &"no_hero"},
+			debug_context,
+			match_elapsed_seconds
+		)
+
+	var hero_in_wave: bool = false
+	for unit: Variant in evaluated_units:
+		if unit is Hero:
+			hero_in_wave = true
+			break
+	if is_wave_commit and not hero_in_wave:
+		return _finalize_attack_gate(
+			{"can_commit": false, "reason": &"hero_not_in_wave"},
 			debug_context,
 			match_elapsed_seconds
 		)
@@ -4318,6 +4502,14 @@ static func command_retreat_hero(hero, rally_position: Vector3) -> void:
 
 	if not is_living_combat_unit(hero):
 		return
+
+	# Prefer full-group retreat whenever any non-hero combatants still exist.
+	var tree: SceneTree = hero.get_tree() if hero is Node else null
+	if tree != null:
+		var non_hero: Array = collect_living_non_hero_combat_units(tree)
+		if not non_hero.is_empty():
+			initiate_group_retreat(tree, "Retreat: keep hero with army")
+			return
 
 	_cancel_unit_offensive_orders(hero)
 	EnemyUnitMission.try_set_mission(hero, EnemyUnitMission.Mission.RETREAT)

@@ -30,6 +30,8 @@ const EARLY_ARMY_SOFT_PIKEMEN: int = 8
 const EARLY_ARMY_TARGET_PIKEMEN: int = 10
 const EARLY_ARMY_RALLY_RATIO: float = 0.75
 const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
+const CREEP_REQUIRED_EARLY_CAMPS_MIN: int = 1
+const CREEP_REQUIRED_EARLY_CAMPS_MAX: int = 3
 const CREEP_REQUIRED_EARLY_CAMPS: int = 2
 const EXPANSION_SATURATION_WORKERS: int = 16
 const EXPANSION_MINE_MIN_WORKERS: int = 5
@@ -38,7 +40,7 @@ const OPENING_WORKER_TARGET: int = 12
 const BASE_HEAVY_DAMAGE_RATIO: float = 0.35
 const RECOVERY_MIN_WORKERS: int = 4
 const PHASE_MIN_ARMY_OPENING: int = 5
-const PHASE_MIN_ARMY_CREEP: int = 6
+const PHASE_MIN_ARMY_CREEP: int = 5
 const PHASE_MIN_ARMY_MID: int = 12
 const PHASE_MIN_ARMY_LATE: int = 20
 const ENEMY_TEAM_ID: int = 1
@@ -66,6 +68,8 @@ var _phase_changed_this_evaluation: bool = false
 var _phase_eval_frame: int = -1
 var _phase_interrupt_active: bool = false
 var _phase_interrupt_reason: String = ""
+## Camps to clear before leaving CREEPING (rolled once on phase entry, 1–3).
+var _creep_camps_target: int = CREEP_REQUIRED_EARLY_CAMPS
 
 var desires: Dictionary = {
 	"economy": 0.8,
@@ -151,6 +155,20 @@ func get_phase_interrupt_reason() -> String:
 	return _phase_interrupt_reason
 
 
+## True while EARLY_ARMY / CREEPING (and OPENING) own the army. Player attacks must not launch.
+## DEFEND / emergency defense intentionally bypass this — callers must allow Mission.DEFEND.
+func blocks_player_offense() -> bool:
+	return _strategic_phase in [
+		StrategicPhase.OPENING,
+		StrategicPhase.EARLY_ARMY,
+		StrategicPhase.CREEPING,
+	]
+
+
+func get_creep_camps_target() -> int:
+	return _creep_camps_target
+
+
 func get_min_army_size_for_current_phase() -> int:
 	return get_min_army_size_for_phase(_strategic_phase)
 
@@ -231,12 +249,10 @@ func should_prioritize_attack() -> bool:
 	if _phase_interrupt_active:
 		return false
 
-	if _strategic_phase in [
-		StrategicPhase.OPENING,
-		StrategicPhase.EARLY_ARMY,
-		StrategicPhase.CREEPING,
-		StrategicPhase.TIER_2,
-	]:
+	if blocks_player_offense():
+		return false
+
+	if _strategic_phase == StrategicPhase.TIER_2:
 		return false
 
 	if get_desire("defense") >= DESIRE_HIGH:
@@ -547,6 +563,12 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 	if int(new_phase) > int(_highest_phase_reached):
 		_highest_phase_reached = new_phase
 
+	if new_phase == StrategicPhase.CREEPING:
+		_creep_camps_target = randi_range(
+			CREEP_REQUIRED_EARLY_CAMPS_MIN,
+			CREEP_REQUIRED_EARLY_CAMPS_MAX
+		)
+
 	if previous == StrategicPhase.OPENING:
 		EnemyAIDebug.log_opening_complete(
 			int(snapshot.get("workers", 0)),
@@ -611,7 +633,7 @@ func _can_leave_creeping() -> bool:
 		return false
 
 	var cleared_camps: int = int(snapshot.get("cleared_early_camps", 0))
-	if cleared_camps >= CREEP_REQUIRED_EARLY_CAMPS:
+	if cleared_camps >= _creep_camps_target:
 		return true
 
 	# No more safe camps left to clear — advance once hero is leveled.
@@ -620,10 +642,11 @@ func _can_leave_creeping() -> bool:
 
 func _creeping_exit_reason() -> String:
 	return (
-		"Hero level %d, camps cleared: %d"
+		"Hero level %d, camps cleared: %d/%d"
 		% [
-			CREEP_HERO_LEVEL_REQUIREMENT,
+			int(snapshot.get("hero_level", 0)),
 			int(snapshot.get("cleared_early_camps", 0)),
+			_creep_camps_target,
 		]
 	)
 
@@ -1369,6 +1392,9 @@ func _get_match_elapsed_seconds() -> float:
 
 
 func _can_launch_offensive_attack() -> bool:
+	if blocks_player_offense():
+		return false
+
 	var tree: SceneTree = get_tree()
 	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if rally_position == Vector3.ZERO:
