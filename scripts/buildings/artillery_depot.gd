@@ -15,6 +15,8 @@ const CANNON_TRAIN_FOOD_COST: int = 2
 const CANNON_TRAIN_SECONDS: float = 14.0
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
+const MAX_ENEMY_UNIT_QUEUE: int = 2
+const ENEMY_TEAM_ID: int = 1
 
 @export var cannon_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.8)
 
@@ -300,6 +302,33 @@ func try_train_cannon() -> void:
 	_try_train_player_unit(TRAIN_ID_CANNON)
 
 
+func get_enemy_pending_unit_count() -> int:
+	return _training_queue.size()
+
+
+func try_train_enemy_cannon() -> bool:
+	return _try_train_enemy_unit(TRAIN_ID_CANNON)
+
+
+func _try_train_enemy_unit(train_id: StringName) -> bool:
+	if building_state != STATE_COMPLETED:
+		return false
+
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return false
+
+	if _training_queue.size() >= MAX_ENEMY_UNIT_QUEUE:
+		return false
+
+	var gold_cost: int = get_unit_train_gold_cost(train_id)
+	var food_cost: int = get_unit_train_food_cost(train_id)
+	if not EnemyResourceManager.try_pay_training(gold_cost, food_cost):
+		return false
+
+	_enqueue_training(train_id)
+	return true
+
+
 func _try_train_player_unit(train_id: StringName) -> void:
 	if building_state != STATE_COMPLETED:
 		return
@@ -410,20 +439,31 @@ func _try_repeat_training() -> void:
 
 
 func _can_pay_training_costs() -> bool:
-	return ResourceManager.can_afford_worker_training(
-		get_unit_train_gold_cost(_repeat_unit_type),
-		get_unit_train_food_cost(_repeat_unit_type)
-	)
+	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
+	var food_cost: int = get_unit_train_food_cost(_repeat_unit_type)
+	if _uses_player_resources():
+		return ResourceManager.can_afford_worker_training(gold_cost, food_cost)
+
+	return EnemyResourceManager.can_afford_training(gold_cost, food_cost)
 
 
 func _pay_training_costs() -> bool:
-	return ResourceManager.try_pay_worker_training(
-		get_unit_train_gold_cost(_repeat_unit_type),
-		get_unit_train_food_cost(_repeat_unit_type)
-	)
+	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
+	var food_cost: int = get_unit_train_food_cost(_repeat_unit_type)
+	if _uses_player_resources():
+		return ResourceManager.try_pay_worker_training(gold_cost, food_cost)
+
+	return EnemyResourceManager.try_pay_training(gold_cost, food_cost)
+
+
+func _uses_player_resources() -> bool:
+	return not _is_enemy_owned()
 
 
 func _ensure_player_resource_listener() -> void:
+	if not _uses_player_resources():
+		return
+
 	if not ResourceManager.resources_changed.is_connected(_on_player_resources_changed):
 		ResourceManager.resources_changed.connect(_on_player_resources_changed)
 
@@ -453,11 +493,29 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	spawn_parent.add_child(unit)
 	unit.global_position = global_position + spawn_offset
 
-	if _has_rally_point:
+	if is_in_group(&"enemy_command_center"):
+		_finalize_enemy_unit(unit)
+		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
+		EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
+	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
 		unit.set_movement_target(_claim_rally_move_target())
 	else:
 		_finalize_spawned_unit(unit)
+
+
+func _finalize_enemy_unit(unit: Unit) -> void:
+	unit.team_id = ENEMY_TEAM_ID
+
+	if not unit.is_in_group(&"enemies"):
+		unit.add_to_group(&"enemies")
+
+	EnemyArmyCommand.register_combat_unit(unit)
+
+	if unit.is_in_group(&"units"):
+		unit.remove_from_group(&"units")
+
+	unit.apply_team_visuals()
 
 
 func _finalize_spawned_unit(unit: Unit) -> void:
@@ -473,8 +531,14 @@ func _finalize_spawned_unit(unit: Unit) -> void:
 
 
 func _refund_training_cost(train_id: StringName) -> void:
-	ResourceManager.add_gold(get_unit_train_gold_cost(train_id))
-	ResourceManager.release_food_used(get_unit_train_food_cost(train_id))
+	var gold_cost: int = get_unit_train_gold_cost(train_id)
+	var food_cost: int = get_unit_train_food_cost(train_id)
+	if _uses_player_resources():
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.release_food_used(food_cost)
+	else:
+		EnemyResourceManager.add_gold(gold_cost)
+		EnemyResourceManager.release_food_used(food_cost)
 
 
 func _emit_queue_changed() -> void:

@@ -60,6 +60,8 @@ const PLACEMENT_SHOP: StringName = &"shop"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 const PLACEMENT_STABLE: StringName = &"stable"
+const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
+const PLACEMENT_ACADEMY: StringName = &"academy"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
@@ -68,6 +70,8 @@ const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
+const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
+const ACADEMY_SCENE: PackedScene = preload("res://scenes/buildings/academy.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
 
 const FARM_GOLD_COST: int = 80
@@ -85,12 +89,27 @@ const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const STABLE_GOLD_COST: int = 175
 const STABLE_WOOD_COST: int = 125
+const ARTILLERY_DEPOT_GOLD_COST: int = 225
+const ARTILLERY_DEPOT_WOOD_COST: int = 175
+const ACADEMY_GOLD_COST: int = 200
+const ACADEMY_WOOD_COST: int = 150
 const COMMAND_CENTER_GOLD_COST: int = 200
 const COMMAND_CENTER_WOOD_COST: int = 400
 const TIER_2_GOLD_COST: int = CommandCenter.TIER_2_GOLD_COST
 const TIER_2_WOOD_COST: int = CommandCenter.TIER_2_WOOD_COST
+const TIER_3_GOLD_COST: int = CommandCenter.TIER_3_GOLD_COST
+const TIER_3_WOOD_COST: int = CommandCenter.TIER_3_WOOD_COST
 const TIER_UPGRADE_STABLE_GOLD_BUFFER: int = 250
 const TIER_UPGRADE_STABLE_WOOD_BUFFER: int = 150
+const TIER_3_UPGRADE_STABLE_GOLD_BUFFER: int = 400
+const TIER_3_UPGRADE_STABLE_WOOD_BUFFER: int = 250
+const TIER_3_MIN_WORKERS: int = 14
+const TIER_3_MIN_FARMS: int = 3
+const TIER_3_MIN_FREE_POPULATION: int = 6
+const TIER_3_MIN_ARMY: int = 18
+const MAX_ENEMY_CANNONS: int = 3
+const MIN_PLAYER_ARMY_FOR_CANNONS: int = 12
+const CANNON_TRAIN_FOOD_COST: int = 2
 
 const CONSTRUCTION_DURATION: float = 4.0
 const FARM_MAX_HEALTH: int = 250
@@ -257,9 +276,20 @@ func _run_build_order() -> void:
 
 	_try_sustain_shop_purchases()
 
+	if _should_build_artillery_depot():
+		if _try_place_building(PLACEMENT_ARTILLERY_DEPOT):
+			return
+
+	if _should_build_academy():
+		if _try_place_building(PLACEMENT_ACADEMY):
+			return
+
+	_try_sustain_academy_research()
+
 	if not defer_military and _can_train_military_units():
 		_try_sustain_military_production()
 		_try_sustain_stable_production()
+		_try_sustain_artillery_production()
 
 	if _should_build_expansion_command_center():
 		_try_place_expansion_command_center()
@@ -396,9 +426,6 @@ func _should_build_blacksmith() -> bool:
 
 
 func _should_upgrade_command_center_tier() -> bool:
-	if TechTree.player_has_tier_2(ENEMY_TEAM_ID):
-		return false
-
 	if _is_any_enemy_command_center_upgrading():
 		return false
 
@@ -406,7 +433,17 @@ func _should_upgrade_command_center_tier() -> bool:
 	if command_center == null or not is_instance_valid(command_center):
 		return false
 
-	if command_center.command_center_tier >= 2:
+	if TechTree.player_has_tier_3(ENEMY_TEAM_ID) or command_center.command_center_tier >= 3:
+		return false
+
+	if TechTree.player_has_tier_2(ENEMY_TEAM_ID) or command_center.command_center_tier >= 2:
+		return _should_upgrade_command_center_to_tier_3(command_center)
+
+	return _should_upgrade_command_center_to_tier_2(command_center)
+
+
+func _should_upgrade_command_center_to_tier_2(command_center: CommandCenter) -> bool:
+	if not is_instance_valid(command_center):
 		return false
 
 	if not _has_completed_building(PLACEMENT_BARRACKS):
@@ -415,16 +452,59 @@ func _should_upgrade_command_center_tier() -> bool:
 	if _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY:
 		return false
 
-	if not _has_stable_enemy_economy_for_tier_upgrade():
+	if not _has_stable_enemy_economy_for_tier_2_upgrade():
 		return false
 
 	return command_center.can_try_enemy_upgrade_tier(2)
 
 
-func _has_stable_enemy_economy_for_tier_upgrade() -> bool:
+func _should_upgrade_command_center_to_tier_3(command_center: CommandCenter) -> bool:
+	if not is_instance_valid(command_center):
+		return false
+
+	if command_center.command_center_tier < 2:
+		return false
+
+	if not _has_required_tier_2_buildings_for_tier_3():
+		return false
+
+	if _count_enemy_workers() < TIER_3_MIN_WORKERS:
+		return false
+
+	if _count_completed_farms() < TIER_3_MIN_FARMS:
+		return false
+
+	if _get_projected_free_population() < TIER_3_MIN_FREE_POPULATION:
+		return false
+
+	if _count_living_military_units() < TIER_3_MIN_ARMY:
+		return false
+
+	if not _has_stable_enemy_economy_for_tier_3_upgrade():
+		return false
+
+	return command_center.can_try_enemy_upgrade_tier(3)
+
+
+func _has_required_tier_2_buildings_for_tier_3() -> bool:
+	# Blacksmith is the Tier 2 gate required by TechTree for Tier 3 buildings.
+	return (
+		_has_completed_building(PLACEMENT_BLACKSMITH)
+		or _is_building_type_in_progress(PLACEMENT_BLACKSMITH)
+	)
+
+
+func _has_stable_enemy_economy_for_tier_2_upgrade() -> bool:
 	return (
 		EnemyResourceManager.gold >= TIER_2_GOLD_COST + TIER_UPGRADE_STABLE_GOLD_BUFFER
 		and EnemyResourceManager.wood >= TIER_2_WOOD_COST + TIER_UPGRADE_STABLE_WOOD_BUFFER
+	)
+
+
+func _has_stable_enemy_economy_for_tier_3_upgrade() -> bool:
+	return (
+		EnemyResourceManager.gold >= TIER_3_GOLD_COST + TIER_3_UPGRADE_STABLE_GOLD_BUFFER
+		and EnemyResourceManager.wood >= TIER_3_WOOD_COST + TIER_3_UPGRADE_STABLE_WOOD_BUFFER
 	)
 
 
@@ -436,7 +516,52 @@ func _try_upgrade_command_center_tier() -> void:
 	if command_center == null or not is_instance_valid(command_center):
 		return
 
-	command_center.try_upgrade_enemy_tier(2)
+	if _is_any_enemy_command_center_upgrading():
+		return
+
+	var target_max_tier: int = 3 if (
+		TechTree.player_has_tier_2(ENEMY_TEAM_ID) or command_center.command_center_tier >= 2
+	) else 2
+	command_center.try_upgrade_enemy_tier(target_max_tier)
+
+
+func _should_hold_workers_for_pending_tier_upgrade() -> bool:
+	if _is_any_enemy_command_center_upgrading():
+		return true
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null or not is_instance_valid(command_center):
+		return false
+
+	if TechTree.player_has_tier_3(ENEMY_TEAM_ID) or command_center.command_center_tier >= 3:
+		return false
+
+	# Only hold workers once Tier 2 is done and Tier 3 is otherwise affordable/ready.
+	if not (TechTree.player_has_tier_2(ENEMY_TEAM_ID) or command_center.command_center_tier >= 2):
+		return false
+
+	if command_center.command_center_tier < 2:
+		return false
+
+	if not _has_required_tier_2_buildings_for_tier_3():
+		return false
+
+	if _count_enemy_workers() < TIER_3_MIN_WORKERS:
+		return false
+
+	if _count_completed_farms() < TIER_3_MIN_FARMS:
+		return false
+
+	if _get_projected_free_population() < TIER_3_MIN_FREE_POPULATION:
+		return false
+
+	if _count_living_military_units() < TIER_3_MIN_ARMY:
+		return false
+
+	if not _has_stable_enemy_economy_for_tier_3_upgrade():
+		return false
+
+	return true
 
 
 func _is_any_enemy_command_center_upgrading() -> bool:
@@ -477,6 +602,76 @@ func _find_completed_enemy_blacksmith() -> Blacksmith:
 		var blacksmith: Blacksmith = node as Blacksmith
 		if blacksmith.building_state == Building.STATE_COMPLETED:
 			return blacksmith
+
+	return null
+
+
+func _should_build_artillery_depot() -> bool:
+	if not TechTree.can_build_artillery_depot(ENEMY_TEAM_ID):
+		return false
+
+	if _has_completed_building(PLACEMENT_ARTILLERY_DEPOT):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_ARTILLERY_DEPOT):
+		return false
+
+	if not (
+		_has_completed_building(PLACEMENT_BLACKSMITH)
+		or _is_building_type_in_progress(PLACEMENT_BLACKSMITH)
+	):
+		return false
+
+	return EnemyResourceManager.can_afford(ARTILLERY_DEPOT_GOLD_COST, ARTILLERY_DEPOT_WOOD_COST)
+
+
+func _should_build_academy() -> bool:
+	if not TechTree.can_build_academy(ENEMY_TEAM_ID):
+		return false
+
+	if _has_completed_building(PLACEMENT_ACADEMY):
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_ACADEMY):
+		return false
+
+	if not (
+		_has_completed_building(PLACEMENT_BLACKSMITH)
+		or _is_building_type_in_progress(PLACEMENT_BLACKSMITH)
+	):
+		return false
+
+	return EnemyResourceManager.can_afford(ACADEMY_GOLD_COST, ACADEMY_WOOD_COST)
+
+
+func _try_sustain_academy_research() -> void:
+	var academy: Academy = _find_completed_enemy_academy()
+	if academy == null or not is_instance_valid(academy):
+		return
+
+	if academy.is_researching():
+		return
+
+	for upgrade_id: StringName in UpgradeManager.ACADEMY_UPGRADE_ORDER:
+		if UpgradeManager.is_enemy_academy_max_level(upgrade_id):
+			continue
+
+		if not UpgradeManager.can_enemy_afford_academy_upgrade(upgrade_id):
+			return
+
+		academy.try_research_upgrade(upgrade_id)
+		return
+
+
+func _find_completed_enemy_academy() -> Academy:
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Academy or not _is_living_building(node as Building):
+			continue
+
+		var academy: Academy = node as Academy
+		if academy.building_state == Building.STATE_COMPLETED:
+			return academy
 
 	return null
 
@@ -758,6 +953,10 @@ func _prune_expansion_failed_mine_cooldowns() -> void:
 
 
 func _try_train_enemy_workers() -> bool:
+	if _should_hold_workers_for_pending_tier_upgrade():
+		_log_worker_production_stopped("holding_for_tier_upgrade")
+		return false
+
 	var target_workers: int = _get_target_worker_count()
 	if _get_effective_worker_count() >= target_workers:
 		_log_worker_production_stopped("at_target")
@@ -1073,11 +1272,116 @@ func _try_sustain_stable_production() -> void:
 		return
 
 	for stable: Stable in _find_all_completed_enemy_stables():
+		if not is_instance_valid(stable):
+			continue
+
 		var queue_attempts: int = 2 if _has_excess_resources() else 1
 		while queue_attempts > 0:
 			if not _try_train_cavalry(stable):
 				break
 			queue_attempts -= 1
+
+
+func _try_sustain_artillery_production() -> void:
+	if not TechTree.can_build_artillery_depot(ENEMY_TEAM_ID):
+		return
+
+	if not _should_train_cannons():
+		return
+
+	if not EnemyResourceManager.has_food_supply(CANNON_TRAIN_FOOD_COST):
+		return
+
+	for depot: ArtilleryDepot in _find_all_completed_enemy_artillery_depots():
+		if not is_instance_valid(depot):
+			continue
+
+		if depot.get_enemy_pending_unit_count() >= ArtilleryDepot.MAX_ENEMY_UNIT_QUEUE:
+			continue
+
+		if (
+			_count_living_cannons() + _count_pending_cannons()
+			>= MAX_ENEMY_CANNONS
+		):
+			return
+
+		depot.try_train_enemy_cannon()
+		return
+
+
+func _should_train_cannons() -> bool:
+	if _count_living_cannons() + _count_pending_cannons() >= MAX_ENEMY_CANNONS:
+		return false
+
+	# Prefer siege when attacking player buildings.
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+		return true
+
+	# Counter large player armies with artillery.
+	if _count_player_military_units() >= MIN_PLAYER_ARMY_FOR_CANNONS:
+		return true
+
+	# Seed at least one cannon once the depot is online and economy is healthy.
+	if (
+		_count_living_cannons() + _count_pending_cannons() <= 0
+		and _has_excess_resources()
+	):
+		return true
+
+	if _has_abundant_resources() and _count_living_military_units() >= TIER_3_MIN_ARMY:
+		return true
+
+	return false
+
+
+func _find_all_completed_enemy_artillery_depots() -> Array:
+	var depots: Array = []
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is ArtilleryDepot or not _is_living_building(node as Building):
+			continue
+
+		var depot: ArtilleryDepot = node as ArtilleryDepot
+		if depot.building_state == Building.STATE_COMPLETED:
+			depots.append(depot)
+
+	return depots
+
+
+func _count_living_cannons() -> int:
+	var count: int = 0
+	for unit: Variant in EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()):
+		if unit is Cannon and is_instance_valid(unit as Node):
+			count += 1
+	return count
+
+
+func _count_pending_cannons() -> int:
+	var pending: int = 0
+	for depot: ArtilleryDepot in _find_all_completed_enemy_artillery_depots():
+		if is_instance_valid(depot):
+			pending += depot.get_enemy_pending_unit_count()
+	return pending
+
+
+func _count_player_military_units() -> int:
+	var count: int = 0
+	for node: Node in get_tree().get_nodes_in_group(&"units"):
+		if not is_instance_valid(node) or node.is_queued_for_deletion():
+			continue
+		if node is Worker or node is Hero:
+			continue
+		if (
+			node is Spearman
+			or node is Swordsman
+			or node is Archer
+			or node is HeavyCavalry
+			or node is LightCavalry
+			or node is CavalryArcher
+			or node is Cannon
+		):
+			count += 1
+	return count
 
 
 func _find_all_completed_enemy_stables() -> Array:
@@ -1443,6 +1747,12 @@ func _try_place_building_at_anchor(
 		PLACEMENT_STABLE:
 			gold_cost = STABLE_GOLD_COST
 			wood_cost = STABLE_WOOD_COST
+		PLACEMENT_ARTILLERY_DEPOT:
+			gold_cost = ARTILLERY_DEPOT_GOLD_COST
+			wood_cost = ARTILLERY_DEPOT_WOOD_COST
+		PLACEMENT_ACADEMY:
+			gold_cost = ACADEMY_GOLD_COST
+			wood_cost = ACADEMY_WOOD_COST
 		_:
 			return false
 
@@ -1512,6 +1822,10 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return COMMAND_CENTER_SCENE.instantiate() as Building
 		PLACEMENT_STABLE:
 			return STABLE_SCENE.instantiate() as Building
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_SCENE.instantiate() as Building
+		PLACEMENT_ACADEMY:
+			return ACADEMY_SCENE.instantiate() as Building
 		_:
 			return null
 
@@ -1794,6 +2108,10 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 			return node is CommandCenter
 		PLACEMENT_STABLE:
 			return node is Stable
+		PLACEMENT_ARTILLERY_DEPOT:
+			return node is ArtilleryDepot
+		PLACEMENT_ACADEMY:
+			return node is Academy
 		_:
 			return false
 
