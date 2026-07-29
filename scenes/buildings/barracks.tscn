@@ -1,7 +1,8 @@
-[gd_scene load_steps=8 format=3 uid="uid://c3tjs5jv1rvr6"]
+[gd_scene load_steps=9 format=3 uid="uid://c3tjs5jv1rvr6"]
 
 [ext_resource type="Script" path="res://scripts/buildings/barracks.gd" id="1_barracks"]
 [ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/Barracks_SecondAge_Level3.gltf" id="2_barracks_model"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="3_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_barracks"]
 albedo_color = Color(0.28, 0.28, 0.3, 1)
@@ -68,3 +69,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_barracks")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("3_health_component")
+max_health = 300

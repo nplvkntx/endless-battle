@@ -1,7 +1,8 @@
-[gd_scene load_steps=7 format=3 uid="uid://bxwg81vxxo5na"]
+[gd_scene load_steps=8 format=3 uid="uid://bxwg81vxxo5na"]
 
 [ext_resource type="Script" path="res://scripts/buildings/tower.gd" id="1_tower"]
 [ext_resource type="PackedScene" path="res://assets/art/quaternius/buildings/tower_candidates/WatchTower_SecondAge_Level3.gltf" id="2_tower_model"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="3_health_component"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tower"]
 albedo_color = Color(0.44, 0.44, 0.48, 1)
@@ -65,3 +66,7 @@ surface_material_override/0 = SubResource("StandardMaterial3D_sel_edge")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_tower")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("3_health_component")
+max_health = 350

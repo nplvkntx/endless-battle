@@ -91,7 +91,6 @@ const TIER_UPGRADE_STABLE_GOLD_BUFFER: int = 250
 const TIER_UPGRADE_STABLE_WOOD_BUFFER: int = 150
 
 const CONSTRUCTION_DURATION: float = 4.0
-const BARRACKS_MAX_HEALTH: int = 300
 const FARM_MAX_HEALTH: int = 250
 const HERO_ALTAR_MAX_HEALTH: int = 350
 const STABLE_MAX_HEALTH: int = 320
@@ -1343,8 +1342,6 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 
 	var max_health: int = 0
 	match building_type:
-		PLACEMENT_BARRACKS:
-			max_health = BARRACKS_MAX_HEALTH
 		PLACEMENT_FARM:
 			max_health = FARM_MAX_HEALTH
 		PLACEMENT_HERO_ALTAR:
