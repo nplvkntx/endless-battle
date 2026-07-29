@@ -84,6 +84,8 @@ const SHOP_GOLD_COST: int = 80
 const SHOP_WOOD_COST: int = 120
 const SHOP_STABLE_GOLD_BUFFER: int = 350
 const SHOP_PURCHASE_COOLDOWN_TICKS: int = 7
+const ACADEMY_RESEARCH_FAIL_COOLDOWN_TICKS: int = 5
+const ACADEMY_RESEARCH_ARMY_GOLD_BUFFER: int = Barracks.TRAIN_GOLD_COST * 2
 const SHOP_HERO_RALLY_DISTANCE: float = 18.0
 const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
@@ -128,6 +130,8 @@ var _train_cavalry_next: bool = true
 var _tick_active: bool = true
 var _worker_production_active: bool = true
 var _shop_purchase_cooldown_ticks: int = 0
+var _academy_research_complete: bool = false
+var _academy_research_fail_cooldown_ticks: int = 0
 var _director: EnemyStrategicDirector = null
 var _last_worker_idle_reason: String = ""
 var _pop_capped_since_seconds: float = -1.0
@@ -691,6 +695,20 @@ func _should_build_academy() -> bool:
 
 
 func _try_sustain_academy_research() -> void:
+	if _academy_research_complete:
+		return
+
+	if _are_enemy_academy_upgrades_complete():
+		_academy_research_complete = true
+		return
+
+	if _academy_research_fail_cooldown_ticks > 0:
+		_academy_research_fail_cooldown_ticks -= 1
+		return
+
+	if _needs_farm():
+		return
+
 	var academy: Academy = _find_completed_enemy_academy()
 	if academy == null or not is_instance_valid(academy):
 		return
@@ -705,8 +723,33 @@ func _try_sustain_academy_research() -> void:
 		if not UpgradeManager.can_enemy_afford_academy_upgrade(upgrade_id):
 			return
 
-		academy.try_research_upgrade(upgrade_id)
+		if not _can_afford_academy_research_without_starving_army(upgrade_id):
+			return
+
+		if academy.try_research_upgrade(upgrade_id):
+			return
+
+		_academy_research_fail_cooldown_ticks = ACADEMY_RESEARCH_FAIL_COOLDOWN_TICKS
 		return
+
+
+func _are_enemy_academy_upgrades_complete() -> bool:
+	for upgrade_id: StringName in UpgradeManager.ACADEMY_UPGRADE_ORDER:
+		if not UpgradeManager.is_enemy_academy_max_level(upgrade_id):
+			return false
+
+	return true
+
+
+func _can_afford_academy_research_without_starving_army(upgrade_id: StringName) -> bool:
+	if _has_excess_resources():
+		return true
+
+	var cost: Dictionary = UpgradeManager.get_enemy_academy_upgrade_cost(upgrade_id)
+	return EnemyResourceManager.can_afford(
+		int(cost.gold) + ACADEMY_RESEARCH_ARMY_GOLD_BUFFER,
+		int(cost.wood) + FARM_WOOD_COST
+	)
 
 
 func _find_completed_enemy_academy() -> Academy:
