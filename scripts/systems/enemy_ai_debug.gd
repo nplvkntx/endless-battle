@@ -20,6 +20,10 @@ static var _last_early_army_action: String = ""
 static var _last_early_army_pikemen: String = ""
 static var _last_early_army_rally: String = ""
 static var _early_army_complete_logged: bool = false
+static var _last_creeping_action: String = ""
+static var _last_creeping_camp: String = ""
+static var _last_creeping_hero_level: int = 0
+static var _creeping_complete_logged: bool = false
 
 
 static func set_enabled(value: bool) -> void:
@@ -97,6 +101,14 @@ static func log_once(key: String, message: String) -> void:
 			if message == _last_early_army_rally:
 				return
 			_last_early_army_rally = message
+		"creeping":
+			if message == _last_creeping_action:
+				return
+			_last_creeping_action = message
+		"creeping_camp":
+			if message == _last_creeping_camp:
+				return
+			_last_creeping_camp = message
 		_:
 			pass
 
@@ -213,6 +225,41 @@ static func log_early_army_complete(pikemen: int) -> void:
 		return
 	_early_army_complete_logged = true
 	log_event("Early Army complete | Hero ready, Pikemen: %d" % pikemen)
+
+
+static func log_creeping_phase() -> void:
+	log_once("phase", "Phase: CREEPING")
+
+
+static func log_creeping(message: String) -> void:
+	if message.is_empty():
+		return
+	log_once("creeping", message)
+
+
+static func log_creeping_camp_selected(camp_name: String, distance: float) -> void:
+	log_once(
+		"creeping_camp",
+		"Selected creep camp: %s (distance %d)" % [camp_name, int(round(distance))]
+	)
+
+
+static func log_creeping_hero_level(level: int) -> void:
+	if level <= _last_creeping_hero_level:
+		return
+	_last_creeping_hero_level = level
+	log_event("Hero reached Level %d" % level)
+
+
+static func log_creeping_retreat_hero_hp(hp_ratio: float) -> void:
+	log_creeping("Retreating from creep camp (Hero HP %d%%)" % int(round(hp_ratio * 100.0)))
+
+
+static func log_creeping_complete() -> void:
+	if _creeping_complete_logged:
+		return
+	_creeping_complete_logged = true
+	log_event("Creeping complete -> Advancing to Tier 2")
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:

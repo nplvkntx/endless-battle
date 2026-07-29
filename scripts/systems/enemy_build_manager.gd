@@ -823,7 +823,7 @@ func _should_build_blacksmith() -> bool:
 
 	if (
 		_director != null
-		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME)
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.CREEPING)
 	):
 		return false
 
@@ -1197,7 +1197,7 @@ func _should_build_shop() -> bool:
 
 	if (
 		_director != null
-		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME)
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.CREEPING)
 	):
 		return false
 

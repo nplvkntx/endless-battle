@@ -704,6 +704,12 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 	if _director != null:
 		if not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.CREEPING):
 			return true
+		# Stay on creep objective until the CREEPING phase completes.
+		if (
+			_director.get_strategic_phase()
+			== EnemyStrategicDirector.StrategicPhase.CREEPING
+		):
+			return true
 		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME):
 			return false
 		if _director.is_phase_interrupted():

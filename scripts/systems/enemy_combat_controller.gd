@@ -90,6 +90,8 @@ func _update_combat_control(delta: float) -> void:
 					"retreat from contest"
 				)
 				_active_player_creep_contest_camp = null
+			if army_mode == EnemyArmyCommand.ArmyMode.CREEPING:
+				_log_creeping_retreat(tree)
 			EnemyArmyCommand.initiate_group_retreat(tree, "fight unfavorable")
 		return
 
@@ -101,6 +103,17 @@ func _update_combat_control(delta: float) -> void:
 		return
 
 	_evaluate_player_creep_opportunities(tree)
+
+
+func _log_creeping_retreat(tree: SceneTree) -> void:
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero != null:
+		var hp_ratio: float = EnemyArmyCommand.get_health_ratio(hero)
+		if hp_ratio < EnemyArmyCommand.HERO_RETREAT_HP_RATIO:
+			EnemyAIDebug.log_creeping_retreat_hero_hp(hp_ratio)
+			return
+
+	EnemyAIDebug.log_creeping("Retreating from creep camp (army strength low)")
 
 
 func _update_opening_phase(tree: SceneTree) -> void:
@@ -344,6 +357,13 @@ func can_launch_offensive_action() -> bool:
 
 func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:
 	if not can_launch_offensive_action():
+		return
+
+	# Dedicated CREEPING phase focuses on neutral camps, not player contests.
+	if (
+		_director != null
+		and _director.get_strategic_phase() == EnemyStrategicDirector.StrategicPhase.CREEPING
+	):
 		return
 
 	if _director != null and not _director.should_prioritize_creep():

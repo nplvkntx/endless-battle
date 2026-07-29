@@ -30,6 +30,7 @@ const EARLY_ARMY_SOFT_PIKEMEN: int = 8
 const EARLY_ARMY_TARGET_PIKEMEN: int = 10
 const EARLY_ARMY_RALLY_RATIO: float = 0.75
 const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
+const CREEP_REQUIRED_EARLY_CAMPS: int = 2
 const EXPANSION_SATURATION_WORKERS: int = 16
 const EXPANSION_MINE_MIN_WORKERS: int = 5
 const MID_GAME_MIN_ARMY: int = 12
@@ -221,7 +222,11 @@ func should_prioritize_attack() -> bool:
 	if _phase_interrupt_active:
 		return false
 
-	if _strategic_phase in [StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY]:
+	if _strategic_phase in [
+		StrategicPhase.OPENING,
+		StrategicPhase.EARLY_ARMY,
+		StrategicPhase.CREEPING,
+	]:
 		return false
 
 	if get_desire("defense") >= DESIRE_HIGH:
@@ -543,6 +548,9 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 	if previous == StrategicPhase.EARLY_ARMY:
 		EnemyAIDebug.log_early_army_complete(int(snapshot.get("pikemen_count", 0)))
 
+	if previous == StrategicPhase.CREEPING:
+		EnemyAIDebug.log_creeping_complete()
+
 	EnemyAIDebug.log_phase_transition(
 		strategic_phase_to_string(previous),
 		strategic_phase_to_string(new_phase),
@@ -580,14 +588,31 @@ func _early_army_exit_reason() -> String:
 
 
 func _can_leave_creeping() -> bool:
-	return (
-		snapshot.get("hero_alive", false)
-		and int(snapshot.get("hero_level", 0)) >= CREEP_HERO_LEVEL_REQUIREMENT
-	)
+	if not snapshot.get("hero_alive", false):
+		return false
+
+	if int(snapshot.get("hero_level", 0)) < CREEP_HERO_LEVEL_REQUIREMENT:
+		return false
+
+	if not snapshot.get("creeping_army_healthy", false):
+		return false
+
+	var cleared_camps: int = int(snapshot.get("cleared_early_camps", 0))
+	if cleared_camps >= CREEP_REQUIRED_EARLY_CAMPS:
+		return true
+
+	# No more safe camps left to clear — advance once hero is leveled.
+	return not snapshot.get("has_safe_creep_camp", true)
 
 
 func _creeping_exit_reason() -> String:
-	return "Hero reached level %d" % CREEP_HERO_LEVEL_REQUIREMENT
+	return (
+		"Hero level %d, camps cleared: %d"
+		% [
+			CREEP_HERO_LEVEL_REQUIREMENT,
+			int(snapshot.get("cleared_early_camps", 0)),
+		]
+	)
 
 
 func _can_leave_tier_2() -> bool:
@@ -707,6 +732,30 @@ func _build_world_snapshot() -> Dictionary:
 			or army_power < 120
 		)
 	)
+	var creep_manager: EnemyCreepManager = (
+		get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+		if get_parent() != null
+		else null
+	)
+	var cleared_early_camps: int = 0
+	var has_safe_creep_camp: bool = false
+	var creeping_army_healthy: bool = false
+	if creep_manager != null:
+		cleared_early_camps = creep_manager.get_cleared_early_camp_count()
+		has_safe_creep_camp = creep_manager.has_safe_creep_camp_available()
+		creeping_army_healthy = creep_manager.is_army_healthy_after_creeping()
+	else:
+		cleared_early_camps = CreepCampSafety.count_cleared_enemy_side_camps(
+			tree,
+			rally_position,
+			EnemyCreepManager.CREEP_SEARCH_RANGE,
+			EnemyCreepManager.CAMP_CLEAR_RADIUS
+		)
+		creeping_army_healthy = (
+			hero != null
+			and non_hero_army.size() >= get_min_army_size_for_current_phase()
+			and EnemyArmyCommand.get_health_ratio(hero) >= EnemyArmyCommand.HERO_RETREAT_HP_RATIO
+		)
 
 	return {
 		"workers": workers.size(),
@@ -729,6 +778,9 @@ func _build_world_snapshot() -> Dictionary:
 		"combat_unit_count": non_hero_army.size(),
 		"pikemen_count": pikemen_count,
 		"early_army_rallied": early_army_rallied,
+		"cleared_early_camps": cleared_early_camps,
+		"has_safe_creep_camp": has_safe_creep_camp,
+		"creeping_army_healthy": creeping_army_healthy,
 		"army_power": army_power,
 		"army_mode": EnemyArmyCommand.get_army_mode(),
 		"visible_enemy_power": visible_threat_power,
@@ -885,12 +937,12 @@ func _apply_phase_desire_baseline() -> void:
 			desires["expansion"] = 0.0
 			desires["upgrade"] = 0.0
 		StrategicPhase.CREEPING:
-			desires["economy"] = 0.45
+			desires["economy"] = 0.55
 			desires["army"] = 0.55
 			desires["creep"] = 0.85
-			desires["attack"] = 0.1
+			desires["attack"] = 0.0
 			desires["expansion"] = 0.05
-			desires["upgrade"] = 0.2
+			desires["upgrade"] = 0.35
 		StrategicPhase.TIER_2:
 			desires["economy"] = 0.5
 			desires["army"] = 0.45

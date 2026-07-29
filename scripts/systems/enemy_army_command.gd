@@ -2186,6 +2186,14 @@ static func _update_objective_stuck_detection(
 	_objective_last_building_health = current_health
 
 
+static func command_focus_attack(
+	units: Array,
+	objective: Node3D,
+	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
+) -> void:
+	_command_focus_attack_objective(units, objective, mission)
+
+
 static func _command_focus_attack_objective(
 	units: Array,
 	objective: Node3D,
@@ -4464,7 +4472,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 		if (
 			use_attack_move
-			and mission == EnemyUnitMission.Mission.ATTACK
+			and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
 			and entry.has("focus_objective")
 		):
 			var focus_objective: Node3D = entry.get("focus_objective") as Node3D
