@@ -20,7 +20,6 @@ enum BuildTripState {
 
 const HEALTH_BAR_WIDTH := 1.0
 const HEALTH_BAR_HUE_GREEN := 0.333333
-const FOOD_SUPPLY_USED: int = 1
 const CONSTRUCTION_STUCK_RECOVERY_DELAY: float = 2.0
 const CONSTRUCTION_STUCK_RECOVERY_COOLDOWN: float = 0.75
 const CONSTRUCTION_REPATH_COOLDOWN: float = 1.25
@@ -298,10 +297,13 @@ func _on_health_depleted() -> void:
 	velocity = Vector3.ZERO
 	_health_bar.visible = false
 
-	if _is_enemy_worker():
-		EnemyResourceManager.release_food_used(FOOD_SUPPLY_USED)
-	else:
-		ResourceManager.release_food_used(FOOD_SUPPLY_USED)
+	if not _population_food_released:
+		_population_food_released = true
+		var food_cost: int = UnitFoodSupply.get_cost(self)
+		if _is_enemy_worker():
+			EnemyResourceManager.release_food_used(food_cost)
+		else:
+			ResourceManager.release_food_used(food_cost)
 
 	HeroXpRewards.notify_unit_killed(self)
 	die()

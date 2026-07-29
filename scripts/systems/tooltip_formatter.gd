@@ -761,17 +761,7 @@ static func _get_unit_role_description(unit: Unit) -> String:
 
 
 static func _get_unit_food_cost(unit: Unit) -> int:
-	if unit is Worker:
-		return CommandCenter.TRAIN_FOOD_COST
-	if unit is Spearman or unit is Swordsman or unit is Archer or unit is LightCavalry or unit is CavalryArcher:
-		return Barracks.TRAIN_FOOD_COST
-	if unit is Cannon:
-		return ArtilleryDepot.CANNON_TRAIN_FOOD_COST
-	if unit is HeavyCavalry:
-		return Stable.HEAVY_CAVALRY_TRAIN_FOOD_COST
-	if unit is Hero:
-		return HeroAltar.TRAIN_FOOD_COST
-	return 0
+	return UnitFoodSupply.get_cost(unit)
 
 
 static func _append_ability_stat_lines(

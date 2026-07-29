@@ -46,6 +46,7 @@ var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
 var _visual_animator: UnitVisualAnimator
+var _population_food_released: bool = false
 
 
 func _ready() -> void:
@@ -421,10 +422,34 @@ func take_damage(_amount: float, _attacker = null) -> void:
 	pass
 
 
+## Population food reserved by this unit when trained. Neutral/test units return 0.
+func get_food_supply_cost() -> int:
+	return UnitFoodSupply.get_cost(self)
+
+
 ## Handles unit death and notifies listeners through signals.
 func die() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not self is Worker:
-		EnemyResourceManager.release_unit_population(self)
+	_release_reserved_food()
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
 	NodeSafety.prepare_node_for_death(self)
 	died.emit(self)
+
+
+## Releases reserved population food once. Workers use their own death path instead.
+func _release_reserved_food() -> void:
+	if _population_food_released:
+		return
+
+	# Worker releases food in Worker._on_health_depleted before calling die().
+	if self is Worker:
+		return
+
+	var food_cost: int = get_food_supply_cost()
+	if food_cost <= 0:
+		return
+
+	_population_food_released = true
+	if CombatTargetValidation.is_enemy_faction(self):
+		EnemyResourceManager.release_food_used(food_cost)
+	else:
+		ResourceManager.release_food_used(food_cost)

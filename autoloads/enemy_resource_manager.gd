@@ -138,7 +138,7 @@ func release_unit_population(unit: Node) -> void:
 	if not unit.is_in_group(&"enemies"):
 		return
 
-	release_food_used(_get_unit_food_supply(unit))
+	release_food_used(UnitFoodSupply.get_cost(unit))
 
 
 func is_stockpile_available() -> bool:
@@ -153,7 +153,7 @@ func _initialize_population_from_scene() -> void:
 	var supply_used: int = 0
 	for node: Node in tree.get_nodes_in_group(&"enemy_workers"):
 		if node is Worker and is_instance_valid(node):
-			supply_used += 1
+			supply_used += UnitFoodSupply.get_cost(node)
 
 	for node: Node in tree.get_nodes_in_group(&"enemies"):
 		if not is_instance_valid(node):
@@ -163,16 +163,10 @@ func _initialize_population_from_scene() -> void:
 		if node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero:
 			if node is Hero and not (node as Node).is_in_group(&"enemies"):
 				continue
-			supply_used += _get_unit_food_supply(node)
+			supply_used += UnitFoodSupply.get_cost(node)
 
 	food_current = supply_used
 	_log_totals_if_debug()
-
-
-func _get_unit_food_supply(node: Node) -> int:
-	if node is Hero:
-		return 2
-	return 1
 
 
 func _log_totals_if_debug() -> void:
