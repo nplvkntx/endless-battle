@@ -260,11 +260,9 @@ static func _collect_enemy_gold_mines(anchor: Vector3, scene_root: Node) -> Arra
 
 	var radius_sq: float = BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS
 	for child: Node in WorkerGathering._map_resource_children(scene_root):
-		if not child is GoldMine:
+		if child == null or not is_instance_valid(child) or not child is GoldMine:
 			continue
 		if child.global_position.distance_squared_to(anchor) > radius_sq:
-			continue
-		if not child.name.begins_with("Enemy"):
 			continue
 
 		mines.append(child as Node3D)
@@ -279,9 +277,7 @@ static func _collect_enemy_trees(anchor: Vector3, scene_root: Node) -> Array[Nod
 
 	var radius_sq: float = BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS
 	for child: Node in WorkerGathering._map_resource_children(scene_root):
-		if not child is WoodTree:
-			continue
-		if not child.name.begins_with("EnemyTree"):
+		if child == null or not is_instance_valid(child) or not child is WoodTree:
 			continue
 		if child.global_position.distance_squared_to(anchor) > radius_sq:
 			continue

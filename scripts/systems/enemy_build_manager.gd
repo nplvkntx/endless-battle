@@ -19,8 +19,10 @@ const WORKER_QUEUE_TARGET: int = 2
 const MIN_WORKERS_BEFORE_MILITARY: int = 6
 const MIN_WORKERS_BEFORE_MILITARY_ABUNDANT: int = 4
 const WORKER_REBUILD_THRESHOLD_RATIO: float = 0.60
-const EXPANSION_MINE_MAX_DISTANCE: float = 36.0
 const EXPANSION_CC_NEAR_MINE_DISTANCE: float = 22.0
+const EXPANSION_PLACEMENT_RETRY_SECONDS: float = 10.0
+const EXPANSION_UNSAFE_DISTANCE_PENALTY: float = 10000.0
+const PLAYER_COMMAND_CENTER_GROUP := &"player_command_center"
 const WORKER_PHASE_MID_SECONDS: float = 180.0
 const WORKER_PHASE_LATE_SECONDS: float = 360.0
 const WORKER_PHASE_ENDGAME_SECONDS: float = 600.0
@@ -115,6 +117,10 @@ var _farm_reservation_active: bool = false
 var _cc_worker_queue_connected: bool = false
 var _building_scan_frame: int = -1
 var _cached_enemy_buildings: Array = []
+var _expansion_target_mine: GoldMine = null
+var _expansion_placement_cooldown_until: float = -1.0
+var _expansion_order_active: bool = false
+var _expansion_failed_mine_cooldowns: Dictionary = {}
 
 
 func _ready() -> void:
@@ -670,13 +676,18 @@ func _sync_farm_reservation() -> void:
 
 
 func _should_build_expansion_command_center() -> bool:
+	_sync_expansion_order_state()
+
 	if _count_living_command_centers() >= 2:
 		return false
 
-	if _director != null and not _director.should_prioritize_expansion():
+	if _expansion_order_active or _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
 		return false
 
-	if _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
+	if _is_expansion_placement_on_cooldown():
+		return false
+
+	if _director != null and not _director.should_prioritize_expansion():
 		return false
 
 	if not _has_completed_building(PLACEMENT_HERO_ALTAR) or not _has_living_enemy_hero():
@@ -689,6 +700,61 @@ func _should_build_expansion_command_center() -> bool:
 		return false
 
 	return EnemyResourceManager.can_afford(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+
+
+func _sync_expansion_order_state() -> void:
+	if not NodeSafety.is_alive_node(_expansion_target_mine):
+		_expansion_target_mine = null
+
+	_prune_expansion_failed_mine_cooldowns()
+
+	if _count_living_command_centers() >= 2 or _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
+		_expansion_order_active = true
+		return
+
+	_expansion_order_active = false
+
+
+func _is_expansion_placement_on_cooldown() -> bool:
+	return _get_match_elapsed_seconds() < _expansion_placement_cooldown_until
+
+
+func _begin_expansion_placement_cooldown() -> void:
+	_expansion_placement_cooldown_until = (
+		_get_match_elapsed_seconds() + EXPANSION_PLACEMENT_RETRY_SECONDS
+	)
+
+
+func _mark_expansion_mine_placement_failed(mine: GoldMine) -> void:
+	if not NodeSafety.is_alive_node(mine):
+		return
+
+	_expansion_failed_mine_cooldowns[mine.get_instance_id()] = (
+		_get_match_elapsed_seconds() + EXPANSION_PLACEMENT_RETRY_SECONDS
+	)
+
+
+func _is_expansion_mine_on_failure_cooldown(mine: GoldMine) -> bool:
+	if not NodeSafety.is_alive_node(mine):
+		return true
+
+	var until: float = float(
+		_expansion_failed_mine_cooldowns.get(mine.get_instance_id(), -1.0)
+	)
+	return _get_match_elapsed_seconds() < until
+
+
+func _prune_expansion_failed_mine_cooldowns() -> void:
+	var now: float = _get_match_elapsed_seconds()
+	for instance_id: Variant in _expansion_failed_mine_cooldowns.keys():
+		var until: float = float(_expansion_failed_mine_cooldowns[instance_id])
+		if now >= until:
+			_expansion_failed_mine_cooldowns.erase(instance_id)
+			continue
+
+		var node: Object = instance_from_id(int(instance_id))
+		if not NodeSafety.is_alive_node(node):
+			_expansion_failed_mine_cooldowns.erase(instance_id)
 
 
 func _try_train_enemy_workers() -> bool:
@@ -1129,63 +1195,182 @@ func _try_train_military(barracks: Barracks) -> bool:
 
 
 func _try_place_expansion_command_center() -> bool:
-	var expansion_mine: GoldMine = _find_expansion_gold_mine_anchor()
-	if expansion_mine == null:
+	_sync_expansion_order_state()
+	if _expansion_order_active or _is_expansion_placement_on_cooldown():
 		return false
 
-	return _try_place_building_at_anchor(
+	# Wait for other builds without entering the retry cooldown.
+	if _has_unfinished_construction():
+		return false
+
+	var expansion_mine: GoldMine = _find_expansion_gold_mine_anchor()
+	if not NodeSafety.is_alive_node(expansion_mine):
+		_expansion_target_mine = null
+		_begin_expansion_placement_cooldown()
+		return false
+
+	_expansion_target_mine = expansion_mine as GoldMine
+	var placed: bool = _try_place_building_at_anchor(
 		PLACEMENT_COMMAND_CENTER,
-		expansion_mine.global_position,
+		_expansion_target_mine.global_position,
 		true
 	)
+	if placed:
+		_expansion_order_active = true
+		_expansion_placement_cooldown_until = -1.0
+		return true
+
+	# Placement failed: cool down this mine and clear the sticky target so the
+	# next attempt can pick another reachable mine / nearby build spot.
+	_mark_expansion_mine_placement_failed(_expansion_target_mine)
+	_expansion_target_mine = null
+	_expansion_order_active = false
+	_begin_expansion_placement_cooldown()
+	return false
 
 
 func _find_expansion_gold_mine_anchor() -> GoldMine:
-	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
-	if rally_position == Vector3.ZERO:
+	if NodeSafety.is_alive_node(_expansion_target_mine):
+		var sticky_mine: GoldMine = _expansion_target_mine as GoldMine
+		if (
+			_is_valid_expansion_gold_mine(sticky_mine)
+			and not _is_expansion_mine_on_failure_cooldown(sticky_mine)
+		):
+			return sticky_mine
+		_expansion_target_mine = null
+
+	var origin_position: Vector3 = _get_expansion_search_origin()
+	if origin_position == Vector3.ZERO:
 		return null
 
 	var scene_root: Node = get_tree().current_scene
 	if scene_root == null:
 		return null
 
+	var starting_mine: GoldMine = _resolve_enemy_starting_gold_mine()
+	var nav_map: RID = _get_navigation_map()
 	var best_mine: GoldMine = null
-	var best_distance: float = INF
+	var best_score: float = INF
 
 	for child: Node in WorkerGathering._map_resource_children(scene_root):
-		if not child is GoldMine:
+		if not NodeSafety.is_alive_node(child) or not child is GoldMine:
 			continue
 
-		if not child.name.begins_with("Enemy"):
+		var mine: GoldMine = child as GoldMine
+		if starting_mine != null and mine == starting_mine:
+			continue
+
+		if not _is_valid_expansion_gold_mine(mine):
+			continue
+
+		if _is_expansion_mine_on_failure_cooldown(mine):
+			continue
+
+		if not _is_expansion_mine_reachable(mine, origin_position, nav_map):
+			continue
+
+		var distance: float = EnemyArmyCommand.horizontal_distance(
+			mine.global_position,
+			origin_position
+		)
+		var score: float = distance
+		if not WorkerGathering.is_safe_gather_source(mine, get_tree()):
+			score += EXPANSION_UNSAFE_DISTANCE_PENALTY
+
+		if score < best_score:
+			best_score = score
+			best_mine = mine
+
+	return best_mine
+
+
+func _is_valid_expansion_gold_mine(mine: GoldMine) -> bool:
+	if not NodeSafety.is_alive_node(mine):
+		return false
+
+	if not mine.can_gather():
+		return false
+
+	if _has_command_center_near_position(mine.global_position):
+		return false
+
+	return true
+
+
+func _get_expansion_search_origin() -> Vector3:
+	var primary: CommandCenter = _resolve_primary_command_center()
+	if primary != null and NodeSafety.is_alive_node(primary):
+		return primary.global_position
+
+	return EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+
+
+func _resolve_enemy_starting_gold_mine() -> GoldMine:
+	var primary: CommandCenter = _resolve_primary_command_center()
+	if primary == null or not NodeSafety.is_alive_node(primary):
+		return null
+
+	var scene_root: Node = get_tree().current_scene
+	if scene_root == null:
+		return null
+
+	var closest_mine: GoldMine = null
+	var closest_distance: float = INF
+	for child: Node in WorkerGathering._map_resource_children(scene_root):
+		if not NodeSafety.is_alive_node(child) or not child is GoldMine:
 			continue
 
 		var mine: GoldMine = child as GoldMine
 		if not mine.can_gather():
 			continue
 
-		if not WorkerGathering.is_safe_gather_source(mine, get_tree()):
-			continue
-
-		if _has_command_center_near_position(mine.global_position):
-			continue
-
 		var distance: float = EnemyArmyCommand.horizontal_distance(
 			mine.global_position,
-			rally_position
+			primary.global_position
 		)
-		if distance > EXPANSION_MINE_MAX_DISTANCE:
+		if distance > EXPANSION_CC_NEAR_MINE_DISTANCE:
 			continue
 
-		if distance < best_distance:
-			best_distance = distance
-			best_mine = mine
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_mine = mine
 
-	return best_mine
+	return closest_mine
+
+
+func _is_expansion_mine_reachable(
+	mine: GoldMine, from_position: Vector3, nav_map: RID
+) -> bool:
+	if not NodeSafety.is_alive_node(mine):
+		return false
+
+	if nav_map == RID():
+		return true
+
+	if not NavigationServer3D.map_is_active(nav_map):
+		return true
+
+	var from: Vector3 = Vector3(from_position.x, 0.5, from_position.z)
+	var to: Vector3 = Vector3(mine.global_position.x, 0.5, mine.global_position.z)
+	var start: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, from)
+	var end: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, to)
+	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, start, end, true)
+	return path.size() >= 2
 
 
 func _has_command_center_near_position(position: Vector3) -> bool:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
-		if not node is CommandCenter or not _is_living_building(node as Building):
+	if _has_command_center_near_position_in_group(position, ENEMY_BUILDING_GROUP):
+		return true
+
+	return _has_command_center_near_position_in_group(position, PLAYER_COMMAND_CENTER_GROUP)
+
+
+func _has_command_center_near_position_in_group(position: Vector3, group_name: StringName) -> bool:
+	for node: Node in get_tree().get_nodes_in_group(group_name):
+		if not NodeSafety.is_alive_node(node) or not node is CommandCenter:
+			continue
+
+		if not _is_living_building(node as Building):
 			continue
 
 		if (
@@ -1287,12 +1472,19 @@ func _try_place_building_at_anchor(
 		return false
 
 	var building: Building = _instantiate_building(building_type)
-	if building == null:
+	if not NodeSafety.is_alive_node(building):
+		EnemyResourceManager.add_gold(gold_cost)
+		EnemyResourceManager.add_wood(wood_cost)
 		return false
 
 	_tag_enemy_building(building)
 	_add_health_component_if_needed(building, building_type)
 	parent.add_child(building)
+	if not NodeSafety.is_alive_node(building):
+		EnemyResourceManager.add_gold(gold_cost)
+		EnemyResourceManager.add_wood(wood_cost)
+		return false
+
 	building.global_position = position
 	building.start_under_construction()
 	building.setup_construction(
@@ -1361,7 +1553,7 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 
 func _try_assign_idle_builder_to_construction() -> void:
 	for building: Building in _collect_unfinished_buildings():
-		if not is_instance_valid(building) or not _is_living_building(building):
+		if not NodeSafety.is_alive_node(building) or not _is_living_building(building):
 			continue
 
 		if _building_has_active_builder(building):
@@ -1376,14 +1568,14 @@ func _release_stale_build_workers() -> void:
 			continue
 
 		var worker: Worker = node as Worker
-		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
+		if not NodeSafety.is_alive_node(worker):
 			continue
 
 		if not worker.is_on_construction_trip():
 			continue
 
 		var build_target: Building = worker.get_build_target()
-		if build_target == null or not is_instance_valid(build_target):
+		if not NodeSafety.is_alive_node(build_target):
 			worker.prepare_for_enemy_economy_reassign(
 				"build task invalid, returning worker to economy"
 			)
@@ -1404,7 +1596,7 @@ func _release_stale_build_workers() -> void:
 func _collect_unfinished_buildings() -> Array[Building]:
 	var buildings: Array[Building] = []
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
-		if not node is Building:
+		if not NodeSafety.is_alive_node(node) or not node is Building:
 			continue
 
 		var building: Building = node as Building
@@ -1426,7 +1618,7 @@ func _has_unfinished_construction() -> bool:
 
 
 func _building_has_active_builder(building: Building) -> bool:
-	if building == null or not is_instance_valid(building):
+	if not NodeSafety.is_alive_node(building):
 		return false
 
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
@@ -1434,7 +1626,7 @@ func _building_has_active_builder(building: Building) -> bool:
 			continue
 
 		var worker: Worker = node as Worker
-		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
+		if not NodeSafety.is_alive_node(worker):
 			continue
 
 		if worker.is_assigned_to_build(building):
@@ -1444,13 +1636,16 @@ func _building_has_active_builder(building: Building) -> bool:
 
 
 func _assign_nearest_builder(building: Building) -> void:
+	if not NodeSafety.is_alive_node(building):
+		return
+
 	var worker: Worker = _find_nearest_available_enemy_worker(building.global_position, false)
 	if (
-		worker == null
+		not NodeSafety.is_alive_node(worker)
 		and building.building_state == Building.STATE_UNDER_CONSTRUCTION
 	):
 		worker = _find_nearest_available_enemy_worker(building.global_position, true)
-	if worker == null:
+	if not NodeSafety.is_alive_node(worker):
 		return
 
 	worker.command_build(building)
@@ -1472,7 +1667,7 @@ func _find_nearest_available_enemy_worker(
 			continue
 
 		var worker: Worker = node as Worker
-		if not is_instance_valid(worker) or worker.is_queued_for_deletion():
+		if not NodeSafety.is_alive_node(worker):
 			continue
 
 		if WorkerAiUnstuck.blocks_external_commands(worker):
@@ -1687,10 +1882,7 @@ func _count_living_command_centers() -> int:
 
 
 func _is_living_building(building: Building) -> bool:
-	if building == null or not is_instance_valid(building):
-		return false
-
-	if building.is_queued_for_deletion():
+	if not NodeSafety.is_alive_node(building):
 		return false
 
 	var health_component: HealthComponent = building.get_node_or_null(
