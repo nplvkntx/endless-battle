@@ -31,9 +31,6 @@ const DEBUG_AI_WORKER_GATHER: bool = false
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
 @onready var _health_bar_fill: MeshInstance3D = $HealthBar/Fill
-@onready var _navigation_agent: NavigationAgent3D = (
-	get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-)
 
 var _health_bar_fill_material: StandardMaterial3D
 var _gather_state: GatherTripState = GatherTripState.IDLE
@@ -484,6 +481,12 @@ func set_movement_target(target: Vector3) -> bool:
 	return true
 
 
+func stop_movement() -> void:
+	_disable_task_navigation()
+	_task_has_saved_destination = false
+	super.stop_movement()
+
+
 func _is_on_task_movement() -> bool:
 	return (
 		_gather_state == GatherTripState.TO_SOURCE
@@ -513,6 +516,8 @@ func _reset_gather_stuck_watch() -> void:
 
 func _configure_task_navigation_agent() -> void:
 	if _navigation_agent == null:
+		_navigation_agent = get_node_or_null("NavigationAgent3D") as NavigationAgent3D
+	if _navigation_agent == null:
 		return
 
 	WorkerTaskNavigation.configure_agent(_navigation_agent, stopping_distance)
@@ -526,7 +531,7 @@ func _sync_navigation_agent_position() -> void:
 	if _navigation_agent == null:
 		return
 
-	_navigation_agent.target_position = global_position
+	UnitNavigation.clear(_navigation_agent, global_position)
 
 
 func _refresh_task_navigation() -> void:

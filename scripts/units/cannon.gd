@@ -25,6 +25,7 @@ var _attack_target: Node3D = null
 var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
+var _has_active_attack_order: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
 
@@ -73,12 +74,16 @@ func _process(delta: float) -> void:
 
 
 func _sanitize_attack_target() -> void:
-	if _attack_target == null:
-		return
-
-	if not NodeSafety.is_alive_node(_attack_target):
+	if _has_active_attack_order and not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
 		_resume_attack_move()
+		return
+
+	if _attack_target == null:
+		if _has_chase_target:
+			_has_chase_target = false
+			clear_move_target()
+			_resume_attack_move()
 		return
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
@@ -120,6 +125,7 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	_attack_target = NodeSafety.safe_node(target) as Node3D
 	if _attack_target == null:
 		return
+	_has_active_attack_order = true
 	_has_chase_target = false
 
 	if not _is_in_attack_range(_attack_target):
@@ -130,7 +136,7 @@ func command_attack_move(destination: Vector3) -> void:
 	_attack_move_destination = destination
 	_has_attack_move_destination = true
 	cancel_attack()
-	_set_move_destination(destination)
+	_set_move_destination(destination, RepathUrgency.PLAYER_ORDER)
 
 
 func cancel_attack_move() -> void:
@@ -143,16 +149,26 @@ func cancel_attack() -> void:
 	_attack_target = null
 	_attack_approach_slot = -1
 	_has_chase_target = false
+	_has_active_attack_order = false
 
 
 func set_movement_target(target: Vector3) -> bool:
 	cancel_attack_move()
 	cancel_attack()
-	return _set_move_destination(target)
+	return _set_move_destination(target, RepathUrgency.PLAYER_ORDER)
 
 
-func _set_move_destination(target: Vector3) -> bool:
-	return super.set_movement_target(target)
+func stop_movement() -> void:
+	cancel_attack_move()
+	cancel_attack()
+	super.stop_movement()
+
+
+func _set_move_destination(
+	target: Vector3,
+	urgency: RepathUrgency = RepathUrgency.NORMAL
+) -> bool:
+	return request_movement_target(target, urgency)
 
 
 func _physics_process(delta: float) -> void:
@@ -169,8 +185,11 @@ func _physics_process(delta: float) -> void:
 		if can_scan_targets:
 			_try_attack_move_engagement()
 
-	if _attack_target != null:
-		if not CombatTargetValidation.is_valid_combat_target(_attack_target):
+	if _has_active_attack_order:
+		if not NodeSafety.is_alive_node(_attack_target):
+			cancel_attack()
+			_resume_attack_move()
+		elif not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			cancel_attack()
 			_resume_attack_move()
 		else:
@@ -245,10 +264,7 @@ func _process_attack(delta: float) -> void:
 		_stop_and_attack(delta)
 		return
 
-	if not has_move_target:
-		_has_chase_target = false
-		_begin_chase()
-
+	_update_chase_movement()
 	super._physics_process(delta)
 
 	if _attack_target != null and _is_in_attack_range(_attack_target):
@@ -256,9 +272,8 @@ func _process_attack(delta: float) -> void:
 
 
 func _stop_and_attack(delta: float) -> void:
-	has_move_target = false
+	clear_move_target()
 	_has_chase_target = false
-	velocity = Vector3.ZERO
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
@@ -340,22 +355,31 @@ func _on_health_depleted() -> void:
 	cancel_attack_move()
 	cancel_attack()
 	EnemyUnitMission.clear_unit_mission(self)
-	has_move_target = false
-	velocity = Vector3.ZERO
+	clear_move_target()
 	die()
 	queue_free()
 
 
 func _begin_chase() -> void:
+	_update_chase_movement()
+
+
+func _update_chase_movement() -> void:
 	if not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
 		return
 
-	if _has_chase_target:
-		return
+	var approach_position: Vector3 = _compute_attack_approach_position(_attack_target)
+	if _has_chase_target and has_move_target:
+		var destination_delta: Vector3 = approach_position - _movement_target
+		destination_delta.y = 0.0
+		if destination_delta.length() < CHASE_TARGET_MOVE_THRESHOLD:
+			return
 
-	_set_move_destination(_compute_attack_approach_position(_attack_target))
-	_has_chase_target = true
+	if _set_move_destination(approach_position, RepathUrgency.NORMAL):
+		_has_chase_target = true
+	elif not has_move_target:
+		_has_chase_target = true
 
 
 func _try_attack_move_engagement() -> void:

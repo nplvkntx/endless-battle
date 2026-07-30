@@ -31,6 +31,8 @@ const REPATH_COOLDOWN_FORMATION_SECONDS := 1.0
 const REPATH_COOLDOWN_URGENT_SECONDS := 0.35
 const REPATH_COOLDOWN_STUCK_SECONDS := 0.75
 const REPATH_STAGGER_OFFSET_SECONDS := 0.08
+const PATH_VALIDITY_CHECK_INTERVAL := 0.55
+const CHASE_TARGET_MOVE_THRESHOLD := 1.25
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
 const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
@@ -42,6 +44,7 @@ enum RepathUrgency {
 	FORMATION,
 	URGENT,
 	STUCK_RECOVERY,
+	PLAYER_ORDER,
 }
 
 var team_id: int = -1
@@ -75,11 +78,15 @@ var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
 var _visual_animator: UnitVisualAnimator
 var _population_food_released: bool = false
+var _navigation_agent: NavigationAgent3D
+var _navigation_active: bool = false
+var _path_validity_timer: float = 0.0
 
 
 func _ready() -> void:
 	_combat_target_scan_timer = randf() * (COMBAT_TARGET_SCAN_INTERVAL + COMBAT_TARGET_SCAN_JITTER)
 	_combat_target_validate_timer = randf() * COMBAT_TARGET_VALIDATE_INTERVAL
+	_path_validity_timer = randf() * PATH_VALIDITY_CHECK_INTERVAL
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.UNITS
 	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
@@ -89,6 +96,7 @@ func _ready() -> void:
 	_visual_pivot = get_node_or_null("MeshInstance3D") as Node3D
 	_visual_facing_yaw_offset = _detect_visual_facing_yaw_offset()
 	_setup_visual_animator()
+	_setup_navigation_agent()
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
 
@@ -144,10 +152,24 @@ func cancel_attack_move() -> void:
 	pass
 
 
-## Sets a single move target. Called only when a move command is issued.
+## Sets a single move target. Player/rally orders apply immediately.
 ## Returns true when a real destination update was applied.
 func set_movement_target(target: Vector3) -> bool:
-	return request_movement_target(target, RepathUrgency.NORMAL)
+	return request_movement_target(target, RepathUrgency.PLAYER_ORDER)
+
+
+## Clears movement and navigation without canceling combat orders.
+func clear_move_target() -> void:
+	has_move_target = false
+	velocity = Vector3.ZERO
+	_navigation_active = false
+	_clear_navigation_agent()
+	_reset_unstuck_state()
+
+
+## Full stop: clears movement/navigation. Combat subclasses also cancel orders.
+func stop_movement() -> void:
+	clear_move_target()
 
 
 ## Request a movement destination with urgency-aware repath cooldowns.
@@ -183,11 +205,14 @@ func request_movement_target(
 			0.0,
 			_movement_target.z - next_target.z
 		).length()
-		if urgency != RepathUrgency.STUCK_RECOVERY:
+		if urgency != RepathUrgency.STUCK_RECOVERY and urgency != RepathUrgency.PLAYER_ORDER:
 			if destination_delta < MOVE_DEST_NEAR_SKIP:
 				return false
 
-			if urgency != RepathUrgency.URGENT and destination_delta < MOVE_DEST_TOLERANCE:
+			if (
+				urgency != RepathUrgency.URGENT
+				and destination_delta < MOVE_DEST_TOLERANCE
+			):
 				return false
 
 		if not _can_request_repath(destination_delta, urgency, now_msec):
@@ -198,6 +223,7 @@ func request_movement_target(
 	_last_issued_move_destination = next_target
 	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
+	_apply_navigation_destination(next_target)
 	if urgency == RepathUrgency.STUCK_RECOVERY:
 		_stuck_repath_attempted = true
 		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
@@ -216,6 +242,10 @@ func is_confirmed_stuck() -> bool:
 	return _is_confirmed_stuck
 
 
+func uses_navigation_agent() -> bool:
+	return _navigation_agent != null and UnitNavigation.can_use(_navigation_agent)
+
+
 func get_repath_stagger_offset_seconds() -> float:
 	return float(abs(get_instance_id()) % 7) * REPATH_STAGGER_OFFSET_SECONDS
 
@@ -225,6 +255,9 @@ func _can_request_repath(
 	urgency: RepathUrgency,
 	now_msec: int
 ) -> bool:
+	if urgency == RepathUrgency.PLAYER_ORDER:
+		return true
+
 	var cooldown: float = REPATH_COOLDOWN_NORMAL_SECONDS
 	match urgency:
 		RepathUrgency.FORMATION:
@@ -295,21 +328,43 @@ func _physics_process(delta: float) -> void:
 	offset.y = 0.0
 	var distance: float = offset.length()
 	if distance <= stopping_distance:
-		_reset_unstuck_state()
-		has_move_target = false
-		velocity = Vector3.ZERO
+		clear_move_target()
 		return
 
-	var direction: Vector3 = offset.normalized()
-	if _detour_active and not _detour_gave_up:
-		direction = _get_detour_direction(direction)
-
-	velocity = direction * move_speed
-	velocity.y = 0.0
+	_update_navigation_path_validity(delta)
 
 	var position_before: Vector3 = global_position
 	_previous_position = position_before
-	move_and_slide()
+	var direction: Vector3 = offset.normalized() if distance > 0.0001 else Vector3.ZERO
+
+	if _detour_active and not _detour_gave_up:
+		direction = _get_detour_direction(direction)
+		velocity = direction * move_speed
+		velocity.y = 0.0
+		move_and_slide()
+	elif _navigation_active and UnitNavigation.can_use(_navigation_agent):
+		var arrived: bool = UnitNavigation.process_movement(
+			self,
+			_navigation_agent,
+			_movement_target,
+			move_speed,
+			stopping_distance
+		)
+		if arrived:
+			clear_move_target()
+			return
+		var moved: Vector3 = global_position - position_before
+		moved.y = 0.0
+		if moved.length_squared() > 0.0001:
+			direction = moved.normalized()
+	else:
+		if direction.length_squared() < 0.0001:
+			clear_move_target()
+			return
+		velocity = direction * move_speed
+		velocity.y = 0.0
+		move_and_slide()
+
 	_update_unstuck(delta, position_before, direction, distance)
 
 
@@ -607,6 +662,96 @@ func _reset_unstuck_state() -> void:
 	_detour_gave_up = false
 	_distance_at_detour_start = 0.0
 	_stuck_repath_attempted = false
+
+
+func _setup_navigation_agent() -> void:
+	_navigation_agent = get_node_or_null("NavigationAgent3D") as NavigationAgent3D
+	if _navigation_agent == null:
+		_navigation_active = false
+		return
+
+	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
+	call_deferred("_sync_navigation_agent_position")
+
+
+func _sync_navigation_agent_position() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
+	if _navigation_agent == null:
+		return
+
+	UnitNavigation.clear(_navigation_agent, global_position)
+
+
+func _apply_navigation_destination(destination: Vector3) -> void:
+	if _navigation_agent == null:
+		_navigation_active = false
+		return
+
+	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
+	if not UnitNavigation.can_use(_navigation_agent):
+		_navigation_active = false
+		UnitNavigation.apply_destination(_navigation_agent, destination)
+		call_deferred("_refresh_navigation_active_state")
+		return
+
+	UnitNavigation.apply_destination(_navigation_agent, destination)
+	_navigation_active = true
+	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
+	call_deferred("_refresh_navigation_active_state")
+
+
+func _refresh_navigation_active_state() -> void:
+	if not NodeSafety.is_alive_node(self):
+		return
+
+	if not has_move_target or _navigation_agent == null:
+		_navigation_active = false
+		return
+
+	if not UnitNavigation.can_use(_navigation_agent):
+		_navigation_active = false
+		return
+
+	_navigation_active = _navigation_agent.is_target_reachable()
+
+
+func _clear_navigation_agent() -> void:
+	if _navigation_agent == null:
+		return
+
+	UnitNavigation.clear(_navigation_agent, global_position)
+
+
+func _update_navigation_path_validity(delta: float) -> void:
+	if not has_move_target or _navigation_agent == null:
+		return
+
+	_path_validity_timer -= delta
+	if _path_validity_timer > 0.0:
+		return
+
+	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL + get_repath_stagger_offset_seconds()
+	if not UnitNavigation.can_use(_navigation_agent):
+		_navigation_active = false
+		return
+
+	if not _navigation_agent.is_target_reachable():
+		_navigation_active = false
+		return
+
+	_navigation_active = true
+	# Force a repath when the agent finished early but destination is still distant.
+	var remaining: Vector3 = _movement_target - global_position
+	remaining.y = 0.0
+	if (
+		_navigation_agent.is_navigation_finished()
+		and remaining.length() > stopping_distance + MOVE_DEST_TOLERANCE
+		and _stuck_recovery_cooldown <= 0.0
+	):
+		request_movement_target(_movement_target, RepathUrgency.STUCK_RECOVERY)
+
 
 ## Loads runtime state from unit_data when the data pipeline is available.
 func _apply_unit_data() -> void:

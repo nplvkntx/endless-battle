@@ -98,6 +98,12 @@ var _last_click_time_msec: int = -1
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Avoid scanning large selections on every mouse-move frame.
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_S:
+			if _dispatch_stop_command():
+				get_viewport().set_input_as_handled()
+				return
 	if event is InputEventMouseButton:
 		_purge_invalid_selection()
 		var mouse_button := event as InputEventMouseButton
@@ -389,6 +395,20 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 			unit.set_movement_target(move_targets[index])
 		else:
 			unit.set_movement_target(move_targets[index])
+
+
+func _dispatch_stop_command() -> bool:
+	_purge_invalid_selected_units()
+	var commandable_units := _get_commandable_selected_units()
+	if commandable_units.is_empty():
+		return false
+
+	InputManager.disarm_attack_move()
+	for unit: Unit in commandable_units:
+		if unit is Worker:
+			(unit as Worker).cancel_gathering()
+		unit.stop_movement()
+	return true
 
 
 func _dispatch_construction_command(building: Building) -> void:
