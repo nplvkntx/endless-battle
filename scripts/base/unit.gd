@@ -122,6 +122,28 @@ func set_inspected(inspected: bool) -> void:
 		SelectionGlow.set_selection_glow_selected(self, false)
 
 
+## True for units that accept attack / attack-move / cancel-attack orders.
+func supports_combat_orders() -> bool:
+	return false
+
+
+## Combat order stubs — MilitaryUnit / Hero / legacy combat scripts override these.
+func command_attack(_target: Node3D, _assigned_slot: int = -1) -> void:
+	pass
+
+
+func command_attack_move(_destination: Vector3) -> void:
+	pass
+
+
+func cancel_attack() -> void:
+	pass
+
+
+func cancel_attack_move() -> void:
+	pass
+
+
 ## Sets a single move target. Called only when a move command is issued.
 ## Returns true when a real destination update was applied.
 func set_movement_target(target: Vector3) -> bool:

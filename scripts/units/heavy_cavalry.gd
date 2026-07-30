@@ -119,6 +119,10 @@ func get_attack_facing_direction() -> Vector3:
 	return direction.normalized()
 
 
+func supports_combat_orders() -> bool:
+	return true
+
+
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not NodeSafety.is_alive_node(target):
 		return

@@ -1,20 +1,17 @@
-class_name Cannon
+class_name MilitaryUnit
 extends Unit
 
-## Horse-drawn artillery that stops at range, fires a slow shell, and splashes on impact.
+## Shared combat + order layer for military units (move / attack / attack-move / stop-via-move).
+## Subclasses configure stats and override attack delivery (melee, projectile, etc.).
 
-@export var attack_damage: int = 45
-@export var attack_range: float = 14.0
-@export var attack_cooldown: float = 5.5
-@export var splash_radius: float = 3.5
-@export var splash_min_damage_ratio: float = 0.5
+@export var attack_damage: int = 10
+@export var attack_range: float = 2.0
+@export var attack_cooldown: float = 1.0
 @export var armor: int = 0
 
-const HEALTH_BAR_WIDTH := 1.3
+const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
-const SHELL_SCENE: PackedScene = preload("res://scenes/projectiles/artillery_shell.tscn")
-const SHELL_SPAWN_HEIGHT := 0.55
-const ATTACK_MOVE_ENGAGEMENT_RANGE := 18.0
+const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -41,7 +38,11 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	cancel_attack_move()
 	cancel_attack()
-	EnemyUnitMission.clear_unit_mission(self)
+	super._exit_tree()
+
+
+func supports_combat_orders() -> bool:
+	return true
 
 
 func _on_health_changed(current_health: int, max_health: int) -> void:
@@ -104,10 +105,6 @@ func get_attack_facing_direction() -> Vector3:
 		return Vector3.ZERO
 
 	return direction.normalized()
-
-
-func supports_combat_orders() -> bool:
-	return true
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
@@ -269,65 +266,37 @@ func _stop_and_attack(delta: float) -> void:
 		_resume_attack_move()
 		return
 
-	_fire_shell()
+	if not _deliver_attack():
+		cancel_attack()
+		_resume_attack_move()
+		return
+
 	_attack_cooldown_timer = attack_cooldown
 
 
-func _fire_shell() -> void:
-	if not NodeSafety.is_alive_node(self) or _health_component.current_health <= 0:
-		return
+## Override for unit-specific strike delivery. Return false if the strike failed.
+func _deliver_attack() -> bool:
+	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
+		return false
 
-	play_visual_attack_animation()
-	var shell: ArtilleryShell = SHELL_SCENE.instantiate() as ArtilleryShell
-	if shell == null:
-		return
-
-	var scene_root: Node = get_tree().current_scene
-	if scene_root == null:
-		shell.queue_free()
-		return
-
-	scene_root.add_child(shell)
-	var spawn_position: Vector3 = global_position + Vector3(0.0, SHELL_SPAWN_HEIGHT, 0.0)
-	shell.launch(
-		_attack_target,
-		float(_get_effective_attack_damage()),
-		splash_radius,
-		spawn_position,
-		self,
-		splash_min_damage_ratio
-	)
+	MeleeHitSound.play_at(self, _attack_target.global_position)
+	return true
 
 
-func _get_effective_attack_damage() -> int:
-	return maxi(
-		1,
-		int(round(float(attack_damage) * UpgradeManager.get_ballistics_damage_multiplier(_is_enemy_owned())))
-	)
-
-
-func _is_enemy_owned() -> bool:
-	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
+## Override when incoming damage ignores armor (e.g. archer).
+func _compute_incoming_damage(amount: float) -> int:
+	return UnitCombatDamage.compute_armored_damage(amount, armor)
 
 
 func take_damage(amount: float, attacker = null) -> void:
-	if _health_component.current_health <= 0:
-		return
-
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(self, attacker)
-
-	var damage_amount := maxi(1, int(amount) - armor)
-	_health_component.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(self, damage_amount)
-
-	if (
-		CombatTargetValidation.is_enemy_faction(self)
-		and attacker is Node3D
-		and CombatTargetValidation.is_attack_target_for_attacker(self, attacker)
-		and EnemyUnitMission.allows_combat_micro(self)
-	):
-		command_attack(attacker as Node3D)
+	var resolved_attacker = UnitCombatDamage.apply_incoming(
+		self,
+		_health_component,
+		attacker,
+		_compute_incoming_damage(amount)
+	)
+	if UnitCombatDamage.should_enemy_retaliate(self, resolved_attacker):
+		command_attack(resolved_attacker as Node3D)
 
 
 func get_current_health() -> int:

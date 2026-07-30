@@ -58,7 +58,7 @@ func get_multi_selection_ui_info() -> Dictionary:
 			continue
 		if unit is Worker:
 			has_worker = true
-		elif unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Cannon or unit is Hero:
+		elif _is_combat_order_unit(unit):
 			has_combat = true
 		else:
 			category = MULTI_SELECTION_OTHER
@@ -341,22 +341,8 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		var unit: Unit = commandable_units[index]
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
-		if unit is Spearman:
-			(unit as Spearman).cancel_attack()
-		if unit is Swordsman:
-			(unit as Swordsman).cancel_attack()
-		if unit is Archer:
-			(unit as Archer).cancel_attack()
-		if unit is HeavyCavalry:
-			(unit as HeavyCavalry).cancel_attack()
-		if unit is LightCavalry:
-			(unit as LightCavalry).cancel_attack()
-		if unit is CavalryArcher:
-			(unit as CavalryArcher).cancel_attack()
-		if unit is Cannon:
-			(unit as Cannon).cancel_attack()
-		if unit is Hero:
-			(unit as Hero).cancel_attack()
+		if _is_combat_order_unit(unit):
+			unit.cancel_attack()
 		unit.set_movement_target(move_targets[index])
 
 
@@ -370,7 +356,7 @@ func _dispatch_attack_command(target: Node3D) -> void:
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
-		if unit is Spearman or unit is Swordsman or unit is Archer or unit is HeavyCavalry or unit is LightCavalry or unit is CavalryArcher or unit is Cannon or unit is Hero:
+		if _is_combat_order_unit(unit):
 			military_units.append(unit)
 
 	if military_units.is_empty():
@@ -378,22 +364,7 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
-		if unit is Spearman:
-			(unit as Spearman).command_attack(target, index)
-		elif unit is Swordsman:
-			(unit as Swordsman).command_attack(target, index)
-		elif unit is Archer:
-			(unit as Archer).command_attack(target, index)
-		elif unit is HeavyCavalry:
-			(unit as HeavyCavalry).command_attack(target, index)
-		elif unit is LightCavalry:
-			(unit as LightCavalry).command_attack(target, index)
-		elif unit is CavalryArcher:
-			(unit as CavalryArcher).command_attack(target, index)
-		elif unit is Cannon:
-			(unit as Cannon).command_attack(target, index)
-		elif unit is Hero:
-			(unit as Hero).command_attack(target, index)
+		unit.command_attack(target, index)
 
 	if target is Building:
 		_play_attack_target_feedback(target as Building)
@@ -411,22 +382,8 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 	)
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
-		if unit is Spearman:
-			(unit as Spearman).command_attack_move(move_targets[index])
-		elif unit is Swordsman:
-			(unit as Swordsman).command_attack_move(move_targets[index])
-		elif unit is Archer:
-			(unit as Archer).command_attack_move(move_targets[index])
-		elif unit is HeavyCavalry:
-			(unit as HeavyCavalry).command_attack_move(move_targets[index])
-		elif unit is LightCavalry:
-			(unit as LightCavalry).command_attack_move(move_targets[index])
-		elif unit is CavalryArcher:
-			(unit as CavalryArcher).command_attack_move(move_targets[index])
-		elif unit is Cannon:
-			(unit as Cannon).command_attack_move(move_targets[index])
-		elif unit is Hero:
-			(unit as Hero).command_attack_move(move_targets[index])
+		if _is_combat_order_unit(unit):
+			unit.command_attack_move(move_targets[index])
 		elif unit is Worker:
 			(unit as Worker).cancel_gathering()
 			unit.set_movement_target(move_targets[index])
@@ -453,22 +410,8 @@ func _dispatch_construction_command(building: Building) -> void:
 		if unit is Worker:
 			(unit as Worker).start_construction_order(building)
 			dispatched_to_worker = true
-		elif unit is Spearman:
-			(unit as Spearman).cancel_attack()
-		elif unit is Swordsman:
-			(unit as Swordsman).cancel_attack()
-		elif unit is Archer:
-			(unit as Archer).cancel_attack()
-		elif unit is HeavyCavalry:
-			(unit as HeavyCavalry).cancel_attack()
-		elif unit is LightCavalry:
-			(unit as LightCavalry).cancel_attack()
-		elif unit is CavalryArcher:
-			(unit as CavalryArcher).cancel_attack()
-		elif unit is Cannon:
-			(unit as Cannon).cancel_attack()
-		elif unit is Hero:
-			(unit as Hero).cancel_attack()
+		elif _is_combat_order_unit(unit):
+			unit.cancel_attack()
 
 	if dispatched_to_worker:
 		_play_construction_target_feedback(building)
@@ -980,6 +923,10 @@ func _is_commandable_unit(candidate: Variant) -> bool:
 		return false
 
 	return not (candidate as Unit).is_in_group(&"neutral_creeps")
+
+
+func _is_combat_order_unit(unit: Unit) -> bool:
+	return unit != null and unit.supports_combat_orders()
 
 
 func _is_inspectable_unit(candidate: Variant) -> bool:
