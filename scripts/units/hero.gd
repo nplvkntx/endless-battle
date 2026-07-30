@@ -1002,7 +1002,7 @@ func _damage_enemies_in_ground_slam_radius() -> void:
 	var slam_radius: float = get_ground_slam_radius()
 	var slam_damage: int = get_ground_slam_damage()
 
-	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
+	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(self):
 		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
 			if not NodeSafety.is_alive_node(node):
 				continue

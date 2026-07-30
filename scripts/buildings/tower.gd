@@ -106,7 +106,7 @@ func _is_cached_target_valid() -> bool:
 	if not NodeSafety.is_alive_node(_cached_attack_target):
 		return false
 
-	if not CombatTargetValidation.is_tower_attack_target(_cached_attack_target):
+	if not CombatTargetValidation.is_tower_attack_target(self, _cached_attack_target):
 		return false
 
 	return CombatTargetValidation.is_within_attack_range(
@@ -126,7 +126,7 @@ func _fire_projectile(target: Node3D) -> void:
 	if not NodeSafety.is_alive_node(target):
 		return
 
-	if not CombatTargetValidation.is_tower_attack_target(target):
+	if not CombatTargetValidation.is_tower_attack_target(self, target):
 		return
 
 	if not CombatTargetValidation.is_within_attack_range(self, target, attack_range):

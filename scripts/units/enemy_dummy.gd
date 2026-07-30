@@ -208,24 +208,18 @@ func _clear_invalid_attack_target() -> void:
 
 
 func _resolve_combat_attacker(attacker) -> Unit:
-	if not CombatTargetValidation.is_valid_combat_target(attacker):
-		return null
-
 	if not attacker is Unit:
 		return null
 
 	var unit: Unit = attacker as Unit
-	if unit is EnemyDummy:
+	if not CombatTargetValidation.are_hostile(self, unit):
 		return null
 
 	return unit
 
 
 func _is_valid_attack_target(target: Unit) -> bool:
-	if not CombatTargetValidation.is_valid_combat_target(target):
-		return false
-
-	return not target is EnemyDummy
+	return CombatTargetValidation.are_hostile(self, target)
 
 
 func _is_in_attack_range(target: Unit) -> bool:

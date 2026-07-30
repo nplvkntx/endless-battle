@@ -157,19 +157,19 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 	if not is_valid_combat_target(target):
 		return false
 
-	if target is EnemyDummy:
-		return true
-
 	if is_neutral_creep(target):
 		return true
 
-	if target is Node and (target as Node).is_in_group(&"enemies"):
-		if target is Spearman or target is Swordsman or target is Archer or target is HeavyCavalry or target is LightCavalry or target is CavalryArcher or target is Cannon or target is Worker or target is Hero:
-			return true
+	if target is EnemyDummy:
+		return true
+
+	if target is Unit and not target is Building and is_enemy_faction(target):
+		return true
 
 	return is_attackable_enemy_building(target)
 
 
+## True when the node belongs to the enemy faction (team_id / faction groups).
 static func is_enemy_faction(node: Variant) -> bool:
 	if node == null or not node is Node:
 		return false
@@ -184,9 +184,14 @@ static func is_enemy_faction(node: Variant) -> bool:
 	if node is Unit and (node as Unit).team_id >= ENEMY_TEAM_ID:
 		return true
 
+	if node is Building and (node as Building).team_id >= ENEMY_TEAM_ID:
+		return true
+
 	return false
 
 
+## Shared faction hostility check. Friendly fire is blocked unless an ability
+## bypasses apply_damage_to_target / are_hostile intentionally.
 static func are_hostile(attacker, target: Variant) -> bool:
 	if not NodeSafety.is_alive_node(attacker):
 		return false
@@ -194,17 +199,23 @@ static func are_hostile(attacker, target: Variant) -> bool:
 	if not is_valid_combat_target(target):
 		return false
 
+	if attacker == target:
+		return false
+
 	if is_neutral_creep(target) and not is_neutral_creep(attacker):
 		return true
 
 	if is_neutral_creep(attacker) and not is_neutral_creep(target):
-		return is_valid_combat_target(target)
+		return true
 
 	return is_enemy_faction(attacker) != is_enemy_faction(target)
 
 
 static func is_attack_target_for_attacker(attacker, target: Variant) -> bool:
 	if not are_hostile(attacker, target):
+		return false
+
+	if target is GatherableResource:
 		return false
 
 	if is_enemy_faction(attacker):
@@ -216,7 +227,15 @@ static func is_attack_target_for_attacker(attacker, target: Variant) -> bool:
 			return is_valid_combat_target(target)
 		return false
 
-	return is_player_unit_attack_target(target)
+	if is_neutral_creep(target):
+		return true
+	if target is EnemyDummy:
+		return true
+	if target is Unit and not target is Building:
+		return true
+	if is_attackable_enemy_building(target):
+		return true
+	return false
 
 
 static func is_hero_unit_ability_target(attacker, target: Variant) -> bool:
@@ -240,8 +259,38 @@ static func is_hero_unit_ability_target(attacker, target: Variant) -> bool:
 	return target is Node3D
 
 
-static func get_hostile_search_groups() -> Array[StringName]:
+## Scene groups that may contain targets hostile to the attacker.
+## Always filter results with are_hostile / is_attack_target_for_attacker.
+static func get_hostile_search_groups(attacker = null) -> Array[StringName]:
+	if attacker != null and is_neutral_creep(attacker):
+		return [
+			&"enemies",
+			ENEMY_BUILDING_GROUP,
+			PLAYER_COMMAND_CENTER_GROUP,
+			BUILDINGS_GROUP,
+			&"units",
+			&"heroes",
+			NEUTRAL_CREEP_GROUP,
+		]
+
+	if attacker != null and is_enemy_faction(attacker):
+		return [
+			PLAYER_COMMAND_CENTER_GROUP,
+			BUILDINGS_GROUP,
+			&"units",
+			&"heroes",
+			NEUTRAL_CREEP_GROUP,
+		]
+
 	return [&"enemies", ENEMY_BUILDING_GROUP, NEUTRAL_CREEP_GROUP]
+
+
+## Unit/creep groups towers auto-acquire against (buildings excluded).
+static func get_tower_hostile_search_groups(tower) -> Array[StringName]:
+	if tower != null and is_enemy_faction(tower):
+		return [&"units", &"heroes", NEUTRAL_CREEP_GROUP]
+
+	return [&"enemies", NEUTRAL_CREEP_GROUP]
 
 
 static func find_closest_attack_target_for_attacker(attacker) -> Node3D:
@@ -274,15 +323,14 @@ static func find_best_attack_target_for_attacker_in_range(
 	return _find_best_enemy_faction_attack_target(attacker, search_range)
 
 
-static func is_tower_attack_target(target: Variant) -> bool:
+static func is_tower_attack_target(tower, target: Variant) -> bool:
+	if not NodeSafety.is_alive_node(tower):
+		return false
+
 	if not is_valid_combat_target(target):
 		return false
 
-	if not target is Node:
-		return false
-
-	var node: Node = target as Node
-	if not node.is_in_group("enemies"):
+	if not target is Node3D:
 		return false
 
 	if target is GatherableResource:
@@ -294,7 +342,7 @@ static func is_tower_attack_target(target: Variant) -> bool:
 	if target is EnemyDummy and (target as EnemyDummy).exclude_from_tower_auto_target:
 		return false
 
-	return true
+	return are_hostile(tower, target)
 
 
 static func find_closest_tower_attack_target_in_range(
@@ -304,27 +352,32 @@ static func find_closest_tower_attack_target_in_range(
 	if tower == null or attack_range <= 0.0:
 		return null
 
+	var tree: SceneTree = tower.get_tree()
+	if tree == null:
+		return null
+
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
 
-	for node_variant: Variant in get_cached_group_nodes(tower.get_tree(), &"enemies"):
-		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
-			continue
+	for group_name: StringName in get_tower_hostile_search_groups(tower):
+		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+				continue
 
-		var node: Node = node_variant as Node
-		if not node is Node3D:
-			continue
-		if not is_tower_attack_target(node):
-			continue
+			var node: Node = node_variant as Node
+			if not node is Node3D:
+				continue
+			if not is_tower_attack_target(tower, node):
+				continue
 
-		var target: Node3D = node as Node3D
-		var distance: float = get_horizontal_center_distance(tower, target)
-		if distance > attack_range:
-			continue
+			var target: Node3D = node as Node3D
+			var distance: float = get_horizontal_center_distance(tower, target)
+			if distance > attack_range:
+				continue
 
-		if distance < closest_distance:
-			closest_distance = distance
-			closest_target = target
+			if distance < closest_distance:
+				closest_distance = distance
+				closest_target = target
 
 	return closest_target
 
@@ -507,12 +560,7 @@ static func _find_best_enemy_faction_attack_target(
 	var best_target: Node3D = null
 	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
 	var best_distance: float = INF
-	var groups_to_search: Array[StringName] = [
-		PLAYER_COMMAND_CENTER_GROUP,
-		BUILDINGS_GROUP,
-		&"units",
-		&"heroes",
-	]
+	var groups_to_search: Array[StringName] = get_hostile_search_groups(attacker)
 
 	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:
@@ -553,7 +601,7 @@ static func _find_closest_hostile_attack_target_in_range(
 	PerfCounters.record_target_search()
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
-	var groups_to_search: Array[StringName] = get_hostile_search_groups()
+	var groups_to_search: Array[StringName] = get_hostile_search_groups(attacker)
 
 	var tree: SceneTree = attacker.get_tree()
 	for group_name: StringName in groups_to_search:

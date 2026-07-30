@@ -17,7 +17,7 @@ static func apply_radial_damage(
 
 	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(attacker)
 
-	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups():
+	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(safe_attacker):
 		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if not NodeSafety.is_alive_node(node_variant):
 				continue
