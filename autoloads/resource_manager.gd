@@ -15,6 +15,7 @@ var food_max: int = MatchConfig.HUMAN_STARTING_FOOD_MAX
 
 
 func _ready() -> void:
+	MatchSession.register_match_reset(&"ResourceManager", reset_to_starting_values)
 	reset_to_starting_values()
 
 

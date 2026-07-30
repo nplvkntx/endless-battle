@@ -479,6 +479,9 @@ static func reset_match_state() -> void:
 	_attack_wave_ready_to_advance = false
 	_attack_wave_pending_transition = AttackWaveState.NONE
 	_attack_wave_pending_transition_reason = ""
+	_perf_diag_timer = 0.0
+	_orders_issued_since_diag = 0
+	_perf_overlay_status_timer = 0.0
 	EnemyUnitMission.reset_match_state()
 
 

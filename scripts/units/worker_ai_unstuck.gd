@@ -8,6 +8,11 @@ const DEBUG_AI_WORKER_UNSTUCK: bool = false
 static var _reserved_escape_points: Array[Dictionary] = []
 
 
+## Drop escape-point reservations left by workers from a previous match.
+static func reset_match_state() -> void:
+	_reserved_escape_points.clear()
+
+
 static func is_active(worker: Worker) -> bool:
 	return worker._ai_unstuck_active
 

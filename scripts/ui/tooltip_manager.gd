@@ -18,6 +18,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_ui()
 	hide_tooltip()
+	MatchSession.register_match_reset(&"TooltipManager", hide_tooltip)
 
 
 func _process(_delta: float) -> void:

@@ -49,6 +49,7 @@ static var verbose_ai_logging: bool = false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process(true)
+	MatchSession.register_match_reset(&"PerfCounters", reset_all)
 
 
 func _process(delta: float) -> void:

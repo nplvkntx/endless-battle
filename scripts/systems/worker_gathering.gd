@@ -10,6 +10,10 @@ const MAP_RESOURCES_NODE_NAME := NodePath("MapResources")
 static var _enemy_stockpile_warning_shown: bool = false
 
 
+static func reset_match_state() -> void:
+	_enemy_stockpile_warning_shown = false
+
+
 static func find_nearest_dropoff(
 	from_position: Vector3,
 	for_enemy: bool,

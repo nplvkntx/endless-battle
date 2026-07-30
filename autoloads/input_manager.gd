@@ -10,6 +10,10 @@ signal build_command_requested(building_id: StringName)
 var attack_move_armed: bool = false
 
 
+func _ready() -> void:
+	MatchSession.register_match_reset(&"InputManager", disarm_attack_move)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event := event as InputEventKey

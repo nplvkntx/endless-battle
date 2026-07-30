@@ -36,6 +36,14 @@ static var _group_cache_tree_id: int = -1
 static var _cached_group_nodes: Dictionary = {}
 
 
+## Clear attack-slot and group caches so instance IDs cannot leak across matches.
+static func reset_match_state() -> void:
+	_attack_slot_counter_by_target.clear()
+	_group_cache_frame = -1
+	_group_cache_tree_id = -1
+	_cached_group_nodes.clear()
+
+
 static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> Array:
 	if tree == null:
 		return []

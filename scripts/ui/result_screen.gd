@@ -20,12 +20,12 @@ func _ready() -> void:
 
 
 func _on_restart_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/main.tscn")
+	MatchSession.restart_match()
 
 
 func _on_main_menu_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+	MatchSession.go_to_main_menu()
 
 
 func _on_quit_pressed() -> void:
-	get_tree().quit()
+	MatchSession.quit_game()

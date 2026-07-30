@@ -23,6 +23,12 @@ static var _cached_active_camps_tree_id: int = -1
 static var _cached_active_camps: Array[Node3D] = []
 
 
+static func reset_match_state() -> void:
+	_cached_active_camps_frame = -1
+	_cached_active_camps_tree_id = -1
+	_cached_active_camps.clear()
+
+
 static func is_resource_guarded_by_active_camp(
 	resource: Node3D,
 	tree: SceneTree

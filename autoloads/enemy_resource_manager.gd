@@ -14,6 +14,7 @@ var _reserved_wood: int = 0
 
 
 func _ready() -> void:
+	MatchSession.register_match_reset(&"EnemyResourceManager", reset_to_starting_values)
 	reset_to_starting_values()
 
 

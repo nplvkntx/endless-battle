@@ -150,6 +150,23 @@ var _enemy_levels: Dictionary = {
 	UPGRADE_CAVALRY_ARCHER_DEFENSE: 0,
 }
 
+
+func _ready() -> void:
+	MatchSession.register_match_reset(&"UpgradeManager", reset_to_starting_values)
+
+
+## Zero player and enemy research so a new match never inherits prior upgrades.
+func reset_to_starting_values() -> void:
+	_zero_level_dictionary(_levels)
+	_zero_level_dictionary(_enemy_levels)
+	upgrade_levels_changed.emit()
+
+
+func _zero_level_dictionary(levels: Dictionary) -> void:
+	for upgrade_id: Variant in levels.keys():
+		levels[upgrade_id] = 0
+
+
 static func get_cavalry_attack_upgrade_id(cavalry_unit_id: StringName) -> StringName:
 	return StringName("%s_attack" % cavalry_unit_id)
 
