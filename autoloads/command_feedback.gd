@@ -306,7 +306,8 @@ func _animate_fade_and_free(
 			0.0,
 			fade_duration
 		)
-	tween.chain().tween_callback(_finish_tracked.bind(root, track))
+	# Lambda avoids CallbackTweener typed-Array bind failures ("Cannot convert Object to Object").
+	tween.chain().tween_callback(func() -> void: _finish_tracked(root, track))
 
 
 func _animate_dust(root: Node3D, lifetime: float) -> void:
@@ -317,7 +318,7 @@ func _animate_dust(root: Node3D, lifetime: float) -> void:
 	tween.tween_property(root, "scale", Vector3.ONE * 1.8, lifetime)
 	for material: StandardMaterial3D in materials:
 		tween.tween_property(material, "albedo_color:a", 0.0, lifetime)
-	tween.chain().tween_callback(_finish_tracked.bind(root, _active_dust))
+	tween.chain().tween_callback(func() -> void: _finish_tracked(root, _active_dust))
 
 
 func _collect_materials(root: Node) -> Array[StandardMaterial3D]:

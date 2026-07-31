@@ -22,25 +22,25 @@ var patrol_points: Array[Vector3] = []
 var assigned_slot: int = -1
 
 
-static func move(destination: Vector3) -> UnitOrder:
+static func move(move_destination: Vector3) -> UnitOrder:
 	var order := UnitOrder.new()
 	order.type = Type.MOVE
-	order.destination = destination
+	order.destination = move_destination
 	return order
 
 
-static func attack(target: Node3D, assigned_slot: int = -1) -> UnitOrder:
+static func attack(attack_target: Node3D, attack_assigned_slot: int = -1) -> UnitOrder:
 	var order := UnitOrder.new()
 	order.type = Type.ATTACK
-	order.target = NodeSafety.safe_node(target)
-	order.assigned_slot = assigned_slot
+	order.target = NodeSafety.safe_node(attack_target)
+	order.assigned_slot = attack_assigned_slot
 	return order
 
 
-static func attack_move(destination: Vector3) -> UnitOrder:
+static func attack_move(move_destination: Vector3) -> UnitOrder:
 	var order := UnitOrder.new()
 	order.type = Type.ATTACK_MOVE
-	order.destination = destination
+	order.destination = move_destination
 	return order
 
 

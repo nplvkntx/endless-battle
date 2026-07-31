@@ -1,10 +1,14 @@
 extends Node
 
 ## Global input routing for selection, commands, and camera controls.
-## Translates raw input into game commands via signals — no direct unit control here.
+## Public command signals are part of the input architecture for future/external listeners.
+## SelectionManager currently consumes arm/disarm state directly; keep signals intentional.
 
+@warning_ignore("unused_signal") ## Intentional public input API; listeners optional.
 signal selection_requested(screen_position: Vector2)
+@warning_ignore("unused_signal") ## Intentional public input API; listeners optional.
 signal move_command_requested(world_position: Vector3)
+@warning_ignore("unused_signal") ## Intentional public input API; listeners optional.
 signal build_command_requested(building_id: StringName)
 
 var attack_move_armed: bool = false
