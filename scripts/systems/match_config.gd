@@ -1,14 +1,14 @@
 class_name MatchConfig
 extends RefCounted
 
-## Central match-start balance values for human and AI factions.
+## Match-start balance — values live in EconomyStats (edit there only).
 
-const NORMAL_STARTING_GOLD: int = 500
-const NORMAL_STARTING_WOOD: int = 500
-const STARTING_FOOD_MAX: int = 15
+const NORMAL_STARTING_GOLD: int = EconomyStats.STARTING_GOLD
+const NORMAL_STARTING_WOOD: int = EconomyStats.STARTING_WOOD
+const STARTING_FOOD_MAX: int = EconomyStats.STARTING_FOOD_MAX
 
-const HUMAN_STARTING_FOOD: int = STARTING_WORKER_COUNT
-const AI_STARTING_FOOD_MAX: int = STARTING_FOOD_MAX
-const HUMAN_STARTING_FOOD_MAX: int = STARTING_FOOD_MAX
+const HUMAN_STARTING_FOOD: int = EconomyStats.HUMAN_STARTING_FOOD
+const AI_STARTING_FOOD_MAX: int = EconomyStats.STARTING_FOOD_MAX
+const HUMAN_STARTING_FOOD_MAX: int = EconomyStats.STARTING_FOOD_MAX
 
-const STARTING_WORKER_COUNT: int = 5
+const STARTING_WORKER_COUNT: int = EconomyStats.STARTING_WORKER_COUNT

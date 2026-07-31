@@ -6,8 +6,8 @@ extends Node
 signal health_changed(current_health: int, max_health: int)
 signal health_depleted
 
-const HERO_PASSIVE_REGEN_PER_SECOND := 0.5
-const ARMY_PASSIVE_REGEN_PER_SECOND := 0.25
+const HERO_PASSIVE_REGEN_PER_SECOND := UnitStats.HERO_PASSIVE_REGEN_PER_SECOND
+const ARMY_PASSIVE_REGEN_PER_SECOND := UnitStats.ARMY_PASSIVE_REGEN_PER_SECOND
 
 @export var max_health: int = 100
 ## Set to -1 to auto-detect from the owning unit type. Zero disables passive regen.

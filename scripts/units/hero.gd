@@ -2,14 +2,14 @@ extends Hero
 
 ## Player hero unit — melee combat, stronger than a Swordsman.
 
-@export var attack_damage: int = 18
-@export var attack_range: float = 2.0
-@export var attack_cooldown: float = 0.85
-@export var ground_slam_mana_cost: int = 40
-@export var mana_regen_rate: float = 5.0
-@export var divine_protection_mana_cost: int = 30
-@export var power_strike_mana_cost: int = 25
-@export var execute_mana_cost: int = 50
+@export var attack_damage: int = HeroStats.ATTACK_DAMAGE
+@export var attack_range: float = HeroStats.ATTACK_RANGE
+@export var attack_cooldown: float = HeroStats.ATTACK_COOLDOWN
+@export var ground_slam_mana_cost: int = HeroStats.GROUND_SLAM_MANA_COST
+@export var mana_regen_rate: float = HeroStats.MANA_REGEN_RATE
+@export var divine_protection_mana_cost: int = HeroStats.DIVINE_PROTECTION_MANA_COST
+@export var power_strike_mana_cost: int = HeroStats.POWER_STRIKE_MANA_COST
+@export var execute_mana_cost: int = HeroStats.EXECUTE_MANA_COST
 
 signal divine_protection_state_changed(is_active: bool)
 
@@ -27,10 +27,10 @@ const DIVINE_PROTECTION_GLOW_PULSE_DURATION := 0.6
 const POWER_STRIKE_LUNGE_DISTANCE := 0.55
 const POWER_STRIKE_FLASH_DURATION := 0.15
 const EXECUTE_LUNGE_DISTANCE := 0.5
-const BASE_ATTACK_DAMAGE := 18
-const BASE_MAX_MANA := 100
-const BASE_MOVE_SPEED := 5.5
-const MOVE_SPEED_PER_LEVEL_AFTER_18 := 0.05
+const BASE_ATTACK_DAMAGE := HeroStats.ATTACK_DAMAGE
+const BASE_MAX_MANA := HeroStats.MAX_MANA
+const BASE_MOVE_SPEED := HeroStats.MOVE_SPEED
+const MOVE_SPEED_PER_LEVEL_AFTER_18 := HeroStats.MOVE_SPEED_PER_LEVEL_AFTER_18
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 const HOLD_RETURN_DISTANCE := 1.25
 const OPPORTUNISTIC_CHASE_LEASH := 18.0

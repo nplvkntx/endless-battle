@@ -3,21 +3,22 @@ extends RefCounted
 
 ## Grants hero XP and kill gold when valid combat targets are killed.
 
-const CREEP_XP_WEAK: int = 25
-const CREEP_XP_MEDIUM: int = 50
-const CREEP_XP_STRONG: int = 100
-const CREEP_GOLD_WEAK: int = 5
-const CREEP_GOLD_MEDIUM: int = 10
-const CREEP_GOLD_STRONG: int = 20
+## Kill rewards — edit EconomyStats only.
+const CREEP_XP_WEAK: int = EconomyStats.CREEP_XP_WEAK
+const CREEP_XP_MEDIUM: int = EconomyStats.CREEP_XP_MEDIUM
+const CREEP_XP_STRONG: int = EconomyStats.CREEP_XP_STRONG
+const CREEP_GOLD_WEAK: int = EconomyStats.CREEP_GOLD_WEAK
+const CREEP_GOLD_MEDIUM: int = EconomyStats.CREEP_GOLD_MEDIUM
+const CREEP_GOLD_STRONG: int = EconomyStats.CREEP_GOLD_STRONG
 
-const WORKER_XP: int = 10
-const WORKER_GOLD: int = 2
-const MILITARY_XP: int = 25
-const MILITARY_GOLD: int = 5
-const ENEMY_HERO_XP: int = 150
-const ENEMY_HERO_GOLD: int = 50
+const WORKER_XP: int = EconomyStats.WORKER_XP
+const WORKER_GOLD: int = EconomyStats.WORKER_GOLD
+const MILITARY_XP: int = EconomyStats.MILITARY_XP
+const MILITARY_GOLD: int = EconomyStats.MILITARY_GOLD
+const ENEMY_HERO_XP: int = EconomyStats.ENEMY_HERO_XP
+const ENEMY_HERO_GOLD: int = EconomyStats.ENEMY_HERO_GOLD
 
-const CREEP_XP_SHARE_RANGE: float = 18.0
+const CREEP_XP_SHARE_RANGE: float = EconomyStats.CREEP_XP_SHARE_RANGE
 const REWARDS_GRANTED_META := &"_hero_xp_rewards_granted"
 
 

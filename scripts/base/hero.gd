@@ -13,19 +13,21 @@ signal inventory_changed()
 signal respawn_requested(hero: Hero)
 signal mana_changed(current_mana: int, max_mana: int)
 
-const MAX_LEVEL: int = 30
-const XP_PER_LEVEL_MULTIPLIER: int = 100
-const MIN_ABILITY_POINT_LEVEL: int = 2
-const MAX_ABILITY_POINT_LEVEL: int = 18
-const HEALTH_PER_LEVEL: int = 25
-const MANA_PER_LEVEL: int = 10
-const ATTACK_DAMAGE_PER_LEVEL: int = 2
-const BASE_MAX_HEALTH: int = 200
-const INVENTORY_SLOT_COUNT: int = 6
-const MAX_COOLDOWN_REDUCTION: float = 0.4
-const MAX_MANA_COST_REDUCTION: float = 0.4
-const ABILITY_POWER_EFFECT_SECONDS_PER_POINT: float = 0.01
-const ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT: float = 0.001
+const MAX_LEVEL: int = HeroStats.MAX_LEVEL
+const XP_PER_LEVEL_MULTIPLIER: int = HeroStats.XP_PER_LEVEL_MULTIPLIER
+const MIN_ABILITY_POINT_LEVEL: int = HeroStats.MIN_ABILITY_POINT_LEVEL
+const MAX_ABILITY_POINT_LEVEL: int = HeroStats.MAX_ABILITY_POINT_LEVEL
+const HEALTH_PER_LEVEL: int = HeroStats.HEALTH_PER_LEVEL
+const MANA_PER_LEVEL: int = HeroStats.MANA_PER_LEVEL
+const ATTACK_DAMAGE_PER_LEVEL: int = HeroStats.ATTACK_DAMAGE_PER_LEVEL
+const BASE_MAX_HEALTH: int = HeroStats.MAX_HEALTH
+const INVENTORY_SLOT_COUNT: int = HeroStats.INVENTORY_SLOT_COUNT
+const MAX_COOLDOWN_REDUCTION: float = HeroStats.MAX_COOLDOWN_REDUCTION
+const MAX_MANA_COST_REDUCTION: float = HeroStats.MAX_MANA_COST_REDUCTION
+const ABILITY_POWER_EFFECT_SECONDS_PER_POINT: float = HeroStats.ABILITY_POWER_EFFECT_SECONDS_PER_POINT
+const ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT: float = (
+	HeroStats.ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT
+)
 
 @export var hero_data: Resource
 
@@ -38,7 +40,7 @@ var ability_points: int = 0
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var inventory: Array = []
 var current_mana: int = 0
-@export var max_mana: int = 100
+@export var max_mana: int = HeroStats.MAX_MANA
 var _current_xp: float = 0.0
 
 

@@ -5,10 +5,10 @@ extends Unit
 
 const UNIT_ID: StringName = &"heavy_cavalry"
 
-@export var attack_damage: int = 14
-@export var attack_range: float = 2.2
-@export var attack_cooldown: float = 1.1
-@export var armor: int = 2
+@export var attack_damage: int = UnitStats.HEAVY_CAVALRY_ATTACK_DAMAGE
+@export var attack_range: float = UnitStats.HEAVY_CAVALRY_ATTACK_RANGE
+@export var attack_cooldown: float = UnitStats.HEAVY_CAVALRY_ATTACK_COOLDOWN
+@export var armor: int = UnitStats.HEAVY_CAVALRY_ARMOR
 
 var _base_attack_damage: int = -1
 var _base_armor: int = -1
@@ -336,8 +336,8 @@ func apply_stable_upgrades() -> void:
 	var defense_level: int = _get_stable_upgrade_level(
 		UpgradeManager.get_cavalry_defense_upgrade_id(UNIT_ID)
 	)
-	attack_damage = _base_attack_damage + attack_level * UpgradeManager.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
-	armor = _base_armor + defense_level * UpgradeManager.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
+	attack_damage = _base_attack_damage + attack_level * UpgradeStats.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
+	armor = _base_armor + defense_level * UpgradeStats.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
 
 
 func _get_stable_upgrade_level(upgrade_id: StringName) -> int:

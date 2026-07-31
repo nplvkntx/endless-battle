@@ -6,7 +6,7 @@ extends Building
 
 signal gate_state_changed
 
-const GATE_CONVERSION_WOOD_COST := 100
+const GATE_CONVERSION_WOOD_COST := BuildingStats.GATE_CONVERSION_WOOD_COST
 const GATE_POST_SIZE := Vector3(0.22, 1.5, 0.22)
 const GATE_POST_X_OFFSET := 0.36
 const GATE_PASSAGE_SIZE := Vector3(0.46, 1.2, 0.12)

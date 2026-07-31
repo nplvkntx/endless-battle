@@ -10,10 +10,10 @@ var _base_armor: int = -1
 
 
 func _init() -> void:
-	attack_damage = 8
-	attack_range = 2.0
-	attack_cooldown = 0.9
-	armor = 0
+	attack_damage = UnitStats.LIGHT_CAVALRY_ATTACK_DAMAGE
+	attack_range = UnitStats.LIGHT_CAVALRY_ATTACK_RANGE
+	attack_cooldown = UnitStats.LIGHT_CAVALRY_ATTACK_COOLDOWN
+	armor = UnitStats.LIGHT_CAVALRY_ARMOR
 
 
 func _ready() -> void:
@@ -44,8 +44,8 @@ func apply_stable_upgrades() -> void:
 	var defense_level: int = _get_stable_upgrade_level(
 		UpgradeManager.get_cavalry_defense_upgrade_id(UNIT_ID)
 	)
-	attack_damage = _base_attack_damage + attack_level * UpgradeManager.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
-	armor = _base_armor + defense_level * UpgradeManager.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
+	attack_damage = _base_attack_damage + attack_level * UpgradeStats.CAVALRY_ATTACK_DAMAGE_PER_LEVEL
+	armor = _base_armor + defense_level * UpgradeStats.CAVALRY_DEFENSE_ARMOR_PER_LEVEL
 
 
 func _get_stable_upgrade_level(upgrade_id: StringName) -> int:

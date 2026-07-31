@@ -10,9 +10,10 @@ signal repeat_state_changed()
 const TRAIN_ID_CANNON: StringName = &"cannon"
 
 const CANNON_SCENE: PackedScene = preload("res://scenes/units/cannon.tscn")
-const CANNON_TRAIN_GOLD_COST: int = 275
-const CANNON_TRAIN_FOOD_COST: int = 2
-const CANNON_TRAIN_SECONDS: float = 14.0
+## Train costs — edit UnitStats only.
+const CANNON_TRAIN_GOLD_COST: int = UnitStats.CANNON_GOLD_COST
+const CANNON_TRAIN_FOOD_COST: int = UnitStats.CANNON_FOOD_COST
+const CANNON_TRAIN_SECONDS: float = UnitStats.CANNON_TRAIN_SECONDS
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
 const MAX_ENEMY_UNIT_QUEUE: int = 2

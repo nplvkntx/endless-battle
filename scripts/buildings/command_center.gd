@@ -10,9 +10,10 @@ signal tier_state_changed()
 const TRAIN_ID_WORKER: StringName = &"worker"
 const UPGRADE_ID_TIER: StringName = &"cc_tier_upgrade"
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
-const TRAIN_GOLD_COST: int = 50
-const TRAIN_FOOD_COST: int = 1
-const TRAIN_SECONDS: float = 3.0
+## Train / tier costs — edit UnitStats / BuildingStats only.
+const TRAIN_GOLD_COST: int = UnitStats.WORKER_GOLD_COST
+const TRAIN_FOOD_COST: int = UnitStats.WORKER_FOOD_COST
+const TRAIN_SECONDS: float = UnitStats.WORKER_TRAIN_SECONDS
 const MAX_ENEMY_WORKER_QUEUE: int = 2
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
@@ -20,12 +21,12 @@ const ENEMY_TEAM_ID: int = 1
 
 const MIN_TIER: int = 1
 const MAX_TIER: int = 3
-const TIER_2_GOLD_COST: int = 800
-const TIER_2_WOOD_COST: int = 500
-const TIER_2_UPGRADE_SECONDS: float = 60.0
-const TIER_3_GOLD_COST: int = 2000
-const TIER_3_WOOD_COST: int = 1200
-const TIER_3_UPGRADE_SECONDS: float = 120.0
+const TIER_2_GOLD_COST: int = BuildingStats.CC_TIER_2_GOLD_COST
+const TIER_2_WOOD_COST: int = BuildingStats.CC_TIER_2_WOOD_COST
+const TIER_2_UPGRADE_SECONDS: float = BuildingStats.CC_TIER_2_UPGRADE_SECONDS
+const TIER_3_GOLD_COST: int = BuildingStats.CC_TIER_3_GOLD_COST
+const TIER_3_WOOD_COST: int = BuildingStats.CC_TIER_3_WOOD_COST
+const TIER_3_UPGRADE_SECONDS: float = BuildingStats.CC_TIER_3_UPGRADE_SECONDS
 
 const TIER_VISUALS_NODE_NAME := &"TierVisuals"
 const TIER2_MARKER_NAME := &"Tier2Marker"

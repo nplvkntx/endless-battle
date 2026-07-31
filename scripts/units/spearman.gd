@@ -5,7 +5,7 @@ extends MilitaryUnit
 
 
 func _init() -> void:
-	attack_damage = 6
-	attack_range = 2.4
-	attack_cooldown = 1.0
-	armor = 0
+	attack_damage = UnitStats.SPEARMAN_ATTACK_DAMAGE
+	attack_range = UnitStats.SPEARMAN_ATTACK_RANGE
+	attack_cooldown = UnitStats.SPEARMAN_ATTACK_COOLDOWN
+	armor = UnitStats.SPEARMAN_ARMOR

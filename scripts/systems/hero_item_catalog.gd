@@ -1,7 +1,7 @@
 class_name HeroItemCatalog
 extends RefCounted
 
-## Starter hero shop catalog. Add recipes and legendary items here later.
+## Starter hero shop catalog. Item numbers live in ItemStats — edit there only.
 
 const ITEM_LONG_SWORD: StringName = &"long_sword"
 const ITEM_RUBY_CRYSTAL: StringName = &"ruby_crystal"
@@ -51,74 +51,92 @@ static func _ensure_loaded() -> void:
 	_definitions[ITEM_LONG_SWORD] = _make_definition(
 		ITEM_LONG_SWORD,
 		"Long Sword",
-		350,
+		ItemStats.LONG_SWORD_GOLD,
 		"Q",
 		Color(0.72, 0.74, 0.82, 1),
-		{"bonus_attack_damage": 10}
+		{"bonus_attack_damage": ItemStats.LONG_SWORD_BONUS_ATTACK_DAMAGE}
 	)
 	_definitions[ITEM_RUBY_CRYSTAL] = _make_definition(
 		ITEM_RUBY_CRYSTAL,
 		"Ruby Crystal",
-		400,
+		ItemStats.RUBY_CRYSTAL_GOLD,
 		"W",
 		Color(0.82, 0.18, 0.2, 1),
-		{"bonus_max_health": 100, "heal_on_purchase": 100}
+		{
+			"bonus_max_health": ItemStats.RUBY_CRYSTAL_BONUS_MAX_HEALTH,
+			"heal_on_purchase": ItemStats.RUBY_CRYSTAL_HEAL_ON_PURCHASE,
+		}
 	)
 	_definitions[ITEM_BOOTS] = _make_definition(
 		ITEM_BOOTS,
 		"Boots",
-		300,
+		ItemStats.BOOTS_GOLD,
 		"E",
 		Color(0.42, 0.3, 0.18, 1),
-		{"bonus_move_speed": 10.0}
+		{"bonus_move_speed": ItemStats.BOOTS_BONUS_MOVE_SPEED}
 	)
 	_definitions[ITEM_WIZARD_ORB] = _make_definition(
 		ITEM_WIZARD_ORB,
 		"Wizard Orb",
-		450,
+		ItemStats.WIZARD_ORB_GOLD,
 		"R",
 		Color(0.35, 0.45, 0.92, 1),
-		{"bonus_max_mana": 75, "restore_mana_on_purchase": 75}
+		{
+			"bonus_max_mana": ItemStats.WIZARD_ORB_BONUS_MAX_MANA,
+			"restore_mana_on_purchase": ItemStats.WIZARD_ORB_RESTORE_MANA_ON_PURCHASE,
+		}
 	)
 	_definitions[ITEM_MAGE_RING] = _make_definition(
 		ITEM_MAGE_RING,
 		"Mage Ring",
-		400,
+		ItemStats.MAGE_RING_GOLD,
 		"Q",
 		Color(0.55, 0.35, 0.92, 1),
-		{"bonus_ability_power": 20}
+		{"bonus_ability_power": ItemStats.MAGE_RING_BONUS_ABILITY_POWER}
 	)
 	_definitions[ITEM_MANA_CRYSTAL] = _make_definition(
 		ITEM_MANA_CRYSTAL,
 		"Mana Crystal",
-		450,
+		ItemStats.MANA_CRYSTAL_GOLD,
 		"W",
 		Color(0.3, 0.55, 0.95, 1),
-		{"bonus_max_mana": 100, "bonus_mana_cost_reduction": 0.1}
+		{
+			"bonus_max_mana": ItemStats.MANA_CRYSTAL_BONUS_MAX_MANA,
+			"bonus_mana_cost_reduction": ItemStats.MANA_CRYSTAL_BONUS_MANA_COST_REDUCTION,
+		}
 	)
 	_definitions[ITEM_SORCERER_STAFF] = _make_definition(
 		ITEM_SORCERER_STAFF,
 		"Sorcerer Staff",
-		550,
+		ItemStats.SORCERER_STAFF_GOLD,
 		"E",
 		Color(0.62, 0.42, 0.18, 1),
-		{"bonus_ability_power": 40, "bonus_cooldown_reduction": 0.1}
+		{
+			"bonus_ability_power": ItemStats.SORCERER_STAFF_BONUS_ABILITY_POWER,
+			"bonus_cooldown_reduction": ItemStats.SORCERER_STAFF_BONUS_COOLDOWN_REDUCTION,
+		}
 	)
 	_definitions[ITEM_ARCANE_BOOTS] = _make_definition(
 		ITEM_ARCANE_BOOTS,
 		"Arcane Boots",
-		400,
+		ItemStats.ARCANE_BOOTS_GOLD,
 		"E",
 		Color(0.28, 0.42, 0.72, 1),
-		{"bonus_move_speed": 10.0, "bonus_cooldown_reduction": 0.1}
+		{
+			"bonus_move_speed": ItemStats.ARCANE_BOOTS_BONUS_MOVE_SPEED,
+			"bonus_cooldown_reduction": ItemStats.ARCANE_BOOTS_BONUS_COOLDOWN_REDUCTION,
+		}
 	)
 	_definitions[ITEM_ARCHMAGE_ORB] = _make_definition(
 		ITEM_ARCHMAGE_ORB,
 		"Archmage Orb",
-		700,
+		ItemStats.ARCHMAGE_ORB_GOLD,
 		"R",
 		Color(0.45, 0.2, 0.85, 1),
-		{"bonus_ability_power": 80, "bonus_cooldown_reduction": 0.15}
+		{
+			"bonus_ability_power": ItemStats.ARCHMAGE_ORB_BONUS_ABILITY_POWER,
+			"bonus_cooldown_reduction": ItemStats.ARCHMAGE_ORB_BONUS_COOLDOWN_REDUCTION,
+		}
 	)
 
 

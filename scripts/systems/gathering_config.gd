@@ -1,14 +1,15 @@
 class_name GatheringConfig
 extends RefCounted
 
-## Shared gathering balance values for worker resource trips.
+## Shared gathering pathing helpers. Core gather amounts live in EconomyStats.
 
-const GATHER_WAIT_SECONDS: float = 1.0
-const WORKER_CARRY_CAPACITY: int = 10
-const GATHER_CHUNK_GOLD: int = 5
-const GATHER_CHUNK_WOOD: int = 2
-const TREE_STARTING_WOOD: int = 5000
-const GOLD_MINE_STARTING_GOLD: int = 20000
+## Core gather amounts — edit EconomyStats only.
+const GATHER_WAIT_SECONDS: float = EconomyStats.GATHER_WAIT_SECONDS
+const WORKER_CARRY_CAPACITY: int = EconomyStats.WORKER_CARRY_CAPACITY
+const GATHER_CHUNK_GOLD: int = EconomyStats.GATHER_CHUNK_GOLD
+const GATHER_CHUNK_WOOD: int = EconomyStats.GATHER_CHUNK_WOOD
+const TREE_STARTING_WOOD: int = EconomyStats.TREE_STARTING_WOOD
+const GOLD_MINE_STARTING_GOLD: int = EconomyStats.GOLD_MINE_STARTING_GOLD
 const COMMAND_CENTER_DEPOSIT_REACH_BONUS: float = 0.75
 const COMMAND_CENTER_DEPOSIT_EXTENDED_REACH: float = 3.0
 const RESOURCE_INTERACTION_REACH_BONUS: float = 1.25

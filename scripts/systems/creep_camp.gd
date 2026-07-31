@@ -3,7 +3,7 @@ extends Node3D
 
 ## Owns a neutral creep camp: snapshots spawn layout and respawns after clear.
 
-const RESPAWN_DELAY_SECONDS: float = 180.0
+const RESPAWN_DELAY_SECONDS: float = EconomyStats.CREEP_CAMP_RESPAWN_DELAY_SECONDS
 const CREEP_SCENE: PackedScene = preload("res://scenes/units/neutral_creep.tscn")
 
 var _spawn_configs: Array[Dictionary] = []

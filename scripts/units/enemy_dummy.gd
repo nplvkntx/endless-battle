@@ -3,9 +3,9 @@ extends Unit
 
 ## Stationary enemy placeholder for future combat features.
 
-@export var attack_damage: int = 8
-@export var attack_range: float = 2.0
-@export var attack_cooldown: float = 1.2
+@export var attack_damage: int = UnitStats.ENEMY_DUMMY_ATTACK_DAMAGE
+@export var attack_range: float = UnitStats.ENEMY_DUMMY_ATTACK_RANGE
+@export var attack_cooldown: float = UnitStats.ENEMY_DUMMY_ATTACK_COOLDOWN
 @export var exclude_from_tower_auto_target: bool = false
 
 const HEALTH_BAR_WIDTH := 1.2

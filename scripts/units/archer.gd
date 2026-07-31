@@ -12,10 +12,10 @@ const ARROW_SPAWN_HEIGHT := 0.5
 
 
 func _init() -> void:
-	attack_damage = 7
-	attack_range = 8.0
-	attack_cooldown = 1.2
-	armor = 0
+	attack_damage = UnitStats.ARCHER_ATTACK_DAMAGE
+	attack_range = UnitStats.ARCHER_ATTACK_RANGE
+	attack_cooldown = UnitStats.ARCHER_ATTACK_COOLDOWN
+	armor = UnitStats.ARCHER_ARMOR
 
 
 func _ready() -> void:
@@ -67,9 +67,13 @@ func apply_blacksmith_upgrades() -> void:
 	var attack_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK)
 	var speed_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED)
 	var range_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_RANGE)
-	attack_damage = _base_attack_damage + attack_level * 2
-	attack_cooldown = _base_attack_cooldown * (1.0 - 0.05 * float(speed_level))
-	attack_range = _base_attack_range + float(range_level) * 8.0
+	attack_damage = _base_attack_damage + attack_level * UnitStats.ARCHER_ATTACK_DAMAGE_PER_UPGRADE_LEVEL
+	attack_cooldown = _base_attack_cooldown * (
+		1.0 - UnitStats.ARCHER_ATTACK_SPEED_COOLDOWN_REDUCTION_PER_LEVEL * float(speed_level)
+	)
+	attack_range = (
+		_base_attack_range + float(range_level) * UnitStats.ARCHER_ATTACK_RANGE_PER_UPGRADE_LEVEL
+	)
 
 
 func _get_blacksmith_upgrade_level(upgrade_id: StringName) -> int:

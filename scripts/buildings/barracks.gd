@@ -16,11 +16,12 @@ const TRAIN_ID_ARCHER: StringName = &"archer"
 const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
-const TRAIN_GOLD_COST: int = 100
-const SPEARMAN_TRAIN_GOLD_COST: int = 65
-const TRAIN_FOOD_COST: int = 1
-const TRAIN_SECONDS: float = 4.0
-const SPEARMAN_TRAIN_SECONDS: float = 5.0
+## Train costs — edit UnitStats only.
+const TRAIN_GOLD_COST: int = UnitStats.SWORDSMAN_GOLD_COST
+const SPEARMAN_TRAIN_GOLD_COST: int = UnitStats.SPEARMAN_GOLD_COST
+const TRAIN_FOOD_COST: int = UnitStats.SWORDSMAN_FOOD_COST
+const TRAIN_SECONDS: float = UnitStats.SWORDSMAN_TRAIN_SECONDS
+const SPEARMAN_TRAIN_SECONDS: float = UnitStats.SPEARMAN_TRAIN_SECONDS
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3

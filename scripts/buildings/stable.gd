@@ -10,7 +10,7 @@ signal training_queue_changed()
 signal repeat_state_changed()
 signal research_state_changed()
 
-const RESEARCH_SECONDS: float = 5.0
+const RESEARCH_SECONDS: float = UpgradeStats.STABLE_RESEARCH_SECONDS
 
 const TRAIN_ID_HEAVY_CAVALRY: StringName = &"heavy_cavalry"
 const TRAIN_ID_LIGHT_CAVALRY: StringName = &"light_cavalry"
@@ -25,14 +25,15 @@ const CAVALRY_UNIT_IDS: Array[StringName] = [
 const HEAVY_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/heavy_cavalry.tscn")
 const LIGHT_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/light_cavalry.tscn")
 const CAVALRY_ARCHER_SCENE: PackedScene = preload("res://scenes/units/cavalry_archer.tscn")
-const LIGHT_CAVALRY_TRAIN_GOLD_COST: int = 85
-const HEAVY_CAVALRY_TRAIN_GOLD_COST: int = 150
-const TRAIN_FOOD_COST: int = 1
-const HEAVY_CAVALRY_TRAIN_FOOD_COST: int = 2
-const CAVALRY_ARCHER_TRAIN_GOLD_COST: int = 130
-const LIGHT_CAVALRY_TRAIN_SECONDS: float = 3.5
-const HEAVY_CAVALRY_TRAIN_SECONDS: float = 7.0
-const CAVALRY_ARCHER_TRAIN_SECONDS: float = 5.5
+## Train costs — edit UnitStats only.
+const LIGHT_CAVALRY_TRAIN_GOLD_COST: int = UnitStats.LIGHT_CAVALRY_GOLD_COST
+const HEAVY_CAVALRY_TRAIN_GOLD_COST: int = UnitStats.HEAVY_CAVALRY_GOLD_COST
+const TRAIN_FOOD_COST: int = UnitStats.LIGHT_CAVALRY_FOOD_COST
+const HEAVY_CAVALRY_TRAIN_FOOD_COST: int = UnitStats.HEAVY_CAVALRY_FOOD_COST
+const CAVALRY_ARCHER_TRAIN_GOLD_COST: int = UnitStats.CAVALRY_ARCHER_GOLD_COST
+const LIGHT_CAVALRY_TRAIN_SECONDS: float = UnitStats.LIGHT_CAVALRY_TRAIN_SECONDS
+const HEAVY_CAVALRY_TRAIN_SECONDS: float = UnitStats.HEAVY_CAVALRY_TRAIN_SECONDS
+const CAVALRY_ARCHER_TRAIN_SECONDS: float = UnitStats.CAVALRY_ARCHER_TRAIN_SECONDS
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3

@@ -5,7 +5,7 @@ extends Building
 
 signal research_state_changed()
 
-const RESEARCH_SECONDS: float = 5.0
+const RESEARCH_SECONDS: float = UpgradeStats.BLACKSMITH_RESEARCH_SECONDS
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"

@@ -6,9 +6,10 @@ extends Building
 signal hero_altar_state_changed()
 
 const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
-const TRAIN_GOLD_COST: int = 200
-const TRAIN_FOOD_COST: int = 2
-const TRAIN_SECONDS: float = 6.0
+## Train costs — edit HeroStats only.
+const TRAIN_GOLD_COST: int = HeroStats.TRAIN_GOLD_COST
+const TRAIN_FOOD_COST: int = HeroStats.TRAIN_FOOD_COST
+const TRAIN_SECONDS: float = HeroStats.TRAIN_SECONDS
 const HERO_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0

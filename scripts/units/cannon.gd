@@ -3,12 +3,12 @@ extends Unit
 
 ## Horse-drawn artillery that stops at range, fires a slow shell, and splashes on impact.
 
-@export var attack_damage: int = 45
-@export var attack_range: float = 14.0
-@export var attack_cooldown: float = 5.5
-@export var splash_radius: float = 3.5
-@export var splash_min_damage_ratio: float = 0.5
-@export var armor: int = 0
+@export var attack_damage: int = UnitStats.CANNON_ATTACK_DAMAGE
+@export var attack_range: float = UnitStats.CANNON_ATTACK_RANGE
+@export var attack_cooldown: float = UnitStats.CANNON_ATTACK_COOLDOWN
+@export var splash_radius: float = UnitStats.CANNON_SPLASH_RADIUS
+@export var splash_min_damage_ratio: float = UnitStats.CANNON_SPLASH_MIN_DAMAGE_RATIO
+@export var armor: int = UnitStats.CANNON_ARMOR
 
 const HEALTH_BAR_WIDTH := 1.3
 const HEALTH_BAR_HUE_GREEN := 0.333333

@@ -7,7 +7,7 @@ const CAMP_GUARD_RADIUS: float = 20.0
 const CAMP_RESPAWN_BLOCK_RADIUS: float = 20.0
 const CREEP_LEASH_DISTANCE: float = 16.0
 const CAMP_HOME_TOLERANCE: float = 1.25
-const CREEP_MOVE_SPEED: float = 3.5
+const CREEP_MOVE_SPEED: float = UnitStats.NEUTRAL_CREEP_MOVE_SPEED
 
 const _CAMP_BLOCK_UNIT_GROUPS: Array[StringName] = [
 	&"units",

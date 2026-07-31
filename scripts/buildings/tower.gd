@@ -3,9 +3,9 @@ extends Building
 
 ## Stationary defensive tower that automatically fires projectiles at nearby enemies.
 
-@export var attack_damage: int = 12
-@export var attack_range: float = 10.0
-@export var attack_cooldown: float = 1.5
+@export var attack_damage: int = BuildingStats.TOWER_ATTACK_DAMAGE
+@export var attack_range: float = BuildingStats.TOWER_ATTACK_RANGE
+@export var attack_cooldown: float = BuildingStats.TOWER_ATTACK_COOLDOWN
 
 const ARROW_SCENE: PackedScene = preload("res://scenes/projectiles/arrow.tscn")
 const PROJECTILE_SPAWN_HEIGHT := 2.5

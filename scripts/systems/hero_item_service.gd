@@ -2,15 +2,16 @@ class_name HeroItemService
 extends RefCounted
 
 ## Applies hero item purchases and range checks for completed shops.
+## Purchase range / sell refund — edit ItemStats only.
 
-const SHOP_PURCHASE_RANGE_PIXELS: float = 200.0
-const SHOP_PURCHASE_RANGE_WORLD_FALLBACK: float = 4.5
+const SHOP_PURCHASE_RANGE_PIXELS: float = ItemStats.SHOP_PURCHASE_RANGE_PIXELS
+const SHOP_PURCHASE_RANGE_WORLD_FALLBACK: float = ItemStats.SHOP_PURCHASE_RANGE_WORLD_FALLBACK
 
 const MSG_NO_NEARBY_HERO := "Move a hero near the shop"
 const MSG_INVENTORY_FULL := "Hero inventory is full"
 const MSG_NOT_ENOUGH_GOLD := "Not enough gold"
 const MSG_SHOP_UNAVAILABLE := "Shop cannot sell items"
-const SELL_REFUND_RATIO := 0.5
+const SELL_REFUND_RATIO := ItemStats.SELL_REFUND_RATIO
 
 
 static func try_purchase_from_shop(shop: Shop, item_id: StringName) -> bool:

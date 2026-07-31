@@ -3,7 +3,7 @@ extends Building
 
 ## Placeholder farm building used for early 3D scene testing.
 
-const FOOD_CAP_BONUS: int = 8
+const FOOD_CAP_BONUS: int = BuildingStats.FARM_FOOD_CAP_BONUS
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
