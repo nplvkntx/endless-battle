@@ -31,6 +31,11 @@ extends PanelContainer
 )
 @onready var _train_worker_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/TrainWorkerButton
 @onready var _attack_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/AttackButton
+@onready var _stop_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/StopButton
+@onready var _hold_position_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/ButtonsRow/HoldPositionButton
+)
+@onready var _patrol_button: Button = $MarginContainer/HBoxContainer/RightPanel/ButtonsRow/PatrolButton
 @onready var _train_spearman_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/BarracksTrainingRow/TrainSpearmanButton
 )
@@ -242,6 +247,7 @@ const QUEUE_SLOT_HINT := "Right-click to cancel"
 const QUEUE_SLOT_COLOR := Color(0.28, 0.32, 0.38, 1)
 const BLACKSMITH_UPGRADE_MAX_COLOR := Color(0.55, 0.58, 0.62, 1)
 const ACADEMY_UPGRADE_DONE_COLOR := Color(0.55, 0.58, 0.62, 1)
+const RtsCommandCatalog := preload("res://scripts/ui/rts_command_catalog.gd")
 
 var _blacksmith_upgrade_buttons: Array[Button] = []
 var _blacksmith_upgrade_info_labels: Array[Label] = []
@@ -310,6 +316,9 @@ func _ready() -> void:
 	_build_command_center_button.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
+	_stop_button.visible = false
+	_hold_position_button.visible = false
+	_patrol_button.visible = false
 	_setup_production_controls()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_setup_production_icon_slots()
@@ -338,6 +347,9 @@ func _ready() -> void:
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
+	_stop_button.pressed.connect(_on_stop_pressed)
+	_hold_position_button.pressed.connect(_on_hold_position_pressed)
+	_patrol_button.pressed.connect(_on_patrol_pressed)
 	_ground_slam_button.pressed.connect(_on_ground_slam_pressed)
 	_ground_slam_upgrade_button.pressed.connect(_on_ground_slam_upgrade_pressed)
 	_divine_protection_button.pressed.connect(_on_divine_protection_pressed)
@@ -2785,6 +2797,9 @@ func _clear_all_command_ui() -> void:
 	_buttons_row.visible = false
 	_train_worker_button.visible = false
 	_attack_button.visible = false
+	_stop_button.visible = false
+	_hold_position_button.visible = false
+	_patrol_button.visible = false
 	_train_spearman_button.visible = false
 	_train_swordsman_button.visible = false
 	_train_archer_button.visible = false
@@ -2917,7 +2932,8 @@ func _refresh_command_visibility() -> void:
 				_set_tracked_hero(null)
 				multi_combat_selection = true
 			else:
-				_apply_hidden_command_buttons()
+				# Mixed / other: show shared Stop + combat orders for units that support them.
+				_apply_mixed_unit_command_visibility()
 				_set_tracked_hero(null)
 	elif not selected_units.is_empty() and not NodeSafety.is_alive_node(single_unit):
 		_set_tracked_hero(null)
@@ -3082,7 +3098,7 @@ func _sync_ui_process() -> void:
 func _apply_hero_command_visibility() -> void:
 	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
-	_attack_button.visible = true
+	_apply_unit_order_button_visibility(true, true)
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
 	_barracks_training_row.visible = false
@@ -3102,7 +3118,8 @@ func _apply_hero_command_visibility() -> void:
 func _apply_worker_command_visibility() -> void:
 	_set_build_icon_visibility(true)
 	_train_worker_button.visible = false
-	_attack_button.visible = false
+	_apply_unit_order_button_visibility(false, false)
+	_stop_button.visible = true
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
 	_barracks_training_row.visible = false
@@ -3122,7 +3139,34 @@ func _apply_worker_command_visibility() -> void:
 func _apply_combat_command_visibility() -> void:
 	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
-	_attack_button.visible = true
+	_apply_unit_order_button_visibility(true, true)
+	_buttons_row.visible = true
+	_barracks_panel.visible = false
+	_barracks_training_row.visible = false
+	_hero_altar_panel.visible = false
+	_hero_altar_training_row.visible = false
+	_blacksmith_panel.visible = false
+	_stable_panel.visible = false
+	_artillery_depot_panel.visible = false
+	_artillery_depot_training_row.visible = false
+	_academy_panel.visible = false
+	_shop_panel.visible = false
+	_wall_gate_panel.visible = false
+	_clear_queue_row(_worker_queue_row)
+	_hero_panel.visible = false
+
+
+func _apply_unit_order_button_visibility(show_combat_orders: bool, show_stop: bool = true) -> void:
+	_stop_button.visible = show_stop
+	_attack_button.visible = show_combat_orders
+	_hold_position_button.visible = show_combat_orders
+	_patrol_button.visible = show_combat_orders
+
+
+func _apply_mixed_unit_command_visibility() -> void:
+	_set_build_icon_visibility(false)
+	_train_worker_button.visible = false
+	_apply_unit_order_button_visibility(true, true)
 	_buttons_row.visible = true
 	_barracks_panel.visible = false
 	_barracks_training_row.visible = false
@@ -3318,6 +3362,9 @@ func _apply_hidden_command_buttons() -> void:
 	_set_build_icon_visibility(false)
 	_train_worker_button.visible = false
 	_attack_button.visible = false
+	_stop_button.visible = false
+	_hold_position_button.visible = false
+	_patrol_button.visible = false
 	_buttons_row.visible = false
 	_barracks_training_row.visible = false
 	_stable_training_row.visible = false
@@ -3441,6 +3488,22 @@ func _disconnect_wall_gate_signals() -> void:
 
 func _on_attack_pressed() -> void:
 	InputManager.arm_attack_move()
+
+
+func _on_stop_pressed() -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager != null and selection_manager.has_method("_dispatch_stop_command"):
+		selection_manager._dispatch_stop_command()
+
+
+func _on_hold_position_pressed() -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager != null and selection_manager.has_method("_dispatch_hold_position_command"):
+		selection_manager._dispatch_hold_position_command()
+
+
+func _on_patrol_pressed() -> void:
+	InputManager.arm_patrol()
 
 
 func _on_worker_queue_changed(_queue_count: int) -> void:
@@ -3784,6 +3847,9 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_train_archer_button)
 	_clear_control_tooltip(_train_hero_button)
 	_clear_control_tooltip(_attack_button)
+	_clear_control_tooltip(_stop_button)
+	_clear_control_tooltip(_hold_position_button)
+	_clear_control_tooltip(_patrol_button)
 	_clear_control_tooltip(_ground_slam_button)
 	_clear_control_tooltip(_ground_slam_upgrade_button)
 	_clear_control_tooltip(_divine_protection_button)
@@ -3874,7 +3940,18 @@ func _setup_command_tooltips() -> void:
 	TooltipManager.bind_control(_train_swordsman_button, _get_train_swordsman_tooltip)
 	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
 	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
-	TooltipManager.bind_static_tooltip(_attack_button, "Attack-move\nMove while engaging enemies.")
+	for definition: Dictionary in RtsCommandCatalog.unit_command_definitions():
+		var command_id: StringName = definition.get("id", &"")
+		var tooltip_text: String = str(definition.get("tooltip", ""))
+		match command_id:
+			RtsCommandCatalog.ID_STOP:
+				TooltipManager.bind_static_tooltip(_stop_button, tooltip_text)
+			RtsCommandCatalog.ID_HOLD_POSITION:
+				TooltipManager.bind_static_tooltip(_hold_position_button, tooltip_text)
+			RtsCommandCatalog.ID_PATROL:
+				TooltipManager.bind_static_tooltip(_patrol_button, tooltip_text)
+			RtsCommandCatalog.ID_ATTACK_MOVE:
+				TooltipManager.bind_static_tooltip(_attack_button, tooltip_text)
 	TooltipManager.bind_static_tooltip(
 		_build_gate_button,
 		"Build Gate\nConvert this wall segment into a gate.\nCost: 100 wood"

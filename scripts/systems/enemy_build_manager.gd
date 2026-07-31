@@ -119,6 +119,10 @@ const FARM_MAX_HEALTH: int = 250
 const HERO_ALTAR_MAX_HEALTH: int = 350
 const STABLE_MAX_HEALTH: int = 320
 const COMMAND_CENTER_MAX_HEALTH: int = 500
+const MAX_PARALLEL_CONSTRUCTIONS: int = 3
+const STUCK_CONSTRUCTION_TIMEOUT_MSEC: int = 45000
+const FARM_PLACEMENT_FAIL_COOLDOWN_SECONDS: float = 4.0
+const FARM_RESOURCE_RESERVATION_TTL_MSEC: int = 30000
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gather_manager_path: NodePath
@@ -138,6 +142,8 @@ var _last_worker_idle_reason: String = ""
 var _pop_capped_since_seconds: float = -1.0
 var _macro_emergency_timer: float = 0.0
 var _farm_reservation_active: bool = false
+var _farm_reservation_msec: int = 0
+var _farm_placement_fail_cooldown_until: float = -1.0
 var _cc_worker_queue_connected: bool = false
 var _building_scan_frame: int = -1
 var _cached_enemy_buildings: Array = []
@@ -231,8 +237,10 @@ func _on_build_tick() -> void:
 
 func _run_build_order() -> void:
 	_refresh_building_cache_if_needed()
+	ConstructionReservations.purge_expired()
 	_release_stale_build_workers()
 	_try_assign_idle_builder_to_construction()
+	_cancel_stuck_unfinished_constructions()
 	_run_macro_emergency_checks()
 
 	if _is_opening_phase():
@@ -593,7 +601,7 @@ func _try_place_missing_tier_1_building(building_type: StringName) -> bool:
 	if _has_completed_building(building_type) or _is_building_type_in_progress(building_type):
 		return false
 
-	if _has_unfinished_construction():
+	if not _can_start_additional_construction(building_type):
 		return false
 
 	return _try_place_building(building_type)
@@ -848,6 +856,7 @@ func _try_place_opening_core_building(building_type: StringName) -> bool:
 	if _has_completed_building(building_type) or _is_building_type_in_progress(building_type):
 		return false
 
+	# Opening sequence stays serial for core tech buildings.
 	if _has_unfinished_construction():
 		return false
 
@@ -1752,22 +1761,36 @@ func _count_player_workers() -> int:
 
 
 func _try_place_farm(emergency: bool) -> bool:
-	_ensure_farm_reservation()
-	if not EnemyResourceManager.can_afford(FARM_GOLD_COST, FARM_WOOD_COST):
+	if _is_farm_placement_on_fail_cooldown():
 		return false
 
-	var placed: bool = _try_place_building(PLACEMENT_FARM, false, emergency)
+	_ensure_farm_reservation()
+	# Spend against total stockpile while the farm hold is active (avoid double-count).
+	if not EnemyResourceManager.can_afford(FARM_GOLD_COST, FARM_WOOD_COST, false):
+		return false
+
+	var placed: bool = _try_place_building(PLACEMENT_FARM, false, true)
 	if placed:
-		_release_farm_reservation()
+		# try_spend already cleared the reserved amounts from the stockpile hold.
+		_farm_reservation_active = false
+		_farm_reservation_msec = 0
+		_farm_placement_fail_cooldown_until = -1.0
+	else:
+		_begin_farm_placement_fail_cooldown()
+		# Failed site must not permanently starve spending.
+		if not _needs_farm() and EnemyResourceManager.has_food_supply(3):
+			_release_farm_reservation()
 	return placed
 
 
 func _ensure_farm_reservation() -> void:
+	_expire_farm_reservation_if_needed()
 	if _farm_reservation_active:
 		return
 
 	EnemyResourceManager.reserve_resources(FARM_GOLD_COST, FARM_WOOD_COST)
 	_farm_reservation_active = true
+	_farm_reservation_msec = Time.get_ticks_msec()
 
 
 func _release_farm_reservation() -> void:
@@ -1776,13 +1799,36 @@ func _release_farm_reservation() -> void:
 
 	EnemyResourceManager.release_reservation(FARM_GOLD_COST, FARM_WOOD_COST)
 	_farm_reservation_active = false
+	_farm_reservation_msec = 0
+
+
+func _expire_farm_reservation_if_needed() -> void:
+	if not _farm_reservation_active:
+		return
+
+	if (
+		Time.get_ticks_msec() - _farm_reservation_msec
+		>= FARM_RESOURCE_RESERVATION_TTL_MSEC
+	):
+		_release_farm_reservation()
 
 
 func _sync_farm_reservation() -> void:
+	_expire_farm_reservation_if_needed()
 	if _needs_farm() or not EnemyResourceManager.has_food_supply(3):
 		_ensure_farm_reservation()
 	else:
 		_release_farm_reservation()
+
+
+func _begin_farm_placement_fail_cooldown() -> void:
+	_farm_placement_fail_cooldown_until = (
+		_get_match_elapsed_seconds() + FARM_PLACEMENT_FAIL_COOLDOWN_SECONDS
+	)
+
+
+func _is_farm_placement_on_fail_cooldown() -> bool:
+	return _get_match_elapsed_seconds() < _farm_placement_fail_cooldown_until
 
 
 func _should_build_expansion_command_center() -> bool:
@@ -2511,7 +2557,7 @@ func _try_place_expansion_command_center() -> bool:
 		return false
 
 	# Wait for other builds without entering the retry cooldown.
-	if _has_unfinished_construction():
+	if not _can_start_additional_construction(PLACEMENT_COMMAND_CENTER):
 		return false
 
 	var expansion_mine: GoldMine = _find_expansion_gold_mine_anchor()
@@ -2727,7 +2773,7 @@ func _try_place_building_at_anchor(
 	if is_farm:
 		if _is_building_type_in_progress(PLACEMENT_FARM):
 			return false
-	elif _has_unfinished_construction():
+	elif not allow_parallel and not _can_start_additional_construction(building_type):
 		return false
 
 	var gold_cost: int = 0
@@ -2763,7 +2809,9 @@ func _try_place_building_at_anchor(
 		_:
 			return false
 
-	if not EnemyResourceManager.can_afford(gold_cost, wood_cost):
+	# Farm holds already reserve the cost; spend from total while reserved.
+	var respect_reservations: bool = not (is_farm and _farm_reservation_active)
+	if not EnemyResourceManager.can_afford(gold_cost, wood_cost, respect_reservations):
 		return false
 
 	var parent: Node = get_node_or_null(buildings_parent_path)
@@ -2785,13 +2833,23 @@ func _try_place_building_at_anchor(
 	if not position.is_finite():
 		return false
 
-	if not EnemyResourceManager.try_spend(gold_cost, wood_cost):
+	var footprint: Vector2 = EnemyBuildPlacement.get_footprint(building_type)
+	var footprint_reservation_id: int = ConstructionReservations.reserve_footprint(
+		position,
+		footprint,
+		self,
+		ConstructionReservations.FOOTPRINT_RESERVATION_TTL_MSEC
+	)
+
+	if not EnemyResourceManager.try_spend(gold_cost, wood_cost, respect_reservations):
+		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
 	var building: Building = _instantiate_building(building_type)
 	if not NodeSafety.is_alive_node(building):
 		EnemyResourceManager.add_gold(gold_cost)
 		EnemyResourceManager.add_wood(wood_cost)
+		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
 	_tag_enemy_building(building)
@@ -2800,18 +2858,56 @@ func _try_place_building_at_anchor(
 	if not NodeSafety.is_alive_node(building):
 		EnemyResourceManager.add_gold(gold_cost)
 		EnemyResourceManager.add_wood(wood_cost)
+		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
 	building.global_position = position
+	building.set_construction_cost(gold_cost, wood_cost, true)
 	building.start_under_construction()
 	building.setup_construction(
 		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
 	)
+	ConstructionReservations.release_footprint(footprint_reservation_id)
 	_assign_nearest_builder(building)
 	_log_building_started(building_type)
 	if building_type == PLACEMENT_BARRACKS and _has_excess_resources():
 		EnemyArmyCommand.debug_combat_log("building additional barracks: excess resources")
 	return true
+
+
+func _can_start_additional_construction(building_type: StringName) -> bool:
+	if building_type == PLACEMENT_FARM:
+		return not _is_building_type_in_progress(PLACEMENT_FARM)
+
+	return _count_unfinished_buildings() < MAX_PARALLEL_CONSTRUCTIONS
+
+
+func _count_unfinished_buildings() -> int:
+	return _collect_unfinished_buildings().size()
+
+
+func _cancel_stuck_unfinished_constructions() -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	for building: Building in _collect_unfinished_buildings():
+		if not NodeSafety.is_alive_node(building):
+			continue
+
+		if _building_has_active_builder(building):
+			continue
+
+		var started_msec: int = building.get_construction_started_msec()
+		if started_msec <= 0:
+			continue
+
+		if now_msec - started_msec < STUCK_CONSTRUCTION_TIMEOUT_MSEC:
+			continue
+
+		# No builder for too long — refund and clear the soft-lock site.
+		building.refund_and_cancel_construction()
+		if building is Farm:
+			_begin_farm_placement_fail_cooldown()
+			_release_farm_reservation()
+			_ensure_farm_reservation()
 
 
 func _log_building_started(building_type: StringName) -> void:

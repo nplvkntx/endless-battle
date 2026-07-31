@@ -5,6 +5,21 @@ extends StaticBody3D
 
 signal depleted()
 
+enum OwnerFaction {
+	UNSET = -1,
+	PLAYER = 0,
+	ENEMY = 1,
+	NEUTRAL = 2,
+}
+
+const GROUP_RESOURCE_NODES := &"resource_nodes"
+const GROUP_PLAYER_RESOURCES := &"player_gather_resources"
+const GROUP_ENEMY_RESOURCES := &"enemy_gather_resources"
+const GROUP_NEUTRAL_RESOURCES := &"neutral_gather_resources"
+
+## Faction ownership for gather discovery. Prefer explicit assignment over node names.
+@export var owner_faction: OwnerFaction = OwnerFaction.UNSET
+
 @onready var _mesh: MeshInstance3D = $MeshInstance3D
 @onready var _visuals_root: Node3D = get_node_or_null("Visuals") as Node3D
 
@@ -19,6 +34,7 @@ var _pending_removal: bool = false
 func _ready() -> void:
 	depleted.connect(_on_depleted, CONNECT_ONE_SHOT)
 	NavigationObstacleSetup.apply_from_collision_body(self)
+	_apply_resource_groups()
 
 	if _mesh == null:
 		return
@@ -32,6 +48,64 @@ func _ready() -> void:
 	_base_albedo = _mesh_material.albedo_color
 	_base_emission = _mesh_material.emission
 	_base_emission_enabled = _mesh_material.emission_enabled
+
+
+func set_owner_faction(faction: OwnerFaction) -> void:
+	owner_faction = faction
+	_apply_resource_groups()
+
+
+func get_owner_faction() -> OwnerFaction:
+	if owner_faction != OwnerFaction.UNSET:
+		return owner_faction
+
+	if is_in_group(GROUP_PLAYER_RESOURCES):
+		return OwnerFaction.PLAYER
+	if is_in_group(GROUP_ENEMY_RESOURCES):
+		return OwnerFaction.ENEMY
+	if is_in_group(GROUP_NEUTRAL_RESOURCES):
+		return OwnerFaction.NEUTRAL
+
+	return OwnerFaction.UNSET
+
+
+func is_usable_by_faction(for_enemy: bool) -> bool:
+	var faction: OwnerFaction = get_owner_faction()
+	match faction:
+		OwnerFaction.PLAYER:
+			return not for_enemy
+		OwnerFaction.ENEMY:
+			return for_enemy
+		OwnerFaction.NEUTRAL:
+			return true
+		_:
+			# Unclassified resources stay gatherable so authored scenes do not break.
+			return true
+
+
+func _apply_resource_groups() -> void:
+	if not is_in_group(GROUP_RESOURCE_NODES):
+		add_to_group(GROUP_RESOURCE_NODES)
+
+	_remove_faction_groups()
+	match get_owner_faction():
+		OwnerFaction.PLAYER:
+			add_to_group(GROUP_PLAYER_RESOURCES)
+		OwnerFaction.ENEMY:
+			add_to_group(GROUP_ENEMY_RESOURCES)
+		OwnerFaction.NEUTRAL:
+			add_to_group(GROUP_NEUTRAL_RESOURCES)
+		_:
+			pass
+
+
+func _remove_faction_groups() -> void:
+	if is_in_group(GROUP_PLAYER_RESOURCES):
+		remove_from_group(GROUP_PLAYER_RESOURCES)
+	if is_in_group(GROUP_ENEMY_RESOURCES):
+		remove_from_group(GROUP_ENEMY_RESOURCES)
+	if is_in_group(GROUP_NEUTRAL_RESOURCES):
+		remove_from_group(GROUP_NEUTRAL_RESOURCES)
 
 
 func play_target_feedback() -> void:

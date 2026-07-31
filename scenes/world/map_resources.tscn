@@ -1,9 +1,11 @@
-[gd_scene format=3 uid="uid://dxwvi84m2vts6"]
+[gd_scene load_steps=4 format=3 uid="uid://dxwvi84m2vts6"]
 
 [ext_resource type="PackedScene" uid="uid://ew40ufc50053" path="res://scenes/resources/gold_mine.tscn" id="1_gold_mine"]
 [ext_resource type="PackedScene" uid="uid://bg40oion7ayqm" path="res://scenes/resources/tree.tscn" id="2_tree"]
+[ext_resource type="Script" path="res://scripts/systems/map_resources_setup.gd" id="3_setup"]
 
 [node name="MapResources" type="Node3D"]
+script = ExtResource("3_setup")
 
 [node name="GoldMine" parent="." unique_id=1424185328 instance=ExtResource("1_gold_mine")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1, -38)

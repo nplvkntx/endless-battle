@@ -80,7 +80,7 @@ func _go_to_main_menu_with_result(result_message: String) -> void:
 
 	## End-of-match navigation only. Persistent state is reset on the next prepare_new_match().
 	TooltipManager.hide_tooltip()
-	InputManager.disarm_attack_move()
+	InputManager.disarm_all_command_modes()
 	last_match_result = result_message
 	tree.paused = false
 	tree.change_scene_to_file(MAIN_MENU_SCENE)
@@ -95,6 +95,7 @@ func _register_static_match_resets() -> void:
 	register_match_reset(&"WorkerAiUnstuck", WorkerAiUnstuck.reset_match_state)
 	register_match_reset(&"WorkerGathering", WorkerGathering.reset_match_state)
 	register_match_reset(&"CreepCampSafety", CreepCampSafety.reset_match_state)
+	register_match_reset(&"ConstructionReservations", ConstructionReservations.reset_match_state)
 
 
 ## Debug-only: fail loudly if any known persistent match state survived prepare.
@@ -133,6 +134,10 @@ func _verify_clean_match_state() -> void:
 
 	if InputManager.attack_move_armed:
 		failures.append("InputManager.attack_move_armed")
+	if ControlGroupManager.has_any_members():
+		failures.append("ControlGroupManager.groups")
+	if ControlGroupManager.get_active_group_index() >= 0:
+		failures.append("ControlGroupManager.active_group")
 	if HeroProgressionStore.has_saved_progression():
 		failures.append("HeroProgressionStore.player")
 	if HeroProgressionStore.has_saved_enemy_progression():

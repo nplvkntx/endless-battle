@@ -58,6 +58,11 @@ const AI_WORKER_DROP_OFF_STUCK_DELAY: float = 4.0
 const AI_WORKER_BUILD_INVALID_TIMEOUT: float = 8.0
 const AI_WORKER_TARGET_BLACKLIST_SECONDS: float = 15.0
 const AI_WORKER_MAX_TARGET_FAILURES: int = 3
+const WOOD_RESERVATION_TTL_MSEC: int = 45000
+const GOLD_RESERVATION_TTL_MSEC: int = 45000
+const MAX_SOFT_TREE_ASSIGNMENTS: int = 4
+const MAX_SOFT_GOLD_ASSIGNMENTS: int = 8
+const GATHER_LOOP_FAILURE_LIMIT: int = 4
 
 
 static func get_gather_wait_seconds(speed_multiplier: float = 1.0) -> float:

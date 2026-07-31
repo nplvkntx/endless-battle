@@ -89,6 +89,138 @@ func get_primary_ui_hero() -> Hero:
 	return get_multi_selection_ui_info().primary_hero
 
 
+## Units + optional building currently selected, for control-group assign/add.
+func get_control_group_members() -> Array:
+	_purge_invalid_selection()
+	var members: Array = []
+	for unit: Unit in selected_units:
+		if _is_commandable_unit(unit):
+			members.append(unit)
+	if _is_selectable_building(selected_building):
+		members.append(selected_building)
+	return members
+
+
+## Apply a recalled control group (units preferred; otherwise first building).
+func apply_control_group_selection(members: Array) -> void:
+	var units: Array[Unit] = []
+	var building: Building = null
+	for entry: Variant in members:
+		if entry is Unit and _is_selectable_unit(entry):
+			units.append(entry as Unit)
+		elif entry is Building and _is_selectable_building(entry) and building == null:
+			building = entry as Building
+
+	if not units.is_empty():
+		_set_selected_units(units)
+		# Ensure command panel refreshes even if membership matched.
+		selection_changed.emit(selected_units)
+		return
+
+	if building != null:
+		_set_selected_building(building)
+		building_selection_changed.emit(selected_building)
+
+
+func focus_camera_on_current_selection() -> void:
+	var camera: Camera3D = _get_camera()
+	if camera == null or not camera.has_method("focus_on_world_position"):
+		return
+
+	_purge_invalid_selection()
+	var positions: Array[Vector3] = []
+	for unit: Unit in selected_units:
+		if _is_selectable_unit(unit):
+			positions.append(unit.global_position)
+	if _is_selectable_building(selected_building):
+		positions.append(selected_building.global_position)
+
+	if positions.is_empty():
+		return
+
+	var centroid := Vector3.ZERO
+	for position: Vector3 in positions:
+		centroid += position
+	centroid /= float(positions.size())
+	camera.focus_on_world_position(centroid)
+
+
+func select_player_hero_and_focus() -> bool:
+	var hero: Hero = _find_player_hero()
+	if hero == null:
+		return false
+	_set_selected_units([hero])
+	focus_camera_on_current_selection()
+	return true
+
+
+func select_next_idle_worker_and_focus() -> bool:
+	var idle_workers: Array[Worker] = collect_idle_player_workers()
+	if idle_workers.is_empty():
+		return false
+
+	var start_index: int = 0
+	if selected_units.size() == 1 and selected_units[0] is Worker:
+		var current_index: int = idle_workers.find(selected_units[0] as Worker)
+		if current_index >= 0:
+			start_index = (current_index + 1) % idle_workers.size()
+
+	var worker: Worker = idle_workers[start_index]
+	_set_selected_units([worker])
+	focus_camera_on_current_selection()
+	return true
+
+
+func collect_idle_player_workers() -> Array[Worker]:
+	var idle_workers: Array[Worker] = []
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return idle_workers
+
+	for node: Node in tree.get_nodes_in_group(&"workers"):
+		var worker := node as Worker
+		if worker == null:
+			continue
+		if not worker.is_player_idle():
+			continue
+		idle_workers.append(worker)
+	return idle_workers
+
+
+func count_idle_player_workers() -> int:
+	return collect_idle_player_workers().size()
+
+
+func _find_player_hero() -> Hero:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return null
+
+	for node: Node in tree.get_nodes_in_group(&"heroes"):
+		if not node is Hero:
+			continue
+		var hero: Hero = node as Hero
+		if not NodeSafety.is_alive_node(hero):
+			continue
+		if hero.is_in_group(&"enemies"):
+			continue
+		if CombatTargetValidation.is_enemy_faction(hero):
+			continue
+		if not _is_commandable_unit(hero):
+			continue
+		return hero
+
+	for node: Node in tree.get_nodes_in_group(UNIT_GROUP):
+		if not node is Hero:
+			continue
+		var hero: Hero = node as Hero
+		if not _is_commandable_unit(hero):
+			continue
+		return hero
+
+	return null
+
+
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _is_dragging: bool = false
@@ -100,10 +232,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Avoid scanning large selections on every mouse-move frame.
 	if event is InputEventKey:
 		var key_event := event as InputEventKey
-		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_S:
-			if _dispatch_stop_command():
-				get_viewport().set_input_as_handled()
-				return
+		if key_event.pressed and not key_event.echo:
+			match key_event.keycode:
+				KEY_S:
+					if _dispatch_stop_command():
+						get_viewport().set_input_as_handled()
+						return
+				KEY_H:
+					if _dispatch_hold_position_command():
+						get_viewport().set_input_as_handled()
+						return
 	if event is InputEventMouseButton:
 		_purge_invalid_selection()
 		var mouse_button := event as InputEventMouseButton
@@ -164,7 +302,10 @@ func _finish_drag_selection(screen_position: Vector2) -> void:
 
 	var selection_rect := _make_screen_rect(_drag_start, screen_position)
 	var units := _get_units_in_rect(camera, selection_rect)
-	_set_selected_units(units)
+	if Input.is_key_pressed(KEY_SHIFT) and not units.is_empty():
+		_merge_units_into_selection(units)
+	else:
+		_set_selected_units(units)
 	_reset_click_tracking()
 
 
@@ -175,6 +316,8 @@ func _handle_left_click(screen_position: Vector2) -> void:
 
 	var unit: Unit = _raycast_unit(camera, screen_position)
 	var building: Building = _raycast_building(camera, screen_position)
+	var shift_held: bool = Input.is_key_pressed(KEY_SHIFT)
+	var ctrl_held: bool = Input.is_key_pressed(KEY_CTRL)
 
 	if unit != null and building != null:
 		var unit_distance: float = _raycast_hit_distance(
@@ -197,11 +340,7 @@ func _handle_left_click(screen_position: Vector2) -> void:
 			_reset_click_tracking()
 			return
 		elif _is_selectable_unit(unit):
-			if _is_double_click(unit):
-				_select_all_visible_same_type(unit, camera)
-			else:
-				_set_selected_units([unit])
-			_record_click(unit)
+			_apply_unit_left_click(unit, camera, shift_held, ctrl_held)
 			return
 
 	if unit:
@@ -209,12 +348,9 @@ func _handle_left_click(screen_position: Vector2) -> void:
 			_set_inspected_unit(unit)
 			_reset_click_tracking()
 			return
-		if _is_double_click(unit):
-			_select_all_visible_same_type(unit, camera)
-		else:
-			_set_selected_units([unit])
-		_record_click(unit)
-		return
+		if _is_selectable_unit(unit):
+			_apply_unit_left_click(unit, camera, shift_held, ctrl_held)
+			return
 
 	if building != null:
 		if _is_inspectable_building(building):
@@ -234,14 +370,72 @@ func _handle_left_click(screen_position: Vector2) -> void:
 	if InputManager.attack_move_armed and has_commandable_selected_units():
 		var attack_move_position: Vector3 = _raycast_ground_plane(camera, screen_position)
 		if attack_move_position.is_finite():
-			_dispatch_attack_move_command(attack_move_position)
-			InputManager.disarm_attack_move()
+			_dispatch_attack_move_command(attack_move_position, Input.is_key_pressed(KEY_SHIFT))
+			InputManager.disarm_all_command_modes()
+			return
+
+	if InputManager.patrol_armed and has_commandable_selected_units():
+		var patrol_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+		if patrol_position.is_finite():
+			_dispatch_patrol_command(patrol_position, Input.is_key_pressed(KEY_SHIFT))
+			if not Input.is_key_pressed(KEY_SHIFT):
+				InputManager.disarm_patrol()
 			return
 
 	_clear_selection()
 	_clear_building_selection()
 	_clear_inspection()
 	_reset_click_tracking()
+
+
+func _apply_unit_left_click(
+	unit: Unit, camera: Camera3D, shift_held: bool, ctrl_held: bool
+) -> void:
+	if shift_held and not ctrl_held:
+		_toggle_unit_in_selection(unit)
+		_record_click(unit)
+		return
+
+	if ctrl_held or _is_double_click(unit):
+		_select_all_visible_same_type(unit, camera)
+		_record_click(unit)
+		return
+
+	_set_selected_units([unit])
+	_record_click(unit)
+
+
+func _toggle_unit_in_selection(unit: Unit) -> void:
+	if not _is_selectable_unit(unit):
+		return
+
+	if selected_units.has(unit):
+		_remove_unit_from_selection(unit, true)
+		return
+
+	_merge_units_into_selection([unit])
+
+
+func _merge_units_into_selection(units: Array[Unit]) -> void:
+	var next_units: Array[Unit] = selected_units.duplicate()
+	var existing_ids: Dictionary = {}
+	for existing: Unit in next_units:
+		existing_ids[existing.get_instance_id()] = true
+
+	for unit: Unit in units:
+		if not _is_selectable_unit(unit):
+			continue
+		var unit_id: int = unit.get_instance_id()
+		if existing_ids.has(unit_id):
+			continue
+		existing_ids[unit_id] = true
+		next_units.append(unit)
+
+	_set_selected_units(next_units)
+
+
+func _is_shift_queue() -> bool:
+	return Input.is_key_pressed(KEY_SHIFT)
 
 
 func _handle_right_click(screen_position: Vector2) -> void:
@@ -297,12 +491,14 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if selected_units.is_empty():
 		return
 
+	var queued: bool = _is_shift_queue()
+
 	var clicked_unit: Unit = _raycast_unit(camera, screen_position)
 	if (
 		clicked_unit != null
 		and CombatTargetValidation.is_player_unit_attack_target(clicked_unit)
 	):
-		_dispatch_attack_command(clicked_unit)
+		_dispatch_attack_command(clicked_unit, queued)
 		return
 
 	var clicked_building: Building = _raycast_building(camera, screen_position)
@@ -310,14 +506,14 @@ func _handle_right_click(screen_position: Vector2) -> void:
 		clicked_building != null
 		and CombatTargetValidation.is_attackable_enemy_building(clicked_building)
 	):
-		_dispatch_attack_command(clicked_building)
+		_dispatch_attack_command(clicked_building, queued)
 		return
 
 	if (
 		clicked_building != null
 		and _is_unfinished_player_construction(clicked_building)
 	):
-		_dispatch_construction_command(clicked_building)
+		_dispatch_construction_command(clicked_building, queued)
 		return
 
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
@@ -329,12 +525,23 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if not ground_position.is_finite():
 		return
 
-	if InputManager.attack_move_armed:
-		_dispatch_attack_move_command(ground_position)
-		InputManager.disarm_attack_move()
+	if InputManager.patrol_armed:
+		_dispatch_patrol_command(ground_position, queued)
+		if not queued:
+			InputManager.disarm_patrol()
 		return
 
-	InputManager.disarm_attack_move()
+	if InputManager.attack_move_armed:
+		_dispatch_attack_move_command(ground_position, queued)
+		InputManager.disarm_all_command_modes()
+		return
+
+	InputManager.disarm_all_command_modes()
+	_dispatch_move_command(ground_position, queued)
+
+
+func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> void:
+	_purge_invalid_selected_units()
 	var commandable_units := _get_commandable_selected_units()
 	if commandable_units.is_empty():
 		return
@@ -345,18 +552,16 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	)
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
-		if unit is Worker:
+		if unit is Worker and not queued:
 			(unit as Worker).cancel_gathering()
-		if _is_combat_order_unit(unit):
-			unit.cancel_attack()
-		unit.set_movement_target(move_targets[index])
+		unit.issue_order(UnitOrder.move(move_targets[index]), queued)
 
 
-func _dispatch_attack_command(target: Node3D) -> void:
+func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 	if not CombatTargetValidation.is_player_unit_attack_target(target):
 		return
 
-	InputManager.disarm_attack_move()
+	InputManager.disarm_all_command_modes()
 	_purge_invalid_selected_units()
 	var military_units: Array[Unit] = []
 	for unit: Unit in selected_units:
@@ -370,13 +575,13 @@ func _dispatch_attack_command(target: Node3D) -> void:
 
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
-		unit.command_attack(target, index)
+		unit.issue_order(UnitOrder.attack(target, index), queued)
 
 	if target is Building:
 		_play_attack_target_feedback(target as Building)
 
 
-func _dispatch_attack_move_command(ground_position: Vector3) -> void:
+func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = false) -> void:
 	_purge_invalid_selected_units()
 	var commandable_units := _get_commandable_selected_units()
 	if commandable_units.is_empty():
@@ -389,12 +594,52 @@ func _dispatch_attack_move_command(ground_position: Vector3) -> void:
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
 		if _is_combat_order_unit(unit):
-			unit.command_attack_move(move_targets[index])
-		elif unit is Worker:
-			(unit as Worker).cancel_gathering()
-			unit.set_movement_target(move_targets[index])
+			unit.issue_order(UnitOrder.attack_move(move_targets[index]), queued)
 		else:
-			unit.set_movement_target(move_targets[index])
+			# Mixed selection: non-combat units receive a compatible move.
+			if unit is Worker and not queued:
+				(unit as Worker).cancel_gathering()
+			unit.issue_order(UnitOrder.move(move_targets[index]), queued)
+
+
+func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) -> void:
+	_purge_invalid_selected_units()
+	var commandable_units := _get_commandable_selected_units()
+	if commandable_units.is_empty():
+		return
+
+	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+		ground_position,
+		commandable_units.size()
+	)
+	for index: int in commandable_units.size():
+		var unit: Unit = commandable_units[index]
+		if not unit.supports_patrol():
+			# Compatible fallback for mixed selections.
+			unit.issue_order(UnitOrder.move(move_targets[index]), queued)
+			continue
+
+		if queued and unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.PATROL:
+			unit.append_patrol_point(move_targets[index])
+			continue
+
+		var points: Array[Vector3] = [unit.global_position, move_targets[index]]
+		unit.issue_order(UnitOrder.patrol(points), queued)
+
+
+func _dispatch_hold_position_command() -> bool:
+	_purge_invalid_selected_units()
+	var commandable_units := _get_commandable_selected_units()
+	if commandable_units.is_empty():
+		return false
+
+	InputManager.disarm_all_command_modes()
+	var any_dispatched := false
+	for unit: Unit in commandable_units:
+		if unit.supports_hold_position():
+			unit.issue_order(UnitOrder.hold_position(), false)
+			any_dispatched = true
+	return any_dispatched
 
 
 func _dispatch_stop_command() -> bool:
@@ -403,15 +648,15 @@ func _dispatch_stop_command() -> bool:
 	if commandable_units.is_empty():
 		return false
 
-	InputManager.disarm_attack_move()
+	InputManager.disarm_all_command_modes()
 	for unit: Unit in commandable_units:
 		if unit is Worker:
 			(unit as Worker).cancel_gathering()
-		unit.stop_movement()
+		unit.issue_stop()
 	return true
 
 
-func _dispatch_construction_command(building: Building) -> void:
+func _dispatch_construction_command(building: Building, queued: bool = false) -> void:
 	if building == null or not is_instance_valid(building):
 		return
 	if not _is_unfinished_player_construction(building):
@@ -421,16 +666,16 @@ func _dispatch_construction_command(building: Building) -> void:
 		_dispatch_wall_chain_construction_command(building as WallSegment)
 		return
 
-	InputManager.disarm_attack_move()
+	InputManager.disarm_all_command_modes()
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
 		if unit is Worker:
-			(unit as Worker).start_construction_order(building)
+			unit.issue_order(UnitOrder.build(building), queued)
 			dispatched_to_worker = true
-		elif _is_combat_order_unit(unit):
+		elif _is_combat_order_unit(unit) and not queued:
 			unit.cancel_attack()
 
 	if dispatched_to_worker:
@@ -447,7 +692,7 @@ func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment) -> 
 	if segments.is_empty():
 		return
 
-	InputManager.disarm_attack_move()
+	InputManager.disarm_all_command_modes()
 	_purge_invalid_selected_units()
 
 	var workers: Array[Worker] = []
@@ -1241,6 +1486,7 @@ func _find_building_from_collider(node: Node) -> Building:
 
 
 func _ready() -> void:
+	add_to_group(ControlGroupManager.SELECTION_MANAGER_GROUP)
 	set_process(true)
 
 

@@ -1,17 +1,22 @@
 class_name WorkerGathering
 extends RefCounted
 
-## Shared deposit helpers for worker gathering trips.
+## Shared deposit helpers and faction-aware gather source discovery.
 
 const PLAYER_DROPOFF_GROUP := &"player_command_center"
 const ENEMY_DROPOFF_GROUP := &"enemy_command_center"
-const MAP_RESOURCES_NODE_NAME := NodePath("MapResources")
 
 static var _enemy_stockpile_warning_shown: bool = false
+static var _resource_cache_frame: int = -1
+static var _resource_cache_tree_id: int = -1
+static var _cached_resource_nodes: Array[Node] = []
 
 
 static func reset_match_state() -> void:
 	_enemy_stockpile_warning_shown = false
+	_resource_cache_frame = -1
+	_resource_cache_tree_id = -1
+	_cached_resource_nodes.clear()
 
 
 static func find_nearest_dropoff(
@@ -106,7 +111,7 @@ static func find_nearest_gather_source(
 	var closest_source: GatherableResource = null
 	var closest_distance_squared: float = INF
 
-	for node: Node in _map_resource_children(scene_root):
+	for node: Node in get_gatherable_resources(tree, scene_root):
 		if not _is_matching_gather_source(node, resource_id, for_enemy):
 			continue
 
@@ -144,7 +149,7 @@ static func find_best_wood_tree(
 	var best_assigned: int = 999999
 	var best_distance_squared: float = INF
 
-	for node: Node in _map_resource_children(scene_root):
+	for node: Node in get_gatherable_resources(tree, scene_root):
 		if not _is_matching_gather_source(node, &"wood", for_enemy):
 			continue
 
@@ -159,6 +164,12 @@ static func find_best_wood_tree(
 			continue
 
 		var assigned: int = wood_tree.get_assigned_worker_count()
+		if (
+			assigned >= GatheringConfig.MAX_SOFT_TREE_ASSIGNMENTS
+			and wood_tree != preferred
+		):
+			continue
+
 		var distance_squared: float = from_position.distance_squared_to(wood_tree.global_position)
 		var is_better: bool = false
 
@@ -182,49 +193,132 @@ static func find_best_wood_tree(
 		and preferred != null
 		and allow_dangerous
 		and _is_usable_gather_source(preferred)
+		and preferred.is_usable_by_faction(for_enemy)
 	):
 		return preferred
 
 	return best_tree
 
 
+static func find_best_gold_mine(
+	from_position: Vector3,
+	scene_root: Node,
+	for_enemy: bool,
+	preferred: GoldMine = null,
+	exclude: GatherableResource = null,
+	allow_dangerous: bool = false
+) -> GoldMine:
+	if scene_root == null or not is_instance_valid(scene_root):
+		return null
+
+	var tree: SceneTree = scene_root.get_tree()
+	var best_mine: GoldMine = null
+	var best_assigned: int = 999999
+	var best_distance_squared: float = INF
+
+	for node: Node in get_gatherable_resources(tree, scene_root):
+		if not _is_matching_gather_source(node, &"gold", for_enemy):
+			continue
+
+		var gold_mine := node as GoldMine
+		if gold_mine == exclude or not _is_usable_gather_source(gold_mine):
+			continue
+
+		if (
+			not allow_dangerous
+			and CreepCampSafety.is_resource_guarded_by_active_camp(gold_mine, tree)
+		):
+			continue
+
+		var assigned: int = gold_mine.get_assigned_worker_count()
+		if (
+			assigned >= GatheringConfig.MAX_SOFT_GOLD_ASSIGNMENTS
+			and gold_mine != preferred
+		):
+			continue
+
+		var distance_squared: float = from_position.distance_squared_to(gold_mine.global_position)
+		var is_better: bool = false
+		if assigned < best_assigned:
+			is_better = true
+		elif assigned == best_assigned:
+			if gold_mine == preferred and best_mine != preferred:
+				is_better = true
+			elif best_mine == preferred and gold_mine != preferred:
+				is_better = false
+			elif distance_squared < best_distance_squared:
+				is_better = true
+
+		if is_better:
+			best_assigned = assigned
+			best_distance_squared = distance_squared
+			best_mine = gold_mine
+
+	return best_mine
+
+
+static func get_gatherable_resources(tree: SceneTree, scene_root: Node = null) -> Array[Node]:
+	if tree != null:
+		var frame: int = Engine.get_process_frames()
+		var tree_id: int = tree.get_instance_id()
+		if frame == _resource_cache_frame and tree_id == _resource_cache_tree_id:
+			return _cached_resource_nodes
+
+		_resource_cache_frame = frame
+		_resource_cache_tree_id = tree_id
+		_cached_resource_nodes.clear()
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+			tree, GatherableResource.GROUP_RESOURCE_NODES
+		):
+			if node_variant != null and is_instance_valid(node_variant):
+				_cached_resource_nodes.append(node_variant as Node)
+
+		if not _cached_resource_nodes.is_empty():
+			return _cached_resource_nodes
+
+	return _map_resource_children(scene_root)
+
+
+## Compatibility alias for placement/build managers that still iterate map resources.
 static func _map_resource_children(scene_root: Node) -> Array[Node]:
+	if scene_root != null and scene_root.is_inside_tree():
+		var resources: Array[Node] = get_gatherable_resources(scene_root.get_tree(), scene_root)
+		if not resources.is_empty():
+			return resources
+	return _map_resource_children_fallback(scene_root)
+
+
+static func _map_resource_children_fallback(scene_root: Node) -> Array[Node]:
 	var nodes: Array[Node] = []
 	if scene_root == null:
 		return nodes
 
-	var map_resources: Node = scene_root.get_node_or_null(MAP_RESOURCES_NODE_NAME)
-	if map_resources != null:
-		for child: Node in map_resources.get_children():
+	var map_resources: Node = scene_root.get_node_or_null(NodePath("MapResources"))
+	var search_root: Node = map_resources if map_resources != null else scene_root
+	for child: Node in search_root.get_children():
+		if child is GatherableResource:
 			nodes.append(child)
-		return nodes
-
-	for child: Node in scene_root.get_children():
-		nodes.append(child)
 	return nodes
 
 
 static func _is_matching_gather_source(
 	node: Node, resource_id: StringName, for_enemy: bool
 ) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	if not node is GatherableResource:
+		return false
+
+	var source := node as GatherableResource
+	if not source.is_usable_by_faction(for_enemy):
+		return false
+
 	match resource_id:
 		&"wood":
-			if for_enemy:
-				if not node.name.begins_with("Enemy"):
-					return false
-			else:
-				if node.name.begins_with("Enemy"):
-					return false
 			return node is WoodTree
 		&"gold":
-			if not node is GoldMine:
-				return false
-			if for_enemy:
-				return (
-					node.name.begins_with("Enemy")
-					or node.name.begins_with("Expansion")
-				)
-			return not node.name.begins_with("Enemy")
+			return node is GoldMine
 		_:
 			return false
 

@@ -3,6 +3,8 @@ extends Unit
 
 ## Placeholder worker unit used for early 3D scene testing.
 
+signal idle_status_changed(is_idle: bool)
+
 enum GatherTripState {
 	IDLE,
 	TO_SOURCE,
@@ -38,6 +40,7 @@ var _gather_source: GatherableResource = null
 var _assigned_resource_id: StringName = &""
 var _carried_amount: int = 0
 var _source_approach_candidate_index: int = 0
+var _last_reported_idle: bool = true
 var _dropoff_candidate_index: int = 0
 var _assigned_dropoff: CommandCenter = null
 var _return_dropoff: CommandCenter = null
@@ -69,6 +72,10 @@ var _wood_chop_spot: Vector3 = Vector3.ZERO
 var _wood_chop_spot_valid: bool = false
 var _locked_wood_tree: WoodTree = null
 var _pinned_starting_gold_mine: GoldMine = null
+var _reserved_gold_mine: GoldMine = null
+var _suspended_gather_source: GatherableResource = null
+var _suspended_resource_id: StringName = &""
+var _gather_loop_failures: int = 0
 var _work_armature_flip_active: bool = false
 var _last_gather_command_source: StringName = &""
 var _ai_unstuck_active: bool = false
@@ -237,6 +244,7 @@ func _update_work_facing() -> void:
 func _process(delta: float) -> void:
 	_update_work_facing()
 	super._process(delta)
+	_update_idle_status_signal()
 
 
 func _update_visual_facing(delta: float) -> void:
@@ -329,6 +337,12 @@ func _sanitize_stored_targets() -> void:
 	if not NodeSafety.is_alive_node(_locked_wood_tree):
 		_locked_wood_tree = null
 
+	if not NodeSafety.is_alive_node(_reserved_gold_mine):
+		_reserved_gold_mine = null
+
+	if not NodeSafety.is_alive_node(_suspended_gather_source):
+		_suspended_gather_source = null
+
 	if not NodeSafety.is_alive_node(_pinned_starting_gold_mine):
 		_pinned_starting_gold_mine = null
 
@@ -348,6 +362,7 @@ func _cancel_build_trip(clear_wall_job: bool = true) -> void:
 	if _building_target != null and is_instance_valid(_building_target):
 		_building_target.unregister_builder(self)
 
+	ConstructionReservations.release_build_slots_for_worker(self)
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
 	_build_approach_candidate_index = 0
@@ -461,13 +476,14 @@ func set_movement_target(target: Vector3) -> bool:
 	):
 		return false
 
-	if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
-		_cancel_build_trip()
-	elif _build_trip_state == BuildTripState.TO_BUILDING:
-		if _try_commit_construction_if_in_range():
-			return false
-		if not _is_construction_approach_move_target(target):
+	if not _issuing_order:
+		if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
 			_cancel_build_trip()
+		elif _build_trip_state == BuildTripState.TO_BUILDING:
+			if _try_commit_construction_if_in_range():
+				return false
+			if not _is_construction_approach_move_target(target):
+				_cancel_build_trip()
 
 	var applied: bool = super.set_movement_target(target)
 	if not applied:
@@ -485,6 +501,12 @@ func stop_movement() -> void:
 	_disable_task_navigation()
 	_task_has_saved_destination = false
 	super.stop_movement()
+
+
+func _prepare_for_new_player_order() -> void:
+	cancel_gathering()
+	if _build_trip_state != BuildTripState.IDLE:
+		_cancel_build_trip()
 
 
 func _is_on_task_movement() -> bool:
@@ -796,6 +818,9 @@ func get_pinned_starting_gold_mine() -> GoldMine:
 
 
 func _start_gathering(source: GatherableResource, player_ordered: bool = true) -> void:
+	if player_ordered:
+		clear_order_queue()
+		_active_order = null
 	_cancel_build_trip()
 	cancel_gathering()
 	if source == null or not is_instance_valid(source):
@@ -822,6 +847,8 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 			return
 		source = wood_tree
 		_lock_to_wood_tree(wood_tree)
+	elif source is GoldMine:
+		_lock_to_gold_mine(source as GoldMine)
 
 	if not _is_valid_gather_source(source):
 		return
@@ -833,7 +860,9 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_dropoff_candidate_index = 0
+	_gather_loop_failures = 0
 	_return_dropoff = null
+	_clear_suspended_gathering()
 	var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(
 		source.global_position,
 		_is_enemy_worker(),
@@ -853,6 +882,8 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 
 func cancel_gathering() -> void:
 	_unlock_wood_tree()
+	_unlock_gold_mine()
+	_clear_suspended_gathering()
 	_gather_state = GatherTripState.IDLE
 	_gather_source = null
 	_assigned_resource_id = &""
@@ -862,6 +893,7 @@ func cancel_gathering() -> void:
 	_assigned_dropoff = null
 	_return_dropoff = null
 	_gather_stuck_recovery_cooldown = 0.0
+	_gather_loop_failures = 0
 	_task_has_saved_destination = false
 	_clear_wood_chop_spot()
 	_disable_task_navigation()
@@ -909,7 +941,7 @@ func continue_wall_build_order(building: Building) -> void:
 
 func _begin_construction_trip(building: Building, clear_wall_job: bool) -> void:
 	_cancel_build_trip(clear_wall_job)
-	cancel_gathering()
+	_suspend_gathering_for_construction()
 	_build_trip_state = BuildTripState.TO_BUILDING
 	_building_target = NodeSafety.safe_node(building) as Building
 	if _building_target == null:
@@ -936,12 +968,26 @@ func on_building_construction_finished() -> void:
 		return
 
 	var finished_building: Building = _building_target
+	if finished_building != null and is_instance_valid(finished_building):
+		ConstructionReservations.release_build_slot(finished_building, self)
+
 	_build_trip_state = BuildTripState.IDLE
 	_building_target = null
 	_construction_target_point_valid = false
 
 	if _wall_build_job != null:
 		_wall_build_job.on_worker_segment_finished(self, finished_building)
+		return
+
+	# Advance shift-queued orders before resuming gather.
+	if has_queued_orders():
+		notify_order_completed(UnitOrder.Type.BUILD)
+		return
+
+	if _active_order != null and _active_order.type == UnitOrder.Type.BUILD:
+		_active_order = null
+
+	if _try_resume_suspended_gathering():
 		return
 
 	if _is_enemy_worker():
@@ -1063,11 +1109,23 @@ func _assign_construction_target_point(advance_to_next: bool = false) -> void:
 		_construction_target_point_valid = false
 		return
 
+	var preferred_index: int = _building_target.get_nearest_construction_point_index(
+		global_position
+	)
 	if advance_to_next:
-		_build_approach_candidate_index += 1
+		preferred_index = _build_approach_candidate_index + 1
 
-	var raw_point: Vector3 = _building_target.get_construction_point_by_rank(
-		global_position,
+	var claimed_slot: int = ConstructionReservations.claim_build_slot(
+		_building_target,
+		self,
+		preferred_index
+	)
+	if claimed_slot >= 0:
+		_build_approach_candidate_index = claimed_slot
+	else:
+		_build_approach_candidate_index = preferred_index
+
+	var raw_point: Vector3 = _building_target.get_construction_point_by_index(
 		_build_approach_candidate_index
 	)
 	raw_point.y = global_position.y
@@ -1091,6 +1149,10 @@ func _try_repath_construction_movement() -> void:
 	if _is_in_build_start_range():
 		_commit_to_construction()
 		return
+
+	# Release current slot so a freer approach point can be claimed.
+	if _building_target != null and is_instance_valid(_building_target):
+		ConstructionReservations.release_build_slot(_building_target, self)
 
 	_assign_construction_target_point(true)
 	set_movement_target(_construction_target_point)
@@ -1126,6 +1188,22 @@ func _is_in_build_start_range() -> bool:
 		to_spot.y = 0.0
 		if to_spot.length_squared() <= effective_range_sq:
 			return true
+
+	# Prefer claimed construction point, then footprint proximity as fallback.
+	var claimed_slot: int = ConstructionReservations.get_claimed_build_slot(_building_target, self)
+	if claimed_slot >= 0:
+		var claimed_point: Vector3 = _building_target.get_construction_point_by_index(claimed_slot)
+		var to_claimed: Vector3 = global_position - claimed_point
+		to_claimed.y = 0.0
+		if to_claimed.length_squared() <= effective_range_sq:
+			return true
+
+	if _building_target.is_position_in_construction_range(
+		global_position,
+		Building.BUILD_RANGE,
+		worker_radius
+	):
+		return true
 
 	var nearest_point: Vector3 = _building_target.get_nearest_construction_point(
 		global_position
@@ -1170,16 +1248,14 @@ func _validate_construction_session() -> bool:
 		return false
 
 	if not is_in_build_start_range():
-		if _wall_build_job != null and NodeSafety.is_alive_node(_building_target):
-			if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
-				_building_target.unregister_builder(self)
-			_build_trip_state = BuildTripState.TO_BUILDING
-			_try_repath_construction_movement()
-			return false
-
-		_cancel_build_trip()
+		# Stay assigned and repath — do not abandon unfinished buildings.
+		if _build_trip_state == BuildTripState.CONSTRUCTION_WAIT:
+			_building_target.unregister_builder(self)
+		_build_trip_state = BuildTripState.TO_BUILDING
+		_try_repath_construction_movement()
 		return false
 
+	ConstructionReservations.refresh_build_slot(_building_target, self)
 	return true
 
 
@@ -1371,8 +1447,9 @@ func _update_gather_stuck_recovery(delta: float) -> void:
 	if _gather_state == GatherTripState.TO_SOURCE and _is_gathering_wood():
 		if _wood_chop_spot_valid and _is_near_wood_chop_spot():
 			_attempt_source_proximity_resolve()
-		_reset_gather_stuck_watch()
-		return
+			_reset_gather_stuck_watch()
+			return
+		# Fall through to normal stuck timing when wood approach is blocked.
 
 	var moved: Vector3 = global_position - _gather_stuck_watch_position
 	moved.y = 0.0
@@ -1395,6 +1472,19 @@ func _update_gather_stuck_recovery(delta: float) -> void:
 func _attempt_gather_stuck_recovery() -> void:
 	if _gather_state == GatherTripState.TO_SOURCE:
 		if _is_gathering_wood():
+			# Wood uses chop-spot proximity; if still stuck, rotate spots then reassign.
+			_clear_wood_chop_spot()
+			_source_approach_candidate_index += 1
+			if _source_approach_candidate_index < GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES:
+				var source: GatherableResource = _get_valid_gather_source()
+				if source != null:
+					_set_movement_to_gather_source(source)
+					return
+			_gather_loop_failures += 1
+			if _gather_loop_failures >= GatheringConfig.GATHER_LOOP_FAILURE_LIMIT:
+				_unlock_wood_tree()
+				if not _try_reassign_gather_source():
+					_finish_gathering_idle()
 			return
 
 		if not _has_valid_gather_source():
@@ -1411,12 +1501,18 @@ func _attempt_gather_stuck_recovery() -> void:
 			_apply_current_task_movement_target()
 			return
 
+		_gather_loop_failures += 1
 		if _is_enemy_worker():
 			var failed_source: GatherableResource = _get_valid_gather_source()
 			if failed_source != null:
 				register_enemy_gather_target_failure(failed_source)
 			_log_ai_worker_recovery_once("stuck path detected, retrying alternate approach")
 			_notify_enemy_worker_needs_gather_job()
+			return
+
+		if _gather_loop_failures >= GatheringConfig.GATHER_LOOP_FAILURE_LIMIT:
+			if not _try_reassign_gather_source():
+				_finish_gathering_idle()
 			return
 
 		_source_approach_candidate_index = 0
@@ -1431,6 +1527,15 @@ func _attempt_gather_stuck_recovery() -> void:
 
 		if _advance_task_approach_candidate():
 			_apply_current_task_movement_target()
+			return
+
+		_gather_loop_failures += 1
+		if _gather_loop_failures >= GatheringConfig.GATHER_LOOP_FAILURE_LIMIT:
+			# Break resource↔TH loops by parking idle with resources still carried
+			# only if a dropoff truly cannot be approached; otherwise retry once more.
+			_dropoff_candidate_index = 0
+			_retry_return_to_command_center()
+			_gather_loop_failures = 0
 			return
 
 		_retry_return_to_command_center()
@@ -1781,12 +1886,14 @@ func _move_toward_command_center_for_deposit(command_center: CommandCenter) -> v
 
 
 func _continue_gather_cycle() -> void:
+	_gather_loop_failures = 0
 	if _is_gathering_wood():
 		if (
 			_locked_wood_tree != null
 			and is_instance_valid(_locked_wood_tree)
 			and _locked_wood_tree.can_gather()
 		):
+			_locked_wood_tree.refresh_worker_reservation(self)
 			_gather_source = _locked_wood_tree
 			_gather_state = GatherTripState.TO_SOURCE
 			_source_approach_candidate_index = 0
@@ -1804,6 +1911,8 @@ func _continue_gather_cycle() -> void:
 		_finish_gathering_idle()
 		return
 
+	if source is GoldMine:
+		_lock_to_gold_mine(source as GoldMine)
 	_gather_state = GatherTripState.TO_SOURCE
 	_source_approach_candidate_index = 0
 	_set_movement_to_gather_source(source)
@@ -1844,27 +1953,29 @@ func _try_reassign_gather_source() -> bool:
 			if scene_root == null:
 				return false
 
-			var replacement: GatherableResource = WorkerGathering.find_nearest_gather_source(
-				&"gold",
+			var replacement_mine: GoldMine = WorkerGathering.find_best_gold_mine(
 				global_position,
 				scene_root,
 				_is_enemy_worker(),
 				null,
+				null,
 				false
 			)
-			if replacement == null or not is_instance_valid(replacement) or not replacement is GoldMine:
+			if replacement_mine == null or not is_instance_valid(replacement_mine):
 				return false
 
-			gold_mine = replacement as GoldMine
+			gold_mine = replacement_mine
 		if not gold_mine.can_gather():
 			return false
 
 		if _is_enemy_worker() and not WorkerGathering.is_safe_gather_source(gold_mine, get_tree()):
 			return false
 
+		_lock_to_gold_mine(gold_mine)
 		_gather_source = gold_mine
 		_assigned_resource_id = gold_mine.get_resource_id()
 		_source_approach_candidate_index = 0
+		_gather_loop_failures = 0
 		_gather_state = GatherTripState.TO_SOURCE
 		_set_movement_to_gather_source(gold_mine)
 		return true
@@ -1890,6 +2001,7 @@ func _try_reassign_gather_source() -> bool:
 		_gather_source = replacement
 		_assigned_resource_id = replacement.get_resource_id()
 		_source_approach_candidate_index = 0
+		_gather_loop_failures = 0
 		_gather_state = GatherTripState.TO_SOURCE
 		_set_movement_to_gather_source(replacement)
 		return true
@@ -2395,6 +2507,41 @@ func _is_enemy_worker() -> bool:
 	return is_in_group(&"enemy_workers")
 
 
+## Player idle worker: no move, gather, build/repair, attack, or queued orders.
+func is_player_idle() -> bool:
+	if not _is_alive():
+		return false
+	if _is_enemy_worker() or is_in_group(&"enemies"):
+		return false
+	if has_move_target:
+		return false
+	if get_active_order() != null:
+		return false
+	if has_queued_orders():
+		return false
+	if _wall_build_job != null:
+		return false
+	if _build_trip_state != BuildTripState.IDLE and _build_trip_state != BuildTripState.DONE:
+		return false
+	if _gather_state != GatherTripState.IDLE and _gather_state != GatherTripState.DONE:
+		return false
+	if _carried_amount > 0:
+		return false
+	return true
+
+
+func _update_idle_status_signal() -> void:
+	if _is_enemy_worker():
+		return
+
+	var idle_now: bool = is_player_idle()
+	if idle_now == _last_reported_idle:
+		return
+
+	_last_reported_idle = idle_now
+	idle_status_changed.emit(idle_now)
+
+
 func is_busy_with_task() -> bool:
 	if _build_trip_state != BuildTripState.IDLE:
 		return true
@@ -2474,18 +2621,115 @@ func _lock_to_wood_tree(tree: WoodTree) -> void:
 		return
 
 	if _locked_wood_tree == tree:
+		tree.refresh_worker_reservation(self)
 		return
 
 	_unlock_wood_tree()
 	_clear_wood_chop_spot()
 	_locked_wood_tree = tree
-	tree.register_assigned_worker()
+	tree.register_assigned_worker(self)
 
 
 func _unlock_wood_tree() -> void:
 	if _locked_wood_tree != null and is_instance_valid(_locked_wood_tree):
-		_locked_wood_tree.unregister_assigned_worker()
+		_locked_wood_tree.unregister_assigned_worker(self)
 	_locked_wood_tree = null
+
+
+func _lock_to_gold_mine(mine: GoldMine) -> void:
+	if mine == null or not is_instance_valid(mine):
+		_unlock_gold_mine()
+		return
+
+	if _reserved_gold_mine == mine:
+		mine.refresh_worker_reservation(self)
+		return
+
+	_unlock_gold_mine()
+	_reserved_gold_mine = mine
+	mine.register_assigned_worker(self)
+
+
+func _unlock_gold_mine() -> void:
+	if _reserved_gold_mine != null and is_instance_valid(_reserved_gold_mine):
+		_reserved_gold_mine.unregister_assigned_worker(self)
+	_reserved_gold_mine = null
+
+
+func _suspend_gathering_for_construction() -> void:
+	_suspended_gather_source = null
+	_suspended_resource_id = &""
+
+	var resume_source: GatherableResource = _get_valid_gather_source()
+	if resume_source == null and NodeSafety.is_alive_node(_locked_wood_tree):
+		resume_source = _locked_wood_tree
+	if resume_source == null and NodeSafety.is_alive_node(_reserved_gold_mine):
+		resume_source = _reserved_gold_mine
+
+	if resume_source != null or not _assigned_resource_id.is_empty() or _carried_amount > 0:
+		_suspended_gather_source = resume_source
+		_suspended_resource_id = _get_assigned_resource_id()
+
+	_unlock_wood_tree()
+	_unlock_gold_mine()
+	_gather_state = GatherTripState.IDLE
+	_gather_source = null
+	# Keep carried resources and assigned resource id so delivery can resume.
+	_source_approach_candidate_index = 0
+	_dropoff_candidate_index = 0
+	_return_dropoff = null
+	_gather_stuck_recovery_cooldown = 0.0
+	_gather_loop_failures = 0
+	_task_has_saved_destination = false
+	_clear_wood_chop_spot()
+	_disable_task_navigation()
+	_reset_task_corner_nudge()
+	_reset_ai_unstuck_state()
+
+
+func _clear_suspended_gathering() -> void:
+	_suspended_gather_source = null
+	_suspended_resource_id = &""
+
+
+func _try_resume_suspended_gathering() -> bool:
+	if _carried_amount > 0:
+		if _assigned_resource_id.is_empty() and not _suspended_resource_id.is_empty():
+			_assigned_resource_id = _suspended_resource_id
+		_clear_suspended_gathering()
+		_begin_return_to_command_center()
+		return true
+
+	var resume_source: GatherableResource = null
+	var resume_resource_id: StringName = _suspended_resource_id
+	if NodeSafety.is_alive_node(_suspended_gather_source) and _suspended_gather_source.can_gather():
+		resume_source = _suspended_gather_source
+	_clear_suspended_gathering()
+
+	if resume_source == null:
+		if resume_resource_id.is_empty():
+			return false
+		_assigned_resource_id = resume_resource_id
+		return _try_reassign_gather_source()
+
+	if resume_source is WoodTree:
+		command_gather_tree(resume_source as WoodTree, false)
+		return _gather_state != GatherTripState.IDLE
+	if resume_source is GoldMine:
+		command_gather_gold_mine(resume_source as GoldMine, false)
+		return _gather_state != GatherTripState.IDLE
+
+	return false
+
+
+func is_reserved_to_gather_source(source: GatherableResource) -> bool:
+	if source == null:
+		return false
+	if source is WoodTree:
+		return _locked_wood_tree == source
+	if source is GoldMine:
+		return _reserved_gold_mine == source or _gather_source == source
+	return _gather_source == source
 
 
 func _select_wood_tree(preferred: WoodTree, player_ordered: bool = true) -> WoodTree:
@@ -2554,15 +2798,25 @@ func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
 		GatheringConfig.APPROACH_OCCUPIED_MAX_ATTEMPTS,
 		GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES
 	)
+	var first_candidate: Vector3 = Vector3.ZERO
+	var has_first_candidate: bool = false
 	for attempt_offset: int in attempt_limit:
 		var candidate_index: int = base_slot + attempt_offset
-		fallback_position = _compute_resource_approach_position_for_candidate(
+		var candidate: Vector3 = _compute_resource_approach_position_for_candidate(
 			tree, candidate_index
 		)
-		if _is_approach_position_occupied(fallback_position, tree, nearby_workers):
+		if not has_first_candidate:
+			first_candidate = candidate
+			has_first_candidate = true
+			fallback_position = candidate
+		if _is_approach_position_occupied(candidate, tree, nearby_workers):
 			continue
-		return fallback_position
+		if not _is_wood_chop_spot_reachable(candidate):
+			continue
+		return candidate
 
+	if has_first_candidate:
+		return first_candidate
 	return fallback_position
 
 
@@ -2693,18 +2947,29 @@ func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 		GatheringConfig.APPROACH_OCCUPIED_MAX_ATTEMPTS,
 		GatheringConfig.MAX_GATHER_APPROACH_CANDIDATES - _source_approach_candidate_index
 	)
+	var has_fallback: bool = false
 	for attempt_offset: int in attempt_limit:
 		var candidate_index: int = _source_approach_candidate_index + attempt_offset
-		fallback_position = _compute_resource_approach_position_for_candidate(
+		var candidate: Vector3 = _compute_resource_approach_position_for_candidate(
 			source, candidate_index
 		)
-		if _is_approach_position_occupied(fallback_position, source, nearby_workers):
+		if not has_fallback:
+			fallback_position = candidate
+			has_fallback = true
+		if _is_approach_position_occupied(candidate, source, nearby_workers):
 			continue
-		if source is WoodTree and not _is_wood_chop_spot_reachable(fallback_position):
+		if not _is_gather_approach_reachable(candidate):
 			continue
-		return fallback_position
+		return candidate
 
 	return fallback_position
+
+
+func _is_gather_approach_reachable(approach_position: Vector3) -> bool:
+	if not WorkerTaskNavigation.can_use(_navigation_agent):
+		return true
+
+	return WorkerTaskNavigation.is_target_reachable(_navigation_agent, approach_position)
 
 
 func _compute_command_center_dropoff_position(command_center: CommandCenter) -> Vector3:

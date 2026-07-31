@@ -6,6 +6,8 @@ extends Node
 
 const REPORT_PATH := "user://match_reset_verify_result.txt"
 
+var _dirty_control_group_unit: Node = null
+
 
 func _ready() -> void:
 	var exit_code: int = 0
@@ -58,6 +60,12 @@ func _dirty_persistent_match_state() -> void:
 	UpgradeManager.finish_enemy_research(UpgradeManager.UPGRADE_ARCHER_ATTACK)
 	UpgradeManager.finish_academy_research(UpgradeManager.UPGRADE_FASTER_GATHERING)
 	InputManager.arm_attack_move()
+	if _dirty_control_group_unit != null and is_instance_valid(_dirty_control_group_unit):
+		_dirty_control_group_unit.queue_free()
+		_dirty_control_group_unit = null
+	_dirty_control_group_unit = load("res://scenes/units/swordsman.tscn").instantiate()
+	add_child(_dirty_control_group_unit)
+	ControlGroupManager.assign_group(0, [_dirty_control_group_unit])
 	HeroProgressionStore._player_snapshot = {"level": 5}
 	HeroProgressionStore._enemy_snapshot = {"level": 3}
 
@@ -96,6 +104,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and EnemyResourceManager.get_spendable_wood() == EnemyResourceManager.wood
 		and all_upgrades_zero
 		and not InputManager.attack_move_armed
+		and not ControlGroupManager.has_any_members()
+		and ControlGroupManager.get_active_group_index() < 0
 		and not HeroProgressionStore.has_saved_progression()
 		and not HeroProgressionStore.has_saved_enemy_progression()
 		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
@@ -114,6 +124,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		"player_upgrades": player_upgrades,
 		"enemy_upgrades": enemy_upgrades,
 		"attack_move_armed": InputManager.attack_move_armed,
+		"control_groups_empty": not ControlGroupManager.has_any_members(),
+		"control_group_active": ControlGroupManager.get_active_group_index(),
 		"hero_player_saved": HeroProgressionStore.has_saved_progression(),
 		"hero_enemy_saved": HeroProgressionStore.has_saved_enemy_progression(),
 		"army_mode": int(EnemyArmyCommand.get_army_mode()),

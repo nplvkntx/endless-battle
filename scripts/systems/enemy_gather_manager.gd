@@ -1328,6 +1328,8 @@ func _find_gold_mine_near_command_center(
 		var mine: GoldMine = child as GoldMine
 		if not mine.can_gather():
 			continue
+		if not mine.is_usable_by_faction(true):
+			continue
 		if not WorkerGathering.is_safe_gather_source(mine, get_tree()):
 			continue
 
@@ -1465,13 +1467,19 @@ func _resolve_gold_mine() -> GoldMine:
 	if scene_root == null:
 		return null
 
-	var named_mine: Node = scene_root.get_node_or_null("MapResources/EnemyGoldMine")
-	if named_mine == null:
-		named_mine = scene_root.get_node_or_null("EnemyGoldMine")
-	if named_mine is GoldMine:
-		return named_mine as GoldMine
+	var from_position: Vector3 = Vector3(38.0, 0.0, 38.0)
+	var centers: Array[CommandCenter] = _collect_completed_enemy_command_centers()
+	if not centers.is_empty():
+		from_position = centers[0].global_position
 
-	return null
+	return WorkerGathering.find_best_gold_mine(
+		from_position,
+		scene_root,
+		true,
+		null,
+		null,
+		false
+	)
 
 
 func _resolve_trees() -> Array[WoodTree]:
@@ -1480,19 +1488,19 @@ func _resolve_trees() -> Array[WoodTree]:
 	if scene_root == null:
 		return trees
 
-	var map_resources: Node = scene_root.get_node_or_null("MapResources")
-	var search_root: Node = map_resources if map_resources != null else scene_root
-
-	for child: Node in search_root.get_children():
-		if not child is WoodTree:
+	for node: Node in WorkerGathering.get_gatherable_resources(get_tree(), scene_root):
+		if not node is WoodTree:
 			continue
-		if not child.name.begins_with("EnemyTree"):
+		var wood_tree := node as WoodTree
+		if not wood_tree.is_usable_by_faction(true):
 			continue
-		trees.append(child as WoodTree)
+		if not wood_tree.can_gather():
+			continue
+		trees.append(wood_tree)
 
 	trees.sort_custom(
 		func(first: WoodTree, second: WoodTree) -> bool:
-			return first.name < second.name
+			return first.get_instance_id() < second.get_instance_id()
 	)
 	return trees
 

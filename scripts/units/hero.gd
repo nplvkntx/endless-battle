@@ -32,6 +32,8 @@ const BASE_MAX_MANA := 100
 const BASE_MOVE_SPEED := 5.5
 const MOVE_SPEED_PER_LEVEL_AFTER_18 := 0.05
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
+const HOLD_RETURN_DISTANCE := 1.25
+const OPPORTUNISTIC_CHASE_LEASH := 18.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -46,8 +48,14 @@ var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _has_active_attack_order: bool = false
+var _committed_attack_order: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
+var _is_holding_position: bool = false
+var _hold_anchor: Vector3 = Vector3.ZERO
+var _is_patrolling: bool = false
+var _patrol_points: Array[Vector3] = []
+var _patrol_index: int = 0
 var _ground_slam_cooldown_timer: float = 0.0
 var _ground_slam_pulse_tween: Tween
 var _mana_regen_accumulator: float = 0.0
@@ -223,12 +231,30 @@ func supports_combat_orders() -> bool:
 	return true
 
 
+func _prepare_for_new_player_order() -> void:
+	_cancel_power_strike()
+	_cancel_execute()
+	_clear_hold_position_state()
+	_clear_patrol_state()
+	cancel_attack_move()
+	cancel_attack()
+
+
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not NodeSafety.is_alive_node(target):
 		return
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.attack(target, assigned_slot)
+		_prepare_for_new_player_order()
+
+	_begin_attack_on_target(target, assigned_slot, true)
+
+
+func _begin_attack_on_target(target: Node3D, assigned_slot: int, committed: bool) -> void:
 	_cancel_power_strike()
 	_cancel_execute()
 	_assign_attack_approach_slot(target, assigned_slot)
@@ -236,19 +262,97 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if _attack_target == null:
 		return
 	_has_active_attack_order = true
+	_committed_attack_order = committed
 	_has_chase_target = false
+
+	if _is_holding_position:
+		if not _is_in_attack_range(_attack_target):
+			cancel_attack()
+		return
 
 	if not _is_in_attack_range(_attack_target):
 		_begin_chase()
 
 
 func command_attack_move(destination: Vector3) -> void:
-	_cancel_power_strike()
-	_cancel_execute()
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.attack_move(destination)
+		_clear_hold_position_state()
+		_clear_patrol_state()
+		_cancel_power_strike()
+		_cancel_execute()
+
 	_attack_move_destination = destination
 	_has_attack_move_destination = true
 	cancel_attack()
 	_set_move_destination(destination, RepathUrgency.PLAYER_ORDER)
+
+
+func command_hold_position() -> void:
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.hold_position()
+		_clear_patrol_state()
+		_cancel_power_strike()
+		_cancel_execute()
+		cancel_attack_move()
+		cancel_attack()
+
+	_is_holding_position = true
+	_hold_anchor = global_position
+	clear_move_target()
+
+
+func command_patrol(points: Array[Vector3]) -> void:
+	var resolved_points: Array[Vector3] = []
+	for point: Vector3 in points:
+		resolved_points.append(Vector3(point.x, global_position.y, point.z))
+	if resolved_points.size() == 1:
+		resolved_points.insert(0, global_position)
+	if resolved_points.size() < 2:
+		return
+
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.patrol(resolved_points)
+		_clear_hold_position_state()
+		_cancel_power_strike()
+		_cancel_execute()
+
+	_patrol_points = resolved_points
+	_patrol_index = 0
+	_is_patrolling = true
+	cancel_attack()
+	_start_patrol_leg()
+
+
+func append_patrol_point(point: Vector3) -> void:
+	if not _is_patrolling:
+		command_patrol([global_position, point] as Array[Vector3])
+		return
+	var next_point := Vector3(point.x, global_position.y, point.z)
+	_patrol_points.append(next_point)
+	if _active_order != null and _active_order.type == UnitOrder.Type.PATROL:
+		_active_order.patrol_points = _patrol_points.duplicate()
+
+
+func _start_patrol_leg() -> void:
+	if _patrol_points.is_empty():
+		_clear_patrol_state()
+		return
+	_patrol_index = posmod(_patrol_index, _patrol_points.size())
+	var destination: Vector3 = _patrol_points[_patrol_index]
+	_attack_move_destination = destination
+	_has_attack_move_destination = true
+	_set_move_destination(destination, RepathUrgency.PLAYER_ORDER)
+
+
+func _advance_patrol_waypoint() -> void:
+	if not _is_patrolling or _patrol_points.is_empty():
+		return
+	_patrol_index = (_patrol_index + 1) % _patrol_points.size()
+	_start_patrol_leg()
 
 
 func cancel_attack_move() -> void:
@@ -257,29 +361,47 @@ func cancel_attack_move() -> void:
 
 func cancel_attack() -> void:
 	if NodeSafety.is_alive_node(_attack_target):
-		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
+		CombatTargetValidation.release_attack_approach_slot(_attack_target, self)
 	_attack_target = null
 	_attack_approach_slot = -1
 	_has_chase_target = false
 	_has_active_attack_order = false
+	_committed_attack_order = false
+
+
+func _clear_hold_position_state() -> void:
+	_is_holding_position = false
+
+
+func _clear_patrol_state() -> void:
+	_is_patrolling = false
+	_patrol_points.clear()
+	_patrol_index = 0
 
 
 func _sanitize_attack_target() -> void:
 	if _has_active_attack_order and not NodeSafety.is_alive_node(_attack_target):
-		cancel_attack()
-		_resume_attack_move()
+		_finish_attack_target_lost()
 		return
 
 	if _attack_target == null:
 		if _has_chase_target:
 			_has_chase_target = false
 			clear_move_target()
-			_resume_attack_move()
+			_resume_attack_move_or_patrol()
 		return
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
-		cancel_attack()
-		_resume_attack_move()
+		_finish_attack_target_lost()
+
+
+func _finish_attack_target_lost() -> void:
+	var was_committed: bool = _committed_attack_order
+	cancel_attack()
+	if _resume_attack_move_or_patrol():
+		return
+	if was_committed:
+		notify_order_completed(UnitOrder.Type.ATTACK)
 
 
 func _sanitize_ability_targets() -> void:
@@ -291,19 +413,37 @@ func _sanitize_ability_targets() -> void:
 
 
 func set_movement_target(target: Vector3) -> bool:
-	_cancel_power_strike()
-	_cancel_execute()
-	cancel_attack_move()
-	cancel_attack()
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.move(target)
+		_prepare_for_new_player_order()
+	else:
+		_cancel_power_strike()
+		_cancel_execute()
+		cancel_attack_move()
+		cancel_attack()
 	return _set_move_destination(target, RepathUrgency.PLAYER_ORDER)
 
 
 func stop_movement() -> void:
 	_cancel_power_strike()
 	_cancel_execute()
+	_clear_hold_position_state()
+	_clear_patrol_state()
 	cancel_attack_move()
 	cancel_attack()
 	super.stop_movement()
+
+
+func _on_movement_arrived() -> void:
+	if _is_patrolling and _has_attack_move_destination:
+		_advance_patrol_waypoint()
+		return
+	if _has_attack_move_destination and _is_at_attack_move_destination():
+		cancel_attack_move()
+		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
+		return
+	super._on_movement_arrived()
 
 
 func _set_move_destination(
@@ -511,7 +651,7 @@ func _begin_power_strike(target: Node3D) -> void:
 	cancel_attack_move()
 	cancel_attack()
 	_power_strike_approach_slot = CombatTargetValidation.claim_attack_approach_slot(
-		_power_strike_target
+		_power_strike_target, self
 	)
 	_has_power_strike_pending = true
 
@@ -524,6 +664,8 @@ func _begin_power_strike(target: Node3D) -> void:
 
 
 func _cancel_power_strike() -> void:
+	if NodeSafety.is_alive_node(_power_strike_target):
+		CombatTargetValidation.release_attack_approach_slot(_power_strike_target, self)
 	_has_power_strike_pending = false
 	_power_strike_target = null
 	_power_strike_approach_slot = -1
@@ -821,7 +963,7 @@ func _begin_execute(target: Node3D) -> void:
 	cancel_attack()
 	_cancel_power_strike()
 	_execute_approach_slot = CombatTargetValidation.claim_attack_approach_slot(
-		_execute_target
+		_execute_target, self
 	)
 	_has_execute_pending = true
 
@@ -832,6 +974,8 @@ func _begin_execute(target: Node3D) -> void:
 
 
 func _cancel_execute() -> void:
+	if NodeSafety.is_alive_node(_execute_target):
+		CombatTargetValidation.release_attack_approach_slot(_execute_target, self)
 	_has_execute_pending = false
 	_execute_target = null
 	_execute_approach_slot = -1
@@ -1145,28 +1289,31 @@ func _physics_process(delta: float) -> void:
 
 	if _has_execute_pending:
 		_process_execute(delta)
-	elif _has_power_strike_pending:
+		return
+	if _has_power_strike_pending:
 		_process_power_strike(delta)
-	elif _attack_target == null and not has_move_target:
+		return
+
+	if _is_holding_position:
+		_update_hold_position(can_scan_targets, delta)
+		return
+
+	if _attack_target == null and not has_move_target:
 		if can_scan_targets:
 			_try_auto_attack()
 
-	if (
-		_has_attack_move_destination
-		and _attack_target == null
-		and not _has_power_strike_pending
-		and not _has_execute_pending
-	):
+	if _has_attack_move_destination and _attack_target == null:
 		if can_scan_targets:
 			_try_attack_move_engagement()
 
-	if _has_active_attack_order and not _has_power_strike_pending and not _has_execute_pending:
+	if _has_active_attack_order:
 		if not NodeSafety.is_alive_node(_attack_target):
-			cancel_attack()
-			_resume_attack_move()
+			_finish_attack_target_lost()
 		elif not CombatTargetValidation.is_valid_combat_target(_attack_target):
+			_finish_attack_target_lost()
+		elif not _committed_attack_order and _should_break_opportunistic_chase():
 			cancel_attack()
-			_resume_attack_move()
+			_resume_attack_move_or_patrol()
 		else:
 			_process_attack(delta)
 			return
@@ -1174,8 +1321,40 @@ func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
 
 	if _has_attack_move_destination and _attack_target == null and not has_move_target:
-		if _is_at_attack_move_destination():
+		if _is_patrolling:
+			_advance_patrol_waypoint()
+		elif _is_at_attack_move_destination():
 			cancel_attack_move()
+			notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
+
+
+func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
+	var offset: Vector3 = global_position - _hold_anchor
+	offset.y = 0.0
+	if offset.length() > HOLD_RETURN_DISTANCE and _attack_target == null:
+		_set_move_destination(_hold_anchor, RepathUrgency.NORMAL)
+		super._physics_process(delta)
+		return
+
+	if _attack_target == null:
+		clear_move_target()
+		if can_scan_targets:
+			var nearby: Node3D = _find_closest_attack_target_in_range()
+			if nearby != null:
+				_begin_attack_on_target(nearby, -1, false)
+		UnitSeparation.apply_standing_push(self, move_speed, true)
+		return
+
+	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
+		cancel_attack()
+		UnitSeparation.apply_standing_push(self, move_speed, true)
+		return
+
+	if _is_in_attack_range(_attack_target):
+		_stop_and_attack(delta)
+	else:
+		cancel_attack()
+		UnitSeparation.apply_standing_push(self, move_speed, true)
 
 
 func _try_auto_attack() -> void:
@@ -1184,7 +1363,7 @@ func _try_auto_attack() -> void:
 
 	var closest_target: Node3D = _find_closest_attack_target_in_range()
 	if closest_target != null:
-		command_attack(closest_target)
+		_begin_attack_on_target(closest_target, -1, false)
 
 
 func _find_closest_attack_target_in_range() -> Node3D:
@@ -1200,6 +1379,14 @@ func _find_closest_attack_target_in_range() -> Node3D:
 
 func _process_attack(delta: float) -> void:
 	if _is_in_attack_range(_attack_target):
+		if _should_reposition_for_preferred_range():
+			_update_chase_movement()
+			super._physics_process(delta)
+			if _attack_target != null and _is_in_attack_range(_attack_target):
+				if not _should_reposition_for_preferred_range():
+					_stop_and_attack(delta)
+			return
+
 		_stop_and_attack(delta)
 		return
 
@@ -1213,24 +1400,38 @@ func _process_attack(delta: float) -> void:
 func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
+	UnitSeparation.apply_standing_push(self, move_speed, true)
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
 		return
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
-		cancel_attack()
-		_resume_attack_move()
+		_finish_attack_target_lost()
 		return
 
 	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
-		cancel_attack()
-		_resume_attack_move()
+		_finish_attack_target_lost()
 		return
 
 	MeleeHitSound.play_at(self, _attack_target.global_position)
 	_play_attack_animation()
 	_attack_cooldown_timer = attack_cooldown
+
+
+func _should_reposition_for_preferred_range() -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return false
+	if _is_holding_position:
+		return false
+
+	return CombatTargetValidation.is_too_close_for_preferred_range(
+		self,
+		_attack_target,
+		attack_range,
+		stopping_distance,
+		maxi(_attack_approach_slot, 0)
+	)
 
 
 func _play_attack_animation() -> void:
@@ -1313,6 +1514,8 @@ func _update_chase_movement() -> void:
 	if not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
 		return
+	if _is_holding_position:
+		return
 
 	var approach_position: Vector3 = _compute_attack_approach_position(_attack_target)
 	if _has_chase_target and has_move_target:
@@ -1331,28 +1534,48 @@ func _try_attack_move_engagement() -> void:
 	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
 		return
 
-	var closest_target: Node3D = null
-	if CombatTargetValidation.is_enemy_faction(self):
-		closest_target = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
-			self, maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-		)
-	else:
-		closest_target = _find_closest_attack_target_in_range()
-
+	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	var closest_target: Node3D = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+		self, search_range
+	)
 	if closest_target != null:
-		command_attack(closest_target)
+		_begin_attack_on_target(closest_target, -1, false)
 
 
-func _resume_attack_move() -> void:
+func _should_break_opportunistic_chase() -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return true
+	var distance: float = CombatTargetValidation.get_horizontal_attack_distance(self, _attack_target)
+	if distance > OPPORTUNISTIC_CHASE_LEASH:
+		return true
+	if _has_attack_move_destination:
+		var target_from_dest: Vector3 = _attack_target.global_position - _attack_move_destination
+		target_from_dest.y = 0.0
+		if target_from_dest.length() > OPPORTUNISTIC_CHASE_LEASH:
+			return true
+	return false
+
+
+func _resume_attack_move() -> bool:
+	return _resume_attack_move_or_patrol()
+
+
+func _resume_attack_move_or_patrol() -> bool:
+	if _is_patrolling:
+		_start_patrol_leg()
+		return true
+
 	if not _has_attack_move_destination:
-		return
+		return false
 
 	if _is_at_attack_move_destination():
 		cancel_attack_move()
-		return
+		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
+		return false
 
 	_has_chase_target = false
 	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
+	return true
 
 
 func _is_at_attack_move_destination() -> bool:
@@ -1380,6 +1603,8 @@ func _compute_attack_approach_position(target: Node3D, approach_slot: int = -1) 
 
 func _assign_attack_approach_slot(target: Node3D, assigned_slot: int) -> void:
 	if assigned_slot >= 0:
-		_attack_approach_slot = assigned_slot
+		_attack_approach_slot = CombatTargetValidation.reserve_attack_approach_slot(
+			target, self, assigned_slot
+		)
 	elif _attack_target != target:
-		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
+		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target, self)

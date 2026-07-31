@@ -45,7 +45,8 @@ static func process_movement(
 	agent: NavigationAgent3D,
 	destination: Vector3,
 	move_speed: float,
-	stopping_distance: float
+	stopping_distance: float,
+	apply_separation: bool = true
 ) -> bool:
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
@@ -54,18 +55,29 @@ static func process_movement(
 		return true
 
 	if not can_use(agent):
-		return process_direct_movement(body, destination, move_speed, stopping_distance)
+		return process_direct_movement(
+			body, destination, move_speed, stopping_distance, apply_separation
+		)
 
 	if agent.is_navigation_finished():
-		return process_direct_movement(body, destination, move_speed, stopping_distance)
+		return process_direct_movement(
+			body, destination, move_speed, stopping_distance, apply_separation
+		)
 
 	var next_position: Vector3 = agent.get_next_path_position()
 	var direction: Vector3 = next_position - body.global_position
 	direction.y = 0.0
 	if direction.length_squared() < 0.0001:
-		return process_direct_movement(body, destination, move_speed, stopping_distance)
+		return process_direct_movement(
+			body, destination, move_speed, stopping_distance, apply_separation
+		)
 
-	body.velocity = direction.normalized() * move_speed
+	var desired_velocity: Vector3 = direction.normalized() * move_speed
+	if apply_separation:
+		desired_velocity = UnitSeparation.blend_desired_velocity(
+			body, desired_velocity, move_speed
+		)
+	body.velocity = desired_velocity
 	body.velocity.y = 0.0
 	body.move_and_slide()
 	return false
@@ -75,7 +87,8 @@ static func process_direct_movement(
 	body: CharacterBody3D,
 	destination: Vector3,
 	move_speed: float,
-	stopping_distance: float
+	stopping_distance: float,
+	apply_separation: bool = true
 ) -> bool:
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
@@ -88,7 +101,12 @@ static func process_direct_movement(
 		body.move_and_slide()
 		return true
 
-	body.velocity = offset.normalized() * move_speed
+	var desired_velocity: Vector3 = offset.normalized() * move_speed
+	if apply_separation:
+		desired_velocity = UnitSeparation.blend_desired_velocity(
+			body, desired_velocity, move_speed
+		)
+	body.velocity = desired_velocity
 	body.velocity.y = 0.0
 	body.move_and_slide()
 	return false

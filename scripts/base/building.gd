@@ -39,6 +39,11 @@ var _construction_duration: float = 4.0
 var _construction_timer_active: bool = false
 var _construction_elapsed: float = 0.0
 var _registered_builders: Array[Worker] = []
+var _construction_gold_cost: int = 0
+var _construction_wood_cost: int = 0
+var _construction_cost_for_enemy: bool = false
+var _construction_cost_refunded: bool = false
+var _construction_started_msec: int = 0
 var _mesh_instance: MeshInstance3D
 var _visuals_root: Node3D
 var _feedback_material_ready: bool = false
@@ -185,6 +190,8 @@ func take_damage(_amount: float, _attacker = null) -> void:
 
 ## Handles building destruction and notifies listeners through signals.
 func destroy_building() -> void:
+	_refund_construction_costs_if_needed()
+	ConstructionReservations.release_build_slots_for_building(self)
 	_release_registered_builders_on_destroy()
 	NodeSafety.prepare_node_for_death(self)
 	destroyed.emit(self)
@@ -231,6 +238,7 @@ func start_under_construction() -> void:
 	building_state = STATE_UNDER_CONSTRUCTION
 	_construction_progress = 0.0
 	_construction_elapsed = 0.0
+	_construction_started_msec = Time.get_ticks_msec()
 	_apply_under_construction_visual()
 	_show_construction_progress_bar()
 	building_state_changed.emit(building_state)
@@ -240,6 +248,46 @@ func start_under_construction() -> void:
 
 func setup_construction(duration: float) -> void:
 	_construction_duration = duration
+
+
+func set_construction_cost(gold_cost: int, wood_cost: int, for_enemy: bool = false) -> void:
+	_construction_gold_cost = maxi(gold_cost, 0)
+	_construction_wood_cost = maxi(wood_cost, 0)
+	_construction_cost_for_enemy = for_enemy
+	_construction_cost_refunded = false
+
+
+func get_construction_started_msec() -> int:
+	return _construction_started_msec
+
+
+func refund_and_cancel_construction() -> void:
+	if building_state == STATE_COMPLETED:
+		return
+
+	_refund_construction_costs_if_needed()
+	ConstructionReservations.release_build_slots_for_building(self)
+	_release_registered_builders_on_destroy()
+	queue_free()
+
+
+func _refund_construction_costs_if_needed() -> void:
+	if _construction_cost_refunded:
+		return
+
+	if building_state == STATE_COMPLETED:
+		return
+
+	if _construction_gold_cost <= 0 and _construction_wood_cost <= 0:
+		return
+
+	_construction_cost_refunded = true
+	if _construction_cost_for_enemy:
+		EnemyResourceManager.add_gold(_construction_gold_cost)
+		EnemyResourceManager.add_wood(_construction_wood_cost)
+	else:
+		ResourceManager.add_gold(_construction_gold_cost)
+		ResourceManager.add_wood(_construction_wood_cost)
 
 
 func get_construction_progress_ratio() -> float:
@@ -414,6 +462,7 @@ func unregister_builder(worker: Worker) -> void:
 	if worker == null or not is_instance_valid(worker):
 		return
 
+	ConstructionReservations.release_build_slot(self, worker)
 	var index: int = _registered_builders.find(worker)
 	if index >= 0:
 		_registered_builders.remove_at(index)
@@ -431,6 +480,7 @@ func register_builder(worker: Worker) -> void:
 	if worker == null or not is_instance_valid(worker):
 		return
 
+	ConstructionReservations.refresh_build_slot(self, worker)
 	if worker not in _registered_builders:
 		_registered_builders.append(worker)
 
@@ -454,6 +504,8 @@ func begin_construction() -> void:
 func complete_construction() -> void:
 	building_state = STATE_COMPLETED
 	_construction_progress = 1.0
+	_construction_cost_refunded = true
+	ConstructionReservations.release_build_slots_for_building(self)
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
@@ -463,6 +515,8 @@ func complete_construction() -> void:
 func set_completed() -> void:
 	building_state = STATE_COMPLETED
 	_construction_progress = 1.0
+	_construction_cost_refunded = true
+	ConstructionReservations.release_build_slots_for_building(self)
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)

@@ -145,7 +145,7 @@ func cancel_attack_move() -> void:
 
 func cancel_attack() -> void:
 	if NodeSafety.is_alive_node(_attack_target):
-		CombatTargetValidation.clear_attack_approach_slots(_attack_target)
+		CombatTargetValidation.release_attack_approach_slot(_attack_target, self)
 	_attack_target = null
 	_attack_approach_slot = -1
 	_has_chase_target = false
@@ -261,6 +261,14 @@ func _try_retarget_higher_priority_during_attack() -> void:
 
 func _process_attack(delta: float) -> void:
 	if _is_in_attack_range(_attack_target):
+		if _should_reposition_for_preferred_range():
+			_update_chase_movement()
+			super._physics_process(delta)
+			if _attack_target != null and _is_in_attack_range(_attack_target):
+				if not _should_reposition_for_preferred_range():
+					_stop_and_attack(delta)
+			return
+
 		_stop_and_attack(delta)
 		return
 
@@ -274,6 +282,7 @@ func _process_attack(delta: float) -> void:
 func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
+	UnitSeparation.apply_standing_push(self, move_speed, true)
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
@@ -286,6 +295,19 @@ func _stop_and_attack(delta: float) -> void:
 
 	_fire_shell()
 	_attack_cooldown_timer = attack_cooldown
+
+
+func _should_reposition_for_preferred_range() -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return false
+
+	return CombatTargetValidation.is_too_close_for_preferred_range(
+		self,
+		_attack_target,
+		attack_range,
+		stopping_distance,
+		maxi(_attack_approach_slot, 0)
+	)
 
 
 func _fire_shell() -> void:
@@ -427,6 +449,8 @@ func _compute_attack_approach_position(target: Node3D) -> Vector3:
 
 func _assign_attack_approach_slot(target: Node3D, assigned_slot: int) -> void:
 	if assigned_slot >= 0:
-		_attack_approach_slot = assigned_slot
+		_attack_approach_slot = CombatTargetValidation.reserve_attack_approach_slot(
+			target, self, assigned_slot
+		)
 	elif _attack_target != target:
-		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target)
+		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target, self)

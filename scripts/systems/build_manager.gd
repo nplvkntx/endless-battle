@@ -47,17 +47,6 @@ const HERO_ALTAR_GOLD_COST: int = 180
 const HERO_ALTAR_WOOD_COST: int = 110
 const COMMAND_CENTER_GOLD_COST: int = 200
 const COMMAND_CENTER_WOOD_COST: int = 400
-const FARM_GROUND_Y: float = 0.75
-const BARRACKS_GROUND_Y: float = 1.0
-const BLACKSMITH_GROUND_Y: float = 1.0
-const STABLE_GROUND_Y: float = 1.0
-const ARTILLERY_DEPOT_GROUND_Y: float = 1.0
-const ACADEMY_GROUND_Y: float = 1.0
-const SHOP_GROUND_Y: float = 1.0
-const TOWER_GROUND_Y: float = 1.5
-const WALL_SEGMENT_GROUND_Y: float = 0.75
-const HERO_ALTAR_GROUND_Y: float = 1.25
-const COMMAND_CENTER_GROUND_Y: float = 1.25
 const GHOST_ALPHA: float = 0.4
 const GHOST_COLOR_VALID := Color(0.5, 0.85, 0.5, GHOST_ALPHA)
 const GHOST_COLOR_INVALID := Color(0.9, 0.35, 0.35, GHOST_ALPHA)
@@ -83,6 +72,7 @@ var _wall_drag_has_start: bool = false
 var _wall_drag_start: Vector3 = Vector3.ZERO
 var _wall_drag_ghosts: Array[Node3D] = []
 var _wall_drag_ghost_materials: Array[StandardMaterial3D] = []
+var _ghost_footprint_reservation_id: int = 0
 
 
 func _ready() -> void:
@@ -118,11 +108,12 @@ func _process(_delta: float) -> void:
 	if not ground_position.is_finite():
 		return
 
-	var ground_y: float = _get_ground_y(_active_placement)
+	var ground_y: float = EnemyBuildPlacement.get_ground_y(_active_placement)
 	var snapped_position: Vector3 = EnemyBuildPlacement.snap_to_grid(ground_position)
 	snapped_position.y = ground_y
 	_placement_ghost.global_position = snapped_position
 	_update_ghost_validity(snapped_position)
+	_refresh_ghost_footprint_reservation(snapped_position)
 
 
 func _input(event: InputEvent) -> void:
@@ -273,6 +264,7 @@ func _start_placement(placement_type: StringName) -> void:
 
 
 func _cancel_placement() -> void:
+	_release_ghost_footprint_reservation()
 	_active_placement = &""
 	_ghost_material = null
 	_wall_drag_has_start = false
@@ -359,19 +351,55 @@ func _place_building() -> void:
 
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
 	if buildings_parent == null or not buildings_parent.is_inside_tree():
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
 		return
 
 	var scene: PackedScene = _get_building_scene(_active_placement)
 	if scene == null:
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
 		return
 
 	var placement_position: Vector3 = _placement_ghost.global_position
 	if not placement_position.is_finite():
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
+		return
+
+	# Final placement must match the same validity rules as the preview ghost.
+	var exclude_nodes: Array[Node] = []
+	if _placement_ghost != null and is_instance_valid(_placement_ghost):
+		exclude_nodes.append(_placement_ghost)
+
+	if not EnemyBuildPlacement.is_position_valid(
+		placement_position,
+		_active_placement,
+		_collect_placement_obstacles(buildings_parent),
+		buildings_parent,
+		exclude_nodes,
+		true,
+		_ghost_footprint_reservation_id
+	):
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
+		print("Invalid placement")
 		return
 
 	var building: Building = scene.instantiate() as Building
+	if building == null:
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
+		return
+
 	buildings_parent.add_child(building)
+	if not is_instance_valid(building) or not building.is_inside_tree():
+		ResourceManager.add_gold(gold_cost)
+		ResourceManager.add_wood(wood_cost)
+		return
+
 	building.global_position = placement_position
+	building.set_construction_cost(gold_cost, wood_cost, false)
 	building.start_under_construction()
 
 	var workers: Array[Worker] = _get_selected_workers()
@@ -379,6 +407,7 @@ func _place_building() -> void:
 	for worker: Worker in workers:
 		worker.start_construction_order(building)
 
+	_release_ghost_footprint_reservation()
 	_cancel_placement()
 
 
@@ -410,32 +439,26 @@ func _get_building_scene(placement_type: StringName) -> PackedScene:
 			return null
 
 
-func _get_ground_y(placement_type: StringName) -> float:
-	match placement_type:
-		PLACEMENT_FARM:
-			return FARM_GROUND_Y
-		PLACEMENT_BARRACKS:
-			return BARRACKS_GROUND_Y
-		PLACEMENT_BLACKSMITH:
-			return BLACKSMITH_GROUND_Y
-		PLACEMENT_STABLE:
-			return STABLE_GROUND_Y
-		PLACEMENT_ARTILLERY_DEPOT:
-			return ARTILLERY_DEPOT_GROUND_Y
-		PLACEMENT_ACADEMY:
-			return ACADEMY_GROUND_Y
-		PLACEMENT_SHOP:
-			return SHOP_GROUND_Y
-		PLACEMENT_TOWER:
-			return TOWER_GROUND_Y
-		PLACEMENT_WALL_SEGMENT:
-			return WALL_SEGMENT_GROUND_Y
-		PLACEMENT_HERO_ALTAR:
-			return HERO_ALTAR_GROUND_Y
-		PLACEMENT_COMMAND_CENTER:
-			return COMMAND_CENTER_GROUND_Y
-		_:
-			return 0.0
+func _refresh_ghost_footprint_reservation(position: Vector3) -> void:
+	if _active_placement.is_empty() or not position.is_finite():
+		return
+
+	var footprint: Vector2 = EnemyBuildPlacement.get_footprint(_active_placement)
+	_ghost_footprint_reservation_id = ConstructionReservations.reserve_footprint(
+		position,
+		footprint,
+		self,
+		ConstructionReservations.FOOTPRINT_RESERVATION_TTL_MSEC,
+		_ghost_footprint_reservation_id
+	)
+
+
+func _release_ghost_footprint_reservation() -> void:
+	if _ghost_footprint_reservation_id <= 0:
+		return
+
+	ConstructionReservations.release_footprint(_ghost_footprint_reservation_id)
+	_ghost_footprint_reservation_id = 0
 
 
 func _get_selected_workers() -> Array[Worker]:
@@ -582,7 +605,9 @@ func _is_placement_valid_at(position: Vector3) -> bool:
 		_active_placement,
 		_collect_placement_obstacles(buildings_parent),
 		buildings_parent,
-		exclude_nodes
+		exclude_nodes,
+		true,
+		_ghost_footprint_reservation_id
 	)
 
 
@@ -643,7 +668,7 @@ func _process_wall_drag_preview() -> void:
 		return
 
 	var snapped_position: Vector3 = EnemyBuildPlacement.snap_to_grid(ground_position)
-	snapped_position.y = WALL_SEGMENT_GROUND_Y
+	snapped_position.y = EnemyBuildPlacement.WALL_SEGMENT_GROUND_Y
 
 	if not _wall_drag_has_start:
 		if _placement_ghost == null or not is_instance_valid(_placement_ghost):
@@ -661,7 +686,7 @@ func _process_wall_drag_preview() -> void:
 	var line_positions: Array[Vector3] = EnemyBuildPlacement.get_wall_segment_line_positions(
 		_wall_drag_start,
 		snapped_position,
-		WALL_SEGMENT_GROUND_Y,
+		EnemyBuildPlacement.WALL_SEGMENT_GROUND_Y,
 		WALL_DRAG_MAX_SEGMENTS
 	)
 	_sync_wall_drag_ghosts(line_positions)
@@ -692,12 +717,12 @@ func _place_wall_line() -> void:
 		return
 
 	var snapped_end: Vector3 = EnemyBuildPlacement.snap_to_grid(ground_position)
-	snapped_end.y = WALL_SEGMENT_GROUND_Y
+	snapped_end.y = EnemyBuildPlacement.WALL_SEGMENT_GROUND_Y
 
 	var line_positions: Array[Vector3] = EnemyBuildPlacement.get_wall_segment_line_positions(
 		_wall_drag_start,
 		snapped_end,
-		WALL_SEGMENT_GROUND_Y,
+		EnemyBuildPlacement.WALL_SEGMENT_GROUND_Y,
 		WALL_DRAG_MAX_SEGMENTS
 	)
 	if line_positions.is_empty():
@@ -730,16 +755,25 @@ func _place_wall_line() -> void:
 	)
 	var placed_buildings: Array[Building] = []
 	var wall_chain_id: int = WallSegment.allocate_wall_chain_id()
+	var segment_wood_cost: int = WALL_SEGMENT_WOOD_COST
 
 	for position: Vector3 in line_positions:
 		var building: Building = WALL_SEGMENT_SCENE.instantiate() as Building
+		if building == null:
+			continue
 		buildings_parent.add_child(building)
 		building.global_position = position
+		building.set_construction_cost(WALL_SEGMENT_GOLD_COST, segment_wood_cost, false)
 		if building is WallSegment:
 			(building as WallSegment).wall_chain_id = wall_chain_id
 		building.start_under_construction()
 		building.setup_construction(construction_duration)
 		placed_buildings.append(building)
+
+	if placed_buildings.is_empty():
+		ResourceManager.add_gold(WALL_SEGMENT_GOLD_COST)
+		ResourceManager.add_wood(wood_cost)
+		return
 
 	var wall_job := WallBuildJob.new(placed_buildings, workers)
 	wall_job.start()

@@ -2,26 +2,15 @@ class_name WorkerTaskNavigation
 extends RefCounted
 
 ## NavigationAgent helpers for worker gather/build task movement.
+## Reuses UnitNavigation for agent validity / configuration.
 
 
 static func can_use(agent: NavigationAgent3D) -> bool:
-	if agent == null or not is_instance_valid(agent):
-		return false
-
-	var nav_map: RID = agent.get_navigation_map()
-	if nav_map == RID():
-		return false
-
-	return NavigationServer3D.map_is_active(nav_map)
+	return UnitNavigation.can_use(agent)
 
 
 static func configure_agent(agent: NavigationAgent3D, stopping_distance: float) -> void:
-	if agent == null:
-		return
-
-	agent.path_desired_distance = stopping_distance
-	agent.target_desired_distance = stopping_distance
-	agent.avoidance_enabled = false
+	UnitNavigation.configure_agent(agent, stopping_distance)
 
 
 static func is_target_reachable(agent: NavigationAgent3D, target: Vector3) -> bool:
@@ -44,6 +33,9 @@ static func process_movement(
 	if _has_reached_task_destination(offset, stopping_distance):
 		return true
 
+	if not can_use(agent):
+		return process_direct_movement(worker, destination, move_speed, stopping_distance)
+
 	if agent.is_navigation_finished():
 		process_direct_movement(worker, destination, move_speed, stopping_distance)
 		return _has_reached_task_destination(
@@ -56,6 +48,7 @@ static func process_movement(
 	if direction.length_squared() < 0.0001:
 		process_direct_movement(worker, destination, move_speed, stopping_distance)
 	else:
+		# Keep gather packing tight: no combat-style separation blend on task paths.
 		worker.velocity = direction.normalized() * move_speed
 		worker.velocity.y = 0.0
 		worker.move_and_slide()

@@ -29,8 +29,17 @@ const ENEMY_WORKER_BUILDING_GUARD_RANGE := 48.0
 
 const ATTACK_SLOTS_PER_RING := 8
 const ATTACK_SLOT_ANGLE_STEP := TAU / float(ATTACK_SLOTS_PER_RING)
+const MELEE_RANGE_THRESHOLD := 3.5
+const APPROACH_RING_SPACING := 1.15
+const RANGED_STANDOFF_RATIO := 0.88
+const RANGED_TOO_CLOSE_RATIO := 0.72
+const RANGED_HOLD_RATIO := 0.85
 
 static var _attack_slot_counter_by_target: Dictionary = {}
+## target_id -> Dictionary[attacker_id -> slot_index]
+static var _attack_slot_owners_by_target: Dictionary = {}
+## target_id -> frozen ring forward (XZ) so slots do not rotate as attackers move
+static var _attack_slot_ring_basis_by_target: Dictionary = {}
 static var _group_cache_frame: int = -1
 static var _group_cache_tree_id: int = -1
 static var _cached_group_nodes: Dictionary = {}
@@ -39,6 +48,8 @@ static var _cached_group_nodes: Dictionary = {}
 ## Clear attack-slot and group caches so instance IDs cannot leak across matches.
 static func reset_match_state() -> void:
 	_attack_slot_counter_by_target.clear()
+	_attack_slot_owners_by_target.clear()
+	_attack_slot_ring_basis_by_target.clear()
 	_group_cache_frame = -1
 	_group_cache_tree_id = -1
 	_cached_group_nodes.clear()
@@ -97,16 +108,43 @@ static func clear_target_combat_state(target) -> void:
 
 static func purge_stale_attack_slots() -> int:
 	var removed: int = 0
+	var target_ids: Array = _attack_slot_counter_by_target.keys()
+	for owner_id: Variant in _attack_slot_owners_by_target.keys():
+		if not target_ids.has(owner_id):
+			target_ids.append(owner_id)
 
-	for target_id: Variant in _attack_slot_counter_by_target.keys():
+	for target_id: Variant in target_ids:
 		var node: Variant = instance_from_id(int(target_id))
 		if NodeSafety.is_alive_node(node):
+			_purge_stale_slot_owners_for_target(int(target_id))
 			continue
 
 		_attack_slot_counter_by_target.erase(target_id)
+		_attack_slot_owners_by_target.erase(target_id)
+		_attack_slot_ring_basis_by_target.erase(target_id)
 		removed += 1
 
 	return removed
+
+
+static func _purge_stale_slot_owners_for_target(target_id: int) -> void:
+	if not _attack_slot_owners_by_target.has(target_id):
+		return
+
+	var owners: Dictionary = _attack_slot_owners_by_target[target_id]
+	var stale_attackers: Array = []
+	for attacker_id: Variant in owners.keys():
+		var attacker: Variant = instance_from_id(int(attacker_id))
+		if not NodeSafety.is_alive_node(attacker):
+			stale_attackers.append(attacker_id)
+
+	for attacker_id: Variant in stale_attackers:
+		owners.erase(attacker_id)
+
+	if owners.is_empty():
+		_attack_slot_owners_by_target.erase(target_id)
+	else:
+		_attack_slot_owners_by_target[target_id] = owners
 
 
 static func is_attackable_enemy_building(target: Variant) -> bool:
@@ -703,21 +741,201 @@ static func _get_attacker_attack_range(attacker) -> float:
 	return 2.0
 
 
-static func claim_attack_approach_slot(target) -> int:
+static func claim_attack_approach_slot(target, attacker = null) -> int:
 	if target == null or not is_instance_valid(target):
 		return 0
 
 	var target_id: int = target.get_instance_id()
+	if attacker != null and is_instance_valid(attacker):
+		var existing: int = get_attack_approach_slot(target, attacker)
+		if existing >= 0:
+			return existing
+
+	var occupied: Dictionary = {}
+	if _attack_slot_owners_by_target.has(target_id):
+		var owners: Dictionary = _attack_slot_owners_by_target[target_id]
+		for attacker_id: Variant in owners.keys():
+			occupied[int(owners[attacker_id])] = true
+
 	var next_slot: int = int(_attack_slot_counter_by_target.get(target_id, 0))
+	while occupied.has(next_slot):
+		next_slot += 1
+
 	_attack_slot_counter_by_target[target_id] = next_slot + 1
+	if attacker != null and is_instance_valid(attacker):
+		_register_attack_approach_slot(target, attacker, next_slot)
 	return next_slot
+
+
+static func reserve_attack_approach_slot(target, attacker, slot_index: int) -> int:
+	if target == null or not is_instance_valid(target):
+		return maxi(slot_index, 0)
+
+	var resolved_slot: int = maxi(slot_index, 0)
+	if attacker != null and is_instance_valid(attacker):
+		_register_attack_approach_slot(target, attacker, resolved_slot)
+	var target_id: int = target.get_instance_id()
+	var next_counter: int = int(_attack_slot_counter_by_target.get(target_id, 0))
+	_attack_slot_counter_by_target[target_id] = maxi(next_counter, resolved_slot + 1)
+	return resolved_slot
+
+
+static func get_attack_approach_slot(target, attacker) -> int:
+	if target == null or not is_instance_valid(target):
+		return -1
+	if attacker == null or not is_instance_valid(attacker):
+		return -1
+
+	var target_id: int = target.get_instance_id()
+	if not _attack_slot_owners_by_target.has(target_id):
+		return -1
+
+	var owners: Dictionary = _attack_slot_owners_by_target[target_id]
+	var attacker_id: int = attacker.get_instance_id()
+	if not owners.has(attacker_id):
+		return -1
+
+	return int(owners[attacker_id])
+
+
+static func release_attack_approach_slot(target, attacker) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	if attacker == null or not is_instance_valid(attacker):
+		return
+
+	var target_id: int = target.get_instance_id()
+	if not _attack_slot_owners_by_target.has(target_id):
+		return
+
+	var owners: Dictionary = _attack_slot_owners_by_target[target_id]
+	owners.erase(attacker.get_instance_id())
+	if owners.is_empty():
+		_attack_slot_owners_by_target.erase(target_id)
+		_attack_slot_counter_by_target.erase(target_id)
+		_attack_slot_ring_basis_by_target.erase(target_id)
+	else:
+		_attack_slot_owners_by_target[target_id] = owners
 
 
 static func clear_attack_approach_slots(target) -> void:
 	if target == null or not is_instance_valid(target):
 		return
 
-	_attack_slot_counter_by_target.erase(target.get_instance_id())
+	var target_id: int = target.get_instance_id()
+	_attack_slot_counter_by_target.erase(target_id)
+	_attack_slot_owners_by_target.erase(target_id)
+	_attack_slot_ring_basis_by_target.erase(target_id)
+
+
+static func _register_attack_approach_slot(target, attacker, slot_index: int) -> void:
+	var target_id: int = target.get_instance_id()
+	var owners: Dictionary = {}
+	if _attack_slot_owners_by_target.has(target_id):
+		owners = _attack_slot_owners_by_target[target_id]
+	owners[attacker.get_instance_id()] = slot_index
+	_attack_slot_owners_by_target[target_id] = owners
+	_ensure_attack_slot_ring_basis(target, attacker)
+
+
+static func _ensure_attack_slot_ring_basis(target, attacker) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	if attacker == null or not is_instance_valid(attacker):
+		return
+
+	var target_id: int = target.get_instance_id()
+	if _attack_slot_ring_basis_by_target.has(target_id):
+		return
+
+	var to_attacker: Vector3 = attacker.global_position - target.global_position
+	to_attacker.y = 0.0
+	if to_attacker.length_squared() < 0.001:
+		to_attacker = Vector3.FORWARD
+	_attack_slot_ring_basis_by_target[target_id] = to_attacker.normalized()
+
+
+static func _get_attack_slot_ring_basis(attacker: Node3D, target: Node3D) -> Vector3:
+	if target != null and is_instance_valid(target):
+		var target_id: int = target.get_instance_id()
+		if _attack_slot_ring_basis_by_target.has(target_id):
+			return (_attack_slot_ring_basis_by_target[target_id] as Vector3).normalized()
+
+	var to_attacker: Vector3 = attacker.global_position - target.global_position
+	to_attacker.y = 0.0
+	if to_attacker.length_squared() < 0.001:
+		return Vector3.FORWARD
+	return to_attacker.normalized()
+
+
+static func is_ranged_attack_range(attack_range: float) -> bool:
+	return attack_range > MELEE_RANGE_THRESHOLD
+
+
+static func get_preferred_attack_standoff(
+	attacker: Node3D,
+	target: Node3D,
+	attack_range: float,
+	stopping_distance: float,
+	slot_index: int = 0
+) -> float:
+	var ring: int = maxi(slot_index, 0) / ATTACK_SLOTS_PER_RING
+	var ring_bonus: float = float(ring) * APPROACH_RING_SPACING
+	var attacker_radius: float = 0.5
+	if attacker is CollisionObject3D:
+		attacker_radius = _get_collision_xz_radius(attacker as CollisionObject3D)
+
+	if target != null and is_attackable_enemy_building(target) and target is CollisionObject3D:
+		return (
+			_get_collision_xz_radius(target as CollisionObject3D)
+			+ attacker_radius
+			+ stopping_distance
+			+ ring_bonus
+		)
+
+	if is_ranged_attack_range(attack_range):
+		return maxf(attack_range * RANGED_STANDOFF_RATIO, stopping_distance) + ring_bonus
+
+	return (
+		maxf(attack_range - stopping_distance, maxf(attacker_radius + 0.35, stopping_distance))
+		+ ring_bonus
+	)
+
+
+static func is_too_close_for_preferred_range(
+	attacker: Node3D,
+	target: Node3D,
+	attack_range: float,
+	stopping_distance: float,
+	slot_index: int = 0
+) -> bool:
+	if not is_ranged_attack_range(attack_range):
+		return false
+	if attacker == null or target == null:
+		return false
+
+	var preferred: float = get_preferred_attack_standoff(
+		attacker, target, attack_range, stopping_distance, slot_index
+	)
+	var distance: float = get_horizontal_attack_distance(attacker, target)
+	return distance < preferred * RANGED_TOO_CLOSE_RATIO
+
+
+static func is_at_preferred_hold_range(
+	attacker: Node3D,
+	target: Node3D,
+	attack_range: float,
+	stopping_distance: float,
+	slot_index: int = 0
+) -> bool:
+	if attacker == null or target == null:
+		return true
+
+	var preferred: float = get_preferred_attack_standoff(
+		attacker, target, attack_range, stopping_distance, slot_index
+	)
+	var distance: float = get_horizontal_attack_distance(attacker, target)
+	return distance >= preferred * RANGED_HOLD_RATIO
 
 
 static func compute_attack_approach_position(
@@ -734,23 +952,17 @@ static func compute_attack_approach_position(
 		return attacker.global_position
 
 	var target_center: Vector3 = target.global_position
-	var to_attacker: Vector3 = attacker.global_position - target_center
-	to_attacker.y = 0.0
+	var base_direction: Vector3 = _get_attack_slot_ring_basis(attacker, target)
+	if slot_index <= 0 and not _attack_slot_ring_basis_by_target.has(target.get_instance_id()):
+		# Solo / untracked approach still faces current attacker direction.
+		var to_attacker: Vector3 = attacker.global_position - target_center
+		to_attacker.y = 0.0
+		if to_attacker.length_squared() >= 0.001:
+			base_direction = to_attacker.normalized()
 
-	if to_attacker.length_squared() < 0.001:
-		to_attacker = Vector3.FORWARD
-
-	var standoff_distance: float
-	if is_attackable_enemy_building(target) and target is CollisionObject3D:
-		standoff_distance = (
-			_get_collision_xz_radius(target as CollisionObject3D)
-			+ _get_collision_xz_radius(attacker as CollisionObject3D)
-			+ stopping_distance
-		)
-	else:
-		standoff_distance = maxf(attack_range - stopping_distance, stopping_distance)
-
-	var base_direction: Vector3 = to_attacker.normalized()
+	var standoff_distance: float = get_preferred_attack_standoff(
+		attacker, target, attack_range, stopping_distance, slot_index
+	)
 	var direction: Vector3 = _apply_attack_slot_direction(base_direction, slot_index)
 	var approach_position: Vector3 = target_center + direction * standoff_distance
 	approach_position.y = attacker.global_position.y

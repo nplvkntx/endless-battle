@@ -82,6 +82,11 @@ var _navigation_agent: NavigationAgent3D
 var _navigation_active: bool = false
 var _path_validity_timer: float = 0.0
 
+## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
+var _order_queue: Array[UnitOrder] = []
+var _active_order: UnitOrder = null
+var _issuing_order: bool = false
+
 
 func _ready() -> void:
 	_combat_target_scan_timer = randf() * (COMBAT_TARGET_SCAN_INTERVAL + COMBAT_TARGET_SCAN_JITTER)
@@ -135,12 +140,29 @@ func supports_combat_orders() -> bool:
 	return false
 
 
+## True for units that accept Hold Position / Patrol.
+func supports_hold_position() -> bool:
+	return supports_combat_orders()
+
+
+func supports_patrol() -> bool:
+	return supports_combat_orders()
+
+
 ## Combat order stubs — MilitaryUnit / Hero / legacy combat scripts override these.
 func command_attack(_target: Node3D, _assigned_slot: int = -1) -> void:
 	pass
 
 
 func command_attack_move(_destination: Vector3) -> void:
+	pass
+
+
+func command_hold_position() -> void:
+	pass
+
+
+func command_patrol(_points: Array[Vector3]) -> void:
 	pass
 
 
@@ -152,9 +174,144 @@ func cancel_attack_move() -> void:
 	pass
 
 
-## Sets a single move target. Player/rally orders apply immediately.
+func append_patrol_point(_point: Vector3) -> void:
+	pass
+
+
+## Issue a player order. `queued` true (Shift) appends; false replaces the queue.
+func issue_order(order: UnitOrder, queued: bool = false) -> bool:
+	if order == null:
+		return false
+	if not _can_accept_order(order):
+		return false
+
+	if order.type == UnitOrder.Type.STOP:
+		issue_stop()
+		return true
+
+	if queued:
+		if _active_order != null:
+			_order_queue.append(order)
+			return true
+	else:
+		_order_queue.clear()
+
+	return _start_order(order)
+
+
+func issue_stop() -> void:
+	_order_queue.clear()
+	_active_order = null
+	_prepare_for_new_player_order()
+	stop_movement()
+
+
+func clear_order_queue() -> void:
+	_order_queue.clear()
+
+
+func get_active_order() -> UnitOrder:
+	return _active_order
+
+
+func get_queued_orders() -> Array[UnitOrder]:
+	return _order_queue.duplicate()
+
+
+func has_queued_orders() -> bool:
+	return not _order_queue.is_empty()
+
+
+func _can_accept_order(order: UnitOrder) -> bool:
+	match order.type:
+		UnitOrder.Type.ATTACK, UnitOrder.Type.ATTACK_MOVE:
+			return supports_combat_orders()
+		UnitOrder.Type.HOLD_POSITION:
+			return supports_hold_position()
+		UnitOrder.Type.PATROL:
+			return supports_patrol()
+		UnitOrder.Type.BUILD:
+			return self is Worker
+		UnitOrder.Type.MOVE, UnitOrder.Type.STOP:
+			return true
+		_:
+			return false
+
+
+func _start_order(order: UnitOrder) -> bool:
+	_active_order = order
+	_issuing_order = true
+	_prepare_for_new_player_order()
+	var applied: bool = _apply_order(order)
+	_issuing_order = false
+	if not applied and order.type != UnitOrder.Type.HOLD_POSITION:
+		_active_order = null
+		_advance_order_queue()
+		return false
+	return true
+
+
+## Override to cancel attack / hold / patrol / gather before a replacement order.
+func _prepare_for_new_player_order() -> void:
+	pass
+
+
+func _apply_order(order: UnitOrder) -> bool:
+	match order.type:
+		UnitOrder.Type.MOVE:
+			return set_movement_target(order.destination)
+		UnitOrder.Type.ATTACK:
+			command_attack(order.target, order.assigned_slot)
+			return true
+		UnitOrder.Type.ATTACK_MOVE:
+			command_attack_move(order.destination)
+			return true
+		UnitOrder.Type.HOLD_POSITION:
+			command_hold_position()
+			return true
+		UnitOrder.Type.PATROL:
+			command_patrol(order.patrol_points)
+			return true
+		UnitOrder.Type.BUILD:
+			if self is Worker and NodeSafety.is_alive_node(order.target) and order.target is Building:
+				(self as Worker).start_construction_order(order.target as Building)
+				return true
+			return false
+		_:
+			return false
+
+
+func _advance_order_queue() -> void:
+	_active_order = null
+	while not _order_queue.is_empty():
+		var next_order: UnitOrder = _order_queue.pop_front()
+		if next_order == null:
+			continue
+		if next_order.is_target_order() and not NodeSafety.is_alive_node(next_order.target):
+			continue
+		if not _can_accept_order(next_order):
+			continue
+		_start_order(next_order)
+		return
+
+
+## Called when a discrete order finishes (move arrived, attack target gone, etc.).
+func notify_order_completed(order_type: UnitOrder.Type) -> void:
+	if _active_order == null:
+		return
+	if _active_order.type != order_type:
+		return
+	_advance_order_queue()
+
+
+## Sets a single move target. Player/rally orders apply immediately and replace the queue
+## unless issued through the order system (`_issuing_order`).
 ## Returns true when a real destination update was applied.
 func set_movement_target(target: Vector3) -> bool:
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = UnitOrder.move(target)
+		_prepare_for_new_player_order()
 	return request_movement_target(target, RepathUrgency.PLAYER_ORDER)
 
 
@@ -167,9 +324,23 @@ func clear_move_target() -> void:
 	_reset_unstuck_state()
 
 
-## Full stop: clears movement/navigation. Combat subclasses also cancel orders.
+## Full stop: clears movement/navigation and the order queue. Combat subclasses also cancel orders.
 func stop_movement() -> void:
+	if not _issuing_order:
+		_order_queue.clear()
+		_active_order = null
 	clear_move_target()
+
+
+func _complete_movement_arrival() -> void:
+	clear_move_target()
+	_on_movement_arrived()
+
+
+## Override for patrol waypoint cycling / attack-move completion hooks.
+func _on_movement_arrived() -> void:
+	if _active_order != null and _active_order.type == UnitOrder.Type.MOVE:
+		notify_order_completed(UnitOrder.Type.MOVE)
 
 
 ## Request a movement destination with urgency-aware repath cooldowns.
@@ -321,14 +492,18 @@ func _physics_process(delta: float) -> void:
 
 	if not has_move_target:
 		_reset_unstuck_state()
-		velocity = Vector3.ZERO
+		# Soft unpack when idle so armies do not remain permanently stacked.
+		if should_run_staggered_update(2):
+			UnitSeparation.apply_standing_push(self, move_speed, false)
+		else:
+			velocity = Vector3.ZERO
 		return
 
 	var offset: Vector3 = _movement_target - global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
 	if distance <= stopping_distance:
-		clear_move_target()
+		_complete_movement_arrival()
 		return
 
 	_update_navigation_path_validity(delta)
@@ -339,7 +514,11 @@ func _physics_process(delta: float) -> void:
 
 	if _detour_active and not _detour_gave_up:
 		direction = _get_detour_direction(direction)
-		velocity = direction * move_speed
+		var detour_velocity: Vector3 = direction * move_speed
+		# Keep separation gentle during unstuck so narrow corridors do not deadlock.
+		velocity = UnitSeparation.blend_desired_velocity(
+			self, detour_velocity, move_speed, 0.25
+		)
 		velocity.y = 0.0
 		move_and_slide()
 	elif _navigation_active and UnitNavigation.can_use(_navigation_agent):
@@ -348,10 +527,11 @@ func _physics_process(delta: float) -> void:
 			_navigation_agent,
 			_movement_target,
 			move_speed,
-			stopping_distance
+			stopping_distance,
+			true
 		)
 		if arrived:
-			clear_move_target()
+			_complete_movement_arrival()
 			return
 		var moved: Vector3 = global_position - position_before
 		moved.y = 0.0
@@ -359,9 +539,10 @@ func _physics_process(delta: float) -> void:
 			direction = moved.normalized()
 	else:
 		if direction.length_squared() < 0.0001:
-			clear_move_target()
+			_complete_movement_arrival()
 			return
-		velocity = direction * move_speed
+		var direct_velocity: Vector3 = direction * move_speed
+		velocity = UnitSeparation.blend_desired_velocity(self, direct_velocity, move_speed)
 		velocity.y = 0.0
 		move_and_slide()
 

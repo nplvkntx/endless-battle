@@ -19,10 +19,13 @@ border_color = Color(0.85, 0.35, 0.3, 1)
 
 [node name="Hud" parent="." unique_id=1874720175 instance=ExtResource("1_hud")]
 
-[node name="UnitPanel" parent="Hud" index="1"]
+[node name="IdleWorkerButton" parent="Hud" index="1"]
 selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
 
-[node name="CommandBar" parent="Hud" index="2"]
+[node name="UnitPanel" parent="Hud" index="3"]
+selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
+
+[node name="CommandBar" parent="Hud" index="4"]
 selection_manager_path = NodePath("../../../MatchSystems/SelectionManager")
 
 [node name="SelectionCommandPanel" parent="Hud/CommandBar/MarginContainer/VBoxContainer" index="0"]
