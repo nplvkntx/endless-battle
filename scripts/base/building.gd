@@ -27,6 +27,9 @@ const SELECTION_PULSE_SCALE := 1.04
 const SELECTION_PULSE_HALF_DURATION := 0.1
 
 @export var building_data: Resource
+## Optional artist override for per-building construction stage models.
+## When empty, ConstructionStageCatalog supplies defaults (or reveal placeholders).
+@export var construction_stages: ConstructionStageSet
 
 var team_id: int = -1
 var building_state: StringName = &""
@@ -46,6 +49,7 @@ var _construction_cost_refunded: bool = false
 var _construction_started_msec: int = 0
 var _mesh_instance: MeshInstance3D
 var _visuals_root: Node3D
+var _construction_stage_visuals: ConstructionStageVisuals
 var _feedback_material_ready: bool = false
 var _mesh_material: StandardMaterial3D
 var _base_albedo: Color
@@ -193,6 +197,7 @@ func destroy_building() -> void:
 	_refund_construction_costs_if_needed()
 	ConstructionReservations.release_build_slots_for_building(self)
 	_release_registered_builders_on_destroy()
+	_cleanup_construction_stage_visuals()
 	NodeSafety.prepare_node_for_death(self)
 	destroyed.emit(self)
 
@@ -229,6 +234,7 @@ func _process(delta: float) -> void:
 	)
 	construction_progress_changed.emit(_construction_progress)
 	_update_construction_progress_bar()
+	_sync_construction_stage_visuals()
 
 	if _construction_progress >= 1.0:
 		_on_construction_timer_finished()
@@ -268,6 +274,7 @@ func refund_and_cancel_construction() -> void:
 	_refund_construction_costs_if_needed()
 	ConstructionReservations.release_build_slots_for_building(self)
 	_release_registered_builders_on_destroy()
+	_cleanup_construction_stage_visuals()
 	queue_free()
 
 
@@ -292,6 +299,23 @@ func _refund_construction_costs_if_needed() -> void:
 
 func get_construction_progress_ratio() -> float:
 	return _construction_progress
+
+
+func get_construction_stage_index() -> int:
+	if _construction_stage_visuals != null and _construction_stage_visuals.is_active():
+		return _construction_stage_visuals.get_current_stage()
+	return ConstructionStageVisuals.stage_index_for_progress(_construction_progress)
+
+
+## Headless/debug helper: set progress from an authoritative ratio (not frame-guessed).
+func force_construction_progress_for_verify(progress: float) -> void:
+	_construction_progress = clampf(progress, 0.0, 1.0)
+	_construction_elapsed = _construction_progress * maxf(_construction_duration, 0.001)
+	construction_progress_changed.emit(_construction_progress)
+	_update_construction_progress_bar()
+	_sync_construction_stage_visuals()
+	if _construction_progress >= 1.0 and building_state != STATE_COMPLETED:
+		_on_construction_timer_finished()
 
 
 func is_being_constructed() -> bool:
@@ -565,6 +589,13 @@ func _on_construction_timer_finished() -> void:
 
 
 func _apply_under_construction_visual() -> void:
+	_ensure_construction_stage_visuals()
+	if _construction_stage_visuals != null:
+		_construction_stage_visuals.begin_construction()
+		_construction_stage_visuals.update_progress(_construction_progress)
+		return
+
+	# Legacy fallback if stage visuals cannot initialize.
 	if _mesh_instance == null:
 		return
 
@@ -572,6 +603,31 @@ func _apply_under_construction_visual() -> void:
 	placeholder_material.albedo_color = Color(0.6, 0.6, 0.6, CONSTRUCTION_PLACEHOLDER_ALPHA)
 	placeholder_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_instance.material_override = placeholder_material
+
+
+func _ensure_construction_stage_visuals() -> void:
+	if _construction_stage_visuals != null:
+		return
+
+	var stage_set: ConstructionStageSet = construction_stages
+	if stage_set == null:
+		stage_set = ConstructionStageCatalog.resolve_for_building(self)
+
+	_construction_stage_visuals = ConstructionStageVisuals.new()
+	_construction_stage_visuals.setup(self, _visuals_root, _mesh_instance, stage_set)
+
+
+func _sync_construction_stage_visuals() -> void:
+	if _construction_stage_visuals == null:
+		return
+	_construction_stage_visuals.update_progress(_construction_progress)
+
+
+func _cleanup_construction_stage_visuals() -> void:
+	if _construction_stage_visuals == null:
+		return
+	_construction_stage_visuals.cleanup()
+	_construction_stage_visuals = null
 
 
 func _ensure_construction_progress_bar() -> void:
@@ -698,10 +754,12 @@ func _apply_completed_visual() -> void:
 	_pause_construction_timer()
 	_hide_construction_progress_bar()
 
-	if _mesh_instance == null:
-		apply_team_visuals()
-		return
+	if _construction_stage_visuals != null:
+		_construction_stage_visuals.finish_construction()
+		_construction_stage_visuals = null
 
-	_mesh_instance.material_override = null
-	_feedback_material_ready = false
+	if _mesh_instance != null:
+		_mesh_instance.material_override = null
+		_feedback_material_ready = false
+
 	apply_team_visuals()

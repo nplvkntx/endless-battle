@@ -7,8 +7,31 @@ const REPORT_PATH := "user://construction_verify_result.txt"
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
+const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
+const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
+const SHOP_SCENE: PackedScene = preload("res://scenes/buildings/shop.tscn")
+const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
+const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
+const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
+const ACADEMY_SCENE: PackedScene = preload("res://scenes/buildings/academy.tscn")
+const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
+const WALL_SEGMENT_SCENE: PackedScene = preload("res://scenes/buildings/wall_segment.tscn")
 const SETTLE_MS := 800
 const BUILD_MS := 12000
+
+const ALL_BUILDING_SCENES: Array[PackedScene] = [
+	FARM_SCENE,
+	BARRACKS_SCENE,
+	BLACKSMITH_SCENE,
+	STABLE_SCENE,
+	SHOP_SCENE,
+	TOWER_SCENE,
+	HERO_ALTAR_SCENE,
+	COMMAND_CENTER_SCENE,
+	ACADEMY_SCENE,
+	ARTILLERY_DEPOT_SCENE,
+	WALL_SEGMENT_SCENE,
+]
 
 
 func _ready() -> void:
@@ -21,10 +44,14 @@ func _ready() -> void:
 	_verify_blocked_placement(failures)
 	_verify_stale_reservation_expiry(failures)
 	_verify_preview_matches_final(failures)
+	_verify_construction_stages_all_buildings(failures)
+	_verify_stage_threshold_crossing_once(failures)
 	await _verify_parallel_buildings(failures)
 	await _verify_multi_worker_assist(failures)
 	await _verify_builder_dies_en_route(failures)
 	await _verify_cancelled_construction_refund(failures)
+	await _verify_destroyed_unfinished_building(failures)
+	await _verify_ai_construction_stages(failures)
 	_verify_ai_farm_reservation_recovery(failures)
 	_verify_compact_ai_placement_smoke(failures)
 
@@ -315,6 +342,7 @@ func _verify_cancelled_construction_refund(failures: PackedStringArray) -> void:
 	farm.set_construction_cost(80, 20, false)
 	farm.start_under_construction()
 	farm.setup_construction(10.0)
+	_expect(failures, "cancel: stage host present while building", _has_stage_host(farm))
 
 	var worker: Worker = _spawn_worker(root, Vector3(0.0, 0.5, -3.0), false)
 	await _wait_nav_ready(worker)
@@ -334,6 +362,163 @@ func _verify_cancelled_construction_refund(failures: PackedStringArray) -> void:
 	)
 
 	await _free_harness(harness)
+
+
+func _verify_construction_stages_all_buildings(failures: PackedStringArray) -> void:
+	print("verify: construction stages for every building type")
+	var root := Node3D.new()
+	add_child(root)
+
+	var samples: Array[float] = [0.0, 0.24, 0.25, 0.49, 0.5, 0.74, 0.75, 0.99, 1.0]
+	var expected: Array[int] = [0, 0, 1, 1, 2, 2, 3, 3, 4]
+
+	for scene: PackedScene in ALL_BUILDING_SCENES:
+		var building: Building = scene.instantiate() as Building
+		_expect(failures, "stages: scene instantiates Building", building != null)
+		if building == null:
+			continue
+
+		root.add_child(building)
+		building.global_position = Vector3(0.0, 0.5, 0.0)
+		# Override auto-complete from building _ready.
+		building.start_under_construction()
+		building.setup_construction(10.0)
+
+		var type_label: String = building.get_script().resource_path.get_file().get_basename()
+		_expect(
+			failures,
+			"stages: %s starts at stage 0" % type_label,
+			building.get_construction_stage_index() == 0
+		)
+
+		for sample_index: int in samples.size():
+			var progress: float = samples[sample_index]
+			var want_stage: int = expected[sample_index]
+			if progress >= 1.0:
+				building.force_construction_progress_for_verify(progress)
+				_expect(
+					failures,
+					"stages: %s completes at 100%%" % type_label,
+					building.building_state == Building.STATE_COMPLETED
+				)
+				_expect(
+					failures,
+					"stages: %s restores finished visuals" % type_label,
+					not _has_stage_host(building)
+				)
+			else:
+				building.force_construction_progress_for_verify(progress)
+				_expect(
+					failures,
+					"stages: %s at %.2f -> stage %d" % [type_label, progress, want_stage],
+					building.get_construction_stage_index() == want_stage
+				)
+
+		building.free()
+
+	root.free()
+
+
+func _verify_stage_threshold_crossing_once(failures: PackedStringArray) -> void:
+	print("verify: stage changes only once per threshold")
+	var root := Node3D.new()
+	add_child(root)
+
+	var barracks: Building = BARRACKS_SCENE.instantiate() as Building
+	root.add_child(barracks)
+	barracks.start_under_construction()
+	barracks.setup_construction(10.0)
+
+	var last_stage: int = barracks.get_construction_stage_index()
+	var transitions: int = 0
+	var progress: float = 0.0
+	while progress <= 1.001:
+		barracks.force_construction_progress_for_verify(minf(progress, 1.0))
+		var stage: int = barracks.get_construction_stage_index()
+		if stage != last_stage:
+			transitions += 1
+			_expect(
+				failures,
+				"threshold: stage only increases",
+				stage == last_stage + 1 or (last_stage == 3 and stage == 4)
+			)
+			last_stage = stage
+		progress += 0.01
+		if barracks.building_state == Building.STATE_COMPLETED:
+			break
+
+	_expect(failures, "threshold: exactly 4 stage transitions (0→1→2→3→4)", transitions == 4)
+	barracks.free()
+	root.free()
+
+
+func _verify_destroyed_unfinished_building(failures: PackedStringArray) -> void:
+	print("verify: destroying unfinished building cleans up")
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	var tower: Building = TOWER_SCENE.instantiate() as Building
+	root.add_child(tower)
+	tower.global_position = Vector3(0.0, EnemyBuildPlacement.TOWER_GROUND_Y, 0.0)
+	tower.set_construction_cost(100, 50, false)
+	tower.start_under_construction()
+	tower.setup_construction(10.0)
+	tower.force_construction_progress_for_verify(0.4)
+	_expect(failures, "destroy: mid-build stage active", tower.get_construction_stage_index() == 1)
+	_expect(failures, "destroy: stage host present", _has_stage_host(tower))
+
+	tower.destroy_building()
+	tower.queue_free()
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"destroy: unfinished tower removed",
+		not is_instance_valid(tower) or tower.is_queued_for_deletion()
+	)
+
+	await _free_harness(harness)
+
+
+func _verify_ai_construction_stages(failures: PackedStringArray) -> void:
+	print("verify: AI construction uses same stage system")
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	var farm: Building = FARM_SCENE.instantiate() as Building
+	root.add_child(farm)
+	farm.add_to_group(&"enemy_command_center")
+	farm.team_id = 1
+	farm.global_position = Vector3(0.0, EnemyBuildPlacement.FARM_GROUND_Y, 0.0)
+	farm.set_construction_cost(80, 20, true)
+	farm.start_under_construction()
+	farm.setup_construction(4.0)
+
+	_expect(failures, "ai stages: starts at 0", farm.get_construction_stage_index() == 0)
+	farm.force_construction_progress_for_verify(0.5)
+	_expect(failures, "ai stages: 50% is stage 2", farm.get_construction_stage_index() == 2)
+
+	var worker: Worker = _spawn_worker(root, Vector3(0.0, 0.5, -2.2), true)
+	await _wait_nav_ready(worker)
+	worker.start_construction_order(farm)
+	await _wait_msec(SETTLE_MS)
+	if worker.is_assigned_to_build(farm) and not worker.is_constructing():
+		worker.global_position = farm.get_nearest_construction_point(worker.global_position)
+		worker._commit_to_construction()
+
+	farm.force_construction_progress_for_verify(1.0)
+	_expect(failures, "ai stages: completes", farm.building_state == Building.STATE_COMPLETED)
+	_expect(failures, "ai stages: host cleared", not _has_stage_host(farm))
+
+	await _free_harness(harness)
+
+
+func _has_stage_host(building: Building) -> bool:
+	if building == null or not is_instance_valid(building):
+		return false
+	var visuals: Node = building.get_node_or_null("Visuals")
+	if visuals == null:
+		return false
+	return visuals.get_node_or_null("ConstructionStageHost") != null
 
 
 func _verify_ai_farm_reservation_recovery(failures: PackedStringArray) -> void:
