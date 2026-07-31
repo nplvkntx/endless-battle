@@ -73,6 +73,16 @@ const ABILITY_DESCRIPTIONS: Dictionary = {
 	HeroAbilityProgression.ABILITY_R: "Executes enemies below a health threshold.",
 }
 
+const KIT_ABILITY_DESCRIPTIONS: Dictionary = {
+	HeroCatalog.KIT_PALADIN: ABILITY_DESCRIPTIONS,
+	HeroCatalog.KIT_SHADOW_ASSASSIN: {
+		HeroAbilityProgression.ABILITY_Q: "Throws a spinning axe that marks the target; basic attacks consume the mark for bonus damage.",
+		HeroAbilityProgression.ABILITY_W: "Drops a smoke cloud that hides and speeds up allies standing inside it.",
+		HeroAbilityProgression.ABILITY_E: "Slashes nearby enemies in a radius around the assassin.",
+		HeroAbilityProgression.ABILITY_R: "Dashes to a target, dealing damage on arrival.",
+	},
+}
+
 const UPGRADE_DESCRIPTIONS: Dictionary = {
 	UpgradeManager.UPGRADE_SWORDSMAN_ATTACK: "Increases swordsman attack damage.",
 	UpgradeManager.UPGRADE_SWORDSMAN_ARMOR: "Increases swordsman armor.",
@@ -349,12 +359,13 @@ static func format_passive(hero: Hero) -> String:
 
 
 static func format_ability_cast(hero: Hero, ability_id: StringName, slot_label: String) -> String:
-	var display_name: String = HeroAbilityStats.get_display_name(ability_id)
+	var kit_id: StringName = hero.get_hero_kit_id() if hero != null and is_instance_valid(hero) else HeroCatalog.KIT_PALADIN
+	var display_name: String = HeroAbilityStats.get_display_name(ability_id, kit_id)
 	var lines: PackedStringArray = PackedStringArray()
 	lines.append("%s (%s)" % [display_name, slot_label])
 
 	if hero == null or not is_instance_valid(hero):
-		lines.append(_get_ability_description(ability_id))
+		lines.append(_get_ability_description(ability_id, kit_id))
 		return "\n".join(lines)
 
 	var rank: int = hero.get_ability_rank(ability_id)
@@ -368,7 +379,7 @@ static func format_ability_cast(hero: Hero, ability_id: StringName, slot_label: 
 			)
 			if not learn_reason.is_empty():
 				lines.append(learn_reason)
-		lines.append(_get_ability_description(ability_id))
+		lines.append(_get_ability_description(ability_id, kit_id))
 		return "\n".join(lines)
 
 	var overrides: Dictionary = hero.get_ability_base_overrides(ability_id)
@@ -384,12 +395,13 @@ static func format_ability_cast(hero: Hero, ability_id: StringName, slot_label: 
 	if not cast_reason.is_empty():
 		lines.append(cast_reason)
 
-	lines.append(_get_ability_description(ability_id))
+	lines.append(_get_ability_description(ability_id, kit_id))
 	return "\n".join(lines)
 
 
 static func format_ability_upgrade(hero: Hero, ability_id: StringName, slot_label: String) -> String:
-	var display_name: String = HeroAbilityStats.get_display_name(ability_id)
+	var kit_id: StringName = hero.get_hero_kit_id() if hero != null and is_instance_valid(hero) else HeroCatalog.KIT_PALADIN
+	var display_name: String = HeroAbilityStats.get_display_name(ability_id, kit_id)
 	if hero == null or not is_instance_valid(hero):
 		return "Upgrade %s (%s)" % [display_name, slot_label]
 
@@ -418,7 +430,7 @@ static func format_ability_upgrade(hero: Hero, ability_id: StringName, slot_labe
 			)
 		)
 
-	lines.append(_get_ability_description(ability_id))
+	lines.append(_get_ability_description(ability_id, kit_id))
 	return "\n".join(lines)
 
 
@@ -606,29 +618,19 @@ static func get_ability_cast_blocked_reason(hero: Hero, ability_id: StringName) 
 	if not hero.is_ability_unlocked(ability_id):
 		return "Ability not learned"
 
-	match ability_id:
-		HeroAbilityProgression.ABILITY_Q:
-			if hero.get_ground_slam_cooldown_remaining() > 0.0:
-				return "On cooldown"
-			if hero.current_mana < hero.get_ground_slam_mana_cost():
-				return "Not enough mana"
-		HeroAbilityProgression.ABILITY_W:
-			if hero.get_divine_protection_cooldown_remaining() > 0.0:
-				return "On cooldown"
-			if hero.is_divine_protection_active():
-				return "Already active"
-			if hero.current_mana < hero.get_divine_protection_mana_cost():
-				return "Not enough mana"
-		HeroAbilityProgression.ABILITY_E:
-			if hero.get_power_strike_cooldown_remaining() > 0.0:
-				return "On cooldown"
-			if hero.current_mana < hero.get_power_strike_mana_cost():
-				return "Not enough mana"
-		HeroAbilityProgression.ABILITY_R:
-			if hero.get_execute_cooldown_remaining() > 0.0:
-				return "On cooldown"
-			if hero.current_mana < hero.get_execute_mana_cost():
-				return "Not enough mana"
+	if hero.has_method(&"get_ability_active_status_text"):
+		var status_text: String = String(hero.call(&"get_ability_active_status_text", ability_id))
+		if not status_text.is_empty():
+			return status_text
+
+	var cooldown_remaining: float = 0.0
+	if hero.has_method(&"get_ability_cooldown_remaining"):
+		cooldown_remaining = float(hero.call(&"get_ability_cooldown_remaining", ability_id))
+	if cooldown_remaining > 0.0:
+		return "On cooldown"
+
+	if hero.current_mana < hero.get_ability_mana_cost(ability_id):
+		return "Not enough mana"
 
 	return ""
 
@@ -709,7 +711,7 @@ static func _get_unit_display_name(unit: Unit) -> String:
 	if unit is Cannon:
 		return "Cannon"
 	if unit is Hero:
-		return "Hero"
+		return (unit as Hero).get_display_name()
 	if unit is NeutralCreep:
 		return "Neutral Creep"
 	if unit is EnemyDummy:
@@ -764,7 +766,7 @@ static func _get_unit_role_description(unit: Unit) -> String:
 	if unit is Cannon:
 		return String(UNIT_ROLE_DESCRIPTIONS[ArtilleryDepot.TRAIN_ID_CANNON])
 	if unit is Hero:
-		return String(UNIT_ROLE_DESCRIPTIONS[&"hero"])
+		return HeroCatalog.get_role_description((unit as Hero).get_hero_kit_id())
 	if unit is NeutralCreep:
 		return String(UNIT_ROLE_DESCRIPTIONS[&"neutral_creep"])
 	if unit is EnemyDummy:
@@ -777,6 +779,21 @@ static func _get_unit_food_cost(unit: Unit) -> int:
 
 
 static func _append_ability_stat_lines(
+	lines: PackedStringArray,
+	ability_id: StringName,
+	rank: int,
+	overrides: Dictionary,
+	hero: Hero = null
+) -> void:
+	var kit_id: StringName = hero.get_hero_kit_id() if hero != null and is_instance_valid(hero) else HeroCatalog.KIT_PALADIN
+	if kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
+		_append_assassin_ability_stat_lines(lines, ability_id, rank, overrides, hero)
+		return
+
+	_append_paladin_ability_stat_lines(lines, ability_id, rank, overrides, hero)
+
+
+static func _append_paladin_ability_stat_lines(
 	lines: PackedStringArray,
 	ability_id: StringName,
 	rank: int,
@@ -820,8 +837,78 @@ static func _append_ability_stat_lines(
 			lines.append("Execute Threshold: %d%% HP" % int(round(threshold * 100.0)))
 
 
-static func _get_ability_description(ability_id: StringName) -> String:
-	return String(ABILITY_DESCRIPTIONS.get(ability_id, ""))
+static func _append_assassin_ability_stat_lines(
+	lines: PackedStringArray,
+	ability_id: StringName,
+	rank: int,
+	overrides: Dictionary,
+	hero: Hero = null
+) -> void:
+	var kit_id: StringName = HeroCatalog.KIT_SHADOW_ASSASSIN
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			var damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides, kit_id))
+			)
+			var mark_duration: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides, kit_id))
+			)
+			var bonus_damage: int = (
+				hero.get_ability_bonus_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_BONUS_DAMAGE, rank, overrides, kit_id))
+			)
+			lines.append("Damage: %d" % damage)
+			lines.append("Mark Duration: %s" % _format_seconds(mark_duration))
+			lines.append("Consume Bonus: %d" % bonus_damage)
+		HeroAbilityProgression.ABILITY_W:
+			var duration: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides, kit_id))
+			)
+			var radius: float = (
+				hero.get_ability_splash_radius_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_SPLASH, rank, overrides, kit_id))
+			)
+			lines.append("Duration: %s" % _format_seconds(duration))
+			lines.append("Radius: %s" % _format_number(radius))
+		HeroAbilityProgression.ABILITY_E:
+			var slash_damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides, kit_id))
+			)
+			var slash_radius: float = (
+				hero.get_ability_splash_radius_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_SPLASH, rank, overrides, kit_id))
+			)
+			lines.append("Damage: %d" % slash_damage)
+			lines.append("Splash Radius: %s" % _format_number(slash_radius))
+		HeroAbilityProgression.ABILITY_R:
+			var dash_damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides, kit_id))
+			)
+			var dash_range: float = (
+				hero.get_ability_range_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_RANGE, rank, overrides, kit_id))
+			)
+			lines.append("Damage: %d" % dash_damage)
+			lines.append("Range: %s" % _format_number(dash_range))
+
+
+static func _get_ability_description(ability_id: StringName, kit_id: StringName = HeroCatalog.KIT_PALADIN) -> String:
+	var by_kit: Dictionary = KIT_ABILITY_DESCRIPTIONS.get(kit_id, ABILITY_DESCRIPTIONS)
+	return String(by_kit.get(ability_id, ABILITY_DESCRIPTIONS.get(ability_id, "")))
 
 
 static func _get_shop_item_effect_text(item: HeroItemDefinition) -> String:

@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3 uid="uid://cassassinprocfx0001"]
+
+[ext_resource type="Script" path="res://scripts/effects/assassin_passive_proc_effect.gd" id="1_assassin_passive_proc_effect"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spark"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.9, 0.85, 0.3, 0.9)
+emission_enabled = true
+emission = Color(0.95, 0.9, 0.4, 1)
+emission_energy_multiplier = 2.6
+
+[sub_resource type="SphereMesh" id="SphereMesh_spark"]
+radius = 0.3
+height = 0.6
+
+[node name="AssassinPassiveProcEffect" type="Node3D"]
+script = ExtResource("1_assassin_passive_proc_effect")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_spark")
+surface_material_override/0 = SubResource("StandardMaterial3D_spark")

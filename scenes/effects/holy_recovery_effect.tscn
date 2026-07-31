@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://cholyrecoveryfx"]
+[gd_scene format=3 uid="uid://b5irawauxpo0x"]
 
 [ext_resource type="Script" path="res://scripts/effects/holy_recovery_effect.gd" id="1_holy_recovery_effect"]
 

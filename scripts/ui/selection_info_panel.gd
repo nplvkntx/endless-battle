@@ -53,6 +53,7 @@ const PORTRAIT_STYLES: Dictionary = {
 	"cavalry_archer": {"color": Color(0.18, 0.58, 0.32, 1), "label": "CA"},
 	"cannon": {"color": Color(0.32, 0.3, 0.24, 1), "label": "Cn"},
 	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
+	"shadow_assassin": {"color": Color(0.35, 0.15, 0.45, 1), "label": "SA"},
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
 	"neutral_creep": {"color": Color(0.48, 0.38, 0.16, 1), "label": "Nc"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
@@ -1319,7 +1320,7 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 	if unit is Cannon:
 		return {"name": "Cannon", "type": "Unit", "portrait_key": "cannon"}
 	if unit is Hero:
-		return {"name": "Hero", "type": "Unit", "portrait_key": "hero"}
+		return _get_hero_portrait_info(unit as Hero, "")
 	if unit is Worker:
 		return {"name": "Worker", "type": "Unit", "portrait_key": "worker"}
 	if unit is NeutralCreep:
@@ -1329,9 +1330,23 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 	return {}
 
 
+func _get_hero_portrait_info(hero: Hero, name_prefix: String) -> Dictionary:
+	if hero == null or not is_instance_valid(hero):
+		return {"name": "%sHero" % name_prefix, "type": "Unit", "portrait_key": "hero"}
+
+	var portrait_key: String = (
+		"shadow_assassin" if hero.get_hero_kit_id() == HeroCatalog.KIT_SHADOW_ASSASSIN else "hero"
+	)
+	return {
+		"name": "%s%s" % [name_prefix, hero.get_display_name()],
+		"type": "Unit",
+		"portrait_key": portrait_key,
+	}
+
+
 func _get_enemy_unit_info(unit: Unit) -> Dictionary:
 	if unit is Hero:
-		return {"name": "Enemy Hero", "type": "Unit", "portrait_key": "hero"}
+		return _get_hero_portrait_info(unit as Hero, "Enemy ")
 	if unit is Worker:
 		return {"name": "Enemy Worker", "type": "Unit", "portrait_key": "worker"}
 	if unit is Spearman:

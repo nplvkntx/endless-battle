@@ -407,6 +407,8 @@ static func find_closest_tower_attack_target_in_range(
 				continue
 			if not is_tower_attack_target(tower, node):
 				continue
+			if StealthService.is_combat_hidden(node):
+				continue
 
 			var target: Node3D = node as Node3D
 			var distance: float = get_horizontal_center_distance(tower, target)
@@ -604,6 +606,8 @@ static func _find_best_enemy_faction_attack_target(
 			var target: Node3D = node as Node3D
 			if not is_attack_target_for_attacker(attacker, target):
 				continue
+			if StealthService.is_combat_hidden(target):
+				continue
 
 			var distance: float = get_horizontal_attack_distance(attacker, target)
 			if distance > search_range:
@@ -642,6 +646,8 @@ static func _find_closest_hostile_attack_target_in_range(
 			if not node is Node3D:
 				continue
 			if not is_attack_target_for_attacker(attacker, node):
+				continue
+			if StealthService.is_combat_hidden(node):
 				continue
 
 			var target: Node3D = node as Node3D

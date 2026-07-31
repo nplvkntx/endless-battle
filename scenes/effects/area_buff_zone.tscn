@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cbareabuffzone0001"]
+
+[ext_resource type="Script" path="res://scripts/systems/area_buff_zone.gd" id="1_area_buff_zone"]
+
+[node name="AreaBuffZone" type="Node3D"]
+script = ExtResource("1_area_buff_zone")

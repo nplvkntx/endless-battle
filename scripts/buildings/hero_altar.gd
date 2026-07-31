@@ -5,7 +5,6 @@ extends Building
 
 signal hero_altar_state_changed()
 
-const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
 ## Train costs — edit HeroStats only.
 const TRAIN_GOLD_COST: int = HeroStats.TRAIN_GOLD_COST
 const TRAIN_FOOD_COST: int = HeroStats.TRAIN_FOOD_COST
@@ -24,6 +23,14 @@ var _has_rally_point: bool = false
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
 var _rally_next_slot: int = 0
+
+## Kit locked in for the training session currently in progress.
+var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
+## Player-selected kit for the next training (UI writes this).
+var selected_kit_id: StringName = HeroCatalog.KIT_PALADIN
+## Enemy training defaults to Shadow Assassin (unless a saved enemy kit exists)
+## so AI assassin behavior is exercised without requiring extra UI.
+const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_SHADOW_ASSASSIN
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -79,7 +86,35 @@ func get_active_unit_training_progress() -> float:
 
 
 func get_active_unit_training_name() -> String:
-	return "Hero"
+	return HeroCatalog.get_display_name(_training_kit_id)
+
+
+func set_selected_kit(kit_id: StringName) -> void:
+	selected_kit_id = HeroCatalog.normalize_kit_id(kit_id)
+
+
+func get_selected_kit() -> StringName:
+	return selected_kit_id
+
+
+## Kit that will actually be spawned for the given owner on the next training,
+## accounting for saved progression from a prior death (retrain restores that kit).
+func get_pending_training_kit_id(is_enemy_owned: bool = false) -> StringName:
+	return _resolve_spawn_kit_id(is_enemy_owned)
+
+
+## Resolves which kit the next training session for this owner should spawn.
+## Retraining after a death always restores the previously saved kit; otherwise
+## the player's selection is used, and the enemy defaults to Shadow Assassin.
+func _resolve_spawn_kit_id(is_enemy_owned: bool) -> StringName:
+	var saved_kit_id: StringName = HeroProgressionStore.get_saved_kit_id(is_enemy_owned)
+	if saved_kit_id != &"":
+		return HeroCatalog.normalize_kit_id(saved_kit_id)
+
+	if is_enemy_owned:
+		return ENEMY_DEFAULT_KIT_ID
+
+	return selected_kit_id
 
 
 func _get_time_seconds() -> float:
@@ -189,6 +224,7 @@ func try_train_hero() -> void:
 		return
 
 	_training_for_enemy = false
+	_training_kit_id = _resolve_spawn_kit_id(false)
 	_begin_hero_training()
 
 
@@ -208,6 +244,7 @@ func try_begin_hero_training(is_enemy_owned: bool) -> bool:
 			return false
 
 	_training_for_enemy = is_enemy_owned
+	_training_kit_id = _resolve_spawn_kit_id(is_enemy_owned)
 	_begin_hero_training()
 	return true
 
@@ -250,7 +287,7 @@ func _on_hero_training_finished(session: int) -> void:
 
 
 func _spawn_hero() -> void:
-	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	var hero: Hero = HeroCatalog.load_scene(_training_kit_id).instantiate() as Hero
 	var spawn_parent: Node = get_parent()
 	if spawn_parent == null or hero == null:
 		return
@@ -272,7 +309,7 @@ func _spawn_hero() -> void:
 
 
 func _spawn_enemy_hero() -> void:
-	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	var hero: Hero = HeroCatalog.load_scene(_training_kit_id).instantiate() as Hero
 	var spawn_parent: Node = get_parent()
 	if spawn_parent == null or hero == null:
 		return

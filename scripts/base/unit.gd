@@ -91,6 +91,55 @@ var _order_queue: Array[UnitOrder] = []
 var _active_order: UnitOrder = null
 var _issuing_order: bool = false
 
+## Combat stealth — skipped by auto-targeting; area damage and manual orders still work.
+var _combat_hidden: bool = false
+
+
+func is_combat_hidden() -> bool:
+	return _combat_hidden
+
+
+func set_combat_hidden(hidden: bool) -> void:
+	if _combat_hidden == hidden:
+		return
+	_combat_hidden = hidden
+	_apply_stealth_visual(hidden)
+
+
+func _apply_stealth_visual(hidden: bool) -> void:
+	# Friendly always sees the unit; use a soft transparency cue for feedback.
+	var pivot: Node3D = _visual_pivot
+	if pivot == null:
+		pivot = get_node_or_null("MeshInstance3D") as Node3D
+	if pivot == null:
+		return
+	_set_node_albedo_alpha(pivot, 0.45 if hidden else 1.0)
+
+
+func _set_node_albedo_alpha(node: Node, alpha: float) -> void:
+	if node is MeshInstance3D:
+		var mesh_instance := node as MeshInstance3D
+		for surface_index: int in mesh_instance.get_surface_override_material_count():
+			var mat: Material = mesh_instance.get_surface_override_material(surface_index)
+			if mat is StandardMaterial3D:
+				var std := mat as StandardMaterial3D
+				std.transparency = (
+					BaseMaterial3D.TRANSPARENCY_ALPHA if alpha < 0.99 else BaseMaterial3D.TRANSPARENCY_DISABLED
+				)
+				var color: Color = std.albedo_color
+				color.a = alpha
+				std.albedo_color = color
+		if mesh_instance.material_override is StandardMaterial3D:
+			var override_mat := mesh_instance.material_override as StandardMaterial3D
+			override_mat.transparency = (
+				BaseMaterial3D.TRANSPARENCY_ALPHA if alpha < 0.99 else BaseMaterial3D.TRANSPARENCY_DISABLED
+			)
+			var override_color: Color = override_mat.albedo_color
+			override_color.a = alpha
+			override_mat.albedo_color = override_color
+	for child: Node in node.get_children():
+		_set_node_albedo_alpha(child, alpha)
+
 
 func _ready() -> void:
 	_combat_target_scan_timer = randf() * (COMBAT_TARGET_SCAN_INTERVAL + COMBAT_TARGET_SCAN_JITTER)

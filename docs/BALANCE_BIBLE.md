@@ -223,12 +223,13 @@ Academy **Improved Tools** multiplies construction speed by **1.2** (duration ÷
 | Cavalry Archer | 90 | 0 | 6 | 1.1 | 5.45 | 7.5 | 7.5 | 1×1×1 | 0.55 | 130 | 1 | 5.5 s | Stable |
 | Heavy Cavalry | 150 | 2 | 14 | 1.1 | 12.73 | 2.2 | 7.0 | 1×1×1 | 0.55 | 150 | 2 | 7.0 s | Stable |
 | Cannon | 120 | 0 | 45 | 5.5 | 8.18 | 14.0 | 6.0 | 1.4×1×1.8 | 0.55 | 275 | 2 | 14.0 s | Artillery Depot |
-| Hero | 200 | 0§ | 18 | 0.85 | 21.18 | 2.0 | 5.5 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
+| Hero (Paladin) | 200 | 0§ | 18 | 0.85 | 21.18 | 2.0 | 5.5 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
+| Hero (Shadow Assassin) | 180 | 0§ | 20 | 0.75 | 26.67 | 2.0 | 6.0 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
 
 † Inherited from `Unit.move_speed = 5.0` (scene does not override).  
 ‡ Archer **incoming** damage ignores armor (`Archer._compute_incoming_damage` returns `int(amount)`).  
-§ Hero **incoming** damage ignores armor (`Hero.take_damage` uses `int(amount)` with no armor subtract).  
-\* Requires Blacksmith.
+§ Hero **incoming** damage ignores armor (`Hero.take_damage` uses `int(amount)` with no armor subtract, both kits).  
+\* Requires Blacksmith. Both hero kits cost the same gold/food/train time — see §5 for kit selection at the altar.
 
 DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed this).
 
@@ -239,7 +240,8 @@ DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed
 | Archer | Fires Arrow projectile (speed 20, hit distance 0.45, max lifetime 5.0 s) |
 | Cavalry Archer | Same Arrow projectile |
 | Cannon | Artillery shell (speed 14); splash radius **3.5**, min damage ratio **0.5**; Ballistics ×1.2 |
-| Hero | Q/W/E/R abilities (see §5); Divine Protection blocks all damage while active |
+| Hero (Paladin) | Q/W/E/R abilities (see §5); Divine Protection blocks all damage while active |
+| Hero (Shadow Assassin) | Q/W/E/R abilities (see §5); Smoke (W) grants combat-hidden status — hidden units are skipped by auto-targeting but remain valid for committed attacks, player orders, and area damage |
 | Worker | Gather, build, repair; no combat attack |
 
 ### Passive regen (units)
@@ -262,34 +264,48 @@ DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed
 
 # 5. Heroes
 
-**One hero class** exists (`scripts/units/hero.gd` extending `scripts/base/hero.gd`).
+**Two hero kits** exist, selected at the Hero Altar and resolved via `scripts/systems/hero_catalog.gd`
+(`HeroCatalog.KIT_PALADIN`, `HeroCatalog.KIT_SHADOW_ASSASSIN`). Both extend the shared
+`scripts/units/melee_hero.gd` → `scripts/base/hero.gd` → `scripts/base/unit.gd` chain, and share
+ability rank rules, XP/leveling, inventory, and item math. Kit-specific numbers live in
+`scripts/balance/hero_stats.gd` (Paladin) and `scripts/balance/shadow_assassin_stats.gd` (Assassin);
+ability scaling per rank is resolved kit-aware via `scripts/systems/hero_ability_stats.gd`.
+
+- **Human Paladin** (`scripts/units/hero.gd`) — durable frontline fighter: Ground Slam, Divine
+  Protection, Power Strike, Execute. Passive: **Holy Recovery**.
+- **Shadow Assassin** (`scripts/units/shadow_assassin.gd`) — mobile burst/pick assassin: Axe Mark,
+  Smoke, Slash, Dash. Passive: **Assassin** (bonus damage on consecutive hits vs. the same target).
+
+Both kits share the same ability rank rules, XP curve, respawn/retrain flow, and item interaction
+caps documented below; per-kit numbers are called out where they differ.
 
 ## Base stats (Level 1)
 
-| Stat | Value | Source |
-|------|------:|--------|
-| HP | 200 | `hero.tscn` / `Hero.BASE_MAX_HEALTH` |
-| Mana | 100 | `BASE_MAX_MANA` |
-| Mana regen | 5.0 /s | `@export mana_regen_rate` |
-| Attack damage | 18 | `@export` / `BASE_ATTACK_DAMAGE` |
-| Attack cooldown | 0.85 s | |
-| Attack range | 2.0 | |
-| Move speed | 5.5 | scene + `BASE_MOVE_SPEED` |
-| Armor | *none applied* | Incoming damage ignores armor |
-| Inventory slots | 6 | `INVENTORY_SLOT_COUNT` |
+| Stat | Paladin | Shadow Assassin | Source |
+|------|--------:|-----------------:|--------|
+| HP | 200 | 180 | `HeroStats.MAX_HEALTH` / `ShadowAssassinStats.MAX_HEALTH` |
+| Mana | 100 | 100 | `BASE_MAX_MANA` / `ShadowAssassinStats.MAX_MANA` |
+| Mana regen | 5.0 /s | 5.0 /s | `mana_regen_rate` |
+| Attack damage | 18 | 20 | `BASE_ATTACK_DAMAGE` / `ShadowAssassinStats.ATTACK_DAMAGE` |
+| Attack cooldown | 0.85 s | 0.75 s | |
+| Attack range | 2.0 | 2.0 | |
+| Move speed | 5.5 | 6.0 | `BASE_MOVE_SPEED` / `ShadowAssassinStats.MOVE_SPEED` |
+| Armor | *none applied* | *none applied* | Incoming damage ignores armor |
+| Inventory slots | 6 | 6 | `INVENTORY_SLOT_COUNT` (shared) |
 
 ## Growth per level
 
-| Stat | Per level | Notes |
-|------|----------:|-------|
-| HP | +25 | Levels 2–30 |
-| Mana | +10 | |
-| Attack damage | +2 | |
-| Armor | *none* | No armor growth |
-| Move speed | +0.05 | **Only after level 18** (`MOVE_SPEED_PER_LEVEL_AFTER_18`) |
-| Ability points | +1 | Levels **2–18** inclusive |
+| Stat | Paladin / level | Assassin / level | Notes |
+|------|-----------------:|------------------:|-------|
+| HP | +25 | +22 | Levels 2–30 |
+| Mana | +10 | +10 | |
+| Attack damage | +2 | +2 | |
+| Armor | *none* | *none* | No armor growth |
+| Move speed | +0.05 | +0.05 | **Only after level 18** (`MOVE_SPEED_PER_LEVEL_AFTER_18`, shared) |
+| Ability points | +1 | +1 | Levels **2–18** inclusive (shared) |
 
-Max level: **30**. Ability point window: levels 2–18 → **17** points total.
+Max level: **30**. Ability point window: levels 2–18 → **17** points total. Rank rules (max ranks,
+level-gated ultimate) are identical for both kits — see **Abilities** below.
 
 ### XP requirements
 
@@ -311,9 +327,10 @@ Formula for XP to reach level L from 1: `50 × (L−1) × L`.
 |------|-------|
 | Auto-respawn timer | *None* |
 | Revival method | Retrain at Hero Altar |
-| Retrain cost | 200 gold, 2 food |
+| Retrain cost | 200 gold, 2 food (same for both kits) |
 | Retrain time | 6.0 s |
-| Progression on death | Saved via `HeroProgressionStore` (level, XP, abilities, inventory) and restored on next train |
+| Progression on death | Saved via `HeroProgressionStore` (level, XP, abilities, inventory, **kit id**) and restored on next train |
+| Kit on retrain | Altar auto-spawns the previously trained kit (`HeroProgressionStore.get_saved_kit_id`) — dying as Shadow Assassin and retraining spawns another Shadow Assassin, not the default selection |
 | Living hero limit | 1 per side (altar blocks train while hero lives / is training) |
 
 ## Kill XP / gold rewards (hero recipient)
@@ -333,12 +350,15 @@ Creep XP share range: **18.0** world units from hero.
 
 ## Abilities
 
-**Rank rules** (`hero_ability_progression.gd`):
+**Rank rules** (`hero_ability_progression.gd`, shared by both kits):
 
 - Q/W/E: max rank **5**, learnable from level 1 (with points)
-- R (Execute): max rank **3**; unlock ranks at levels **6 / 11 / 16**
+- R (ultimate): max rank **3**; unlock ranks at levels **6 / 11 / 16**
 
-**Base stats** (`hero_ability_stats.gd`); mana costs also mirrored as `@export` on hero scene script:
+**Base stats** (`hero_ability_stats.gd`, resolved kit-aware via `get_stat(ability_id, stat, rank, overrides, kit_id)`);
+Paladin mana costs are also mirrored as `@export` on the hero scene script.
+
+## 5a. Human Paladin abilities
 
 ### Q — Ground Slam
 
@@ -390,14 +410,99 @@ Single-target melee nuke. Damage also gains **+item_ability_power**.
 
 Clamped max threshold **75%**. Instantly deals remaining HP as damage if target below threshold. Item AP adds `+0.001` threshold per point (also clamped to 0.75).
 
+### Passive — Holy Recovery
+
+**Source:** `scripts/passives/holy_recovery_passive.gd`, numbers in `scripts/balance/hero_passive_stats.gd`.
+
+| Stat | Value |
+|------|------:|
+| Out-of-combat delay | 5.0 s (`HOLY_RECOVERY_OUT_OF_COMBAT_SECONDS`) |
+| Regen rate | 2% max HP / s (`HOLY_RECOVERY_REGEN_PERCENT_PER_SECOND`) |
+
+While out of combat for the delay window, heals a percentage of max HP per second until back to full or re-engaged.
+
+## 5b. Shadow Assassin abilities
+
+**Source:** `scripts/balance/shadow_assassin_stats.gd` (edit assassin balance only there); scaling
+multipliers per rank are the same curves used by the Paladin (`BASIC_*_MULT` / `ULTIMATE_*_MULT` in
+`hero_ability_stats.gd`), applied to the Assassin's own base numbers.
+
+### Q — Axe Mark
+
+| Rank | Damage | Consume Bonus | Mark Duration | Cooldown | Mana |
+|-----:|-------:|---------------:|--------------:|---------:|-----:|
+| 1 | 28 | 40 | 5.0 s | 10.0 | 35 |
+| 2 | 34 | 48 | 6.0 s | 9.5 | 39 |
+| 3 | 39 | 56 | 7.0 s | 9.0 | 42 |
+| 4 | 45 | 64 | 8.0 s | 8.5 | 46 |
+| 5 | 50 | 72 | 9.0 s | 8.0 | 49 |
+
+Throws a spinning axe (`SpinningAxe`, travel speed `AXE_MARK_PROJECTILE_SPEED = 16.0`) that deals
+damage and applies a mark (`AxeMarkBuff`) to the target for the mark duration. The assassin's next
+basic attack on a marked target consumes the mark for the consume bonus damage and refunds
+**50%** of the ability's mana cost (`AXE_MARK_MANA_REFUND_RATIO`).
+
+### W — Smoke
+
+| Rank | Duration | Radius | Cooldown | Mana |
+|-----:|---------:|-------:|---------:|-----:|
+| 1 | 6.0 s | 4.0 | 18.0 | 35 |
+| 2 | 7.2 s | 4.4 | 17.1 | 39 |
+| 3 | 8.4 s | 4.8 | 16.2 | 42 |
+| 4 | 9.6 s | 5.2 | 15.3 | 46 |
+| 5 | 10.8 s | 5.6 | 14.4 | 49 |
+
+Drops a ground zone (`AreaBuffZone`) at the assassin's feet. While standing inside: **hidden**
+from enemy auto-targeting (`Unit.is_combat_hidden`) and gains `+1.5` move speed
+(`SMOKE_MOVE_SPEED_BONUS`). Attacking or casting an ability reveals the assassin for
+`SMOKE_REVEAL_SECONDS = 1.25s` before it can re-hide inside the zone.
+
+### E — Slash
+
+| Rank | Damage | Radius | Cooldown | Mana |
+|-----:|-------:|-------:|---------:|-----:|
+| 1 | 38 | 2.8 | 8.0 | 30 |
+| 2 | 46 | 3.08 | 7.6 | 33 |
+| 3 | 53 | 3.36 | 7.2 | 36 |
+| 4 | 61 | 3.64 | 6.8 | 39 |
+| 5 | 68 | 3.92 | 6.4 | 42 |
+
+Instant AoE damage to hostile combat targets in radius around the assassin (no falloff), same
+mechanic as Ground Slam.
+
+### R — Dash
+
+| Rank | Damage | Range | Cooldown | Mana |
+|-----:|-------:|------:|---------:|-----:|
+| 1 | 55 | 7.0 | 20.0 | 40 |
+| 2 | 66 | 7.35 | 18.0 | 48 |
+| 3 | 77 | 7.7 | 16.0 | 56 |
+
+Prefers the lowest-HP hostile hero in range, otherwise the current attack target, otherwise nearest
+hostile. Teleports to melee range of the target (`DASH_ARRIVAL_OFFSET = 1.15`) and deals damage on
+arrival.
+
+### Passive — Assassin
+
+**Source:** `scripts/passives/assassin_passive.gd`, numbers in `scripts/balance/hero_passive_stats.gd` /
+`shadow_assassin_stats.gd`.
+
+| Stat | Value |
+|------|------:|
+| Bonus damage per consecutive hit | `+8` flat (`ASSASSIN_PASSIVE_BONUS_DAMAGE`) |
+| Bonus damage ratio | `+25%` of attack damage (`ASSASSIN_PASSIVE_ATTACK_DAMAGE_RATIO`) |
+
+Grants bonus physical damage on every basic attack against the same target after the first (i.e.
+rewards committing to a single target rather than spreading attacks).
+
 ### Item interaction caps
 
 | Cap | Value |
 |-----|------:|
-| Max cooldown reduction | 40% |
-| Max mana cost reduction | 40% |
-| Ability damage | `base + item_ability_power` |
-| Spell radius | `base + item_spell_radius_bonus` |
+| Max cooldown reduction | 40% (shared) |
+| Max mana cost reduction | 40% (shared) |
+| Ability damage | `base + item_ability_power` (Assassin also scales off attack damage per-ability — see `HeroAbilityStats.KIT_ABILITY_SCALING`) |
+| Spell radius | `base + item_spell_radius_bonus` (shared) |
 
 ---
 

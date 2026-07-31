@@ -466,6 +466,18 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 	if not NodeSafety.is_alive_node(hero):
 		return
 
+	if hero.has_method("try_ai_cast_abilities"):
+		hero.try_ai_cast_abilities({
+			"health_ratio": health_ratio,
+			"nearby_enemy_count": _count_player_military_near_hero(hero),
+			"aoe_needed": EnemyArmyCommand.HERO_AOE_PLAYER_COUNT,
+			"defensive_hp_ratio": EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
+			"power_strike_range": EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE,
+			"execute_range": HERO_EXECUTE_SEARCH_RANGE,
+			"retreating": health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
+		})
+		return
+
 	if (
 		health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO
 		and hero.has_method("can_use_divine_protection")

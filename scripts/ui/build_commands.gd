@@ -57,6 +57,8 @@ extends PanelContainer
 @onready var _train_hero_button: Button = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroAltarTrainingRow/TrainHeroButton
 )
+## Created at runtime in _setup_production_controls(); trains the Shadow Assassin kit.
+var _train_assassin_button: Button = null
 @onready var _hero_status_label: Label = (
 	$MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel/HeroStatusLabel
 )
@@ -352,6 +354,7 @@ func _ready() -> void:
 	_train_spearman_button.pressed.connect(_on_train_spearman_pressed)
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
+	_train_assassin_button.pressed.connect(_on_train_assassin_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
 	_stop_button.pressed.connect(_on_stop_pressed)
 	_hold_position_button.pressed.connect(_on_hold_position_pressed)
@@ -420,6 +423,11 @@ func _setup_production_controls() -> void:
 	_hero_queue_row.add_theme_constant_override("separation", 2)
 	_hero_altar_panel.add_child(_hero_queue_row)
 	_hero_altar_panel.move_child(_hero_queue_row, _hero_status_label.get_index() + 1)
+
+	_train_assassin_button = Button.new()
+	_train_assassin_button.visible = false
+	_hero_altar_training_row.add_child(_train_assassin_button)
+	_hero_altar_training_row.move_child(_train_assassin_button, _train_hero_button.get_index() + 1)
 
 
 func _setup_production_icon_slots() -> void:
@@ -1128,7 +1136,9 @@ func _set_production_icon_visibility(
 	_train_swordsman_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_swordsman_slot)
 	_train_archer_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_archer_slot)
 	_train_worker_button.visible = show_town_center and _should_use_legacy_train_button(_town_center_worker_slot)
-	_train_hero_button.visible = show_hero_altar and _should_use_legacy_train_button(_hero_altar_slot)
+	_train_hero_button.visible = show_hero_altar
+	if _train_assassin_button != null:
+		_train_assassin_button.visible = show_hero_altar
 
 	if USE_PRODUCTION_ICON_SLOTS:
 		if show_barracks:
@@ -1200,6 +1210,7 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 		if _selected_hero_altar == null:
 			return
 
+		_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
 		_selected_hero_altar.try_train_hero()
 	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
 		if _selected_stable == null:
@@ -1800,26 +1811,38 @@ func _unhandled_input(event: InputEvent) -> void:
 			if key_event.shift_pressed:
 				hero.try_learn_ability(HeroAbilityProgression.ABILITY_Q)
 			else:
-				hero.try_ground_slam()
+				_try_cast_hero_ability(hero, &"try_cast_q", &"try_ground_slam")
 			get_viewport().set_input_as_handled()
 		KEY_W:
 			if key_event.shift_pressed:
 				hero.try_learn_ability(HeroAbilityProgression.ABILITY_W)
 			else:
-				hero.try_divine_protection()
+				_try_cast_hero_ability(hero, &"try_cast_w", &"try_divine_protection")
 			get_viewport().set_input_as_handled()
 		KEY_E:
 			if key_event.shift_pressed:
 				hero.try_learn_ability(HeroAbilityProgression.ABILITY_E)
 			else:
-				hero.try_power_strike()
+				_try_cast_hero_ability(hero, &"try_cast_e", &"try_power_strike")
 			get_viewport().set_input_as_handled()
 		KEY_R:
 			if key_event.shift_pressed:
 				hero.try_learn_ability(HeroAbilityProgression.ABILITY_R)
 			else:
-				hero.try_execute()
+				_try_cast_hero_ability(hero, &"try_cast_r", &"try_execute")
 			get_viewport().set_input_as_handled()
+
+
+## Casts an ability on any Hero subclass. Prefers the kit-agnostic try_cast_*
+## entry point (used by non-Paladin kits like Shadow Assassin) and falls back
+## to the legacy Paladin-named method so existing Paladin behavior is unchanged.
+func _try_cast_hero_ability(
+	hero: Hero, generic_method: StringName, legacy_method: StringName
+) -> void:
+	if hero.has_method(generic_method):
+		hero.call(generic_method)
+	elif hero.has_method(legacy_method):
+		hero.call(legacy_method)
 
 
 func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
@@ -1948,6 +1971,8 @@ func _get_tracked_hero_for_input() -> Hero:
 func _set_hero_altar_button_labels() -> void:
 	var cost_label := " (%d Gold, %d Food)" % [HeroAltar.TRAIN_GOLD_COST, HeroAltar.TRAIN_FOOD_COST]
 	_train_hero_button.text = "Train Hero%s" % cost_label
+	if _train_assassin_button != null:
+		_train_assassin_button.text = "Train Assassin%s" % cost_label
 
 
 func _set_barracks_button_labels() -> void:
@@ -2431,6 +2456,26 @@ func _try_learn_ability_from_ui(ability_id: StringName) -> void:
 	_update_hero_abilities_ui()
 
 
+## Reads cooldown remaining via the generic per-kit API when available, falling
+## back to the Paladin-named getter so existing behavior is unchanged.
+func _get_hero_ability_cooldown_remaining(
+	hero: Hero, ability_id: StringName, legacy_method: StringName
+) -> float:
+	if hero.has_method(&"get_ability_cooldown_remaining"):
+		return float(hero.call(&"get_ability_cooldown_remaining", ability_id))
+	if hero.has_method(legacy_method):
+		return float(hero.call(legacy_method))
+	return 0.0
+
+
+## Reads the "active/pending" status text (e.g. Divine Protection active, Smoke
+## hidden) via the generic per-kit API when available.
+func _get_hero_ability_active_status_text(hero: Hero, ability_id: StringName) -> String:
+	if hero.has_method(&"get_ability_active_status_text"):
+		return String(hero.call(&"get_ability_active_status_text", ability_id))
+	return ""
+
+
 func _update_ground_slam_ui() -> void:
 	if _ground_slam_button == null or _ground_slam_cooldown_label == null:
 		return
@@ -2446,14 +2491,25 @@ func _update_ground_slam_ui() -> void:
 		_ground_slam_cooldown_label.text = _format_ability_label("Q", _tracked_hero, ability_id, "")
 		return
 
-	var remaining: float = _tracked_hero.get_ground_slam_cooldown_remaining()
+	var status_text: String = _get_hero_ability_active_status_text(_tracked_hero, ability_id)
+	if not status_text.is_empty():
+		_ground_slam_button.disabled = true
+		_ground_slam_cooldown_label.text = _format_ability_label(
+			"Q", _tracked_hero, ability_id, status_text
+		)
+		return
+
+	var remaining: float = _get_hero_ability_cooldown_remaining(
+		_tracked_hero, ability_id, &"get_ground_slam_cooldown_remaining"
+	)
 	if remaining > 0.0:
 		_ground_slam_button.disabled = true
 		_ground_slam_cooldown_label.text = _format_ability_label(
 			"Q", _tracked_hero, ability_id, "%.1fs" % remaining
 		)
 	else:
-		_ground_slam_button.disabled = false
+		var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_ability_mana_cost(ability_id)
+		_ground_slam_button.disabled = not has_mana
 		_ground_slam_cooldown_label.text = _format_ability_label(
 			"Q", _tracked_hero, ability_id, "Ready"
 		)
@@ -2463,7 +2519,7 @@ func _on_ground_slam_pressed() -> void:
 	if _tracked_hero == null:
 		return
 
-	_tracked_hero.try_ground_slam()
+	_try_cast_hero_ability(_tracked_hero, &"try_cast_q", &"try_ground_slam")
 	_update_hero_abilities_ui()
 
 
@@ -2486,17 +2542,17 @@ func _update_divine_protection_ui() -> void:
 		_divine_protection_cooldown_label.text = _format_ability_label("W", _tracked_hero, ability_id, "")
 		return
 
-	if _tracked_hero.is_divine_protection_active():
+	var status_text: String = _get_hero_ability_active_status_text(_tracked_hero, ability_id)
+	if not status_text.is_empty():
 		_divine_protection_button.disabled = true
 		_divine_protection_cooldown_label.text = _format_ability_label(
-			"W",
-			_tracked_hero,
-			ability_id,
-			"Active %.1fs" % _tracked_hero.get_divine_protection_remaining()
+			"W", _tracked_hero, ability_id, status_text
 		)
 		return
 
-	var cooldown_remaining: float = _tracked_hero.get_divine_protection_cooldown_remaining()
+	var cooldown_remaining: float = _get_hero_ability_cooldown_remaining(
+		_tracked_hero, ability_id, &"get_divine_protection_cooldown_remaining"
+	)
 	if cooldown_remaining > 0.0:
 		_divine_protection_button.disabled = true
 		_divine_protection_cooldown_label.text = _format_ability_label(
@@ -2504,7 +2560,7 @@ func _update_divine_protection_ui() -> void:
 		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_divine_protection_mana_cost()
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_ability_mana_cost(ability_id)
 	_divine_protection_button.disabled = not has_mana
 	_divine_protection_cooldown_label.text = _format_ability_label(
 		"W", _tracked_hero, ability_id, "Ready"
@@ -2515,7 +2571,7 @@ func _on_divine_protection_pressed() -> void:
 	if _tracked_hero == null:
 		return
 
-	_tracked_hero.try_divine_protection()
+	_try_cast_hero_ability(_tracked_hero, &"try_cast_w", &"try_divine_protection")
 	_update_hero_abilities_ui()
 
 
@@ -2538,14 +2594,17 @@ func _update_power_strike_ui() -> void:
 		_power_strike_cooldown_label.text = _format_ability_label("E", _tracked_hero, ability_id, "")
 		return
 
-	if _tracked_hero.is_power_strike_pending():
+	var status_text: String = _get_hero_ability_active_status_text(_tracked_hero, ability_id)
+	if not status_text.is_empty():
 		_power_strike_button.disabled = true
 		_power_strike_cooldown_label.text = _format_ability_label(
-			"E", _tracked_hero, ability_id, "Moving..."
+			"E", _tracked_hero, ability_id, status_text
 		)
 		return
 
-	var cooldown_remaining: float = _tracked_hero.get_power_strike_cooldown_remaining()
+	var cooldown_remaining: float = _get_hero_ability_cooldown_remaining(
+		_tracked_hero, ability_id, &"get_power_strike_cooldown_remaining"
+	)
 	if cooldown_remaining > 0.0:
 		_power_strike_button.disabled = true
 		_power_strike_cooldown_label.text = _format_ability_label(
@@ -2553,7 +2612,7 @@ func _update_power_strike_ui() -> void:
 		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_power_strike_mana_cost()
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_ability_mana_cost(ability_id)
 	_power_strike_button.disabled = not has_mana
 	_power_strike_cooldown_label.text = _format_ability_label(
 		"E", _tracked_hero, ability_id, "Ready"
@@ -2564,7 +2623,7 @@ func _on_power_strike_pressed() -> void:
 	if _tracked_hero == null:
 		return
 
-	_tracked_hero.try_power_strike()
+	_try_cast_hero_ability(_tracked_hero, &"try_cast_e", &"try_power_strike")
 	_update_hero_abilities_ui()
 
 
@@ -2595,14 +2654,17 @@ func _update_execute_ui() -> void:
 			)
 		return
 
-	if _tracked_hero.is_execute_pending():
+	var status_text: String = _get_hero_ability_active_status_text(_tracked_hero, ability_id)
+	if not status_text.is_empty():
 		_execute_button.disabled = true
 		_execute_cooldown_label.text = _format_ability_label(
-			"R", _tracked_hero, ability_id, "Moving..."
+			"R", _tracked_hero, ability_id, status_text
 		)
 		return
 
-	var cooldown_remaining: float = _tracked_hero.get_execute_cooldown_remaining()
+	var cooldown_remaining: float = _get_hero_ability_cooldown_remaining(
+		_tracked_hero, ability_id, &"get_execute_cooldown_remaining"
+	)
 	if cooldown_remaining > 0.0:
 		_execute_button.disabled = true
 		_execute_cooldown_label.text = _format_ability_label(
@@ -2610,7 +2672,7 @@ func _update_execute_ui() -> void:
 		)
 		return
 
-	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_execute_mana_cost()
+	var has_mana: bool = _tracked_hero.current_mana >= _tracked_hero.get_ability_mana_cost(ability_id)
 	_execute_button.disabled = not has_mana
 	_execute_cooldown_label.text = _format_ability_label(
 		"R", _tracked_hero, ability_id, "Ready"
@@ -2621,7 +2683,7 @@ func _on_execute_pressed() -> void:
 	if _tracked_hero == null:
 		return
 
-	_tracked_hero.try_execute()
+	_try_cast_hero_ability(_tracked_hero, &"try_cast_r", &"try_execute")
 	_update_hero_abilities_ui()
 
 
@@ -2825,11 +2887,13 @@ func _update_hero_altar_status() -> void:
 	if _tracked_hero_altar.player_has_hero():
 		_hero_status_label.text = "Hero: Already active"
 	elif _tracked_hero_altar.is_training_hero():
-		_hero_status_label.text = "Hero: Training..."
+		_hero_status_label.text = "%s: Training..." % _tracked_hero_altar.get_active_unit_training_name()
 	else:
 		_hero_status_label.text = "Hero: Ready to train"
 
 	_train_hero_button.disabled = not _tracked_hero_altar.can_train_hero()
+	if _train_assassin_button != null:
+		_train_assassin_button.disabled = not _tracked_hero_altar.can_train_hero()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_hero_altar_production_slot()
 	else:
@@ -2851,6 +2915,8 @@ func _clear_all_command_ui() -> void:
 	_train_swordsman_button.visible = false
 	_train_archer_button.visible = false
 	_train_hero_button.visible = false
+	if _train_assassin_button != null:
+		_train_assassin_button.visible = false
 
 	_center_panel.visible = false
 	_barracks_panel.visible = false
@@ -3873,6 +3939,15 @@ func _on_train_hero_pressed() -> void:
 	if _selected_hero_altar == null:
 		return
 
+	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
+	_selected_hero_altar.try_train_hero()
+
+
+func _on_train_assassin_pressed() -> void:
+	if _selected_hero_altar == null:
+		return
+
+	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_SHADOW_ASSASSIN)
 	_selected_hero_altar.try_train_hero()
 
 
@@ -3893,6 +3968,7 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_train_swordsman_button)
 	_clear_control_tooltip(_train_archer_button)
 	_clear_control_tooltip(_train_hero_button)
+	_clear_control_tooltip(_train_assassin_button)
 	_clear_control_tooltip(_attack_button)
 	_clear_control_tooltip(_stop_button)
 	_clear_control_tooltip(_hold_position_button)
@@ -3987,6 +4063,7 @@ func _setup_command_tooltips() -> void:
 	TooltipManager.bind_control(_train_swordsman_button, _get_train_swordsman_tooltip)
 	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
 	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
+	TooltipManager.bind_control(_train_assassin_button, _get_train_assassin_tooltip)
 	for definition: Dictionary in RtsCommandCatalog.unit_command_definitions():
 		var command_id: StringName = definition.get("id", &"")
 		var tooltip_text: String = str(definition.get("tooltip", ""))
@@ -4264,8 +4341,23 @@ func _get_train_cannon_tooltip() -> String:
 
 
 func _get_train_hero_tooltip() -> String:
+	var kit_id: StringName = HeroCatalog.KIT_PALADIN
+	if _selected_hero_altar != null and is_instance_valid(_selected_hero_altar):
+		kit_id = _selected_hero_altar.get_pending_training_kit_id(false)
 	return TooltipFormatter.format_train_command(
-		"Hero",
+		HeroCatalog.get_display_name(kit_id),
+		HeroAltar.TRAIN_GOLD_COST,
+		0,
+		HeroAltar.TRAIN_FOOD_COST,
+		HeroAltar.TRAIN_SECONDS,
+		&"hero",
+		TooltipFormatter.get_hero_train_blocked_reason(_selected_hero_altar)
+	)
+
+
+func _get_train_assassin_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		HeroCatalog.get_display_name(HeroCatalog.KIT_SHADOW_ASSASSIN),
 		HeroAltar.TRAIN_GOLD_COST,
 		0,
 		HeroAltar.TRAIN_FOOD_COST,

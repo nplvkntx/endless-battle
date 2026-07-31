@@ -199,7 +199,11 @@ func get_ability_max_rank(ability_id: StringName) -> int:
 
 func get_scaled_ability_stat(ability_id: StringName, stat: StringName) -> Variant:
 	return HeroAbilityStats.get_stat(
-		ability_id, stat, get_ability_rank(ability_id), _get_ability_base_overrides(ability_id)
+		ability_id,
+		stat,
+		get_ability_rank(ability_id),
+		_get_ability_base_overrides(ability_id),
+		get_hero_kit_id()
 	)
 
 
@@ -214,7 +218,11 @@ func get_effective_mana_cost_reduction() -> float:
 func get_ability_damage_at_rank(ability_id: StringName, rank: int, target: Node = null) -> int:
 	var base_damage: int = int(
 		HeroAbilityStats.get_stat(
-			ability_id, HeroAbilityStats.STAT_DAMAGE, rank, _get_ability_base_overrides(ability_id)
+			ability_id,
+			HeroAbilityStats.STAT_DAMAGE,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
 		)
 	)
 	if base_damage <= 0:
@@ -230,10 +238,53 @@ func get_ability_damage(ability_id: StringName, target: Node = null) -> int:
 	return get_ability_damage_at_rank(ability_id, get_ability_rank(ability_id), target)
 
 
+func get_ability_bonus_damage_at_rank(ability_id: StringName, rank: int, target: Node = null) -> int:
+	var base_damage: int = int(
+		HeroAbilityStats.get_stat(
+			ability_id,
+			HeroAbilityStats.STAT_BONUS_DAMAGE,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
+		)
+	)
+	if base_damage <= 0:
+		return 0
+
+	var scaling_bonus: float = _get_ability_scaling_bonus(
+		ability_id, HeroAbilityStats.STAT_BONUS_DAMAGE, target
+	)
+	return maxi(1, int(round(float(base_damage) + scaling_bonus)))
+
+
+func get_ability_bonus_damage(ability_id: StringName, target: Node = null) -> int:
+	return get_ability_bonus_damage_at_rank(ability_id, get_ability_rank(ability_id), target)
+
+
+func get_ability_range_at_rank(ability_id: StringName, rank: int) -> float:
+	return float(
+		HeroAbilityStats.get_stat(
+			ability_id,
+			HeroAbilityStats.STAT_RANGE,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
+		)
+	)
+
+
+func get_ability_range(ability_id: StringName) -> float:
+	return get_ability_range_at_rank(ability_id, get_ability_rank(ability_id))
+
+
 func get_ability_splash_radius_at_rank(ability_id: StringName, rank: int) -> float:
 	var base_radius: float = float(
 		HeroAbilityStats.get_stat(
-			ability_id, HeroAbilityStats.STAT_SPLASH, rank, _get_ability_base_overrides(ability_id)
+			ability_id,
+			HeroAbilityStats.STAT_SPLASH,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
 		)
 	)
 	if base_radius <= 0.0:
@@ -251,7 +302,11 @@ func get_ability_effect_strength_at_rank(
 ) -> float:
 	var base_effect: float = float(
 		HeroAbilityStats.get_stat(
-			ability_id, HeroAbilityStats.STAT_EFFECT, rank, _get_ability_base_overrides(ability_id)
+			ability_id,
+			HeroAbilityStats.STAT_EFFECT,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
 		)
 	)
 	if base_effect <= 0.0:
@@ -260,7 +315,10 @@ func get_ability_effect_strength_at_rank(
 	var bonus: float = _get_ability_scaling_bonus(
 		ability_id, HeroAbilityStats.STAT_EFFECT, target
 	)
-	if ability_id == HeroAbilityProgression.ABILITY_R:
+	if (
+		get_hero_kit_id() == HeroCatalog.KIT_PALADIN
+		and ability_id == HeroAbilityProgression.ABILITY_R
+	):
 		return clampf(base_effect + bonus, 0.0, 0.75)
 
 	return base_effect + bonus
@@ -273,7 +331,11 @@ func get_ability_effect_strength(ability_id: StringName, target: Node = null) ->
 func get_ability_mana_cost_at_rank(ability_id: StringName, rank: int) -> int:
 	var base_mana: int = int(
 		HeroAbilityStats.get_stat(
-			ability_id, HeroAbilityStats.STAT_MANA, rank, _get_ability_base_overrides(ability_id)
+			ability_id,
+			HeroAbilityStats.STAT_MANA,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
 		)
 	)
 	return maxi(1, int(round(float(base_mana) * (1.0 - get_effective_mana_cost_reduction()))))
@@ -286,7 +348,11 @@ func get_ability_mana_cost(ability_id: StringName) -> int:
 func get_ability_cooldown_at_rank(ability_id: StringName, rank: int) -> float:
 	var base_cooldown: float = float(
 		HeroAbilityStats.get_stat(
-			ability_id, HeroAbilityStats.STAT_COOLDOWN, rank, _get_ability_base_overrides(ability_id)
+			ability_id,
+			HeroAbilityStats.STAT_COOLDOWN,
+			rank,
+			_get_ability_base_overrides(ability_id),
+			get_hero_kit_id()
 		)
 	)
 	return maxf(0.1, base_cooldown * (1.0 - get_effective_cooldown_reduction()))
@@ -295,6 +361,13 @@ func get_ability_cooldown_at_rank(ability_id: StringName, rank: int) -> float:
 func get_ability_cooldown(ability_id: StringName) -> float:
 	return get_ability_cooldown_at_rank(ability_id, get_ability_rank(ability_id))
 
+
+func get_hero_kit_id() -> StringName:
+	return HeroCatalog.KIT_PALADIN
+
+
+func get_display_name() -> String:
+	return "Hero"
 
 func get_ground_slam_mana_cost() -> int:
 	return get_ability_mana_cost(HeroAbilityProgression.ABILITY_Q)
@@ -385,7 +458,9 @@ func resolve_ability_scaling_stat(scaling_stat: int, target: Node = null) -> flo
 func _get_ability_scaling_bonus(
 	ability_id: StringName, stat: StringName, target: Node = null
 ) -> float:
-	var ratios: Dictionary = HeroAbilityStats.get_scaling_ratios(ability_id, stat)
+	var ratios: Dictionary = HeroAbilityStats.get_scaling_ratios(
+		ability_id, stat, get_hero_kit_id()
+	)
 	if ratios.is_empty():
 		return 0.0
 
@@ -393,7 +468,9 @@ func _get_ability_scaling_bonus(
 	for scaling_stat: Variant in ratios.keys():
 		resolved_values[scaling_stat] = resolve_ability_scaling_stat(int(scaling_stat), target)
 
-	return HeroAbilityStats.compute_scaling_bonus(ability_id, stat, resolved_values)
+	return HeroAbilityStats.compute_scaling_bonus(
+		ability_id, stat, resolved_values, get_hero_kit_id()
+	)
 
 
 func _get_health_component() -> HealthComponent:
@@ -438,7 +515,10 @@ func _get_target_current_health(target: Node) -> int:
 
 func get_ability_tooltip(ability_id: StringName) -> String:
 	return HeroAbilityStats.format_tooltip(
-		ability_id, get_ability_rank(ability_id), _get_ability_base_overrides(ability_id)
+		ability_id,
+		get_ability_rank(ability_id),
+		_get_ability_base_overrides(ability_id),
+		get_hero_kit_id()
 	)
 
 
@@ -528,9 +608,13 @@ func _apply_level_health_gain() -> void:
 	if health_component == null:
 		return
 
-	health_component.max_health += HEALTH_PER_LEVEL
+	var health_gain: int = HEALTH_PER_LEVEL
+	if has_method(&"get_kit_health_per_level"):
+		health_gain = int(call(&"get_kit_health_per_level"))
+
+	health_component.max_health += health_gain
 	health_component.current_health = mini(
-		health_component.current_health + HEALTH_PER_LEVEL,
+		health_component.current_health + health_gain,
 		health_component.max_health
 	)
 	health_component.health_changed.emit(health_component.current_health, health_component.max_health)
@@ -569,6 +653,7 @@ func export_progression_snapshot() -> Dictionary:
 		"ability_points": ability_points,
 		"ability_ranks": ability_ranks,
 		"inventory_item_ids": _export_inventory_item_ids(),
+		"hero_kit_id": String(get_hero_kit_id()),
 	}
 
 
@@ -609,7 +694,13 @@ func restore_progression_snapshot(snapshot: Dictionary) -> void:
 func _reapply_all_level_stat_scaling() -> void:
 	var health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
 	if health_component != null:
-		health_component.max_health = BASE_MAX_HEALTH + (level - 1) * HEALTH_PER_LEVEL
+		var base_health: int = BASE_MAX_HEALTH
+		var health_per_level: int = HEALTH_PER_LEVEL
+		if has_method(&"get_kit_base_max_health"):
+			base_health = int(call(&"get_kit_base_max_health"))
+		if has_method(&"get_kit_health_per_level"):
+			health_per_level = int(call(&"get_kit_health_per_level"))
+		health_component.max_health = base_health + (level - 1) * health_per_level
 		health_component.current_health = health_component.max_health
 		health_component.health_changed.emit(
 			health_component.current_health, health_component.max_health

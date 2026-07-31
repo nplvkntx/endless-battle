@@ -16,6 +16,14 @@ static func has_saved_enemy_progression() -> bool:
 	return not _enemy_snapshot.is_empty()
 
 
+static func get_saved_kit_id(is_enemy: bool) -> StringName:
+	var snapshot: Dictionary = _enemy_snapshot if is_enemy else _player_snapshot
+	if snapshot.is_empty():
+		return &""
+
+	return StringName(str(snapshot.get("hero_kit_id", "")))
+
+
 static func save_from_hero(hero: Hero) -> void:
 	if hero == null or not is_instance_valid(hero):
 		return

@@ -18,6 +18,8 @@ static func get_icon_texture(icon_id: StringName) -> Texture2D:
 	match icon_id:
 		HeroPassiveCatalog.PASSIVE_HOLY_RECOVERY:
 			_draw_holy_recovery(image)
+		HeroPassiveCatalog.PASSIVE_ASSASSIN:
+			_draw_assassin(image)
 		_:
 			_draw_default(image)
 
@@ -65,3 +67,25 @@ static func _draw_holy_recovery(image: Image) -> void:
 	_fill_rect(image, Rect2i(7, 11, 2, 6), rim)
 	_fill_rect(image, Rect2i(23, 11, 2, 6), rim)
 	_fill_rect(image, Rect2i(13, 25, 6, 2), rim)
+
+
+static func _draw_assassin(image: Image) -> void:
+	var purple := Color(0.42, 0.2, 0.55, 1)
+	var blade := Color(0.82, 0.86, 0.95, 1)
+	var accent := Color(0.95, 0.35, 0.55, 1)
+
+	for y: int in ICON_SIZE:
+		for x: int in ICON_SIZE:
+			var dx: float = float(x) - 15.5
+			var dy: float = float(y) - 15.5
+			var dist: float = sqrt(dx * dx + dy * dy)
+			if dist <= 14.5:
+				image.set_pixel(x, y, Color(0.12, 0.08, 0.16, 1))
+			if dist <= 13.0:
+				image.set_pixel(x, y, purple)
+
+	# Dagger
+	_fill_rect(image, Rect2i(15, 6, 3, 18), blade)
+	_fill_rect(image, Rect2i(14, 7, 5, 2), blade)
+	_fill_rect(image, Rect2i(12, 22, 9, 3), accent)
+	_fill_rect(image, Rect2i(15, 25, 3, 3), Color(0.55, 0.45, 0.25, 1))
