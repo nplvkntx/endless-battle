@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" uid="uid://cacyxd3oy3o0d" path="res://scenes/match/player_starting_base.tscn" id="32_player_starting_base"]
 [ext_resource type="PackedScene" uid="uid://0dsydyxmkkwe" path="res://scenes/match/enemy_starting_base.tscn" id="33_enemy_starting_base"]
 [ext_resource type="PackedScene" uid="uid://exagw4nvcpru" path="res://scenes/match/match_systems.tscn" id="34_match_systems"]
+[ext_resource type="PackedScene" path="res://scenes/world/terrain_decorations.tscn" id="35_terrain_decorations"]
 
 [node name="Main" type="Node3D" unique_id=1133004476]
 script = ExtResource("1_match_bootstrap")
@@ -53,3 +54,5 @@ shadow_enabled = true
 [node name="EnemyStartingBase" parent="." unique_id=1888601700 instance=ExtResource("33_enemy_starting_base")]
 
 [node name="MapResources" parent="." unique_id=1493597898 instance=ExtResource("31_map_resources")]
+
+[node name="TerrainDecorations" parent="." instance=ExtResource("35_terrain_decorations")]
