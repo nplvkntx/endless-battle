@@ -313,6 +313,7 @@ static func format_inventory_item(item: HeroItemDefinition) -> String:
 	if not effect.is_empty():
 		lines.append(effect)
 
+	lines.append("Sell: %dG" % item.get_sell_value())
 	lines.append("Right-click to sell")
 	return "\n".join(lines)
 

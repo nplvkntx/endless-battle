@@ -3,6 +3,7 @@ extends RefCounted
 
 ## Applies hero item purchases and range checks for completed shops.
 ## Purchase range / sell refund — edit ItemStats only.
+## Framework helpers for recipes, actives, uniques, and neutrals are no-ops until data exists.
 
 const SHOP_PURCHASE_RANGE_PIXELS: float = ItemStats.SHOP_PURCHASE_RANGE_PIXELS
 const SHOP_PURCHASE_RANGE_WORLD_FALLBACK: float = ItemStats.SHOP_PURCHASE_RANGE_WORLD_FALLBACK
@@ -11,6 +12,7 @@ const MSG_NO_NEARBY_HERO := "Move a hero near the shop"
 const MSG_INVENTORY_FULL := "Hero inventory is full"
 const MSG_NOT_ENOUGH_GOLD := "Not enough gold"
 const MSG_SHOP_UNAVAILABLE := "Shop cannot sell items"
+const MSG_RECIPE_UNAVAILABLE := "Item cannot be combined"
 const SELL_REFUND_RATIO := ItemStats.SELL_REFUND_RATIO
 
 
@@ -40,6 +42,7 @@ static func try_purchase_from_shop(shop: Shop, item_id: StringName) -> bool:
 
 	hero.set_item_at_slot(slot_index, item)
 	apply_item_to_hero(hero, item, true)
+	_sync_item_runtime(hero)
 	return true
 
 
@@ -144,7 +147,11 @@ static func try_reorder_inventory_slot(hero: Hero, from_index: int, to_index: in
 	if not can_modify_player_inventory(hero):
 		return false
 
-	return hero.reorder_inventory_slot(from_index, to_index)
+	if not hero.reorder_inventory_slot(from_index, to_index):
+		return false
+
+	_sync_item_runtime(hero)
+	return true
 
 
 static func try_sell_inventory_item(hero: Hero, slot_index: int) -> bool:
@@ -158,12 +165,19 @@ static func try_sell_inventory_item(hero: Hero, slot_index: int) -> bool:
 	var definition: HeroItemDefinition = item as HeroItemDefinition
 	remove_item_from_hero(hero, definition)
 	hero.remove_item_at_slot(slot_index)
+	_sync_item_runtime(hero)
 
-	var refund: int = int(definition.gold_cost * SELL_REFUND_RATIO)
+	var refund: int = get_sell_value(definition)
 	if refund > 0:
 		ResourceManager.add_gold(refund)
 
 	return true
+
+
+static func get_sell_value(item: HeroItemDefinition) -> int:
+	if item == null:
+		return 0
+	return item.get_sell_value()
 
 
 static func remove_item_from_hero(hero: Hero, item: HeroItemDefinition) -> void:
@@ -194,7 +208,111 @@ static func restore_inventory_items(hero: Hero) -> void:
 		if item is HeroItemDefinition:
 			apply_item_to_hero(hero, item as HeroItemDefinition, false)
 
+	_sync_item_runtime(hero)
 	hero.inventory_changed.emit()
+
+
+static func hero_has_unique_passive(hero: Hero, unique_key: StringName) -> bool:
+	if hero == null or unique_key == &"":
+		return false
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if definition.get_unique_passive_id() == unique_key:
+			return true
+		for passive: ItemPassiveComponent in definition.get_passive_components():
+			if passive.is_unique and passive.get_unique_key() == unique_key:
+				return true
+	return false
+
+
+static func can_combine_item(hero: Hero, item_id: StringName) -> bool:
+	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+	if hero == null or definition == null or not definition.has_recipe():
+		return false
+
+	return get_combine_failure_reason(hero, definition).is_empty()
+
+
+static func get_combine_failure_reason(hero: Hero, item: HeroItemDefinition) -> String:
+	if hero == null or item == null:
+		return MSG_RECIPE_UNAVAILABLE
+	if not item.has_recipe():
+		return MSG_RECIPE_UNAVAILABLE
+
+	var remaining: Dictionary = {}
+	for component_id: StringName in item.recipe_component_ids:
+		remaining[component_id] = int(remaining.get(component_id, 0)) + 1
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var owned = hero.get_item_at_slot(slot_index)
+		if not owned is HeroItemDefinition:
+			continue
+		var owned_id: StringName = (owned as HeroItemDefinition).item_id
+		if remaining.has(owned_id) and int(remaining[owned_id]) > 0:
+			remaining[owned_id] = int(remaining[owned_id]) - 1
+
+	for component_id: Variant in remaining.keys():
+		if int(remaining[component_id]) > 0:
+			return MSG_RECIPE_UNAVAILABLE
+
+	var gold_cost: int = item.get_recipe_gold_cost()
+	if (
+		gold_cost > 0
+		and TeamVisuals.resolve_team(hero, hero.team_id) == TeamVisuals.PLAYER_TEAM_ID
+		and ResourceManager.gold < gold_cost
+	):
+		return MSG_NOT_ENOUGH_GOLD
+
+	return ""
+
+
+## Combine is framework-only for now — returns false until recipes are authored.
+static func try_combine_item(_hero: Hero, item_id: StringName) -> bool:
+	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+	if definition == null or not definition.has_recipe():
+		return false
+	return false
+
+
+static func can_use_active(hero: Hero, slot_index: int) -> bool:
+	if hero == null:
+		return false
+	var item = hero.get_item_at_slot(slot_index)
+	if not item is HeroItemDefinition:
+		return false
+	var definition: HeroItemDefinition = item as HeroItemDefinition
+	if not definition.has_active():
+		return false
+	var runtime: HeroItemRuntime = HeroItemRuntime.ensure_on(hero)
+	return runtime != null and runtime.is_ready(slot_index, definition)
+
+
+## Active use is framework-only — spends cooldown/charges but has no gameplay effect yet.
+static func try_use_active(hero: Hero, slot_index: int) -> bool:
+	if not can_use_active(hero, slot_index):
+		return false
+	var item = hero.get_item_at_slot(slot_index)
+	var definition: HeroItemDefinition = item as HeroItemDefinition
+	var runtime: HeroItemRuntime = HeroItemRuntime.ensure_on(hero)
+	if runtime == null:
+		return false
+	return runtime.begin_activation(slot_index, definition)
+
+
+static func get_item_runtime(hero: Hero) -> HeroItemRuntime:
+	return HeroItemRuntime.find_on(hero)
+
+
+static func _sync_item_runtime(hero: Hero) -> void:
+	if hero == null:
+		return
+	var runtime: HeroItemRuntime = HeroItemRuntime.ensure_on(hero)
+	if runtime != null:
+		runtime.sync_from_hero(hero)
 
 
 static func _get_shop_hero_candidate(

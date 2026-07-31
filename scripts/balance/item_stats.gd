@@ -3,6 +3,7 @@ extends RefCounted
 
 ## Canonical hero shop item costs and effect magnitudes.
 ## HeroItemCatalog builds definitions from these values — change items here only.
+## Framework fields (tier / category / recipes / components) live on HeroItemDefinition.
 
 const SELL_REFUND_RATIO: float = 0.5
 const SHOP_PURCHASE_RANGE_PIXELS: float = 200.0

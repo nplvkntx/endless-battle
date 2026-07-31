@@ -1,7 +1,7 @@
 class_name HeroItemCatalog
 extends RefCounted
 
-## Starter hero shop catalog. Item numbers live in ItemStats — edit there only.
+## Hero / neutral item registry. Numbers live in ItemStats — edit there only.
 
 const ITEM_LONG_SWORD: StringName = &"long_sword"
 const ITEM_RUBY_CRYSTAL: StringName = &"ruby_crystal"
@@ -19,6 +19,9 @@ const SHOP_ITEM_ORDER: Array[StringName] = [
 	ITEM_BOOTS,
 	ITEM_WIZARD_ORB,
 ]
+
+## Reserved for future neutral drops — empty until neutrals are added.
+const NEUTRAL_ITEM_ORDER: Array[StringName] = []
 
 const SHOP_HOTKEYS: Dictionary = {
 	ITEM_LONG_SWORD: "Q",
@@ -44,6 +47,63 @@ static func get_hotkey_label(item_id: StringName) -> String:
 	return String(SHOP_HOTKEYS.get(item_id, ""))
 
 
+static func get_all_item_ids() -> Array[StringName]:
+	_ensure_loaded()
+	var ids: Array[StringName] = []
+	for key: Variant in _definitions.keys():
+		ids.append(key as StringName)
+	return ids
+
+
+static func get_all_definitions() -> Array[HeroItemDefinition]:
+	_ensure_loaded()
+	var items: Array[HeroItemDefinition] = []
+	for key: Variant in _definitions.keys():
+		var definition: HeroItemDefinition = _definitions[key] as HeroItemDefinition
+		if definition != null:
+			items.append(definition)
+	return items
+
+
+static func get_definitions_by_tier(tier: HeroItemDefinition.Tier) -> Array[HeroItemDefinition]:
+	var items: Array[HeroItemDefinition] = []
+	for definition: HeroItemDefinition in get_all_definitions():
+		if definition.tier == tier:
+			items.append(definition)
+	return items
+
+
+static func get_definitions_by_category(
+	category: HeroItemDefinition.Category
+) -> Array[HeroItemDefinition]:
+	var items: Array[HeroItemDefinition] = []
+	for definition: HeroItemDefinition in get_all_definitions():
+		if definition.category == category:
+			items.append(definition)
+	return items
+
+
+static func get_shop_definitions() -> Array[HeroItemDefinition]:
+	var items: Array[HeroItemDefinition] = []
+	for item_id: StringName in SHOP_ITEM_ORDER:
+		var definition: HeroItemDefinition = get_definition(item_id)
+		if definition != null:
+			items.append(definition)
+	return items
+
+
+static func get_neutral_definitions() -> Array[HeroItemDefinition]:
+	var items: Array[HeroItemDefinition] = []
+	for item_id: StringName in NEUTRAL_ITEM_ORDER:
+		var definition: HeroItemDefinition = get_definition(item_id)
+		if definition != null:
+			items.append(definition)
+	for definition: HeroItemDefinition in get_all_definitions():
+		if definition.is_neutral and not items.has(definition):
+			items.append(definition)
+	return items
+
+
 static func _ensure_loaded() -> void:
 	if not _definitions.is_empty():
 		return
@@ -54,6 +114,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.LONG_SWORD_GOLD,
 		"Q",
 		Color(0.72, 0.74, 0.82, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.WEAPON,
 		{"bonus_attack_damage": ItemStats.LONG_SWORD_BONUS_ATTACK_DAMAGE}
 	)
 	_definitions[ITEM_RUBY_CRYSTAL] = _make_definition(
@@ -62,6 +124,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.RUBY_CRYSTAL_GOLD,
 		"W",
 		Color(0.82, 0.18, 0.2, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.BASIC,
 		{
 			"bonus_max_health": ItemStats.RUBY_CRYSTAL_BONUS_MAX_HEALTH,
 			"heal_on_purchase": ItemStats.RUBY_CRYSTAL_HEAL_ON_PURCHASE,
@@ -73,6 +137,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.BOOTS_GOLD,
 		"E",
 		Color(0.42, 0.3, 0.18, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.BOOTS,
 		{"bonus_move_speed": ItemStats.BOOTS_BONUS_MOVE_SPEED}
 	)
 	_definitions[ITEM_WIZARD_ORB] = _make_definition(
@@ -81,6 +147,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.WIZARD_ORB_GOLD,
 		"R",
 		Color(0.35, 0.45, 0.92, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.MAGIC,
 		{
 			"bonus_max_mana": ItemStats.WIZARD_ORB_BONUS_MAX_MANA,
 			"restore_mana_on_purchase": ItemStats.WIZARD_ORB_RESTORE_MANA_ON_PURCHASE,
@@ -92,6 +160,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.MAGE_RING_GOLD,
 		"Q",
 		Color(0.55, 0.35, 0.92, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.MAGIC,
 		{"bonus_ability_power": ItemStats.MAGE_RING_BONUS_ABILITY_POWER}
 	)
 	_definitions[ITEM_MANA_CRYSTAL] = _make_definition(
@@ -100,6 +170,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.MANA_CRYSTAL_GOLD,
 		"W",
 		Color(0.3, 0.55, 0.95, 1),
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Category.MAGIC,
 		{
 			"bonus_max_mana": ItemStats.MANA_CRYSTAL_BONUS_MAX_MANA,
 			"bonus_mana_cost_reduction": ItemStats.MANA_CRYSTAL_BONUS_MANA_COST_REDUCTION,
@@ -111,6 +183,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.SORCERER_STAFF_GOLD,
 		"E",
 		Color(0.62, 0.42, 0.18, 1),
+		HeroItemDefinition.Tier.TIER_2,
+		HeroItemDefinition.Category.MAGIC,
 		{
 			"bonus_ability_power": ItemStats.SORCERER_STAFF_BONUS_ABILITY_POWER,
 			"bonus_cooldown_reduction": ItemStats.SORCERER_STAFF_BONUS_COOLDOWN_REDUCTION,
@@ -122,6 +196,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.ARCANE_BOOTS_GOLD,
 		"E",
 		Color(0.28, 0.42, 0.72, 1),
+		HeroItemDefinition.Tier.TIER_2,
+		HeroItemDefinition.Category.BOOTS,
 		{
 			"bonus_move_speed": ItemStats.ARCANE_BOOTS_BONUS_MOVE_SPEED,
 			"bonus_cooldown_reduction": ItemStats.ARCANE_BOOTS_BONUS_COOLDOWN_REDUCTION,
@@ -133,6 +209,8 @@ static func _ensure_loaded() -> void:
 		ItemStats.ARCHMAGE_ORB_GOLD,
 		"R",
 		Color(0.45, 0.2, 0.85, 1),
+		HeroItemDefinition.Tier.TIER_3,
+		HeroItemDefinition.Category.MAGIC,
 		{
 			"bonus_ability_power": ItemStats.ARCHMAGE_ORB_BONUS_ABILITY_POWER,
 			"bonus_cooldown_reduction": ItemStats.ARCHMAGE_ORB_BONUS_COOLDOWN_REDUCTION,
@@ -146,6 +224,8 @@ static func _make_definition(
 	gold_cost: int,
 	hotkey: String,
 	icon_color: Color,
+	tier: HeroItemDefinition.Tier,
+	category: HeroItemDefinition.Category,
 	effects: Dictionary
 ) -> HeroItemDefinition:
 	var definition := HeroItemDefinition.new()
@@ -154,6 +234,12 @@ static func _make_definition(
 	definition.gold_cost = gold_cost
 	definition.hotkey = hotkey
 	definition.icon_color = icon_color
+	definition.tier = tier
+	definition.category = category
+	definition.sell_value = HeroItemDefinition.SELL_VALUE_USE_RATIO
+	definition.is_neutral = false
+	definition.is_consumable = false
+	definition.is_active_item = false
 	definition.bonus_attack_damage = int(effects.get("bonus_attack_damage", 0))
 	definition.bonus_max_health = int(effects.get("bonus_max_health", 0))
 	definition.heal_on_purchase = int(effects.get("heal_on_purchase", 0))

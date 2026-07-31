@@ -48,6 +48,7 @@ func _ready() -> void:
 	armor_type = DamageService.ArmorType.HERO
 	_init_inventory()
 	super._ready()
+	HeroItemRuntime.ensure_on(self)
 	if level < 1:
 		level = 1
 	if ability_progression == null:
