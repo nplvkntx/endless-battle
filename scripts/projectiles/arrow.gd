@@ -14,6 +14,8 @@ var _direction: Vector3 = Vector3.ZERO
 var _max_travel: float = 0.0
 var _traveled: float = 0.0
 var _lifetime: float = 0.0
+var _trail: GPUParticles3D = null
+var _impact_played: bool = false
 
 
 func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Node = null) -> void:
@@ -38,19 +40,30 @@ func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: No
 	_direction = to_target.normalized()
 	_max_travel = to_target.length() + HIT_DISTANCE
 	look_at(global_position + _direction, Vector3.UP)
+	_trail = ImpactEffects.attach_arrow_trail(self)
 
 
 func _on_arrow_tree_exiting() -> void:
+	_release_trail()
 	PerfCounters.unregister_projectile()
+
+
+func _release_trail() -> void:
+	if _trail == null:
+		return
+	ImpactEffects.release_attached(_trail, ImpactFxPool.FxKind.ARROW_TRAIL)
+	_trail = null
 
 
 func _physics_process(delta: float) -> void:
 	_lifetime += delta
 	if _lifetime >= MAX_LIFETIME:
+		_play_ground_miss()
 		queue_free()
 		return
 
 	if not _is_target_alive():
+		_play_ground_miss()
 		queue_free()
 		return
 
@@ -64,6 +77,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if _traveled >= _max_travel:
+		_play_ground_miss()
 		queue_free()
 
 
@@ -93,3 +107,13 @@ func _apply_hit() -> void:
 		return
 
 	MeleeHitSound.play_at(self, _target.global_position)
+	if not _impact_played:
+		_impact_played = true
+		ImpactEffects.play_unit_impact(_target.global_position)
+
+
+func _play_ground_miss() -> void:
+	if _impact_played:
+		return
+	_impact_played = true
+	ImpactEffects.play_ground_impact(global_position)

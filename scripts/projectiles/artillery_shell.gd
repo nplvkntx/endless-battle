@@ -16,6 +16,8 @@ var _direction: Vector3 = Vector3.ZERO
 var _max_travel: float = 0.0
 var _traveled: float = 0.0
 var _lifetime: float = 0.0
+var _smoke: GPUParticles3D = null
+var _impact_played: bool = false
 
 
 func launch(
@@ -31,6 +33,7 @@ func launch(
 	_splash_radius = splash_radius
 	_splash_min_damage_ratio = splash_min_damage_ratio
 	global_position = spawn_position
+	tree_exiting.connect(_on_shell_tree_exiting, CONNECT_ONE_SHOT)
 
 	var safe_target: Node3D = NodeSafety.safe_node(target) as Node3D
 	if safe_target == null:
@@ -49,6 +52,18 @@ func launch(
 	_direction = to_target.normalized()
 	_max_travel = to_target.length() + HIT_DISTANCE
 	look_at(global_position + _direction, Vector3.UP)
+	_smoke = ImpactEffects.attach_shell_smoke(self)
+
+
+func _on_shell_tree_exiting() -> void:
+	_release_smoke()
+
+
+func _release_smoke() -> void:
+	if _smoke == null:
+		return
+	ImpactEffects.release_attached(_smoke, ImpactFxPool.FxKind.SHELL_SMOKE)
+	_smoke = null
 
 
 func _physics_process(delta: float) -> void:
@@ -93,3 +108,6 @@ func _apply_impact() -> void:
 		_splash_min_damage_ratio
 	)
 	MeleeHitSound.play_at(self, global_position)
+	if not _impact_played:
+		_impact_played = true
+		ImpactEffects.play_shell_impact(global_position)

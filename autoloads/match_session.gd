@@ -98,6 +98,7 @@ func _register_static_match_resets() -> void:
 	register_match_reset(&"ConstructionReservations", ConstructionReservations.reset_match_state)
 	register_match_reset(&"BuildingDamageFxPool", BuildingDamageFxPool.reset_match_state)
 	register_match_reset(&"DeathFxPool", DeathFxPool.reset_match_state)
+	register_match_reset(&"ImpactFxPool", ImpactFxPool.reset_match_state)
 
 
 ## Debug-only: fail loudly if any known persistent match state survived prepare.

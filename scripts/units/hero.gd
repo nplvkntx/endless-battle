@@ -805,6 +805,7 @@ func _spawn_power_strike_hit_effect(target: Node3D) -> void:
 
 	spawn_parent.add_child(effect)
 	effect.global_position = target.global_position + Vector3(0.0, 0.75, 0.0)
+	ImpactEffects.play_unit_impact(target.global_position, 1.25)
 
 
 func get_execute_cooldown_remaining() -> float:
@@ -1108,6 +1109,7 @@ func _spawn_execute_hit_effect(target: Node3D) -> void:
 
 	spawn_parent.add_child(effect)
 	effect.global_position = target.global_position + Vector3(0.0, 0.6, 0.0)
+	ImpactEffects.play_unit_impact(target.global_position, 1.45)
 
 
 func _tick_execute_cooldown(delta: float) -> void:
@@ -1202,6 +1204,7 @@ func _spawn_ground_slam_effect() -> void:
 
 	spawn_parent.add_child(effect)
 	effect.global_position = Vector3(global_position.x, 0.03, global_position.z)
+	ImpactEffects.play_ground_impact(global_position, maxf(1.0, get_ground_slam_radius() * 0.35))
 
 
 func _play_ground_slam_pulse() -> void:

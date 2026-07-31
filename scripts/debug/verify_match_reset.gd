@@ -71,6 +71,9 @@ func _dirty_persistent_match_state() -> void:
 	CommandFeedback.show_move_marker(Vector3(1, 0, 1))
 	CommandFeedback.notify_movement_started(_dirty_control_group_unit)
 	DeathEffects.play_unit_death(_dirty_control_group_unit)
+	ImpactEffects.play_unit_impact(Vector3(2.0, 0.0, 2.0))
+	ImpactEffects.play_ground_impact(Vector3(3.0, 0.0, 1.0))
+	ImpactEffects.play_shell_impact(Vector3(4.0, 0.0, 0.0))
 
 
 func _capture_persistent_snapshot() -> Dictionary:
@@ -116,6 +119,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and CommandFeedback.get_active_dust_count() == 0
 		and DeathEffects.get_active_particle_count() == 0
 		and DeathEffects.get_active_corpse_count() == 0
+		and ImpactEffects.get_active_burst_count() == 0
+		and ImpactEffects.get_active_trail_count() == 0
 	)
 
 	return {
@@ -141,6 +146,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		"command_feedback_dust": CommandFeedback.get_active_dust_count(),
 		"death_effects_particles": DeathEffects.get_active_particle_count(),
 		"death_effects_corpses": DeathEffects.get_active_corpse_count(),
+		"impact_effects_bursts": ImpactEffects.get_active_burst_count(),
+		"impact_effects_trails": ImpactEffects.get_active_trail_count(),
 	}
 
 

@@ -1,12 +1,13 @@
 extends Node
 
 ## Global manager for spawning and pooling projectiles.
-## Projectile stats and lifetimes come from external Resource data.
+## Visual trails/impacts are owned by ImpactEffects / ImpactFxPool.
 
 signal projectile_spawned(projectile_id: StringName)
 signal projectile_despawned(projectile_id: StringName)
 
 
 func _ready() -> void:
-	# TODO: Set up object pools using projectile Resource definitions.
+	# Projectile node pooling can plug in here later.
+	# Impact/trail FX already pool via ImpactEffects.
 	pass
