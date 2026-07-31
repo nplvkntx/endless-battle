@@ -81,6 +81,7 @@ var _population_food_released: bool = false
 var _navigation_agent: NavigationAgent3D
 var _navigation_active: bool = false
 var _path_validity_timer: float = 0.0
+var _feedback_tween: Tween
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -133,6 +134,16 @@ func set_inspected(inspected: bool) -> void:
 		SelectionGlow.set_selection_glow_selected(self, true)
 	elif not is_selected:
 		SelectionGlow.set_selection_glow_selected(self, false)
+
+
+## Brief pulse used by player attack-command feedback.
+func play_target_feedback() -> void:
+	var visuals: Node3D = _visual_pivot
+	if visuals == null or not is_instance_valid(visuals):
+		visuals = get_node_or_null("MeshInstance3D") as Node3D
+	if visuals == null:
+		return
+	_feedback_tween = TargetFeedback.play_on_visuals(self, visuals, _feedback_tween)
 
 
 ## True for units that accept attack / attack-move / cancel-attack orders.
@@ -389,6 +400,7 @@ func request_movement_target(
 		if not _can_request_repath(destination_delta, urgency, now_msec):
 			return false
 
+	var began_moving: bool = not has_move_target
 	_movement_target = next_target
 	has_move_target = true
 	_last_issued_move_destination = next_target
@@ -402,6 +414,8 @@ func request_movement_target(
 	else:
 		_reset_unstuck_state()
 	PerfCounters.record_repath_request()
+	if began_moving:
+		CommandFeedback.notify_movement_started(self)
 	return true
 
 
@@ -547,6 +561,7 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 
 	_update_unstuck(delta, position_before, direction, distance)
+	CommandFeedback.notify_unit_moving(self)
 
 
 func _process(delta: float) -> void:

@@ -556,6 +556,9 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 			(unit as Worker).cancel_gathering()
 		unit.issue_order(UnitOrder.move(move_targets[index]), queued)
 
+	# Marker at accepted command point (click destination), not per-unit spacing slots.
+	CommandFeedback.show_move_marker(ground_position)
+
 
 func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 	if not CombatTargetValidation.is_player_unit_attack_target(target):
@@ -577,8 +580,7 @@ func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 		var unit: Unit = military_units[index]
 		unit.issue_order(UnitOrder.attack(target, index), queued)
 
-	if target is Building:
-		_play_attack_target_feedback(target as Building)
+	_play_attack_target_feedback(target)
 
 
 func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = false) -> void:
@@ -591,15 +593,22 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 		ground_position,
 		commandable_units.size()
 	)
+	var issued_attack_move := false
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
 		if _is_combat_order_unit(unit):
 			unit.issue_order(UnitOrder.attack_move(move_targets[index]), queued)
+			issued_attack_move = true
 		else:
 			# Mixed selection: non-combat units receive a compatible move.
 			if unit is Worker and not queued:
 				(unit as Worker).cancel_gathering()
 			unit.issue_order(UnitOrder.move(move_targets[index]), queued)
+
+	if issued_attack_move:
+		CommandFeedback.show_attack_move_marker(ground_position)
+	else:
+		CommandFeedback.show_move_marker(ground_position)
 
 
 func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) -> void:
@@ -612,6 +621,7 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 		ground_position,
 		commandable_units.size()
 	)
+	var issued_patrol := false
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
 		if not unit.supports_patrol():
@@ -621,10 +631,17 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 
 		if queued and unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.PATROL:
 			unit.append_patrol_point(move_targets[index])
+			issued_patrol = true
 			continue
 
 		var points: Array[Vector3] = [unit.global_position, move_targets[index]]
 		unit.issue_order(UnitOrder.patrol(points), queued)
+		issued_patrol = true
+
+	if issued_patrol:
+		CommandFeedback.show_patrol_marker(ground_position)
+	else:
+		CommandFeedback.show_move_marker(ground_position)
 
 
 func _dispatch_hold_position_command() -> bool:
@@ -751,14 +768,12 @@ func _play_gather_target_feedback(resource: GatherableResource) -> void:
 	resource.play_target_feedback()
 
 
-func _play_attack_target_feedback(building: Building) -> void:
-	if building == null or not is_instance_valid(building):
+func _play_attack_target_feedback(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
 		return
-	if not CombatTargetValidation.is_attackable_enemy_building(building):
+	if not CombatTargetValidation.is_player_unit_attack_target(target):
 		return
-	if not building.has_method("play_target_feedback"):
-		return
-	building.play_target_feedback()
+	CommandFeedback.pulse_attack_target(target)
 
 
 func _get_units_in_rect(camera: Camera3D, rect: Rect2) -> Array[Unit]:

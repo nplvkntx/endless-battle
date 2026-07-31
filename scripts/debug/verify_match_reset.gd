@@ -68,6 +68,8 @@ func _dirty_persistent_match_state() -> void:
 	ControlGroupManager.assign_group(0, [_dirty_control_group_unit])
 	HeroProgressionStore._player_snapshot = {"level": 5}
 	HeroProgressionStore._enemy_snapshot = {"level": 3}
+	CommandFeedback.show_move_marker(Vector3(1, 0, 1))
+	CommandFeedback.notify_movement_started(_dirty_control_group_unit)
 
 
 func _capture_persistent_snapshot() -> Dictionary:
@@ -109,6 +111,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and not HeroProgressionStore.has_saved_progression()
 		and not HeroProgressionStore.has_saved_enemy_progression()
 		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
+		and CommandFeedback.get_active_marker_count() == 0
+		and CommandFeedback.get_active_dust_count() == 0
 	)
 
 	return {
@@ -130,6 +134,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		"hero_enemy_saved": HeroProgressionStore.has_saved_enemy_progression(),
 		"army_mode": int(EnemyArmyCommand.get_army_mode()),
 		"strategic_state": int(EnemyArmyCommand.get_strategic_state()),
+		"command_feedback_markers": CommandFeedback.get_active_marker_count(),
+		"command_feedback_dust": CommandFeedback.get_active_dust_count(),
 	}
 
 
