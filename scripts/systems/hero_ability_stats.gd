@@ -38,6 +38,12 @@ const KIT_ABILITY_DISPLAY_NAMES: Dictionary = {
 		HeroAbilityProgression.ABILITY_E: "Slash",
 		HeroAbilityProgression.ABILITY_R: "Dash",
 	},
+	HeroCatalog.KIT_RANGER: {
+		HeroAbilityProgression.ABILITY_Q: "Combat Roll",
+		HeroAbilityProgression.ABILITY_W: "Bear Trap",
+		HeroAbilityProgression.ABILITY_E: "Crossbow Bolt",
+		HeroAbilityProgression.ABILITY_R: "Camouflage",
+	},
 }
 
 const KIT_DEFAULT_BASE_STATS: Dictionary = {
@@ -93,6 +99,31 @@ const KIT_DEFAULT_BASE_STATS: Dictionary = {
 			STAT_MANA: ShadowAssassinStats.DASH_MANA_COST,
 		},
 	},
+	HeroCatalog.KIT_RANGER: {
+		HeroAbilityProgression.ABILITY_Q: {
+			STAT_RANGE: RangerStats.COMBAT_ROLL_DISTANCE,
+			STAT_COOLDOWN: RangerStats.COMBAT_ROLL_COOLDOWN,
+			STAT_MANA: RangerStats.COMBAT_ROLL_MANA_COST,
+		},
+		HeroAbilityProgression.ABILITY_W: {
+			STAT_DAMAGE: RangerStats.BEAR_TRAP_DAMAGE,
+			STAT_EFFECT: RangerStats.BEAR_TRAP_ROOT_DURATION,
+			STAT_RANGE: RangerStats.BEAR_TRAP_PLACE_RANGE,
+			STAT_COOLDOWN: RangerStats.BEAR_TRAP_COOLDOWN,
+			STAT_MANA: RangerStats.BEAR_TRAP_MANA_COST,
+		},
+		HeroAbilityProgression.ABILITY_E: {
+			STAT_DAMAGE: RangerStats.CROSSBOW_BOLT_DAMAGE,
+			STAT_RANGE: RangerStats.CROSSBOW_BOLT_RANGE,
+			STAT_COOLDOWN: RangerStats.CROSSBOW_BOLT_COOLDOWN,
+			STAT_MANA: RangerStats.CROSSBOW_BOLT_MANA_COST,
+		},
+		HeroAbilityProgression.ABILITY_R: {
+			STAT_EFFECT: RangerStats.CAMOUFLAGE_DURATION_RANK_1,
+			STAT_COOLDOWN: RangerStats.CAMOUFLAGE_COOLDOWN,
+			STAT_MANA: RangerStats.CAMOUFLAGE_MANA_COST,
+		},
+	},
 }
 
 ## kit -> ability_id -> output_stat -> { ScalingStat: coefficient }
@@ -128,6 +159,19 @@ const KIT_ABILITY_SCALING: Dictionary = {
 		},
 		HeroAbilityProgression.ABILITY_R: {
 			STAT_DAMAGE: {ScalingStat.ABILITY_POWER: 1.0, ScalingStat.ATTACK_DAMAGE: 0.55},
+		},
+	},
+	HeroCatalog.KIT_RANGER: {
+		HeroAbilityProgression.ABILITY_Q: {},
+		HeroAbilityProgression.ABILITY_W: {
+			STAT_DAMAGE: {ScalingStat.ABILITY_POWER: 0.4, ScalingStat.ATTACK_DAMAGE: 0.2},
+			STAT_EFFECT: {ScalingStat.ABILITY_POWER: 0.01},
+		},
+		HeroAbilityProgression.ABILITY_E: {
+			STAT_DAMAGE: {ScalingStat.ABILITY_POWER: 0.85, ScalingStat.ATTACK_DAMAGE: 0.55},
+		},
+		HeroAbilityProgression.ABILITY_R: {
+			STAT_EFFECT: {ScalingStat.ABILITY_POWER: 0.01},
 		},
 	},
 }
@@ -216,6 +260,9 @@ static func get_stat(
 				_multiplier_at(BASIC_RANGE_MULT, rank)
 			)
 		STAT_EFFECT:
+			# Ranger Camouflage uses explicit per-rank durations (12 / 18 / 24).
+			if kit_id == HeroCatalog.KIT_RANGER and ability_id == HeroAbilityProgression.ABILITY_R:
+				return RangerStats.get_camouflage_duration(rank)
 			var base_effect: float = float(_resolve_base(kit_id, ability_id, STAT_EFFECT, base_overrides))
 			var effect_mult: float = _multiplier_for(
 				kit_id, ability_id, BASIC_EFFECT_MULT, ULTIMATE_EFFECT_MULT, rank
@@ -256,6 +303,8 @@ static func format_tooltip(
 
 	if kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
 		_format_assassin_tooltip_lines(lines, ability_id, rank, base_overrides)
+	elif kit_id == HeroCatalog.KIT_RANGER:
+		_format_ranger_tooltip_lines(lines, ability_id, rank, base_overrides)
 	else:
 		_format_paladin_tooltip_lines(lines, ability_id, rank, base_overrides)
 
@@ -331,6 +380,43 @@ static func _format_assassin_tooltip_lines(
 				% [
 					get_stat(ability_id, STAT_DAMAGE, rank, base_overrides, kit_id),
 					get_stat(ability_id, STAT_RANGE, rank, base_overrides, kit_id),
+				]
+			)
+
+
+static func _format_ranger_tooltip_lines(
+	lines: PackedStringArray, ability_id: StringName, rank: int, base_overrides: Dictionary
+) -> void:
+	var kit_id: StringName = HeroCatalog.KIT_RANGER
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			lines.append(
+				"Dash %.1f range"
+				% get_stat(ability_id, STAT_RANGE, rank, base_overrides, kit_id)
+			)
+		HeroAbilityProgression.ABILITY_W:
+			lines.append(
+				"%d damage | root %.1fs | %d charges"
+				% [
+					get_stat(ability_id, STAT_DAMAGE, rank, base_overrides, kit_id),
+					get_stat(ability_id, STAT_EFFECT, rank, base_overrides, kit_id),
+					RangerStats.BEAR_TRAP_MAX_CHARGES,
+				]
+			)
+		HeroAbilityProgression.ABILITY_E:
+			lines.append(
+				"%d damage | %.1f range | pierces"
+				% [
+					get_stat(ability_id, STAT_DAMAGE, rank, base_overrides, kit_id),
+					get_stat(ability_id, STAT_RANGE, rank, base_overrides, kit_id),
+				]
+			)
+		HeroAbilityProgression.ABILITY_R:
+			lines.append(
+				"Camouflage %.1fs | +%.1f move speed"
+				% [
+					get_stat(ability_id, STAT_EFFECT, rank, base_overrides, kit_id),
+					RangerStats.CAMOUFLAGE_MOVE_SPEED_BONUS,
 				]
 			)
 

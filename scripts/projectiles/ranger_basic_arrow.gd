@@ -1,0 +1,125 @@
+class_name RangerBasicArrow
+extends Node3D
+
+## Straight-line basic-attack arrow for the Ranger. Marks hits as basic attacks
+## so Hunter's Precision and other on-hit systems receive the correct notify.
+
+const HIT_DISTANCE := 0.45
+const MAX_LIFETIME := 5.0
+
+var _target: Node3D = null
+var _attacker: Node = null
+var _damage: float = 0.0
+var _speed: float = RangerStats.BASIC_ARROW_SPEED
+var _direction: Vector3 = Vector3.ZERO
+var _max_travel: float = 0.0
+var _traveled: float = 0.0
+var _lifetime: float = 0.0
+var _trail: GPUParticles3D = null
+var _impact_played: bool = false
+
+
+func launch(target: Node3D, damage: float, spawn_position: Vector3, attacker: Node = null) -> void:
+	_target = NodeSafety.safe_node(target) as Node3D
+	_attacker = NodeSafety.safe_node(attacker) as Node
+	_damage = damage
+	global_position = spawn_position
+	PerfCounters.register_projectile()
+	tree_exiting.connect(_on_arrow_tree_exiting, CONNECT_ONE_SHOT)
+
+	if not _is_target_alive():
+		queue_free()
+		return
+
+	var to_target: Vector3 = _target.global_position - spawn_position
+	to_target.y = 0.0
+	if to_target.length_squared() < 0.001:
+		queue_free()
+		return
+
+	_direction = to_target.normalized()
+	_max_travel = to_target.length() + HIT_DISTANCE
+	look_at(global_position + _direction, Vector3.UP)
+	_trail = ImpactEffects.attach_arrow_trail(self)
+
+
+func _on_arrow_tree_exiting() -> void:
+	_release_trail()
+	PerfCounters.unregister_projectile()
+
+
+func _release_trail() -> void:
+	if _trail == null:
+		return
+	ImpactEffects.release_attached(_trail, ImpactFxPool.FxKind.ARROW_TRAIL)
+	_trail = null
+
+
+func _physics_process(delta: float) -> void:
+	_lifetime += delta
+	if _lifetime >= MAX_LIFETIME:
+		_play_ground_miss()
+		queue_free()
+		return
+
+	if not _is_target_alive():
+		_play_ground_miss()
+		queue_free()
+		return
+
+	var step: float = _speed * delta
+	global_position += _direction * step
+	_traveled += step
+
+	if _is_close_to_target():
+		_apply_hit()
+		queue_free()
+		return
+
+	if _traveled >= _max_travel:
+		_play_ground_miss()
+		queue_free()
+
+
+func _is_target_alive() -> bool:
+	if not NodeSafety.is_alive_node(_target):
+		_target = null
+		return false
+	return CombatTargetValidation.is_valid_combat_target(_target)
+
+
+func _is_close_to_target() -> bool:
+	if not _is_target_alive():
+		return false
+	var offset: Vector3 = global_position - _target.global_position
+	offset.y = 0.0
+	return offset.length() <= HIT_DISTANCE
+
+
+func _apply_hit() -> void:
+	if not _is_target_alive():
+		return
+
+	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(_attacker)
+	if not DamageService.apply_damage(
+		_target,
+		_damage,
+		safe_attacker,
+		{DamageService.OPT_IS_BASIC_ATTACK: true}
+	):
+		return
+
+	MeleeHitSound.play_at(self, _target.global_position)
+	if not _impact_played:
+		_impact_played = true
+		ImpactEffects.play_unit_impact(_target.global_position)
+
+	if NodeSafety.is_alive_node(safe_attacker) and safe_attacker.has_method(&"_on_basic_attack_landed"):
+		safe_attacker.call(&"_on_basic_attack_landed", _target)
+
+
+func _play_ground_miss() -> void:
+	if _impact_played:
+		return
+	_impact_played = true
+	ImpactEffects.play_ground_impact(global_position)

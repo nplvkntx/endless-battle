@@ -1,0 +1,22 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/effects/bear_trap_activation_effect.gd" id="1_trap_activation"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flash"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.85, 0.55, 0.2, 0.9)
+emission_enabled = true
+emission = Color(1.0, 0.45, 0.1, 1)
+emission_energy_multiplier = 2.4
+
+[sub_resource type="TorusMesh" id="TorusMesh_flash"]
+inner_radius = 0.2
+outer_radius = 0.55
+
+[node name="BearTrapActivationEffect" type="Node3D"]
+script = ExtResource("1_trap_activation")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("TorusMesh_flash")
+surface_material_override/0 = SubResource("StandardMaterial3D_flash")

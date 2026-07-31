@@ -81,6 +81,12 @@ const KIT_ABILITY_DESCRIPTIONS: Dictionary = {
 		HeroAbilityProgression.ABILITY_E: "Slashes nearby enemies in a radius around the assassin.",
 		HeroAbilityProgression.ABILITY_R: "Dashes to a target, dealing damage on arrival.",
 	},
+	HeroCatalog.KIT_RANGER: {
+		HeroAbilityProgression.ABILITY_Q: "Short dash toward the cursor for repositioning. Does not deal damage.",
+		HeroAbilityProgression.ABILITY_W: "Places a Bear Trap that roots, damages, and reveals the first enemy that walks over it. Up to 3 charges.",
+		HeroAbilityProgression.ABILITY_E: "Fires a heavy piercing crossbow bolt in a line. Damage is reduced after each enemy pierced.",
+		HeroAbilityProgression.ABILITY_R: "Become camouflaged: enemies cannot auto-target you, and you gain move speed. Ends on basic attacks or abilities (Combat Roll can restore camouflage shortly after).",
+	},
 }
 
 const UPGRADE_DESCRIPTIONS: Dictionary = {
@@ -789,6 +795,9 @@ static func _append_ability_stat_lines(
 	if kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
 		_append_assassin_ability_stat_lines(lines, ability_id, rank, overrides, hero)
 		return
+	if kit_id == HeroCatalog.KIT_RANGER:
+		_append_ranger_ability_stat_lines(lines, ability_id, rank, overrides, hero)
+		return
 
 	_append_paladin_ability_stat_lines(lines, ability_id, rank, overrides, hero)
 
@@ -904,6 +913,68 @@ static func _append_assassin_ability_stat_lines(
 			)
 			lines.append("Damage: %d" % dash_damage)
 			lines.append("Range: %s" % _format_number(dash_range))
+
+
+static func _append_ranger_ability_stat_lines(
+	lines: PackedStringArray,
+	ability_id: StringName,
+	rank: int,
+	overrides: Dictionary,
+	hero: Hero = null
+) -> void:
+	var kit_id: StringName = HeroCatalog.KIT_RANGER
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			var roll_range: float = (
+				hero.get_ability_range_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_RANGE, rank, overrides, kit_id))
+			)
+			lines.append("Dash Range: %s" % _format_number(roll_range))
+		HeroAbilityProgression.ABILITY_W:
+			var trap_damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides, kit_id))
+			)
+			var root_duration: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides, kit_id))
+			)
+			lines.append("Damage: %d" % trap_damage)
+			lines.append("Root Duration: %s" % _format_seconds(root_duration))
+			lines.append("Max Charges: %d" % RangerStats.BEAR_TRAP_MAX_CHARGES)
+			lines.append("Trap Lifetime: %s" % _format_seconds(RangerStats.BEAR_TRAP_LIFETIME))
+		HeroAbilityProgression.ABILITY_E:
+			var bolt_damage: int = (
+				hero.get_ability_damage_at_rank(ability_id, rank)
+				if hero != null
+				else int(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_DAMAGE, rank, overrides, kit_id))
+			)
+			var bolt_range: float = (
+				hero.get_ability_range_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_RANGE, rank, overrides, kit_id))
+			)
+			lines.append("Damage: %d" % bolt_damage)
+			lines.append("Range: %s" % _format_number(bolt_range))
+			lines.append(
+				"Pierce Damage: %d%% per hit"
+				% int(round(RangerStats.CROSSBOW_BOLT_PIERCE_DAMAGE_MULT * 100.0))
+			)
+		HeroAbilityProgression.ABILITY_R:
+			var camouflage_duration: float = (
+				hero.get_ability_effect_strength_at_rank(ability_id, rank)
+				if hero != null
+				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides, kit_id))
+			)
+			lines.append("Duration: %s" % _format_seconds(camouflage_duration))
+			lines.append("Move Speed Bonus: +%s" % _format_number(RangerStats.CAMOUFLAGE_MOVE_SPEED_BONUS))
+			lines.append(
+				"Combat Roll Restore: %s"
+				% _format_seconds(RangerStats.CAMOUFLAGE_ROLL_RESTORE_SECONDS)
+			)
 
 
 static func _get_ability_description(ability_id: StringName, kit_id: StringName = HeroCatalog.KIT_PALADIN) -> String:

@@ -457,6 +457,10 @@ func request_movement_target(
 		if not _can_request_repath(destination_delta, urgency, now_msec):
 			return false
 
+	# Enemy AI soft-avoids visible hostile bear traps when possible.
+	if CombatTargetValidation.is_enemy_faction(self):
+		next_target = BearTrap.adjust_destination_away_from_traps(self, next_target)
+
 	var began_moving: bool = not has_move_target
 	_movement_target = next_target
 	has_move_target = true
@@ -560,6 +564,11 @@ func should_run_staggered_update(bucket_count: int = 4) -> bool:
 func _physics_process(delta: float) -> void:
 	if _stuck_recovery_cooldown > 0.0:
 		_stuck_recovery_cooldown = maxf(0.0, _stuck_recovery_cooldown - delta)
+
+	# Root / stun from the Buff system freezes locomotion without clearing orders.
+	if not BuffService.can_move(self):
+		velocity = Vector3.ZERO
+		return
 
 	if not has_move_target:
 		_reset_unstuck_state()

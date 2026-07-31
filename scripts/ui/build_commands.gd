@@ -59,6 +59,8 @@ extends PanelContainer
 )
 ## Created at runtime in _setup_production_controls(); trains the Shadow Assassin kit.
 var _train_assassin_button: Button = null
+## Created at runtime in _setup_production_controls(); trains the Ranger kit.
+var _train_ranger_button: Button = null
 @onready var _hero_status_label: Label = (
 	$MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel/HeroStatusLabel
 )
@@ -355,6 +357,7 @@ func _ready() -> void:
 	_train_archer_button.pressed.connect(_on_train_archer_pressed)
 	_train_hero_button.pressed.connect(_on_train_hero_pressed)
 	_train_assassin_button.pressed.connect(_on_train_assassin_pressed)
+	_train_ranger_button.pressed.connect(_on_train_ranger_pressed)
 	_attack_button.pressed.connect(_on_attack_pressed)
 	_stop_button.pressed.connect(_on_stop_pressed)
 	_hold_position_button.pressed.connect(_on_hold_position_pressed)
@@ -428,6 +431,11 @@ func _setup_production_controls() -> void:
 	_train_assassin_button.visible = false
 	_hero_altar_training_row.add_child(_train_assassin_button)
 	_hero_altar_training_row.move_child(_train_assassin_button, _train_hero_button.get_index() + 1)
+
+	_train_ranger_button = Button.new()
+	_train_ranger_button.visible = false
+	_hero_altar_training_row.add_child(_train_ranger_button)
+	_hero_altar_training_row.move_child(_train_ranger_button, _train_assassin_button.get_index() + 1)
 
 
 func _setup_production_icon_slots() -> void:
@@ -1139,6 +1147,8 @@ func _set_production_icon_visibility(
 	_train_hero_button.visible = show_hero_altar
 	if _train_assassin_button != null:
 		_train_assassin_button.visible = show_hero_altar
+	if _train_ranger_button != null:
+		_train_ranger_button.visible = show_hero_altar
 
 	if USE_PRODUCTION_ICON_SLOTS:
 		if show_barracks:
@@ -1973,6 +1983,8 @@ func _set_hero_altar_button_labels() -> void:
 	_train_hero_button.text = "Train Hero%s" % cost_label
 	if _train_assassin_button != null:
 		_train_assassin_button.text = "Train Assassin%s" % cost_label
+	if _train_ranger_button != null:
+		_train_ranger_button.text = "Train Ranger%s" % cost_label
 
 
 func _set_barracks_button_labels() -> void:
@@ -2894,6 +2906,8 @@ func _update_hero_altar_status() -> void:
 	_train_hero_button.disabled = not _tracked_hero_altar.can_train_hero()
 	if _train_assassin_button != null:
 		_train_assassin_button.disabled = not _tracked_hero_altar.can_train_hero()
+	if _train_ranger_button != null:
+		_train_ranger_button.disabled = not _tracked_hero_altar.can_train_hero()
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_hero_altar_production_slot()
 	else:
@@ -2917,6 +2931,8 @@ func _clear_all_command_ui() -> void:
 	_train_hero_button.visible = false
 	if _train_assassin_button != null:
 		_train_assassin_button.visible = false
+	if _train_ranger_button != null:
+		_train_ranger_button.visible = false
 
 	_center_panel.visible = false
 	_barracks_panel.visible = false
@@ -3951,6 +3967,14 @@ func _on_train_assassin_pressed() -> void:
 	_selected_hero_altar.try_train_hero()
 
 
+func _on_train_ranger_pressed() -> void:
+	if _selected_hero_altar == null:
+		return
+
+	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_RANGER)
+	_selected_hero_altar.try_train_hero()
+
+
 func _setup_command_tooltips() -> void:
 	const BUILD_MANAGER := preload("res://scripts/systems/build_manager.gd")
 
@@ -3969,6 +3993,7 @@ func _setup_command_tooltips() -> void:
 	_clear_control_tooltip(_train_archer_button)
 	_clear_control_tooltip(_train_hero_button)
 	_clear_control_tooltip(_train_assassin_button)
+	_clear_control_tooltip(_train_ranger_button)
 	_clear_control_tooltip(_attack_button)
 	_clear_control_tooltip(_stop_button)
 	_clear_control_tooltip(_hold_position_button)
@@ -4064,6 +4089,7 @@ func _setup_command_tooltips() -> void:
 	TooltipManager.bind_control(_train_archer_button, _get_train_archer_tooltip)
 	TooltipManager.bind_control(_train_hero_button, _get_train_hero_tooltip)
 	TooltipManager.bind_control(_train_assassin_button, _get_train_assassin_tooltip)
+	TooltipManager.bind_control(_train_ranger_button, _get_train_ranger_tooltip)
 	for definition: Dictionary in RtsCommandCatalog.unit_command_definitions():
 		var command_id: StringName = definition.get("id", &"")
 		var tooltip_text: String = str(definition.get("tooltip", ""))
@@ -4358,6 +4384,18 @@ func _get_train_hero_tooltip() -> String:
 func _get_train_assassin_tooltip() -> String:
 	return TooltipFormatter.format_train_command(
 		HeroCatalog.get_display_name(HeroCatalog.KIT_SHADOW_ASSASSIN),
+		HeroAltar.TRAIN_GOLD_COST,
+		0,
+		HeroAltar.TRAIN_FOOD_COST,
+		HeroAltar.TRAIN_SECONDS,
+		&"hero",
+		TooltipFormatter.get_hero_train_blocked_reason(_selected_hero_altar)
+	)
+
+
+func _get_train_ranger_tooltip() -> String:
+	return TooltipFormatter.format_train_command(
+		HeroCatalog.get_display_name(HeroCatalog.KIT_RANGER),
 		HeroAltar.TRAIN_GOLD_COST,
 		0,
 		HeroAltar.TRAIN_FOOD_COST,

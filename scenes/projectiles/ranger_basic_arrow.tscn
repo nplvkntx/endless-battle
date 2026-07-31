@@ -1,0 +1,19 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/projectiles/ranger_basic_arrow.gd" id="1_ranger_arrow"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_arrow"]
+albedo_color = Color(0.35, 0.55, 0.25, 1)
+metallic = 0.15
+roughness = 0.55
+
+[sub_resource type="BoxMesh" id="BoxMesh_arrow"]
+size = Vector3(0.07, 0.07, 0.58)
+
+[node name="RangerBasicArrow" type="Node3D"]
+script = ExtResource("1_ranger_arrow")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.29)
+mesh = SubResource("BoxMesh_arrow")
+surface_material_override/0 = SubResource("StandardMaterial3D_arrow")

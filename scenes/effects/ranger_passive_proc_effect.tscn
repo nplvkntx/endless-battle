@@ -1,0 +1,22 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/effects/ranger_passive_proc_effect.gd" id="1_ranger_passive_proc"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spark"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.95, 0.75, 0.2, 0.95)
+emission_enabled = true
+emission = Color(1.0, 0.7, 0.15, 1)
+emission_energy_multiplier = 3.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_spark"]
+radius = 0.35
+height = 0.7
+
+[node name="RangerPassiveProcEffect" type="Node3D"]
+script = ExtResource("1_ranger_passive_proc")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_spark")
+surface_material_override/0 = SubResource("StandardMaterial3D_spark")

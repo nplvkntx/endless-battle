@@ -54,6 +54,7 @@ const PORTRAIT_STYLES: Dictionary = {
 	"cannon": {"color": Color(0.32, 0.3, 0.24, 1), "label": "Cn"},
 	"hero": {"color": Color(0.85, 0.65, 0.15, 1), "label": "H"},
 	"shadow_assassin": {"color": Color(0.35, 0.15, 0.45, 1), "label": "SA"},
+	"ranger": {"color": Color(0.25, 0.45, 0.2, 1), "label": "RG"},
 	"enemy_dummy": {"color": Color(0.75, 0.2, 0.2, 1), "label": "E"},
 	"neutral_creep": {"color": Color(0.48, 0.38, 0.16, 1), "label": "Nc"},
 	"town_center": {"color": Color(0.75, 0.4, 0.15, 1), "label": "TC"},
@@ -1341,9 +1342,12 @@ func _get_hero_portrait_info(hero: Hero, name_prefix: String) -> Dictionary:
 	if hero == null or not is_instance_valid(hero):
 		return {"name": "%sHero" % name_prefix, "type": "Unit", "portrait_key": "hero"}
 
-	var portrait_key: String = (
-		"shadow_assassin" if hero.get_hero_kit_id() == HeroCatalog.KIT_SHADOW_ASSASSIN else "hero"
-	)
+	var portrait_key: String = "hero"
+	var kit_id: StringName = hero.get_hero_kit_id()
+	if kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
+		portrait_key = "shadow_assassin"
+	elif kit_id == HeroCatalog.KIT_RANGER:
+		portrait_key = "ranger"
 	return {
 		"name": "%s%s" % [name_prefix, hero.get_display_name()],
 		"type": "Unit",

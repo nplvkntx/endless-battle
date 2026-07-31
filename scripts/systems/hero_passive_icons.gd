@@ -20,6 +20,8 @@ static func get_icon_texture(icon_id: StringName) -> Texture2D:
 			_draw_holy_recovery(image)
 		HeroPassiveCatalog.PASSIVE_ASSASSIN:
 			_draw_assassin(image)
+		HeroPassiveCatalog.PASSIVE_HUNTERS_PRECISION:
+			_draw_hunters_precision(image)
 		_:
 			_draw_default(image)
 
@@ -89,3 +91,26 @@ static func _draw_assassin(image: Image) -> void:
 	_fill_rect(image, Rect2i(14, 7, 5, 2), blade)
 	_fill_rect(image, Rect2i(12, 22, 9, 3), accent)
 	_fill_rect(image, Rect2i(15, 25, 3, 3), Color(0.55, 0.45, 0.25, 1))
+
+
+static func _draw_hunters_precision(image: Image) -> void:
+	var forest := Color(0.22, 0.38, 0.18, 1)
+	var gold := Color(0.95, 0.75, 0.25, 1)
+	var arrow := Color(0.85, 0.88, 0.7, 1)
+
+	for y: int in ICON_SIZE:
+		for x: int in ICON_SIZE:
+			var dx: float = float(x) - 15.5
+			var dy: float = float(y) - 15.5
+			var dist: float = sqrt(dx * dx + dy * dy)
+			if dist <= 14.5:
+				image.set_pixel(x, y, Color(0.1, 0.14, 0.08, 1))
+			if dist <= 13.0:
+				image.set_pixel(x, y, forest)
+
+	# Crosshair
+	_fill_rect(image, Rect2i(15, 6, 2, 20), gold)
+	_fill_rect(image, Rect2i(6, 15, 20, 2), gold)
+	# Arrow tip
+	_fill_rect(image, Rect2i(14, 8, 4, 4), arrow)
+	_fill_rect(image, Rect2i(13, 22, 6, 3), gold)

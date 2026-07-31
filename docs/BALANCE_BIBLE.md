@@ -225,11 +225,12 @@ Academy **Improved Tools** multiplies construction speed by **1.2** (duration ÷
 | Cannon | 120 | 0 | 45 | 5.5 | 8.18 | 14.0 | 6.0 | 1.4×1×1.8 | 0.55 | 275 | 2 | 14.0 s | Artillery Depot |
 | Hero (Paladin) | 200 | 0§ | 18 | 0.85 | 21.18 | 2.0 | 5.5 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
 | Hero (Shadow Assassin) | 180 | 0§ | 20 | 0.75 | 26.67 | 2.0 | 6.0 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
+| Hero (Ranger) | 160 | 0§ | 22 | 0.90 | 24.44 | 8.0 | 5.8 | 1.2×1.2×1.2 | 0.55 | 200 | 2 | 6.0 s | Hero Altar |
 
 † Inherited from `Unit.move_speed = 5.0` (scene does not override).  
 ‡ Archer **incoming** damage ignores armor (`Archer._compute_incoming_damage` returns `int(amount)`).  
-§ Hero **incoming** damage ignores armor (`Hero.take_damage` uses `int(amount)` with no armor subtract, both kits).  
-\* Requires Blacksmith. Both hero kits cost the same gold/food/train time — see §5 for kit selection at the altar.
+§ Hero **incoming** damage ignores armor (`Hero.take_damage` uses `int(amount)` with no armor subtract, all kits).  
+\* Requires Blacksmith. All hero kits cost the same gold/food/train time — see §5 for kit selection at the altar.
 
 DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed this).
 
@@ -242,6 +243,7 @@ DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed
 | Cannon | Artillery shell (speed 14); splash radius **3.5**, min damage ratio **0.5**; Ballistics ×1.2 |
 | Hero (Paladin) | Q/W/E/R abilities (see §5); Divine Protection blocks all damage while active |
 | Hero (Shadow Assassin) | Q/W/E/R abilities (see §5); Smoke (W) grants combat-hidden status — hidden units are skipped by auto-targeting but remain valid for committed attacks, player orders, and area damage |
+| Hero (Ranger) | Q/W/E/R abilities (see §5); ranged basic attacks; Camouflage (R) uses combat-hidden; Bear Trap roots via Buff system; Hunter's Precision every 3rd AA vs same non-building target |
 | Worker | Gather, build, repair; no combat attack |
 
 ### Passive regen (units)
@@ -264,45 +266,49 @@ DPS = `attack_damage / attack_cooldown` (single-target; Cannon splash can exceed
 
 # 5. Heroes
 
-**Two hero kits** exist, selected at the Hero Altar and resolved via `scripts/systems/hero_catalog.gd`
-(`HeroCatalog.KIT_PALADIN`, `HeroCatalog.KIT_SHADOW_ASSASSIN`). Both extend the shared
+**Three hero kits** exist, selected at the Hero Altar and resolved via `scripts/systems/hero_catalog.gd`
+(`HeroCatalog.KIT_PALADIN`, `HeroCatalog.KIT_SHADOW_ASSASSIN`, `HeroCatalog.KIT_RANGER`). All extend the shared
 `scripts/units/melee_hero.gd` → `scripts/base/hero.gd` → `scripts/base/unit.gd` chain, and share
 ability rank rules, XP/leveling, inventory, and item math. Kit-specific numbers live in
-`scripts/balance/hero_stats.gd` (Paladin) and `scripts/balance/shadow_assassin_stats.gd` (Assassin);
-ability scaling per rank is resolved kit-aware via `scripts/systems/hero_ability_stats.gd`.
+`scripts/balance/hero_stats.gd` (Paladin), `scripts/balance/shadow_assassin_stats.gd` (Assassin), and
+`scripts/balance/ranger_stats.gd` (Ranger); ability scaling per rank is resolved kit-aware via
+`scripts/systems/hero_ability_stats.gd`.
 
 - **Human Paladin** (`scripts/units/hero.gd`) — durable frontline fighter: Ground Slam, Divine
   Protection, Power Strike, Execute. Passive: **Holy Recovery**.
 - **Shadow Assassin** (`scripts/units/shadow_assassin.gd`) — mobile burst/pick assassin: Axe Mark,
   Smoke, Slash, Dash. Passive: **Assassin** (bonus damage on consecutive hits vs. the same target).
+- **Ranger** (`scripts/units/ranger.gd`) — fragile ranged ADC/marksman: Combat Roll, Bear Trap,
+  Crossbow Bolt, Camouflage. Passive: **Hunter's Precision** (every 3rd consecutive AA vs. the same
+  non-building target deals 10% max HP bonus Physical Damage).
 
-Both kits share the same ability rank rules, XP curve, respawn/retrain flow, and item interaction
+All kits share the same ability rank rules, XP curve, respawn/retrain flow, and item interaction
 caps documented below; per-kit numbers are called out where they differ.
 
 ## Base stats (Level 1)
 
-| Stat | Paladin | Shadow Assassin | Source |
-|------|--------:|-----------------:|--------|
-| HP | 200 | 180 | `HeroStats.MAX_HEALTH` / `ShadowAssassinStats.MAX_HEALTH` |
-| Mana | 100 | 100 | `BASE_MAX_MANA` / `ShadowAssassinStats.MAX_MANA` |
-| Mana regen | 5.0 /s | 5.0 /s | `mana_regen_rate` |
-| Attack damage | 18 | 20 | `BASE_ATTACK_DAMAGE` / `ShadowAssassinStats.ATTACK_DAMAGE` |
-| Attack cooldown | 0.85 s | 0.75 s | |
-| Attack range | 2.0 | 2.0 | |
-| Move speed | 5.5 | 6.0 | `BASE_MOVE_SPEED` / `ShadowAssassinStats.MOVE_SPEED` |
-| Armor | *none applied* | *none applied* | Incoming damage ignores armor |
-| Inventory slots | 6 | 6 | `INVENTORY_SLOT_COUNT` (shared) |
+| Stat | Paladin | Shadow Assassin | Ranger | Source |
+|------|--------:|-----------------:|-------:|--------|
+| HP | 200 | 180 | 160 | `HeroStats` / `ShadowAssassinStats` / `RangerStats` |
+| Mana | 100 | 100 | 100 | shared |
+| Mana regen | 5.0 /s | 5.0 /s | 5.0 /s | `mana_regen_rate` |
+| Attack damage | 18 | 20 | 22 | |
+| Attack cooldown | 0.85 s | 0.75 s | 0.90 s | |
+| Attack range | 2.0 | 2.0 | **8.0** | Ranger is ranged |
+| Move speed | 5.5 | 6.0 | 5.8 | |
+| Armor | *none applied* | *none applied* | *none applied* | Incoming damage ignores armor |
+| Inventory slots | 6 | 6 | 6 | `INVENTORY_SLOT_COUNT` (shared) |
 
 ## Growth per level
 
-| Stat | Paladin / level | Assassin / level | Notes |
-|------|-----------------:|------------------:|-------|
-| HP | +25 | +22 | Levels 2–30 |
-| Mana | +10 | +10 | |
-| Attack damage | +2 | +2 | |
-| Armor | *none* | *none* | No armor growth |
-| Move speed | +0.05 | +0.05 | **Only after level 18** (`MOVE_SPEED_PER_LEVEL_AFTER_18`, shared) |
-| Ability points | +1 | +1 | Levels **2–18** inclusive (shared) |
+| Stat | Paladin / level | Assassin / level | Ranger / level | Notes |
+|------|-----------------:|------------------:|---------------:|-------|
+| HP | +25 | +22 | +18 | Levels 2–30 |
+| Mana | +10 | +10 | +10 | |
+| Attack damage | +2 | +2 | +3 | Ranger stronger AD curve |
+| Armor | *none* | *none* | *none* | No armor growth |
+| Move speed | +0.05 | +0.05 | +0.05 | **Only after level 18** (shared) |
+| Ability points | +1 | +1 | +1 | Levels **2–18** inclusive (shared) |
 
 Max level: **30**. Ability point window: levels 2–18 → **17** points total. Rank rules (max ranks,
 level-gated ultimate) are identical for both kits — see **Abilities** below.
@@ -495,13 +501,82 @@ arrival.
 Grants bonus physical damage on every basic attack against the same target after the first (i.e.
 rewards committing to a single target rather than spreading attacks).
 
+## 5c. Ranger abilities
+
+**Source:** `scripts/balance/ranger_stats.gd` (edit ranger balance only there); scaling multipliers per
+rank are the same curves used by other kits (`BASIC_*_MULT` / `ULTIMATE_*_MULT`), except Camouflage
+duration which uses explicit per-rank values **12 / 18 / 24**.
+
+### Passive — Hunter's Precision
+
+| Stat | Value |
+|------|------:|
+| Hits required | Every **3rd** consecutive basic attack vs same target |
+| Bonus damage | **10%** of target Maximum Health (`HUNTERS_PRECISION_MAX_HEALTH_RATIO`) |
+| Valid targets | Heroes, Units, Creeps |
+| Invalid targets | Buildings |
+| Reset | Switching targets resets the counter |
+
+### Q — Combat Roll
+
+| Rank | Dash range | Cooldown | Mana |
+|-----:|-----------:|---------:|-----:|
+| 1 | 5.0 | 10.0 | 25 |
+| 2 | 5.25 | 9.5 | 28 |
+| 3 | 5.5 | 9.0 | 30 |
+| 4 | 5.75 | 8.5 | 33 |
+| 5 | 6.0 | 8.0 | 35 |
+
+No damage. Repositions via navigation-snapped movement (cannot pass through blocked terrain). Using
+Combat Roll while Camouflaged briefly reveals the Ranger; if no other attack/ability follows,
+Camouflage restores after **3.0 s**.
+
+### W — Bear Trap
+
+| Rank | Damage | Root | Cooldown | Mana |
+|-----:|-------:|-----:|---------:|-----:|
+| 1 | 18 | 2.0 s | 1.0 | 20 |
+| 2 | 22 | 2.4 s | 0.95 | 22 |
+| 3 | 25 | 2.8 s | 0.9 | 24 |
+| 4 | 29 | 3.2 s | 0.85 | 26 |
+| 5 | 32 | 3.6 s | 0.8 | 28 |
+
+Charge-based: **3** max charges, **14.0 s** recharge per charge. Trap lifetime **45.0 s**. Trigger
+radius **0.85**. Multiple traps may exist. On trigger: Physical Damage + Root buff + reveal while
+rooted. Enemy AI soft-avoids hostile traps when pathing.
+
+### E — Crossbow Bolt
+
+| Rank | Damage | Range | Cooldown | Mana |
+|-----:|-------:|------:|---------:|-----:|
+| 1 | 48 | 12.0 | 12.0 | 40 |
+| 2 | 58 | 12.6 | 11.4 | 44 |
+| 3 | 67 | 13.2 | 10.8 | 48 |
+| 4 | 77 | 13.8 | 10.2 | 52 |
+| 5 | 86 | 14.4 | 9.6 | 56 |
+
+Piercing line skillshot. After each pierce, remaining damage is multiplied by
+`CROSSBOW_BOLT_PIERCE_DAMAGE_MULT = 0.7`. Projectile speed **22**.
+
+### R — Camouflage
+
+| Rank | Duration | Cooldown | Mana |
+|-----:|---------:|---------:|-----:|
+| 1 | **12.0 s** | 40.0 | 50 |
+| 2 | **18.0 s** | 36.0 | 60 |
+| 3 | **24.0 s** | 32.0 | 70 |
+
+While active: combat-hidden (enemies cannot auto-target; friendly player still sees a transparency
+cue) and **+1.5** move speed. Ends immediately on Basic Attack, W, or E. Q uses the restore window
+described above.
+
 ### Item interaction caps
 
 | Cap | Value |
 |-----|------:|
 | Max cooldown reduction | 40% (shared) |
 | Max mana cost reduction | 40% (shared) |
-| Ability damage | `base + item_ability_power` (Assassin also scales off attack damage per-ability — see `HeroAbilityStats.KIT_ABILITY_SCALING`) |
+| Ability damage | `base + item_ability_power` (Assassin/Ranger also scale off attack damage per-ability — see `HeroAbilityStats.KIT_ABILITY_SCALING`) |
 | Spell radius | `base + item_spell_radius_bonus` (shared) |
 
 ---

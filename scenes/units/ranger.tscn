@@ -1,0 +1,143 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/units/ranger.gd" id="1_ranger"]
+[ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
+[ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="3_selection_glow"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cloth"]
+albedo_color = Color(0.22, 0.32, 0.18, 1)
+metallic = 0.05
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skin"]
+albedo_color = Color(0.55, 0.42, 0.32, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_leather"]
+albedo_color = Color(0.28, 0.2, 0.12, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cape"]
+albedo_color = Color(0.18, 0.28, 0.16, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_trim"]
+albedo_color = Color(0.55, 0.42, 0.15, 1)
+emission_enabled = true
+emission = Color(0.45, 0.32, 0.08, 1)
+emission_energy_multiplier = 0.45
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bow"]
+albedo_color = Color(0.4, 0.28, 0.14, 1)
+metallic = 0.15
+roughness = 0.55
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_sel_glow"]
+top_radius = 0.4
+bottom_radius = 0.4
+height = 0.02
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.26
+height = 0.66
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.17
+height = 0.34
+
+[sub_resource type="BoxMesh" id="BoxMesh_hood"]
+size = Vector3(0.28, 0.12, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_cape"]
+size = Vector3(0.05, 0.55, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_quiver"]
+size = Vector3(0.1, 0.35, 0.1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bow"]
+size = Vector3(0.05, 0.7, 0.08)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(1.1, 1.2, 1.1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_bg"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_health_fill"]
+albedo_color = Color(0.35, 0.65, 0.25, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_health_bar"]
+size = Vector3(1.4, 0.08, 0.02)
+
+[node name="Ranger" type="CharacterBody3D" groups=["units", "heroes"]]
+script = ExtResource("1_ranger")
+move_speed = 5.8
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.06, 0)
+mesh = SubResource("CapsuleMesh_body")
+surface_material_override/0 = SubResource("StandardMaterial3D_cloth")
+
+[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_skin")
+
+[node name="Hood" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0.02)
+mesh = SubResource("BoxMesh_hood")
+surface_material_override/0 = SubResource("StandardMaterial3D_leather")
+
+[node name="Cape" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.04, 0.2)
+mesh = SubResource("BoxMesh_cape")
+surface_material_override/0 = SubResource("StandardMaterial3D_cape")
+
+[node name="Quiver" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.22, 0.1, 0.12)
+mesh = SubResource("BoxMesh_quiver")
+surface_material_override/0 = SubResource("StandardMaterial3D_leather")
+
+[node name="TrimAccent" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.6, 0, 0, 0, 0.6, 0, 0, 0, 0.6, 0, 0.06, 0.32)
+mesh = SubResource("BoxMesh_quiver")
+surface_material_override/0 = SubResource("StandardMaterial3D_trim")
+
+[node name="Bow" type="MeshInstance3D" parent="MeshInstance3D"]
+transform = Transform3D(0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 0, 0, 1, 0.32, 0.05, 0)
+mesh = SubResource("BoxMesh_bow")
+surface_material_override/0 = SubResource("StandardMaterial3D_bow")
+
+[node name="SelectionIndicator" type="Node3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.48, 0)
+
+[node name="Ring" type="MeshInstance3D" parent="SelectionIndicator"]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.01, 0)
+mesh = SubResource("CylinderMesh_sel_glow")
+surface_material_override/0 = ExtResource("3_selection_glow")
+
+[node name="HealthBar" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.86, 0)
+
+[node name="Background" type="MeshInstance3D" parent="HealthBar"]
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_bg")
+
+[node name="Fill" type="MeshInstance3D" parent="HealthBar"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.015)
+mesh = SubResource("BoxMesh_health_bar")
+surface_material_override/0 = SubResource("StandardMaterial3D_health_fill")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_body")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health_component")
+max_health = 160
+
+[node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
+path_desired_distance = 0.25
+target_desired_distance = 0.25
+radius = 0.5
+height = 2.0
+avoidance_enabled = false
