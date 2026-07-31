@@ -970,6 +970,7 @@ func get_food_supply_cost() -> int:
 func die() -> void:
 	_release_reserved_food()
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
+	DeathEffects.play_unit_death(self)
 	NodeSafety.prepare_node_for_death(self)
 	died.emit(self)
 

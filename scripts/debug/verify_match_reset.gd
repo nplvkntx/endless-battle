@@ -70,6 +70,7 @@ func _dirty_persistent_match_state() -> void:
 	HeroProgressionStore._enemy_snapshot = {"level": 3}
 	CommandFeedback.show_move_marker(Vector3(1, 0, 1))
 	CommandFeedback.notify_movement_started(_dirty_control_group_unit)
+	DeathEffects.play_unit_death(_dirty_control_group_unit)
 
 
 func _capture_persistent_snapshot() -> Dictionary:
@@ -113,6 +114,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
 		and CommandFeedback.get_active_marker_count() == 0
 		and CommandFeedback.get_active_dust_count() == 0
+		and DeathEffects.get_active_particle_count() == 0
+		and DeathEffects.get_active_corpse_count() == 0
 	)
 
 	return {
@@ -136,6 +139,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		"strategic_state": int(EnemyArmyCommand.get_strategic_state()),
 		"command_feedback_markers": CommandFeedback.get_active_marker_count(),
 		"command_feedback_dust": CommandFeedback.get_active_dust_count(),
+		"death_effects_particles": DeathEffects.get_active_particle_count(),
+		"death_effects_corpses": DeathEffects.get_active_corpse_count(),
 	}
 
 

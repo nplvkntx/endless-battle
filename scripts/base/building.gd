@@ -203,6 +203,7 @@ func destroy_building() -> void:
 	_release_registered_builders_on_destroy()
 	_cleanup_construction_stage_visuals()
 	_cleanup_damage_visuals()
+	DeathEffects.play_building_destruction(self)
 	NodeSafety.prepare_node_for_death(self)
 	destroyed.emit(self)
 
