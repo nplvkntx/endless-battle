@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://cmarkconsumeeffect1"]
+[gd_scene format=3 uid="uid://cw2y17oyixtm3"]
 
 [ext_resource type="Script" path="res://scripts/effects/mark_consume_effect.gd" id="1_mark_consume_effect"]
 

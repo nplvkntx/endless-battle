@@ -132,17 +132,26 @@ func _apply_hit() -> void:
 	if not _is_target_alive():
 		return
 
+	var hit_target: Node3D = _target
 	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(_attacker)
-	if not DamageService.apply_damage(_target, _damage, safe_attacker):
+	if not DamageService.apply_damage(hit_target, _damage, safe_attacker):
 		return
 
-	MeleeHitSound.play_at(self, _target.global_position)
+	# queue_free keeps the instance valid until end of frame; truly freed refs must stop here.
+	if hit_target == null or not is_instance_valid(hit_target):
+		_target = null
+		return
+
+	MeleeHitSound.play_at(self, hit_target.global_position)
 	if not _impact_played:
 		_impact_played = true
-		ImpactEffects.play_unit_impact(_target.global_position)
+		ImpactEffects.play_unit_impact(hit_target.global_position)
 
-	if _on_hit_callback.is_valid():
-		_on_hit_callback.call(_target)
+	if _on_hit_callback.is_valid() and is_instance_valid(hit_target):
+		_on_hit_callback.call(hit_target)
+
+	if not NodeSafety.is_alive_node(hit_target):
+		_target = null
 
 
 func _play_ground_miss() -> void:

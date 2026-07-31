@@ -325,7 +325,10 @@ func _apply_order(order: UnitOrder) -> bool:
 		UnitOrder.Type.MOVE:
 			return set_movement_target(order.destination)
 		UnitOrder.Type.ATTACK:
-			command_attack(order.target, order.assigned_slot)
+			var attack_target: Node3D = order.get_alive_target()
+			if attack_target == null:
+				return false
+			command_attack(attack_target, order.assigned_slot)
 			return true
 		UnitOrder.Type.ATTACK_MOVE:
 			command_attack_move(order.destination)
@@ -337,8 +340,9 @@ func _apply_order(order: UnitOrder) -> bool:
 			command_patrol(order.patrol_points)
 			return true
 		UnitOrder.Type.BUILD:
-			if self is Worker and NodeSafety.is_alive_node(order.target) and order.target is Building:
-				(self as Worker).start_construction_order(order.target as Building)
+			var build_target: Node3D = order.get_alive_target()
+			if self is Worker and build_target is Building:
+				(self as Worker).start_construction_order(build_target as Building)
 				return true
 			return false
 		_:

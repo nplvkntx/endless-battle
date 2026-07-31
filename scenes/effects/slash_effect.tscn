@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://cslasheffect0001"]
+[gd_scene format=3 uid="uid://bwmcv08e03hq3"]
 
 [ext_resource type="Script" path="res://scripts/effects/slash_effect.gd" id="1_slash_effect"]
 

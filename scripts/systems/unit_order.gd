@@ -16,7 +16,8 @@ enum Type {
 
 var type: Type = Type.MOVE
 var destination: Vector3 = Vector3.ZERO
-var target: Node3D = null
+## Stored untyped so freed targets do not crash on typed cast access.
+var target: Variant = null
 var patrol_points: Array[Vector3] = []
 var assigned_slot: int = -1
 
@@ -31,7 +32,7 @@ static func move(destination: Vector3) -> UnitOrder:
 static func attack(target: Node3D, assigned_slot: int = -1) -> UnitOrder:
 	var order := UnitOrder.new()
 	order.type = Type.ATTACK
-	order.target = target
+	order.target = NodeSafety.safe_node(target)
 	order.assigned_slot = assigned_slot
 	return order
 
@@ -65,12 +66,21 @@ static func stop() -> UnitOrder:
 static func build(building: Node3D) -> UnitOrder:
 	var order := UnitOrder.new()
 	order.type = Type.BUILD
-	order.target = building
+	order.target = NodeSafety.safe_node(building)
 	return order
 
 
 func is_target_order() -> bool:
 	return type == Type.ATTACK or type == Type.BUILD
+
+
+func get_alive_target() -> Node3D:
+	return NodeSafety.safe_node(target) as Node3D
+
+
+func clear_invalid_target() -> void:
+	if not NodeSafety.is_alive_node(target):
+		target = null
 
 
 func describe() -> String:

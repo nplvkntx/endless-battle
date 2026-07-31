@@ -10,6 +10,8 @@ const BUFF_ID := &"axe_marked"
 static func apply(target: Node, source: Node, duration: float) -> void:
 	if target == null or not is_instance_valid(target):
 		return
+	if source != null and not is_instance_valid(source):
+		source = null
 
 	var definition := BuffDefinition.create(BUFF_ID, duration)
 	definition.display_name = "Marked"
@@ -20,6 +22,8 @@ static func apply(target: Node, source: Node, duration: float) -> void:
 
 
 static func has_mark(target: Node) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
 	return BuffService.has_buff(target, BUFF_ID)
 
 

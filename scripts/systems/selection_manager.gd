@@ -32,6 +32,7 @@ var inspected_unit: Unit = null
 var inspected_building: Building = null
 var inspected_resource: GatherableResource = null
 var _unit_tree_exiting_handlers: Dictionary = {}
+var _inspected_building_destroyed_handler: Callable = Callable()
 var _selection_purge_timer: float = 0.0
 const SELECTION_PURGE_INTERVAL := 0.1
 
@@ -1057,19 +1058,23 @@ func _purge_invalid_selected_building() -> void:
 
 
 func _purge_invalid_inspection() -> void:
+	var unit_ref: Variant = inspected_unit
+	var building_ref: Variant = inspected_building
+	var resource_ref: Variant = inspected_resource
 	var had_inspection: bool = (
-		inspected_unit != null or inspected_building != null or inspected_resource != null
+		unit_ref != null or building_ref != null or resource_ref != null
 	)
 
-	if inspected_unit != null and not _is_inspectable_unit(inspected_unit):
-		_safe_set_unit_inspected(inspected_unit, false)
+	if unit_ref != null and not _is_inspectable_unit(unit_ref):
+		_safe_set_unit_inspected(unit_ref, false)
 		inspected_unit = null
 
-	if inspected_building != null and not _is_inspectable_building(inspected_building):
-		_safe_set_building_inspected(inspected_building, false)
+	if building_ref != null and not _is_inspectable_building(building_ref):
+		_disconnect_inspected_building_destroyed()
+		_safe_set_building_inspected(building_ref, false)
 		inspected_building = null
 
-	if inspected_resource != null and not _is_inspectable_resource(inspected_resource):
+	if resource_ref != null and not _is_inspectable_resource(resource_ref):
 		inspected_resource = null
 
 	if (
@@ -1093,6 +1098,7 @@ func _set_inspected_unit(unit: Unit) -> void:
 	if inspected_unit != null and inspected_unit != unit:
 		_safe_set_unit_inspected(inspected_unit, false)
 	if inspected_building != null:
+		_disconnect_inspected_building_destroyed()
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
 	inspected_resource = null
@@ -1119,12 +1125,14 @@ func _set_inspected_building(building: Building) -> void:
 		_safe_set_unit_inspected(inspected_unit, false)
 		inspected_unit = null
 	if inspected_building != null and inspected_building != building:
+		_disconnect_inspected_building_destroyed()
 		_safe_set_building_inspected(inspected_building, false)
 	inspected_resource = null
 	if not is_instance_valid(building):
 		return
 
 	inspected_building = building
+	_connect_inspected_building_destroyed(building)
 	_safe_set_building_inspected(building, true)
 	inspection_changed.emit(null, inspected_building)
 	selection_changed.emit(selected_units)
@@ -1148,6 +1156,7 @@ func _set_inspected_resource(resource: GatherableResource) -> void:
 		_safe_set_unit_inspected(inspected_unit, false)
 		inspected_unit = null
 	if inspected_building != null:
+		_disconnect_inspected_building_destroyed()
 		_safe_set_building_inspected(inspected_building, false)
 		inspected_building = null
 	if not is_instance_valid(resource):
@@ -1171,10 +1180,47 @@ func _clear_inspection_without_signal() -> void:
 	if inspected_unit != null:
 		_safe_set_unit_inspected(inspected_unit, false)
 	if inspected_building != null:
+		_disconnect_inspected_building_destroyed()
 		_safe_set_building_inspected(inspected_building, false)
 	inspected_unit = null
 	inspected_building = null
 	inspected_resource = null
+
+
+func _connect_inspected_building_destroyed(building: Building) -> void:
+	_disconnect_inspected_building_destroyed()
+	if building == null or not is_instance_valid(building):
+		return
+	if not building.has_signal("destroyed"):
+		return
+
+	_inspected_building_destroyed_handler = _on_inspected_building_destroyed
+	if not building.destroyed.is_connected(_inspected_building_destroyed_handler):
+		building.destroyed.connect(_inspected_building_destroyed_handler, CONNECT_ONE_SHOT)
+
+
+func _disconnect_inspected_building_destroyed() -> void:
+	if not _inspected_building_destroyed_handler.is_valid():
+		_inspected_building_destroyed_handler = Callable()
+		return
+
+	var building_ref: Variant = inspected_building
+	if (
+		building_ref != null
+		and is_instance_valid(building_ref)
+		and building_ref is Building
+		and (building_ref as Building).has_signal("destroyed")
+		and (building_ref as Building).destroyed.is_connected(_inspected_building_destroyed_handler)
+	):
+		(building_ref as Building).destroyed.disconnect(_inspected_building_destroyed_handler)
+
+	_inspected_building_destroyed_handler = Callable()
+
+
+func _on_inspected_building_destroyed(_building: Building) -> void:
+	_inspected_building_destroyed_handler = Callable()
+	inspected_building = null
+	inspection_changed.emit(null, null)
 
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:

@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://cassassinprocfx0001"]
+[gd_scene format=3 uid="uid://dkm4jyv6dmfoi"]
 
 [ext_resource type="Script" path="res://scripts/effects/assassin_passive_proc_effect.gd" id="1_assassin_passive_proc_effect"]
 

@@ -204,7 +204,13 @@ func _sanitize_hero_ability_targets() -> void:
 func _on_basic_attack_landed(target: Node3D) -> void:
 	_notify_smoke_action()
 
+	if target == null or not is_instance_valid(target):
+		return
+
 	if not AxeMarkBuff.consume(target):
+		return
+
+	if not is_instance_valid(target):
 		return
 
 	var bonus_damage: int = get_ability_bonus_damage(HeroAbilityProgression.ABILITY_Q, target)
@@ -217,6 +223,10 @@ func _on_basic_attack_landed(target: Node3D) -> void:
 		return
 
 	_refund_axe_mark_mana()
+
+	if not is_instance_valid(target):
+		return
+
 	_spawn_mark_consume_effect(target)
 	MeleeHitSound.play_at(self, target.global_position)
 
@@ -248,7 +258,7 @@ func _get_axe_mark_mana_refund_ratio() -> float:
 
 
 func _spawn_mark_consume_effect(target: Node3D) -> void:
-	if not NodeSafety.is_alive_node(target):
+	if target == null or not is_instance_valid(target):
 		return
 
 	var effect: Node3D = MARK_CONSUME_EFFECT_SCENE.instantiate() as Node3D
@@ -319,9 +329,11 @@ func try_axe_mark() -> bool:
 func _resolve_axe_mark_target(search_range: float) -> Node3D:
 	_sanitize_attack_target()
 
-	if CombatTargetValidation.is_hero_unit_ability_target(self, _attack_target):
-		if _horizontal_distance_to(_attack_target) <= search_range:
-			return _attack_target
+	var attack_target_ref: Variant = _attack_target
+	if CombatTargetValidation.is_hero_unit_ability_target(self, attack_target_ref):
+		var locked_target: Node3D = NodeSafety.safe_node(attack_target_ref) as Node3D
+		if locked_target != null and _horizontal_distance_to(locked_target) <= search_range:
+			return locked_target
 
 	return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 		self, search_range
@@ -338,6 +350,10 @@ func _execute_axe_mark(target: Node3D) -> void:
 
 
 func _spawn_spinning_axe(target: Node3D) -> void:
+	var safe_target: Node3D = NodeSafety.safe_node(target) as Node3D
+	if safe_target == null:
+		return
+
 	var axe: SpinningAxe = SPINNING_AXE_SCENE.instantiate() as SpinningAxe
 	if axe == null:
 		return
@@ -349,19 +365,24 @@ func _spawn_spinning_axe(target: Node3D) -> void:
 
 	spawn_parent.add_child(axe)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, AXE_SPAWN_HEIGHT, 0.0)
-	var damage: int = get_ability_damage(HeroAbilityProgression.ABILITY_Q, target)
+	var damage: int = get_ability_damage(HeroAbilityProgression.ABILITY_Q, safe_target)
 	var mark_duration: float = get_ability_effect_strength(
-		HeroAbilityProgression.ABILITY_Q, target
+		HeroAbilityProgression.ABILITY_Q, safe_target
 	)
-	var mark_source: Node = self
+	var mark_source_id: int = get_instance_id()
 
 	axe.launch(
-		target,
+		safe_target,
 		float(damage),
 		spawn_position,
 		self,
 		func(hit_target: Node3D) -> void:
-			AxeMarkBuff.apply(hit_target, mark_source, mark_duration)
+			if hit_target == null or not is_instance_valid(hit_target):
+				return
+			var source_node: Variant = instance_from_id(mark_source_id)
+			if not NodeSafety.is_alive_node(source_node):
+				return
+			AxeMarkBuff.apply(hit_target, source_node as Node, mark_duration)
 	)
 
 
@@ -448,11 +469,15 @@ func _execute_smoke(cast_position: Vector3) -> void:
 
 
 func _on_smoke_zone_unit_entered(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
 	if unit == self:
 		_is_in_smoke_zone = true
 
 
 func _on_smoke_zone_unit_exited(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
 	if unit == self:
 		_is_in_smoke_zone = false
 
@@ -558,15 +583,17 @@ func _damage_enemies_in_slash_radius() -> void:
 	var slash_damage: int = get_ability_damage(HeroAbilityProgression.ABILITY_E)
 
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(self):
-		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
-			if not NodeSafety.is_alive_node(node):
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
+			if not NodeSafety.is_alive_node(node_variant):
 				continue
-			if not node is Node3D:
+			if not node_variant is Node3D:
 				continue
-			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
+			if not CombatTargetValidation.is_hero_unit_ability_target(self, node_variant):
 				continue
 
-			var target: Node3D = node as Node3D
+			var target: Node3D = node_variant as Node3D
+			if not NodeSafety.is_alive_node(target):
+				continue
 			if _horizontal_distance_to(target) > slash_radius:
 				continue
 
@@ -681,17 +708,19 @@ func _resolve_dash_target(search_range: float) -> Node3D:
 	var best_hero_ratio: float = 1.0
 
 	for group_name: StringName in [&"units", &"heroes"]:
-		for node: Node in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
-			if not NodeSafety.is_alive_node(node):
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(get_tree(), group_name):
+			if not NodeSafety.is_alive_node(node_variant):
 				continue
-			if not node is Hero:
+			if not node_variant is Hero:
 				continue
-			if not CombatTargetValidation.is_hero_unit_ability_target(self, node):
+			if not CombatTargetValidation.is_hero_unit_ability_target(self, node_variant):
 				continue
-			if StealthService.is_combat_hidden(node):
+			if StealthService.is_combat_hidden(node_variant):
 				continue
 
-			var target: Node3D = node as Node3D
+			var target: Node3D = node_variant as Node3D
+			if not NodeSafety.is_alive_node(target):
+				continue
 			if _horizontal_distance_to(target) > search_range:
 				continue
 
@@ -703,9 +732,11 @@ func _resolve_dash_target(search_range: float) -> Node3D:
 	if NodeSafety.is_alive_node(best_hero):
 		return best_hero
 
-	if CombatTargetValidation.is_hero_unit_ability_target(self, _attack_target):
-		if _horizontal_distance_to(_attack_target) <= search_range:
-			return _attack_target
+	var attack_target_ref: Variant = _attack_target
+	if CombatTargetValidation.is_hero_unit_ability_target(self, attack_target_ref):
+		var locked_target: Node3D = NodeSafety.safe_node(attack_target_ref) as Node3D
+		if locked_target != null and _horizontal_distance_to(locked_target) <= search_range:
+			return locked_target
 
 	return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 		self, search_range
@@ -724,6 +755,10 @@ func _get_target_health_ratio(target: Node3D) -> float:
 
 
 func _execute_dash(target: Node3D) -> void:
+	var safe_target: Node3D = NodeSafety.safe_node(target) as Node3D
+	if safe_target == null:
+		return
+
 	var cost: int = get_ability_mana_cost(HeroAbilityProgression.ABILITY_R)
 	current_mana = maxi(0, current_mana - cost)
 	mana_changed.emit(current_mana, max_mana)
@@ -733,17 +768,24 @@ func _execute_dash(target: Node3D) -> void:
 	cancel_attack()
 	clear_move_target()
 
-	var arrival_position: Vector3 = _compute_dash_arrival_position(target)
+	var arrival_position: Vector3 = _compute_dash_arrival_position(safe_target)
 	global_position = arrival_position
-	_face_toward(target)
+	_face_toward(safe_target)
 
-	var dash_damage: int = get_ability_damage(HeroAbilityProgression.ABILITY_R, target)
+	if not NodeSafety.is_alive_node(safe_target):
+		_play_dash_flash()
+		_notify_smoke_action()
+		return
+
+	var dash_damage: int = get_ability_damage(HeroAbilityProgression.ABILITY_R, safe_target)
 	DamageService.apply_damage(
-		target, float(dash_damage), self, {DamageService.OPT_EMPHASIZE_FLOAT: true}
+		safe_target, float(dash_damage), self, {DamageService.OPT_EMPHASIZE_FLOAT: true}
 	)
 
-	MeleeHitSound.play_at(self, target.global_position)
-	_spawn_dash_impact_effect(target)
+	if NodeSafety.is_alive_node(safe_target):
+		MeleeHitSound.play_at(self, safe_target.global_position)
+		_spawn_dash_impact_effect(safe_target)
+
 	_play_dash_flash()
 	_notify_smoke_action()
 

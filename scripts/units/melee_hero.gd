@@ -26,6 +26,7 @@ var _health_bar_fill_material: StandardMaterial3D
 var _body_mesh_rest_position: Vector3
 var _attack_lunge_tween: Tween
 var _attack_target: Node3D = null
+var _attack_target_tree_exiting_handler: Callable = Callable()
 var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
@@ -291,7 +292,7 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 func _begin_attack_on_target(target: Node3D, assigned_slot: int, committed: bool) -> void:
 	_on_prepare_for_new_player_order()
 	_assign_attack_approach_slot(target, assigned_slot)
-	_attack_target = NodeSafety.safe_node(target) as Node3D
+	_set_attack_target(NodeSafety.safe_node(target) as Node3D)
 	if _attack_target == null:
 		return
 	_has_active_attack_order = true
@@ -305,6 +306,54 @@ func _begin_attack_on_target(target: Node3D, assigned_slot: int, committed: bool
 
 	if not _is_in_attack_range(_attack_target):
 		_begin_chase()
+
+
+func _set_attack_target(target: Node3D) -> void:
+	_clear_attack_target_lifetime_watch()
+	_attack_target = NodeSafety.safe_node(target) as Node3D
+	if _attack_target == null:
+		return
+	_watch_attack_target_lifetime(_attack_target)
+
+
+func _watch_attack_target_lifetime(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	_attack_target_tree_exiting_handler = _on_attack_target_tree_exiting.bind(target.get_instance_id())
+	if not target.tree_exiting.is_connected(_attack_target_tree_exiting_handler):
+		target.tree_exiting.connect(_attack_target_tree_exiting_handler, CONNECT_ONE_SHOT)
+
+
+func _clear_attack_target_lifetime_watch() -> void:
+	if not _attack_target_tree_exiting_handler.is_valid():
+		_attack_target_tree_exiting_handler = Callable()
+		return
+
+	var target_ref: Variant = _attack_target
+	if (
+		target_ref != null
+		and is_instance_valid(target_ref)
+		and target_ref is Node
+		and (target_ref as Node).tree_exiting.is_connected(_attack_target_tree_exiting_handler)
+	):
+		(target_ref as Node).tree_exiting.disconnect(_attack_target_tree_exiting_handler)
+
+	_attack_target_tree_exiting_handler = Callable()
+
+
+func _on_attack_target_tree_exiting(expected_instance_id: int) -> void:
+	_attack_target_tree_exiting_handler = Callable()
+	var target_ref: Variant = _attack_target
+	if target_ref != null and is_instance_valid(target_ref):
+		if int(target_ref.get_instance_id()) != expected_instance_id:
+			return
+	_attack_target = null
+	if _has_active_attack_order:
+		_finish_attack_target_lost()
+	else:
+		_has_chase_target = false
+		_committed_attack_order = false
+		_attack_approach_slot = -1
 
 
 func command_attack_move(destination: Vector3) -> void:
@@ -398,6 +447,7 @@ func cancel_attack_move() -> void:
 func cancel_attack() -> void:
 	if NodeSafety.is_alive_node(_attack_target):
 		CombatTargetValidation.release_attack_approach_slot(_attack_target, self)
+	_clear_attack_target_lifetime_watch()
 	_attack_target = null
 	_attack_approach_slot = -1
 	_has_chase_target = false
@@ -416,6 +466,18 @@ func _clear_patrol_state() -> void:
 
 
 func _sanitize_attack_target() -> void:
+	var target_ref: Variant = _attack_target
+	if target_ref != null and not is_instance_valid(target_ref):
+		_clear_attack_target_lifetime_watch()
+		_attack_target = null
+		if _has_active_attack_order:
+			_finish_attack_target_lost()
+		elif _has_chase_target:
+			_has_chase_target = false
+			clear_move_target()
+			_resume_attack_move_or_patrol()
+		return
+
 	if _has_active_attack_order and not NodeSafety.is_alive_node(_attack_target):
 		_finish_attack_target_lost()
 		return
@@ -633,8 +695,9 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
+	var strike_target: Node3D = _attack_target
 	if not DamageService.apply_damage(
-		_attack_target,
+		strike_target,
 		float(attack_damage),
 		self,
 		{DamageService.OPT_IS_BASIC_ATTACK: true}
@@ -642,10 +705,19 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
-	MeleeHitSound.play_at(self, _attack_target.global_position)
-	_play_attack_animation()
 	_attack_cooldown_timer = attack_cooldown
-	_on_basic_attack_landed(_attack_target)
+
+	# Freed objects must never be cast/used. queue_free targets remain valid this frame.
+	if strike_target == null or not is_instance_valid(strike_target):
+		_finish_attack_target_lost()
+		return
+
+	MeleeHitSound.play_at(self, strike_target.global_position)
+	_play_attack_animation()
+	_on_basic_attack_landed(strike_target)
+
+	if not NodeSafety.is_alive_node(_attack_target):
+		_finish_attack_target_lost()
 
 
 func _should_reposition_for_preferred_range() -> bool:

@@ -123,24 +123,31 @@ func _refresh_panel() -> void:
 		_hide_panel()
 		return
 
-	if selection_manager.inspected_building != null:
-		_show_enemy_building_info(selection_manager.inspected_building)
-		return
-
-	if selection_manager.inspected_unit != null:
-		_show_enemy_unit_info(selection_manager.inspected_unit)
-		return
-
-	if selection_manager.inspected_resource != null:
-		_show_resource_info(selection_manager.inspected_resource)
-		return
-
+	# Purge freed inspection/selection refs before any typed casts.
 	if selection_manager.has_method("purge_invalid_selection"):
 		selection_manager.purge_invalid_selection()
 
-	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null and NodeSafety.is_alive_node(selected_building):
-		_show_building_info(selected_building)
+	var inspected_building_ref: Variant = selection_manager.inspected_building
+	if NodeSafety.is_alive_node(inspected_building_ref) and inspected_building_ref is Building:
+		_show_enemy_building_info(inspected_building_ref as Building)
+		return
+
+	var inspected_unit_ref: Variant = selection_manager.inspected_unit
+	if NodeSafety.is_alive_node(inspected_unit_ref) and inspected_unit_ref is Unit:
+		_show_enemy_unit_info(inspected_unit_ref as Unit)
+		return
+
+	var inspected_resource_ref: Variant = selection_manager.inspected_resource
+	if (
+		NodeSafety.is_alive_node(inspected_resource_ref)
+		and inspected_resource_ref is GatherableResource
+	):
+		_show_resource_info(inspected_resource_ref as GatherableResource)
+		return
+
+	var selected_building_ref: Variant = selection_manager.selected_building
+	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
+		_show_building_info(selected_building_ref as Building)
 		return
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
@@ -153,19 +160,19 @@ func _refresh_panel() -> void:
 
 	if selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
-		var primary_hero: Hero = multi_info.primary_hero
-		if primary_hero != null:
-			_show_unit_info(primary_hero)
+		var primary_hero_ref: Variant = multi_info.primary_hero
+		if NodeSafety.is_alive_node(primary_hero_ref) and primary_hero_ref is Hero:
+			_show_unit_info(primary_hero_ref as Hero)
 			return
 		_show_multiple_units(selected_units, multi_info.category)
 		return
 
-	var single_unit: Unit = selected_units[0]
-	if not NodeSafety.is_alive_node(single_unit):
+	var single_unit_ref: Variant = selected_units[0]
+	if not NodeSafety.is_alive_node(single_unit_ref) or not single_unit_ref is Unit:
 		_hide_panel()
 		return
 
-	_show_unit_info(single_unit)
+	_show_unit_info(single_unit_ref as Unit)
 
 
 func _show_multiple_units(units: Array[Unit], category: StringName) -> void:

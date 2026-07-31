@@ -31,7 +31,7 @@ func on_basic_attack_hit(target: Object, result: Dictionary, _attack_index: int)
 	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return
 
-	var target_id: int = (target as Object).get_instance_id()
+	var target_id: int = target.get_instance_id()
 	if target_id != _current_target_id:
 		_current_target_id = target_id
 		_consecutive_hits = 1
@@ -44,13 +44,27 @@ func on_basic_attack_hit(target: Object, result: Dictionary, _attack_index: int)
 		return
 
 	var bonus: int = _get_bonus_damage()
-	if bonus <= 0 or host == null:
+	if bonus <= 0 or host == null or not is_instance_valid(host):
 		_notify_state_changed()
 		return
 
-	if target is Node:
-		DamageService.apply_damage(target as Node, float(bonus), host)
-		_spawn_proc_effect(target as Node)
+	if not target is Node:
+		_notify_state_changed()
+		return
+
+	var target_node: Node = target as Node
+	if not is_instance_valid(target_node):
+		_reset_chain()
+		return
+
+	DamageService.apply_damage(target_node, float(bonus), host)
+
+	# Bonus damage may have freed the target — never cast a freed node.
+	if is_instance_valid(target_node):
+		_spawn_proc_effect(target_node)
+	else:
+		_reset_chain()
+
 	_notify_state_changed()
 
 
@@ -67,7 +81,7 @@ func _format_tooltip_extra() -> String:
 
 func _get_bonus_damage() -> int:
 	var ad: float = 0.0
-	if host != null and "attack_damage" in host:
+	if host != null and is_instance_valid(host) and "attack_damage" in host:
 		ad = float(host.get("attack_damage"))
 	return maxi(
 		1,
@@ -85,19 +99,27 @@ func _reset_chain() -> void:
 
 
 func _spawn_proc_effect(target: Node) -> void:
-	if target == null or not target is Node3D:
+	if target == null or not is_instance_valid(target):
 		return
+	if not target is Node3D:
+		return
+
+	var target_3d: Node3D = target as Node3D
 	if not ResourceLoader.exists(PROC_EFFECT_SCENE_PATH):
-		ImpactEffects.play_unit_impact((target as Node3D).global_position, 1.1)
+		ImpactEffects.play_unit_impact(target_3d.global_position, 1.1)
 		return
+
 	var effect: Node3D = load(PROC_EFFECT_SCENE_PATH).instantiate() as Node3D
 	if effect == null:
 		return
-	var parent: Node = target.get_parent()
+
+	var parent: Node = target_3d.get_parent()
 	if parent == null:
-		parent = target.get_tree().current_scene if target.get_tree() else null
+		var tree: SceneTree = target_3d.get_tree()
+		parent = tree.current_scene if tree != null else null
 	if parent == null:
 		effect.queue_free()
 		return
+
 	parent.add_child(effect)
-	effect.global_position = (target as Node3D).global_position + Vector3(0.0, 0.7, 0.0)
+	effect.global_position = target_3d.global_position + Vector3(0.0, 0.7, 0.0)

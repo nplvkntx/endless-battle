@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://cbareabuffzone0001"]
+[gd_scene format=3 uid="uid://ddk65skyyjemi"]
 
 [ext_resource type="Script" path="res://scripts/systems/area_buff_zone.gd" id="1_area_buff_zone"]
 

@@ -91,6 +91,8 @@ func _refresh_occupancy() -> void:
 			if not node_variant is Unit:
 				continue
 			var unit: Unit = node_variant as Unit
+			if not NodeSafety.is_alive_node(unit):
+				continue
 			if not _is_affected_faction(unit):
 				continue
 			var offset: Vector3 = unit.global_position - global_position
@@ -105,13 +107,19 @@ func _refresh_occupancy() -> void:
 		if not still_inside.has(unit_id):
 			exited_ids.append(unit_id)
 	for unit_id: Variant in exited_ids:
-		var left: Unit = _units_inside[unit_id] as Unit
+		var left_ref: Variant = _units_inside.get(unit_id)
 		_units_inside.erase(unit_id)
-		_on_unit_exit(left)
+		if NodeSafety.is_alive_node(left_ref) and left_ref is Unit:
+			_on_unit_exit(left_ref as Unit)
+		else:
+			_speed_bonus_applied.erase(unit_id)
 
 	# Enters / stay
 	for unit_id: Variant in still_inside.keys():
-		var unit: Unit = still_inside[unit_id] as Unit
+		var unit_ref: Variant = still_inside[unit_id]
+		if not NodeSafety.is_alive_node(unit_ref) or not unit_ref is Unit:
+			continue
+		var unit: Unit = unit_ref as Unit
 		if not _units_inside.has(unit_id):
 			_units_inside[unit_id] = unit
 			_on_unit_enter(unit)
@@ -184,9 +192,11 @@ func _clear_speed_bonus(unit: Unit) -> void:
 
 func _expire() -> void:
 	var units: Array = _units_inside.values()
-	for unit_variant: Variant in units:
-		_on_unit_exit(unit_variant as Unit)
 	_units_inside.clear()
+	for unit_variant: Variant in units:
+		if NodeSafety.is_alive_node(unit_variant) and unit_variant is Unit:
+			_on_unit_exit(unit_variant as Unit)
+	_speed_bonus_applied.clear()
 	zone_expired.emit()
 	queue_free()
 
