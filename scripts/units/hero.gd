@@ -78,6 +78,8 @@ var _execute_lunge_tween: Tween
 
 
 func _ready() -> void:
+	if passive_definition == null:
+		passive_definition = HeroPassiveCatalog.create_holy_recovery()
 	super._ready()
 	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
 	_health_bar_fill.set_surface_override_material(0, _health_bar_fill_material)
@@ -1409,7 +1411,12 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
-	if not DamageService.apply_damage(_attack_target, float(attack_damage), self):
+	if not DamageService.apply_damage(
+		_attack_target,
+		float(attack_damage),
+		self,
+		{DamageService.OPT_IS_BASIC_ATTACK: true}
+	):
 		_finish_attack_target_lost()
 		return
 

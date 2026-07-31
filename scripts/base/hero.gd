@@ -26,6 +26,8 @@ const MAX_COOLDOWN_REDUCTION: float = HeroStats.MAX_COOLDOWN_REDUCTION
 const MAX_MANA_COST_REDUCTION: float = HeroStats.MAX_MANA_COST_REDUCTION
 
 @export var hero_data: Resource
+## Optional override. When null, HeroPassiveCatalog.resolve_for_hero() is used.
+@export var passive_definition: HeroPassiveDefinition
 
 var level: int = 1
 var item_ability_power: int = 0
@@ -45,12 +47,32 @@ func _ready() -> void:
 	_init_inventory()
 	super._ready()
 	HeroItemRuntime.ensure_on(self)
+	_setup_innate_passive()
 	if level < 1:
 		level = 1
 	if ability_progression == null:
 		ability_progression = HeroAbilityProgression.new()
 	_apply_hero_data()
 	_emit_xp_state()
+
+
+func _setup_innate_passive() -> void:
+	var component: HeroPassiveComponent = HeroPassiveComponent.ensure_on(self)
+	if component == null:
+		return
+	var resolved: HeroPassiveDefinition = HeroPassiveCatalog.resolve_for_hero(self)
+	component.setup_passive(resolved)
+
+
+func get_passive_component() -> HeroPassiveComponent:
+	return HeroPassiveComponent.find_on(self)
+
+
+func get_passive_tooltip() -> String:
+	var component: HeroPassiveComponent = get_passive_component()
+	if component == null:
+		return "No passive"
+	return component.get_tooltip()
 
 
 func _init_inventory() -> void:

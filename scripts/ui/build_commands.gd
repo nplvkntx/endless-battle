@@ -61,6 +61,12 @@ extends PanelContainer
 	$MarginContainer/HBoxContainer/CenterPanel/HeroAltarPanel/HeroStatusLabel
 )
 @onready var _hero_panel: HBoxContainer = $MarginContainer/HBoxContainer/RightPanel/HeroPanel
+@onready var _passive_status_label: Label = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PassiveColumn/PassiveStatusLabel
+)
+@onready var _passive_button: Button = (
+	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/PassiveColumn/PassiveButton
+)
 @onready var _ground_slam_cooldown_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/HeroPanel/GroundSlamColumn/GroundSlamCooldownLabel
 )
@@ -2268,6 +2274,11 @@ func _set_tracked_hero(hero: Hero) -> void:
 			_tracked_hero.ability_points_changed.connect(_on_tracked_hero_progression_changed)
 		if not _tracked_hero.level_changed.is_connected(_on_tracked_hero_progression_changed):
 			_tracked_hero.level_changed.connect(_on_tracked_hero_progression_changed)
+		var passive: HeroPassiveComponent = _tracked_hero.get_passive_component()
+		if passive != null and not passive.passive_state_changed.is_connected(
+			_on_tracked_hero_progression_changed
+		):
+			passive.passive_state_changed.connect(_on_tracked_hero_progression_changed)
 	_update_hero_abilities_ui()
 
 
@@ -2281,6 +2292,11 @@ func _disconnect_tracked_hero_signals() -> void:
 		_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_progression_changed)
 	if _tracked_hero.level_changed.is_connected(_on_tracked_hero_progression_changed):
 		_tracked_hero.level_changed.disconnect(_on_tracked_hero_progression_changed)
+	var passive: HeroPassiveComponent = _tracked_hero.get_passive_component()
+	if passive != null and passive.passive_state_changed.is_connected(
+		_on_tracked_hero_progression_changed
+	):
+		passive.passive_state_changed.disconnect(_on_tracked_hero_progression_changed)
 
 
 func _on_tracked_hero_progression_changed(_unused = null) -> void:
@@ -2288,11 +2304,42 @@ func _on_tracked_hero_progression_changed(_unused = null) -> void:
 
 
 func _update_hero_abilities_ui() -> void:
+	_update_passive_ui()
 	_update_ground_slam_ui()
 	_update_divine_protection_ui()
 	_update_power_strike_ui()
 	_update_execute_ui()
 	_update_all_hero_upgrade_arrows()
+
+
+func _update_passive_ui() -> void:
+	if _passive_button == null or _passive_status_label == null:
+		return
+
+	_passive_button.disabled = true
+	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+		_passive_button.text = "P"
+		_passive_button.icon = null
+		_passive_button.modulate = Color.WHITE
+		_passive_status_label.text = "P: —"
+		return
+
+	var component: HeroPassiveComponent = _tracked_hero.get_passive_component()
+	if component == null or not component.has_passive():
+		_passive_button.text = "P"
+		_passive_button.icon = null
+		_passive_button.modulate = Color.WHITE
+		_passive_status_label.text = "P: —"
+		return
+
+	_passive_button.icon = component.get_icon_texture()
+	_passive_button.expand_icon = true
+	_passive_button.text = ""
+	_passive_status_label.text = "P: %s" % component.get_status_text()
+	if component.is_effect_active():
+		_passive_button.modulate = Color(1.15, 1.05, 0.75, 1.0)
+	else:
+		_passive_button.modulate = Color.WHITE
 
 
 func _get_ability_slot_label(ability_id: StringName) -> String:
@@ -3959,6 +4006,11 @@ func _setup_command_tooltips() -> void:
 	TooltipManager.bind_static_tooltip(_open_gate_button, "Open Gate\nAllow units to pass through.")
 	TooltipManager.bind_static_tooltip(_close_gate_button, "Close Gate\nBlock movement through the gate.")
 
+	TooltipManager.bind_control(
+		_passive_button,
+		func() -> String:
+			return TooltipFormatter.format_passive(_tracked_hero)
+	)
 	TooltipManager.bind_control(
 		_ground_slam_button,
 		func() -> String:

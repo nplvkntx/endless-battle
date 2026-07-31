@@ -62,6 +62,35 @@ static func grant_for_kill(victim: Node, killer: Node) -> void:
 	if granted_xp > 0 or popup_gold > 0:
 		FloatingRewardText.spawn(victim, granted_xp, popup_gold)
 
+	_notify_passive_kill_and_assists(victim, killer)
+
+
+static func _notify_passive_kill_and_assists(victim: Node, killer: Node) -> void:
+	if victim == null or not is_instance_valid(victim):
+		return
+
+	var killer_passive: HeroPassiveComponent = null
+	if killer != null and is_instance_valid(killer):
+		killer_passive = HeroPassiveComponent.find_on(killer)
+		if killer_passive != null:
+			killer_passive.notify_kill(victim)
+
+	var tree: SceneTree = victim.get_tree()
+	if tree == null:
+		return
+
+	for node: Node in tree.get_nodes_in_group("heroes"):
+		if node == killer or not is_instance_valid(node):
+			continue
+		var passive: HeroPassiveComponent = HeroPassiveComponent.find_on(node)
+		if passive == null:
+			continue
+		if killer_passive != null and passive == killer_passive:
+			continue
+		if not passive.contributed_to_victim(victim):
+			continue
+		passive.notify_assist(victim)
+
 
 static func get_xp_amount_for_victim(victim: Node) -> int:
 	if victim == null:

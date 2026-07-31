@@ -337,6 +337,17 @@ static func format_shop_item(item_id: StringName, blocked_reason: String = "") -
 	return "\n".join(lines)
 
 
+static func format_passive(hero: Hero) -> String:
+	if hero == null or not is_instance_valid(hero):
+		return "Passive\nCannot be activated."
+
+	var component: HeroPassiveComponent = hero.get_passive_component()
+	if component == null or not component.has_passive():
+		return "Passive\nCannot be activated."
+
+	return component.get_tooltip()
+
+
 static func format_ability_cast(hero: Hero, ability_id: StringName, slot_label: String) -> String:
 	var display_name: String = HeroAbilityStats.get_display_name(ability_id)
 	var lines: PackedStringArray = PackedStringArray()

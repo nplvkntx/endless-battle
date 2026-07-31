@@ -34,6 +34,7 @@ const OPT_LIFESTEAL_PERCENT := &"lifesteal_percent"
 const OPT_DAMAGE_REDUCTION := &"damage_reduction"
 const OPT_SHOW_FLOAT := &"show_floating_number"
 const OPT_EMPHASIZE_FLOAT := &"emphasize_float"
+const OPT_IS_BASIC_ATTACK := &"is_basic_attack"
 
 const RESULT_APPLIED := &"applied"
 const RESULT_BLOCKED := &"blocked"
@@ -117,7 +118,28 @@ static func apply(
 	if target_object.has_method(&"_on_combat_damage_received"):
 		target_object.call(&"_on_combat_damage_received", result)
 
+	_notify_passive_damage(safe_attacker, target_object, result, options)
+
 	return result
+
+
+static func _notify_passive_damage(
+	attacker: Node,
+	target: Object,
+	result: Dictionary,
+	options: Dictionary
+) -> void:
+	var is_basic: bool = bool(options.get(OPT_IS_BASIC_ATTACK, false))
+
+	if attacker != null and is_instance_valid(attacker):
+		var attacker_passive: HeroPassiveComponent = HeroPassiveComponent.find_on(attacker)
+		if attacker_passive != null:
+			attacker_passive.notify_damage_dealt(target, result, is_basic)
+
+	if target is Node:
+		var target_passive: HeroPassiveComponent = HeroPassiveComponent.find_on(target as Node)
+		if target_passive != null:
+			target_passive.notify_damage_taken(result)
 
 
 static func apply_damage(
