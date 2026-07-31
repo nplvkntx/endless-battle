@@ -2,6 +2,18 @@ class_name HeroAbilityStats
 extends RefCounted
 
 ## Per-rank stat scaling for hero abilities. Multipliers are indexed by rank (1 = index 0).
+## Attribute ratios (AP, AD, health, etc.) live in ABILITY_SCALING and are applied by Hero.
+
+enum ScalingStat {
+	ATTACK_DAMAGE,
+	ABILITY_POWER,
+	BONUS_HEALTH,
+	MISSING_HEALTH,
+	MAXIMUM_HEALTH,
+	ARMOR,
+	TARGET_HEALTH,
+	HERO_LEVEL,
+}
 
 const STAT_DAMAGE := &"damage"
 const STAT_SPLASH := &"splash"
@@ -40,6 +52,31 @@ const DEFAULT_BASE_STATS: Dictionary = {
 	},
 }
 
+## ability_id -> output_stat -> { ScalingStat: coefficient }
+## Current live ratios preserve flat AP behavior (Q/E +1 dmg/AP, W +0.01s/AP, R +0.001/AP).
+const ABILITY_SCALING: Dictionary = {
+	HeroAbilityProgression.ABILITY_Q: {
+		STAT_DAMAGE: {
+			ScalingStat.ABILITY_POWER: 1.0,
+		},
+	},
+	HeroAbilityProgression.ABILITY_W: {
+		STAT_EFFECT: {
+			ScalingStat.ABILITY_POWER: HeroStats.ABILITY_POWER_EFFECT_SECONDS_PER_POINT,
+		},
+	},
+	HeroAbilityProgression.ABILITY_E: {
+		STAT_DAMAGE: {
+			ScalingStat.ABILITY_POWER: 1.0,
+		},
+	},
+	HeroAbilityProgression.ABILITY_R: {
+		STAT_EFFECT: {
+			ScalingStat.ABILITY_POWER: HeroStats.ABILITY_POWER_EXECUTE_THRESHOLD_PER_POINT,
+		},
+	},
+}
+
 const BASIC_DAMAGE_MULT: Array[float] = [1.0, 1.2, 1.4, 1.6, 1.8]
 const BASIC_SPLASH_MULT: Array[float] = [1.0, 1.1, 1.2, 1.3, 1.4]
 const BASIC_COOLDOWN_MULT: Array[float] = [1.0, 0.95, 0.9, 0.85, 0.8]
@@ -53,6 +90,25 @@ const ULTIMATE_MANA_MULT: Array[float] = [1.0, 1.2, 1.4]
 
 static func get_display_name(ability_id: StringName) -> String:
 	return String(ABILITY_DISPLAY_NAMES.get(ability_id, ability_id))
+
+
+static func get_scaling_ratios(ability_id: StringName, stat: StringName) -> Dictionary:
+	var by_ability: Dictionary = ABILITY_SCALING.get(ability_id, {})
+	return by_ability.get(stat, {})
+
+
+static func compute_scaling_bonus(ability_id: StringName, stat: StringName, resolved_values: Dictionary) -> float:
+	var ratios: Dictionary = get_scaling_ratios(ability_id, stat)
+	if ratios.is_empty():
+		return 0.0
+
+	var total: float = 0.0
+	for scaling_stat: Variant in ratios.keys():
+		var coefficient: float = float(ratios[scaling_stat])
+		var resolved_value: float = float(resolved_values.get(scaling_stat, 0.0))
+		total += coefficient * resolved_value
+
+	return total
 
 
 static func get_stat(

@@ -2,7 +2,7 @@ class_name HeroStats
 extends RefCounted
 
 ## Canonical hero combat, growth, train cost, and ability base numbers.
-## Ability rank multipliers stay in HeroAbilityStats; base values live here.
+## Ability rank multipliers and attribute scaling ratios stay in HeroAbilityStats; base values live here.
 ## Change hero balance in this file only.
 
 # --- Train (Hero Altar) ---
