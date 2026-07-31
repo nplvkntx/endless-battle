@@ -33,6 +33,7 @@ var inspected_building: Building = null
 var inspected_resource: GatherableResource = null
 var _unit_tree_exiting_handlers: Dictionary = {}
 var _inspected_building_destroyed_handler: Callable = Callable()
+var _selected_building_destroyed_handler: Callable = Callable()
 var _selection_purge_timer: float = 0.0
 const SELECTION_PURGE_INTERVAL := 0.1
 
@@ -444,46 +445,51 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	if camera == null:
 		return
 
-	if selected_building is CommandCenter:
-		var command_center: CommandCenter = selected_building as CommandCenter
-		var rally_gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
-		if rally_gold_mine != null:
-			command_center.set_rally_resource(rally_gold_mine)
+	_purge_invalid_selected_building()
+	var selected_building_ref: Variant = selected_building
+	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
+		var building: Building = selected_building_ref as Building
+
+		if building is CommandCenter:
+			var command_center: CommandCenter = building as CommandCenter
+			var rally_gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
+			if rally_gold_mine != null:
+				command_center.set_rally_resource(rally_gold_mine)
+				return
+
+			var rally_tree: WoodTree = _raycast_tree(camera, screen_position)
+			if rally_tree != null:
+				command_center.set_rally_resource(rally_tree)
+				return
+
+			var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+			if rally_ground_position.is_finite():
+				command_center.set_rally_point(rally_ground_position)
 			return
 
-		var rally_tree: WoodTree = _raycast_tree(camera, screen_position)
-		if rally_tree != null:
-			command_center.set_rally_resource(rally_tree)
+		if building is Barracks:
+			var barracks_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+			if barracks_rally_position.is_finite():
+				(building as Barracks).set_rally_point(barracks_rally_position)
 			return
 
-		var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-		if rally_ground_position.is_finite():
-			command_center.set_rally_point(rally_ground_position)
-		return
+		if building is HeroAltar:
+			var hero_altar_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+			if hero_altar_rally_position.is_finite():
+				(building as HeroAltar).set_rally_point(hero_altar_rally_position)
+			return
 
-	if selected_building is Barracks:
-		var barracks_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-		if barracks_rally_position.is_finite():
-			(selected_building as Barracks).set_rally_point(barracks_rally_position)
-		return
+		if building is Stable:
+			var stable_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+			if stable_rally_position.is_finite():
+				(building as Stable).set_rally_point(stable_rally_position)
+			return
 
-	if selected_building is HeroAltar:
-		var hero_altar_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-		if hero_altar_rally_position.is_finite():
-			(selected_building as HeroAltar).set_rally_point(hero_altar_rally_position)
-		return
-
-	if selected_building is Stable:
-		var stable_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-		if stable_rally_position.is_finite():
-			(selected_building as Stable).set_rally_point(stable_rally_position)
-		return
-
-	if selected_building is ArtilleryDepot:
-		var depot_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-		if depot_rally_position.is_finite():
-			(selected_building as ArtilleryDepot).set_rally_point(depot_rally_position)
-		return
+		if building is ArtilleryDepot:
+			var depot_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+			if depot_rally_position.is_finite():
+				(building as ArtilleryDepot).set_rally_point(depot_rally_position)
+			return
 
 	if selected_units.is_empty():
 		return
@@ -912,6 +918,7 @@ func _set_selected_building(building: Building) -> void:
 		return
 
 	selected_building = building
+	_connect_selected_building_destroyed(building)
 	if _is_selectable_building(selected_building):
 		_safe_set_building_selected(selected_building, true)
 	building_selection_changed.emit(selected_building)
@@ -919,7 +926,8 @@ func _set_selected_building(building: Building) -> void:
 
 
 func _clear_building_selection() -> void:
-	if selected_building == null:
+	var building_ref: Variant = selected_building
+	if building_ref == null:
 		return
 
 	_clear_building_selection_without_signal()
@@ -927,11 +935,10 @@ func _clear_building_selection() -> void:
 
 
 func _clear_building_selection_without_signal() -> void:
-	if not _is_selectable_building(selected_building):
-		selected_building = null
-		return
-
-	_safe_set_building_selected(selected_building, false)
+	_disconnect_selected_building_destroyed()
+	var building_ref: Variant = selected_building
+	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+		_safe_set_building_selected(building_ref, false)
 	selected_building = null
 
 
@@ -1047,12 +1054,14 @@ func _purge_invalid_selected_units() -> void:
 
 
 func _purge_invalid_selected_building() -> void:
-	if selected_building == null:
+	var building_ref: Variant = selected_building
+	if building_ref == null:
 		return
 
-	if _is_selectable_building(selected_building):
+	if _is_selectable_building(building_ref):
 		return
 
+	_disconnect_selected_building_destroyed()
 	selected_building = null
 	building_selection_changed.emit(null)
 
@@ -1221,6 +1230,42 @@ func _on_inspected_building_destroyed(_building: Building) -> void:
 	_inspected_building_destroyed_handler = Callable()
 	inspected_building = null
 	inspection_changed.emit(null, null)
+
+
+func _connect_selected_building_destroyed(building: Building) -> void:
+	_disconnect_selected_building_destroyed()
+	if building == null or not is_instance_valid(building):
+		return
+	if not building.has_signal("destroyed"):
+		return
+
+	_selected_building_destroyed_handler = _on_selected_building_destroyed
+	if not building.destroyed.is_connected(_selected_building_destroyed_handler):
+		building.destroyed.connect(_selected_building_destroyed_handler, CONNECT_ONE_SHOT)
+
+
+func _disconnect_selected_building_destroyed() -> void:
+	if not _selected_building_destroyed_handler.is_valid():
+		_selected_building_destroyed_handler = Callable()
+		return
+
+	var building_ref: Variant = selected_building
+	if (
+		building_ref != null
+		and is_instance_valid(building_ref)
+		and building_ref is Building
+		and (building_ref as Building).has_signal("destroyed")
+		and (building_ref as Building).destroyed.is_connected(_selected_building_destroyed_handler)
+	):
+		(building_ref as Building).destroyed.disconnect(_selected_building_destroyed_handler)
+
+	_selected_building_destroyed_handler = Callable()
+
+
+func _on_selected_building_destroyed(_building: Building) -> void:
+	_selected_building_destroyed_handler = Callable()
+	selected_building = null
+	building_selection_changed.emit(null)
 
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:

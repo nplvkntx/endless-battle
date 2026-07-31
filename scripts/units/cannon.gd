@@ -440,7 +440,7 @@ func _is_at_attack_move_destination() -> bool:
 	return offset.length() <= stopping_distance
 
 
-func _is_in_attack_range(target: Node3D) -> bool:
+func _is_in_attack_range(target: Variant) -> bool:
 	return CombatTargetValidation.is_within_attack_range(self, target, attack_range)
 
 

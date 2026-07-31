@@ -1421,20 +1421,21 @@ func _get_selection_tooltip() -> String:
 	if selection_manager == null:
 		return ""
 
-	var inspected_unit: Unit = selection_manager.inspected_unit
-	if inspected_unit != null and is_instance_valid(inspected_unit):
-		return TooltipFormatter.format_unit(inspected_unit)
-
-	var inspected_building: Building = selection_manager.inspected_building
-	if inspected_building != null and is_instance_valid(inspected_building):
-		return TooltipFormatter.format_unit(inspected_building)
-
-	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null and NodeSafety.is_alive_node(selected_building):
-		return TooltipFormatter.format_unit(selected_building)
-
+	# Purge freed refs before any typed cast (same rule as _refresh_panel).
 	if selection_manager.has_method("purge_invalid_selection"):
 		selection_manager.purge_invalid_selection()
+
+	var inspected_unit_ref: Variant = selection_manager.inspected_unit
+	if NodeSafety.is_alive_node(inspected_unit_ref) and inspected_unit_ref is Unit:
+		return TooltipFormatter.format_unit(inspected_unit_ref as Unit)
+
+	var inspected_building_ref: Variant = selection_manager.inspected_building
+	if NodeSafety.is_alive_node(inspected_building_ref) and inspected_building_ref is Building:
+		return TooltipFormatter.format_unit(inspected_building_ref as Building)
+
+	var selected_building_ref: Variant = selection_manager.selected_building
+	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
+		return TooltipFormatter.format_unit(selected_building_ref as Building)
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
 	if selected_units.is_empty():
@@ -1443,8 +1444,8 @@ func _get_selection_tooltip() -> String:
 	if selected_units.size() > 1:
 		return "Multiple units selected"
 
-	var single_unit: Unit = selected_units[0]
-	if not NodeSafety.is_alive_node(single_unit):
+	var single_unit_ref: Variant = selected_units[0]
+	if not NodeSafety.is_alive_node(single_unit_ref) or not single_unit_ref is Unit:
 		return ""
 
-	return TooltipFormatter.format_unit(single_unit)
+	return TooltipFormatter.format_unit(single_unit_ref as Unit)

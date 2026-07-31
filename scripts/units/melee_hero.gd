@@ -876,11 +876,11 @@ func _is_at_attack_move_destination() -> bool:
 	return offset.length() <= stopping_distance
 
 
-func _is_in_attack_range(target: Node3D) -> bool:
+func _is_in_attack_range(target: Variant) -> bool:
 	return CombatTargetValidation.is_within_attack_range(self, target, attack_range)
 
 
-func _horizontal_distance_to(target: Node3D) -> float:
+func _horizontal_distance_to(target: Variant) -> float:
 	return CombatTargetValidation.get_horizontal_center_distance(self, target)
 
 

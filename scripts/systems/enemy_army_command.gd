@@ -1583,7 +1583,10 @@ static func try_begin_attack_wave_preparation(
 
 	var objective: Dictionary = resolve_attack_objective(tree, attack_destination)
 	var target_position: Vector3 = objective.get("position", attack_destination)
-	var target_node: Node3D = objective.get("node") as Node3D
+	var target_node_ref: Variant = objective.get("node")
+	var target_node: Node3D = null
+	if NodeSafety.is_alive_node(target_node_ref) and target_node_ref is Node3D:
+		target_node = target_node_ref as Node3D
 	if target_position == Vector3.ZERO:
 		return false
 
@@ -2408,13 +2411,15 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 	_objective_eval_timer += delta
 	_objective_stuck_check_timer += delta
 
-	var previous_objective: Node3D = _active_wave_objective
-	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective)
-	if previous_objective_alive and previous_objective is Building:
-		previous_objective_alive = _is_living_building(previous_objective as Building)
+	var previous_objective_ref: Variant = _active_wave_objective
+	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective_ref)
+	if previous_objective_alive and previous_objective_ref is Building:
+		previous_objective_alive = _is_living_building(previous_objective_ref as Building)
 
-	var objective_died: bool = previous_objective != null and not previous_objective_alive
-	var objective_node: Node3D = previous_objective
+	var objective_died: bool = previous_objective_ref != null and not previous_objective_alive
+	var objective_node: Node3D = null
+	if previous_objective_alive and previous_objective_ref is Node3D:
+		objective_node = previous_objective_ref as Node3D
 	var objective_position: Vector3 = _active_wave_objective_position
 	var objective_changed: bool = false
 
@@ -2430,17 +2435,22 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 			fallback_position = resolve_enemy_rally_position(tree)
 
 		var objective: Dictionary = resolve_attack_objective(tree, fallback_position)
-		objective_node = objective.get("node") as Node3D
+		var objective_node_ref: Variant = objective.get("node")
+		objective_node = null
+		if NodeSafety.is_alive_node(objective_node_ref) and objective_node_ref is Node3D:
+			objective_node = objective_node_ref as Node3D
 		objective_position = objective.get("position", Vector3.ZERO)
 		if objective_position == Vector3.ZERO:
 			return
 
 		objective_changed = (
-			NodeSafety.is_alive_node(objective_node) and objective_node != previous_objective
+			NodeSafety.is_alive_node(objective_node) and objective_node != previous_objective_ref
 		)
 
 		if NodeSafety.is_alive_node(objective_node):
 			_active_wave_objective = objective_node
+		elif objective_died:
+			_active_wave_objective = null
 		_active_wave_objective_position = objective_position
 
 		if _finishing_mode_active and NodeSafety.is_alive_node(objective_node):
@@ -4044,9 +4054,9 @@ static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
 		var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 		var objective: Dictionary = resolve_attack_objective(tree, rally_position)
 		objective_position = objective.get("position", Vector3.ZERO)
-		var objective_node: Node3D = objective.get("node") as Node3D
-		if NodeSafety.is_alive_node(objective_node):
-			set_attack_objective(objective_node, objective_position)
+		var objective_node_ref: Variant = objective.get("node")
+		if NodeSafety.is_alive_node(objective_node_ref) and objective_node_ref is Node3D:
+			set_attack_objective(objective_node_ref as Node3D, objective_position)
 
 	if objective_position == Vector3.ZERO:
 		return
@@ -5071,8 +5081,9 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 			and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
 			and entry.has("focus_objective")
 		):
-			var focus_objective: Node3D = entry.get("focus_objective") as Node3D
-			if NodeSafety.is_alive_node(focus_objective):
+			var focus_objective_ref: Variant = entry.get("focus_objective")
+			if NodeSafety.is_alive_node(focus_objective_ref) and focus_objective_ref is Node3D:
+				var focus_objective: Node3D = focus_objective_ref as Node3D
 				_command_unit_focus_attack(unit, focus_objective)
 				EnemyUnitMission.try_set_mission(unit as Node, mission)
 				EnemyUnitMission.record_move_order(unit as Node, target, mission)
@@ -5086,13 +5097,15 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 			and mission == EnemyUnitMission.Mission.ATTACK
 			and _has_living_attack_building_objective()
 		):
-			_command_unit_focus_attack(unit, _active_wave_objective)
-			EnemyUnitMission.try_set_mission(unit as Node, mission)
-			EnemyUnitMission.record_move_order(unit as Node, target, mission)
-			_orders_issued_since_diag += 1
-			PerfCounters.record_ai_order()
-			issued += 1
-			continue
+			var wave_objective_ref: Variant = _active_wave_objective
+			if NodeSafety.is_alive_node(wave_objective_ref) and wave_objective_ref is Node3D:
+				_command_unit_focus_attack(unit, wave_objective_ref as Node3D)
+				EnemyUnitMission.try_set_mission(unit as Node, mission)
+				EnemyUnitMission.record_move_order(unit as Node, target, mission)
+				_orders_issued_since_diag += 1
+				PerfCounters.record_ai_order()
+				issued += 1
+				continue
 
 		if use_attack_move:
 			_issue_attack_move(unit, target)

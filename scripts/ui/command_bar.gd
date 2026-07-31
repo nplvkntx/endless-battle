@@ -68,18 +68,26 @@ func _apply_frame_visibility() -> void:
 
 
 func _selection_has_commands(selection_manager: Node) -> bool:
-	if selection_manager.inspected_resource != null:
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
+	var inspected_resource_ref: Variant = selection_manager.inspected_resource
+	if NodeSafety.is_alive_node(inspected_resource_ref):
 		return false
 
-	if selection_manager.inspected_unit != null or selection_manager.inspected_building != null:
+	var inspected_unit_ref: Variant = selection_manager.inspected_unit
+	var inspected_building_ref: Variant = selection_manager.inspected_building
+	if NodeSafety.is_alive_node(inspected_unit_ref) or NodeSafety.is_alive_node(inspected_building_ref):
 		return false
 
 	if not selection_manager.selected_units.is_empty():
 		return selection_manager.has_commandable_selected_units()
 
-	var building: Building = selection_manager.selected_building
-	if building == null or not NodeSafety.is_alive_node(building):
+	var building_ref: Variant = selection_manager.selected_building
+	if not NodeSafety.is_alive_node(building_ref) or not building_ref is Building:
 		return false
+
+	var building: Building = building_ref as Building
 
 	if building is CommandCenter:
 		return true

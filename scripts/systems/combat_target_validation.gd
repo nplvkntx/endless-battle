@@ -468,41 +468,57 @@ static func _call_take_damage(target: Object, amount: float, attacker = null) ->
 
 
 static func is_within_attack_range(
-	attacker: Node3D, target: Node3D, attack_range: float
+	attacker: Variant, target: Variant, attack_range: float
 ) -> bool:
-	if attacker == null or target == null:
+	if not NodeSafety.is_alive_node(attacker) or not NodeSafety.is_alive_node(target):
+		return false
+	if not attacker is Node3D or not target is Node3D:
 		return false
 
-	if is_attackable_enemy_building(target):
+	var attacker_node: Node3D = attacker as Node3D
+	var target_node: Node3D = target as Node3D
+
+	if is_attackable_enemy_building(target_node):
 		return (
-			get_horizontal_attack_distance_to_surface(attacker, target) <= attack_range
+			get_horizontal_attack_distance_to_surface(attacker_node, target_node) <= attack_range
 		)
 
-	return get_horizontal_center_distance(attacker, target) <= attack_range
+	return get_horizontal_center_distance(attacker_node, target_node) <= attack_range
 
 
-static func get_horizontal_attack_distance_to_surface(from: Node3D, target: Node3D) -> float:
-	var center_distance: float = get_horizontal_center_distance(from, target)
-	if target is CollisionObject3D:
+static func get_horizontal_attack_distance_to_surface(from: Variant, target: Variant) -> float:
+	if not NodeSafety.is_alive_node(from) or not NodeSafety.is_alive_node(target):
+		return INF
+	if not from is Node3D or not target is Node3D:
+		return INF
+
+	var from_node: Node3D = from as Node3D
+	var target_node: Node3D = target as Node3D
+	var center_distance: float = get_horizontal_center_distance(from_node, target_node)
+	if target_node is CollisionObject3D:
 		return maxf(
 			0.0,
-			center_distance - _get_collision_xz_radius(target as CollisionObject3D)
+			center_distance - _get_collision_xz_radius(target_node as CollisionObject3D)
 		)
 
 	return center_distance
 
 
-static func get_horizontal_center_distance(from: Node3D, to: Node3D) -> float:
+static func get_horizontal_center_distance(from: Variant, to: Variant) -> float:
 	if not NodeSafety.is_alive_node(from) or not NodeSafety.is_alive_node(to):
 		return INF
+	if not from is Node3D or not to is Node3D:
+		return INF
 
-	var offset: Vector3 = from.global_position - to.global_position
+	var from_node: Node3D = from as Node3D
+	var to_node: Node3D = to as Node3D
+	var offset: Vector3 = from_node.global_position - to_node.global_position
 	offset.y = 0.0
 	return offset.length()
 
 
-static func get_horizontal_attack_distance(attacker: Node3D, target: Node3D) -> float:
-	if attacker == null or target == null:
+static func get_horizontal_attack_distance(attacker: Variant, target: Variant) -> float:
+	if not NodeSafety.is_alive_node(attacker) or not NodeSafety.is_alive_node(target):
 		return INF
 
 	if is_attackable_enemy_building(target):

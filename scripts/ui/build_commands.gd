@@ -2258,11 +2258,14 @@ func _get_authoritative_selected_building() -> Building:
 	if selection_manager == null:
 		return null
 
-	var building: Building = selection_manager.selected_building
-	if building != null and not is_instance_valid(building):
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
+	var building_ref: Variant = selection_manager.selected_building
+	if not NodeSafety.is_alive_node(building_ref) or not building_ref is Building:
 		return null
 
-	return building
+	return building_ref as Building
 
 
 func _is_active_selected_building(building: Building) -> bool:
@@ -2969,9 +2972,10 @@ func _refresh_command_visibility() -> void:
 		selection_manager.purge_invalid_selection()
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
-	var selected_building: Building = selection_manager.selected_building
-	if selected_building != null and not is_instance_valid(selected_building):
-		selected_building = null
+	var selected_building_ref: Variant = selection_manager.selected_building
+	var selected_building: Building = null
+	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
+		selected_building = selected_building_ref as Building
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
 	if nothing_selected:

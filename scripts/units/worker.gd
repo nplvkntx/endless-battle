@@ -325,9 +325,9 @@ func _sanitize_stored_targets() -> void:
 	if not NodeSafety.is_alive_node(_building_target):
 		if _wall_build_job != null:
 			var job: WallBuildJob = _wall_build_job
-			var lost_segment: Building = _building_target
+			# Never typed-assign a known-invalid building — pass null to the job.
 			_cancel_build_trip(false)
-			job.on_worker_segment_lost(self, lost_segment)
+			job.on_worker_segment_lost(self, null)
 		else:
 			_cancel_build_trip()
 
