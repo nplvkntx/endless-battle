@@ -501,7 +501,7 @@ func _should_reposition_for_preferred_range() -> bool:
 
 ## Override for unit-specific strike delivery. Return false if the strike failed.
 func _deliver_attack() -> bool:
-	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
+	if not DamageService.apply_damage(_attack_target, float(attack_damage), self):
 		return false
 
 	MeleeHitSound.play_at(self, _attack_target.global_position)
@@ -510,24 +510,30 @@ func _deliver_attack() -> bool:
 
 ## Override when incoming damage ignores armor (e.g. archer).
 func _compute_incoming_damage(amount: float) -> int:
-	return UnitCombatDamage.compute_armored_damage(amount, armor)
+	return DamageService.compute_armored_damage(amount, armor)
 
 
 func take_damage(amount: float, attacker = null) -> void:
-	var resolved_attacker = UnitCombatDamage.apply_incoming(
+	DamageService.apply(
 		self,
-		_health_component,
+		amount,
 		attacker,
-		_compute_incoming_damage(amount)
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
 	)
-	if UnitCombatDamage.should_enemy_retaliate(self, resolved_attacker):
-		if _is_holding_position:
-			if CombatTargetValidation.is_within_attack_range(
-				self, resolved_attacker as Node3D, attack_range
-			):
-				_begin_attack_on_target(resolved_attacker as Node3D, -1, false)
-		else:
-			command_attack(resolved_attacker as Node3D)
+
+
+func _on_combat_damage_received(result: Dictionary) -> void:
+	var resolved_attacker = result.get(DamageService.RESULT_ATTACKER)
+	if not UnitCombatDamage.should_enemy_retaliate(self, resolved_attacker):
+		return
+
+	if _is_holding_position:
+		if CombatTargetValidation.is_within_attack_range(
+			self, resolved_attacker as Node3D, attack_range
+		):
+			_begin_attack_on_target(resolved_attacker as Node3D, -1, false)
+	else:
+		command_attack(resolved_attacker as Node3D)
 
 
 func get_current_health() -> int:

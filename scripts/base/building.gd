@@ -190,10 +190,14 @@ func _apply_building_data() -> void:
 	pass
 
 
-## Applies damage using values derived from building_data.
-func take_damage(_amount: float, _attacker = null) -> void:
-	# TODO: Implement damage handling.
-	pass
+## Applies damage through the shared combat pipeline.
+func take_damage(amount: float, attacker = null) -> void:
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
 
 ## Handles building destruction and notifies listeners through signals.

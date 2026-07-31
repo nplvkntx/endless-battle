@@ -20,11 +20,11 @@ func _ready() -> void:
 	_camp_anchor = CreepCampSafety.get_camp_anchor_for_creep(self)
 
 
-func take_damage(amount: float, attacker = null) -> void:
-	super.take_damage(amount, attacker)
+func _on_combat_damage_received(result: Dictionary) -> void:
+	super._on_combat_damage_received(result)
 
 	var valid_attacker: Unit = _resolve_combat_attacker(
-		CombatTargetValidation.sanitize_damage_attacker(attacker)
+		result.get(DamageService.RESULT_ATTACKER)
 	)
 	if valid_attacker == null:
 		return

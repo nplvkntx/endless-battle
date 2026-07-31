@@ -443,35 +443,26 @@ static func sanitize_damage_attacker(attacker: Variant) -> Node:
 
 
 static func apply_damage_to_target(target: Variant, amount: float, attacker = null) -> bool:
-	if target == null or not is_instance_valid(target):
+	# Runtime load + Script.call avoids a class_name cycle with DamageService.
+	var damage_service: Variant = load("res://scripts/systems/damage_service.gd")
+	if damage_service == null:
 		return false
-
-	if not is_valid_combat_target(target):
-		return false
-
-	var safe_attacker: Node = sanitize_damage_attacker(attacker)
-	if safe_attacker != null and not are_hostile(safe_attacker, target):
-		return false
-
-	if not target is Object:
-		return false
-
-	var target_object: Object = target as Object
-	if not target_object.has_method("take_damage"):
-		return false
-
-	return _call_take_damage(target_object, amount, safe_attacker)
+	return bool(damage_service.call(&"apply_damage", target, amount, attacker))
 
 
 static func _call_take_damage(target: Object, amount: float, attacker = null) -> bool:
-	if not target.has_method("take_damage"):
+	var damage_service: Variant = load("res://scripts/systems/damage_service.gd")
+	if damage_service == null:
 		return false
-
-	if attacker != null:
-		target.call("take_damage", amount, attacker)
-	else:
-		target.call("take_damage", amount)
-	return true
+	return bool(
+		damage_service.call(
+			&"apply_damage",
+			target,
+			amount,
+			attacker,
+			{&"ignore_hostility": true}
+		)
+	)
 
 
 static func is_within_attack_range(

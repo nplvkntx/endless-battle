@@ -955,10 +955,14 @@ func _apply_unit_data() -> void:
 	pass
 
 
-## Applies damage using values derived from unit_data.
-func take_damage(_amount: float, _attacker = null) -> void:
-	# TODO: Implement damage handling.
-	pass
+## Applies damage through the shared combat pipeline.
+func take_damage(amount: float, attacker = null) -> void:
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
 
 ## Population food reserved by this unit when trained. Neutral/test units return 0.

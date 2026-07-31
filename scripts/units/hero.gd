@@ -710,9 +710,7 @@ func _execute_power_strike() -> void:
 	_cancel_power_strike()
 
 	var strike_damage: int = get_power_strike_damage()
-	if not CombatTargetValidation.apply_damage_to_target(
-		target, float(strike_damage), self
-	):
+	if not DamageService.apply_damage(target, float(strike_damage), self):
 		return
 
 	FloatingDamageNumber.spawn(target, strike_damage, true)
@@ -1057,7 +1055,7 @@ func _kill_execute_target(target: Node3D) -> void:
 	if remaining_health <= 0:
 		return
 
-	if not CombatTargetValidation.apply_damage_to_target(target, float(remaining_health), self):
+	if not DamageService.apply_damage(target, float(remaining_health), self):
 		return
 
 	FloatingDamageNumber.spawn(target, remaining_health, true)
@@ -1183,9 +1181,7 @@ func _damage_enemies_in_ground_slam_radius() -> void:
 			if _horizontal_distance_to(target) > slam_radius:
 				continue
 
-			CombatTargetValidation.apply_damage_to_target(
-				target, float(slam_damage), self
-			)
+			DamageService.apply_damage(target, float(slam_damage), self)
 
 
 func _spawn_ground_slam_effect() -> void:
@@ -1413,7 +1409,7 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
-	if not CombatTargetValidation.apply_damage_to_target(_attack_target, float(attack_damage), self):
+	if not DamageService.apply_damage(_attack_target, float(attack_damage), self):
 		_finish_attack_target_lost()
 		return
 
@@ -1465,19 +1461,12 @@ func _play_attack_animation() -> void:
 
 
 func take_damage(amount: float, attacker = null) -> void:
-	if _health_component.current_health <= 0:
-		return
-
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-
-	if is_divine_protection_active():
-		return
-
-	CombatKillTracker.record_attacker(self, attacker)
-
-	var damage_amount := int(amount)
-	_health_component.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(self, damage_amount)
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
 
 func get_current_health() -> int:

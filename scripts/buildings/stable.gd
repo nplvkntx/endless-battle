@@ -333,16 +333,6 @@ func _stop_enemy_auto_production() -> void:
 	_enemy_production_active = false
 
 
-func take_damage(amount: float, attacker = null) -> void:
-	if _health_component == null or _health_component.current_health <= 0:
-		return
-
-	if not _health_component.has_method("take_damage"):
-		return
-
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(self, attacker)
-	_health_component.take_damage(maxi(0, int(amount)))
 
 
 func _on_health_depleted() -> void:

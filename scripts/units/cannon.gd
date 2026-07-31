@@ -347,17 +347,21 @@ func _is_enemy_owned() -> bool:
 	return TeamVisuals.resolve_team(self, team_id) != TeamVisuals.PLAYER_TEAM_ID
 
 
+func _compute_incoming_damage(amount: float) -> int:
+	return DamageService.compute_armored_damage(amount, armor)
+
+
 func take_damage(amount: float, attacker = null) -> void:
-	if _health_component.current_health <= 0:
-		return
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(self, attacker)
 
-	var damage_amount := maxi(1, int(amount) - armor)
-	_health_component.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(self, damage_amount)
-
+func _on_combat_damage_received(result: Dictionary) -> void:
+	var attacker = result.get(DamageService.RESULT_ATTACKER)
 	if (
 		CombatTargetValidation.is_enemy_faction(self)
 		and attacker is Node3D

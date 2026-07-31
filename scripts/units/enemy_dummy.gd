@@ -72,18 +72,20 @@ func _on_health_depleted() -> void:
 
 
 func take_damage(amount: float, attacker = null) -> void:
-	if _health_component.current_health <= 0:
-		return
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(self, attacker)
 
-	var damage_amount := int(amount)
-	_health_component.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(self, damage_amount)
+func _on_combat_damage_received(result: Dictionary) -> void:
 	_play_hit_feedback()
 
-	var valid_attacker: Unit = _resolve_combat_attacker(attacker)
+	var valid_attacker: Unit = _resolve_combat_attacker(
+		result.get(DamageService.RESULT_ATTACKER)
+	)
 	if valid_attacker != null:
 		_set_attack_target(valid_attacker)
 
@@ -158,7 +160,7 @@ func _process_counter_attack(delta: float) -> void:
 		_clear_invalid_attack_target()
 		return
 
-	if not CombatTargetValidation.apply_damage_to_target(
+	if not DamageService.apply_damage(
 		_attack_target, float(attack_damage), self
 	):
 		_clear_invalid_attack_target()

@@ -1,23 +1,27 @@
 class_name UnitCombatDamage
 extends RefCounted
 
-## Shared incoming-damage pipeline for combat units (sanitize, kill credit, apply, float text).
+## Compatibility helpers for combat-unit intake. Prefer DamageService.apply.
 
 
 static func apply_incoming(
 	victim: Node3D,
-	health: HealthComponent,
+	_health: HealthComponent,
 	attacker,
 	damage_amount: int
 ) -> Variant:
-	if health == null or health.current_health <= 0:
+	var result: Dictionary = DamageService.apply(
+		victim,
+		float(damage_amount),
+		attacker,
+		{
+			DamageService.OPT_IGNORE_HOSTILITY: true,
+			DamageService.OPT_BYPASS_ARMOR: true,
+		}
+	)
+	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return null
-
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(victim, attacker)
-	health.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(victim, damage_amount)
-	return attacker
+	return result.get(DamageService.RESULT_ATTACKER)
 
 
 static func should_enemy_retaliate(victim: Node3D, attacker) -> bool:
@@ -30,4 +34,4 @@ static func should_enemy_retaliate(victim: Node3D, attacker) -> bool:
 
 
 static func compute_armored_damage(amount: float, armor: int) -> int:
-	return maxi(1, int(amount) - armor)
+	return DamageService.compute_armored_damage(amount, armor)

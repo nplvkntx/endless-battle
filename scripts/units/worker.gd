@@ -276,15 +276,12 @@ func _is_alive() -> bool:
 
 
 func take_damage(amount: float, attacker = null) -> void:
-	if not _is_alive():
-		return
-
-	attacker = CombatTargetValidation.sanitize_damage_attacker(attacker)
-	CombatKillTracker.record_attacker(self, attacker)
-
-	var damage_amount := int(amount)
-	_health_component.take_damage(damage_amount)
-	FloatingDamageNumber.spawn(self, damage_amount)
+	DamageService.apply(
+		self,
+		amount,
+		attacker,
+		{DamageService.OPT_IGNORE_HOSTILITY: true}
+	)
 
 
 func get_current_health() -> int:

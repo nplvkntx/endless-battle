@@ -39,7 +39,7 @@ static func apply_radial_damage(
 			if damage_amount < 1.0:
 				damage_amount = 1.0
 
-			CombatTargetValidation.apply_damage_to_target(
+			DamageService.apply_damage(
 				node_variant, damage_amount, safe_attacker
 			)
 
