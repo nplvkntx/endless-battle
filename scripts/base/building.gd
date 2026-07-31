@@ -78,6 +78,7 @@ func _ready() -> void:
 	if _selection_indicator:
 		_selection_indicator.visible = false
 	call_deferred("_apply_default_navigation_obstacle")
+	BuffComponent.ensure_on(self)
 	_apply_building_data()
 	call_deferred("apply_team_visuals")
 	call_deferred("_setup_damage_visuals")
@@ -203,8 +204,31 @@ func take_damage(amount: float, attacker = null) -> void:
 	)
 
 
+## Buff-framework hook for DamageService. Identity when no damage-dealt buffs.
+func modify_outgoing_damage(amount: float, _target: Object, _damage_type: int) -> float:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	if buffs == null:
+		return amount
+	return buffs.modify_outgoing_damage(amount)
+
+
+## Buff-framework hook for DamageService. Identity when no damage-taken buffs.
+func modify_incoming_damage(amount: float, _attacker: Object, _damage_type: int) -> float:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	if buffs == null:
+		return amount
+	return buffs.modify_incoming_damage(amount)
+
+
+## Buff-framework invulnerability hook for DamageService.
+func is_damage_immune() -> bool:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	return buffs != null and buffs.is_invulnerable()
+
+
 ## Handles building destruction and notifies listeners through signals.
 func destroy_building() -> void:
+	BuffService.remove_all(self)
 	_refund_construction_costs_if_needed()
 	ConstructionReservations.release_build_slots_for_building(self)
 	_release_registered_builders_on_destroy()

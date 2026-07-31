@@ -106,6 +106,7 @@ func _ready() -> void:
 	_visual_facing_yaw_offset = _detect_visual_facing_yaw_offset()
 	_setup_visual_animator()
 	_setup_navigation_agent()
+	BuffComponent.ensure_on(self)
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
 
@@ -968,6 +969,28 @@ func take_damage(amount: float, attacker = null) -> void:
 	)
 
 
+## Buff-framework hook for DamageService. Identity when no damage-dealt buffs.
+func modify_outgoing_damage(amount: float, _target: Object, _damage_type: int) -> float:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	if buffs == null:
+		return amount
+	return buffs.modify_outgoing_damage(amount)
+
+
+## Buff-framework hook for DamageService. Identity when no damage-taken buffs.
+func modify_incoming_damage(amount: float, _attacker: Object, _damage_type: int) -> float:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	if buffs == null:
+		return amount
+	return buffs.modify_incoming_damage(amount)
+
+
+## Buff-framework invulnerability. Divine Protection still uses its own check first.
+func is_damage_immune() -> bool:
+	var buffs: BuffComponent = BuffComponent.find_on(self)
+	return buffs != null and buffs.is_invulnerable()
+
+
 ## Population food reserved by this unit when trained. Neutral/test units return 0.
 func get_food_supply_cost() -> int:
 	return UnitFoodSupply.get_cost(self)
@@ -975,6 +998,7 @@ func get_food_supply_cost() -> int:
 
 ## Handles unit death and notifies listeners through signals.
 func die() -> void:
+	BuffService.remove_all(self)
 	_release_reserved_food()
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
 	DeathEffects.play_unit_death(self)
