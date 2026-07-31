@@ -485,7 +485,16 @@ func set_movement_target(target: Vector3) -> bool:
 			if not _is_construction_approach_move_target(target):
 				_cancel_build_trip()
 
-	var applied: bool = super.set_movement_target(target)
+	# Unit.set_movement_target treats bare calls as player orders and runs
+	# _prepare_for_new_player_order(), which cancels gathering. Internal gather /
+	# build approach moves and AI unstuck nudges must bypass that path.
+	var applied: bool
+	if _issuing_order:
+		applied = super.set_movement_target(target)
+	elif _is_on_task_movement() or _ai_unstuck_internal_move:
+		applied = request_movement_target(target, RepathUrgency.NORMAL)
+	else:
+		applied = super.set_movement_target(target)
 	if not applied:
 		return false
 
@@ -775,7 +784,8 @@ func _finish_task_corner_nudge() -> void:
 			return
 
 	if _task_has_saved_destination:
-		super.set_movement_target(_task_movement_destination)
+		# Re-apply task destination without Unit's player-order cancel path.
+		set_movement_target(_task_movement_destination)
 
 
 func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) -> void:
