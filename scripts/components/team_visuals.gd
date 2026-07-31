@@ -166,6 +166,8 @@ static func _should_skip_building_visual_node(node: Node, owner: Node3D) -> bool
 		&"SelectionIndicator",
 		&"ConstructionProgressBar",
 		TEAM_ACCENT_MARKER_NAME,
+		BuildingDamageVisuals.HOST_NAME,
+		BuildingDamageVisuals.COMPONENT_NAME,
 	]
 	var current: Node = node
 	while current != null and current != owner:

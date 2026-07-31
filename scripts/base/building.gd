@@ -30,6 +30,8 @@ const SELECTION_PULSE_HALF_DURATION := 0.1
 ## Optional artist override for per-building construction stage models.
 ## When empty, ConstructionStageCatalog supplies defaults (or reveal placeholders).
 @export var construction_stages: ConstructionStageSet
+## Optional per-building smoke/fire damage FX tuning. Empty uses shared defaults.
+@export var damage_visual_profile: BuildingDamageVisualProfile
 
 var team_id: int = -1
 var building_state: StringName = &""
@@ -50,6 +52,7 @@ var _construction_started_msec: int = 0
 var _mesh_instance: MeshInstance3D
 var _visuals_root: Node3D
 var _construction_stage_visuals: ConstructionStageVisuals
+var _damage_visuals: BuildingDamageVisuals
 var _feedback_material_ready: bool = false
 var _mesh_material: StandardMaterial3D
 var _base_albedo: Color
@@ -74,6 +77,7 @@ func _ready() -> void:
 	call_deferred("_apply_default_navigation_obstacle")
 	_apply_building_data()
 	call_deferred("apply_team_visuals")
+	call_deferred("_setup_damage_visuals")
 
 
 func _apply_default_navigation_obstacle() -> void:
@@ -198,8 +202,21 @@ func destroy_building() -> void:
 	ConstructionReservations.release_build_slots_for_building(self)
 	_release_registered_builders_on_destroy()
 	_cleanup_construction_stage_visuals()
+	_cleanup_damage_visuals()
 	NodeSafety.prepare_node_for_death(self)
 	destroyed.emit(self)
+
+
+func _setup_damage_visuals() -> void:
+	if not is_inside_tree() or not NodeSafety.is_alive_node(self):
+		return
+	_damage_visuals = BuildingDamageVisuals.ensure_on_building(self, damage_visual_profile)
+
+
+func _cleanup_damage_visuals() -> void:
+	if _damage_visuals != null and is_instance_valid(_damage_visuals):
+		_damage_visuals.cleanup()
+	_damage_visuals = null
 
 
 func _release_registered_builders_on_destroy() -> void:
@@ -675,7 +692,12 @@ func _estimate_construction_progress_bar_height() -> float:
 
 
 func _collect_mesh_top_local_y(node: Node, top_y: float) -> float:
-	if node.name == CONSTRUCTION_PROGRESS_BAR_NAME or node.name == &"SelectionIndicator":
+	if (
+		node.name == CONSTRUCTION_PROGRESS_BAR_NAME
+		or node.name == &"SelectionIndicator"
+		or node.name == BuildingDamageVisuals.HOST_NAME
+		or node.name == BuildingDamageVisuals.COMPONENT_NAME
+	):
 		return top_y
 
 	if node is MeshInstance3D:
