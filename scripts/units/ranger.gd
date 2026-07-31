@@ -748,7 +748,7 @@ func _is_melee_threat_nearby() -> bool:
 		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
 			if not NodeSafety.is_alive_node(node_variant):
 				continue
-			if not node_variant is Unit or node_variant is Building:
+			if not node_variant is Unit:
 				continue
 			if not CombatTargetValidation.are_hostile(self, node_variant):
 				continue

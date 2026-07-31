@@ -140,8 +140,6 @@ func _scan_for_trigger() -> void:
 			if not node_variant is Unit:
 				continue
 			var unit: Unit = node_variant as Unit
-			if unit is Building:
-				continue
 			if not is_hostile_to(unit):
 				continue
 

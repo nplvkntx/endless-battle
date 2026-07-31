@@ -201,7 +201,7 @@ static func is_player_unit_attack_target(target: Variant) -> bool:
 	if target is EnemyDummy:
 		return true
 
-	if target is Unit and not target is Building and is_enemy_faction(target):
+	if target is Unit and is_enemy_faction(target):
 		return true
 
 	return is_attackable_enemy_building(target)
@@ -259,7 +259,7 @@ static func is_attack_target_for_attacker(attacker, target: Variant) -> bool:
 	if is_enemy_faction(attacker):
 		if is_neutral_creep(target):
 			return true
-		if target is Unit and not target is Building:
+		if target is Unit:
 			return true
 		if is_player_selectable_building(target):
 			return is_valid_combat_target(target)
@@ -269,7 +269,7 @@ static func is_attack_target_for_attacker(attacker, target: Variant) -> bool:
 		return true
 	if target is EnemyDummy:
 		return true
-	if target is Unit and not target is Building:
+	if target is Unit:
 		return true
 	if is_attackable_enemy_building(target):
 		return true
