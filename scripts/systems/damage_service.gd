@@ -4,14 +4,23 @@ extends RefCounted
 ## Single combat damage entry point for units, heroes, buildings, towers, cannons,
 ## creeps, projectiles, splash, and hero abilities.
 ##
-## Current callers preserve existing mitigation quirks. Options below are ready for
-## physical / magic / siege / true damage, crits, lifesteal, reduction, and buffs.
+## Damage × armor type multipliers live in DamageArmorMatrix (temporary identity).
+## Options below also support crits, lifesteal, reduction, and buffs.
 
 enum DamageType {
 	PHYSICAL = 0,
-	MAGIC = 1,
-	SIEGE = 2,
-	TRUE = 3,
+	PIERCE = 1,
+	MAGIC = 2,
+	SIEGE = 3,
+	TRUE = 4,
+}
+
+enum ArmorType {
+	LIGHT = 0,
+	MEDIUM = 1,
+	HEAVY = 2,
+	HERO = 3,
+	BUILDING = 4,
 }
 
 const OPT_DAMAGE_TYPE := &"damage_type"
@@ -32,6 +41,7 @@ const RESULT_DAMAGE_DEALT := &"damage_dealt"
 const RESULT_ATTACKER := &"attacker"
 const RESULT_WAS_CRITICAL := &"was_critical"
 const RESULT_DAMAGE_TYPE := &"damage_type"
+const RESULT_ARMOR_TYPE := &"armor_type"
 const RESULT_LIFESTEAL_HEALED := &"lifesteal_healed"
 
 
@@ -67,8 +77,10 @@ static func apply(
 		result[RESULT_BLOCKED] = true
 		return result
 
-	var damage_type: int = int(options.get(OPT_DAMAGE_TYPE, DamageType.PHYSICAL))
+	var damage_type: int = resolve_damage_type(safe_attacker, options)
+	var armor_type: int = resolve_armor_type(target_object)
 	result[RESULT_DAMAGE_TYPE] = damage_type
+	result[RESULT_ARMOR_TYPE] = armor_type
 
 	var working_amount: float = amount
 	working_amount = _apply_attacker_buffs(safe_attacker, target_object, working_amount, damage_type)
@@ -80,6 +92,7 @@ static func apply(
 	result[RESULT_WAS_CRITICAL] = was_critical
 
 	working_amount = _apply_damage_reduction(target_object, working_amount, damage_type, options)
+	working_amount *= DamageArmorMatrix.get_multiplier(damage_type, armor_type)
 
 	var damage_dealt: int = _resolve_mitigated_damage(
 		target_object,
@@ -138,6 +151,33 @@ static func compute_armored_damage(amount: float, armor: int) -> int:
 	return maxi(1, int(amount) - armor)
 
 
+static func resolve_damage_type(attacker: Object = null, options: Dictionary = {}) -> int:
+	if options.has(OPT_DAMAGE_TYPE):
+		return int(options[OPT_DAMAGE_TYPE])
+	if attacker != null and is_instance_valid(attacker):
+		if attacker.has_method(&"get_damage_type"):
+			return int(attacker.call(&"get_damage_type"))
+		if "damage_type" in attacker:
+			return int(attacker.get("damage_type"))
+	return DamageType.PHYSICAL
+
+
+static func resolve_armor_type(target: Object) -> int:
+	if target == null or not is_instance_valid(target):
+		return ArmorType.MEDIUM
+	if target.has_method(&"get_armor_type"):
+		return int(target.call(&"get_armor_type"))
+	if "armor_type" in target:
+		return int(target.get("armor_type"))
+	if _is_building_target(target):
+		return ArmorType.BUILDING
+	return ArmorType.MEDIUM
+
+
+static func get_type_multiplier(damage_type: int, armor_type: int) -> float:
+	return DamageArmorMatrix.get_multiplier(damage_type, armor_type)
+
+
 static func _empty_result(options: Dictionary) -> Dictionary:
 	return {
 		RESULT_APPLIED: false,
@@ -146,6 +186,7 @@ static func _empty_result(options: Dictionary) -> Dictionary:
 		RESULT_ATTACKER: null,
 		RESULT_WAS_CRITICAL: false,
 		RESULT_DAMAGE_TYPE: int(options.get(OPT_DAMAGE_TYPE, DamageType.PHYSICAL)),
+		RESULT_ARMOR_TYPE: ArmorType.MEDIUM,
 		RESULT_LIFESTEAL_HEALED: 0,
 	}
 

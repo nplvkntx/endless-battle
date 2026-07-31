@@ -27,6 +27,9 @@ const SELECTION_PULSE_SCALE := 1.04
 const SELECTION_PULSE_HALF_DURATION := 0.1
 
 @export var building_data: Resource
+## Temporary combat-type defaults (identity multipliers — no balance change yet).
+@export var damage_type: DamageService.DamageType = DamageService.DamageType.PHYSICAL
+@export var armor_type: DamageService.ArmorType = DamageService.ArmorType.BUILDING
 ## Optional artist override for per-building construction stage models.
 ## When empty, ConstructionStageCatalog supplies defaults (or reveal placeholders).
 @export var construction_stages: ConstructionStageSet

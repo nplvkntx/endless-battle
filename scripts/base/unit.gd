@@ -12,6 +12,9 @@ signal died(unit: Unit)
 @export var unit_data: Resource
 @export var move_speed: float = 5.0
 @export var stopping_distance: float = 0.25
+## Temporary combat-type defaults (identity multipliers — no balance change yet).
+@export var damage_type: DamageService.DamageType = DamageService.DamageType.PHYSICAL
+@export var armor_type: DamageService.ArmorType = DamageService.ArmorType.MEDIUM
 
 const UNSTUCK_STUCK_MOVE_RATIO := 0.2
 const UNSTUCK_CONFIRM_SECONDS := 1.25

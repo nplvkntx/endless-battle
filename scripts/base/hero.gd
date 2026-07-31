@@ -45,6 +45,7 @@ var _current_xp: float = 0.0
 
 
 func _ready() -> void:
+	armor_type = DamageService.ArmorType.HERO
 	_init_inventory()
 	super._ready()
 	if level < 1:
