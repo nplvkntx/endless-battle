@@ -1,0 +1,13 @@
+﻿Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
+
+Godot_v4.7-stable_win64.exe : SCRIPT ERROR: Parse Error: Expression is of type "Swordsman" so it can't be of type 
+"Hero".
+At C:\Users\Vartotojas\AppData\Local\Temp\ps-script-a67e4b43-68fc-4679-9411-c87711c5f531.ps1:103 char:1
++ & "C:\Users\Vartotojas\Desktop\Godot_v4.7-stable_win64.exe" --headles ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (SCRIPT ERROR: P...of type "Hero".:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   at: GDScript::reload (res://scripts/debug/verify_hero_ability_targeting.gd:140)
+ERROR: Failed to load script "res://scripts/debug/verify_hero_ability_targeting.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript_resource_format.cpp:46)

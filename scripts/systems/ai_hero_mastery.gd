@@ -216,6 +216,11 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	if army_mode in [EnemyArmyCommand.ArmyMode.DEFENDING, EnemyArmyCommand.ArmyMode.INTERCEPTING]:
 		defend_base = true
+	var creeping: bool = (
+		bool(context.get("creeping", false))
+		or army_mode == EnemyArmyCommand.ArmyMode.CREEPING
+		or EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP
+	)
 
 	return {
 		"health_ratio": health_ratio,
@@ -229,6 +234,7 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 		"rally": rally,
 		"retreating": retreating or health_ratio < LOW_HP_RATIO,
 		"defend_base": defend_base,
+		"creeping": creeping,
 		"aoe_needed": int(context.get("aoe_needed", EnemyArmyCommand.HERO_AOE_PLAYER_COUNT)),
 		"defensive_hp_ratio": float(
 			context.get("defensive_hp_ratio", EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO)
@@ -272,6 +278,9 @@ func _update_tactical_state(hero: Hero, situation: Dictionary) -> void:
 			desired = TacticalState.REPOSITION
 	elif int(situation.get("nearby_enemy_count", 0)) > 0:
 		desired = TacticalState.ENGAGE
+	elif bool(situation.get("creeping", false)):
+		## Stay with the creep squad even when briefly between camp pulls.
+		desired = TacticalState.FOLLOW_ARMY
 	else:
 		desired = TacticalState.FOLLOW_ARMY
 
@@ -370,6 +379,16 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 			score += 80.0
 		else:
 			score += 600.0
+		return score
+
+	## Neutral camps: keep hero in XP range and focus dangerous creeps.
+	if CombatTargetValidation.is_neutral_creep(target):
+		var creep_damage: int = 8
+		if "attack_damage" in target:
+			creep_damage = int(target.get("attack_damage"))
+		score -= float(creep_damage) * 8.0
+		if hp_ratio <= 0.35:
+			score -= 40.0
 		return score
 
 	var role: UnitFormationRole.Role = UnitFormationRole.get_role(target)
@@ -755,11 +774,14 @@ func _ranger_kite_move(ranger, situation: Dictionary, now: float) -> void:
 			return
 
 	_last_micro_move_at = now
+	var hold_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
+	if bool(situation.get("creeping", false)):
+		hold_mission = EnemyUnitMission.Mission.CREEP
 	EnemyArmyCommand.with_authorized_orders(func() -> void:
 		EnemyArmyCommand.command_hold_at_rally(
 			[ranger],
 			destination,
-			EnemyUnitMission.Mission.ATTACK
+			hold_mission
 		)
 	)
 

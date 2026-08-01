@@ -467,16 +467,26 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 		return
 
 	## Single owner for AI hero tactical state, targeting, and ability micro.
+	var nearby_hostiles: int = _count_player_military_near_hero(hero)
+	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	var creeping: bool = (
+		army_mode == EnemyArmyCommand.ArmyMode.CREEPING
+		or EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP
+	)
+	if creeping:
+		nearby_hostiles = maxi(nearby_hostiles, _count_neutral_creeps_near_hero(hero))
+
 	AIHeroMastery.tick(
 		hero as Hero,
 		{
 			"health_ratio": health_ratio,
-			"nearby_enemy_count": _count_player_military_near_hero(hero),
+			"nearby_enemy_count": nearby_hostiles,
 			"aoe_needed": EnemyArmyCommand.HERO_AOE_PLAYER_COUNT,
 			"defensive_hp_ratio": EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
 			"power_strike_range": EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE,
 			"execute_range": HERO_EXECUTE_SEARCH_RANGE,
 			"retreating": health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
+			"creeping": creeping,
 			"mastery_owned": true,
 		}
 	)
@@ -553,6 +563,40 @@ func _count_player_military_near_hero(hero) -> int:
 				continue
 
 			count += 1
+
+	return count
+
+
+func _count_neutral_creeps_near_hero(hero) -> int:
+	if not NodeSafety.is_alive_node(hero):
+		return 0
+
+	if not hero is Hero:
+		return 0
+
+	var count: int = 0
+	var search_range: float = EnemyArmyCommand.HERO_AOE_CHECK_RANGE
+	var tree: SceneTree = get_tree()
+
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		CombatTargetValidation.NEUTRAL_CREEP_GROUP
+	):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node3D:
+			continue
+		if not CombatTargetValidation.is_neutral_creep(node_variant):
+			continue
+		if CombatTargetValidation.get_target_current_health(node_variant) <= 0:
+			continue
+		if (
+			_horizontal_distance(
+				hero.global_position,
+				(node_variant as Node3D).global_position
+			)
+			> search_range
+		):
+			continue
+		count += 1
 
 	return count
 
@@ -885,6 +929,20 @@ func _enforce_army_regroup_when_waiting() -> void:
 			_abort_active_offensive_push(rally_position)
 			if _director != null:
 				_director.notify_army_losses()
+		return
+
+	## Creep manager owns the squad during CREEPING / creep assemble — do not yank it home.
+	if army_mode in [
+		EnemyArmyCommand.ArmyMode.CREEPING,
+		EnemyArmyCommand.ArmyMode.ASSEMBLING,
+	]:
+		return
+	if (
+		_creep_manager != null
+		and _creep_manager.is_creep_mission_active()
+	):
+		return
+	if EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP:
 		return
 
 	var should_hold: bool = (

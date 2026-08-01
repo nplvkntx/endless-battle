@@ -444,7 +444,7 @@ func request_assembled_group_move(
 	_assembly_target_mode = mode
 	_assembly_mission = mission
 	_assembly_use_attack_move = use_attack_move
-	return EnemyArmyCommand.begin_assembly(tree, mode, rally_position, units)
+	return EnemyArmyCommand.begin_assembly(tree, mode, rally_position, units, mission)
 
 
 func issue_immediate_group_move(
@@ -477,6 +477,17 @@ func can_launch_offensive_action() -> bool:
 	if mode == EnemyArmyCommand.ArmyMode.ASSEMBLING:
 		return false
 	return true
+
+
+func is_assembling_for_creep() -> bool:
+	return (
+		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ASSEMBLING
+		and _assembly_target_mode == EnemyArmyCommand.ArmyMode.CREEPING
+	)
+
+
+func get_assembly_target_mode() -> EnemyArmyCommand.ArmyMode:
+	return _assembly_target_mode
 
 
 func _evaluate_player_creep_opportunities(tree: SceneTree) -> void:

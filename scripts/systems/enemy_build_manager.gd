@@ -63,6 +63,7 @@ const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 const PLACEMENT_STABLE: StringName = &"stable"
 const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
 const PLACEMENT_ACADEMY: StringName = &"academy"
+const PLACEMENT_TOWER: StringName = &"tower"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
@@ -73,6 +74,7 @@ const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/comman
 const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
 const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
 const ACADEMY_SCENE: PackedScene = preload("res://scenes/buildings/academy.tscn")
+const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
 
 ## Building costs / HP — edit BuildingStats only (shared with player BuildManager).
@@ -97,6 +99,8 @@ const ARTILLERY_DEPOT_GOLD_COST: int = BuildingStats.ARTILLERY_DEPOT_GOLD_COST
 const ARTILLERY_DEPOT_WOOD_COST: int = BuildingStats.ARTILLERY_DEPOT_WOOD_COST
 const ACADEMY_GOLD_COST: int = BuildingStats.ACADEMY_GOLD_COST
 const ACADEMY_WOOD_COST: int = BuildingStats.ACADEMY_WOOD_COST
+const TOWER_GOLD_COST: int = BuildingStats.TOWER_GOLD_COST
+const TOWER_WOOD_COST: int = BuildingStats.TOWER_WOOD_COST
 const COMMAND_CENTER_GOLD_COST: int = BuildingStats.COMMAND_CENTER_GOLD_COST
 const COMMAND_CENTER_WOOD_COST: int = BuildingStats.COMMAND_CENTER_WOOD_COST
 const TIER_2_GOLD_COST: int = BuildingStats.CC_TIER_2_GOLD_COST
@@ -120,10 +124,16 @@ const FARM_MAX_HEALTH: int = BuildingStats.FARM_MAX_HEALTH
 const HERO_ALTAR_MAX_HEALTH: int = BuildingStats.HERO_ALTAR_MAX_HEALTH
 const STABLE_MAX_HEALTH: int = BuildingStats.ENEMY_STABLE_MAX_HEALTH
 const COMMAND_CENTER_MAX_HEALTH: int = BuildingStats.COMMAND_CENTER_MAX_HEALTH
+const TOWER_MAX_HEALTH: int = BuildingStats.TOWER_MAX_HEALTH
 const MAX_PARALLEL_CONSTRUCTIONS: int = 3
 const STUCK_CONSTRUCTION_TIMEOUT_MSEC: int = 45000
 const FARM_PLACEMENT_FAIL_COOLDOWN_SECONDS: float = 4.0
 const FARM_RESOURCE_RESERVATION_TTL_MSEC: int = 30000
+const TOWER_PLACEMENT_FAIL_COOLDOWN_SECONDS: float = 5.0
+const TOWER_RESOURCE_RESERVATION_TTL_MSEC: int = 25000
+const TOWER_ARMY_GOLD_BUFFER: int = UnitStats.SWORDSMAN_GOLD_COST * 2
+const TOWER_HERO_GOLD_BUFFER: int = HeroStats.TRAIN_GOLD_COST
+const MIN_ARMY_BEFORE_OPTIONAL_TOWERS: int = 4
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gather_manager_path: NodePath
@@ -145,6 +155,10 @@ var _macro_emergency_timer: float = 0.0
 var _farm_reservation_active: bool = false
 var _farm_reservation_msec: int = 0
 var _farm_placement_fail_cooldown_until: float = -1.0
+var _tower_reservation_active: bool = false
+var _tower_reservation_msec: int = 0
+var _tower_placement_fail_cooldown_until: float = -1.0
+var _tower_lane_bindings: Dictionary = {} ## instance_id -> lane
 var _cc_worker_queue_connected: bool = false
 var _building_scan_frame: int = -1
 var _cached_enemy_buildings: Array = []
@@ -296,6 +310,10 @@ func _run_build_order() -> void:
 
 	_try_sustain_blacksmith_research()
 
+	if _should_build_tower():
+		if _try_place_tower():
+			return
+
 	if _should_build_hero_altar():
 		if _try_place_building(PLACEMENT_HERO_ALTAR):
 			return
@@ -409,6 +427,10 @@ func _run_early_army_build_order() -> void:
 
 	_try_train_early_army_hero()
 	_try_train_early_army_pikemen()
+
+	## Emergency / early-rush towers only — do not spam during opening army build.
+	if _should_build_tower(true):
+		_try_place_tower(true)
 
 	if _needs_farm():
 		_try_place_farm(false)
@@ -536,6 +558,10 @@ func _run_tier_2_build_order() -> void:
 
 	# Essential early-army replacement only — avoid spending the Tier 2 stockpile.
 	_try_replace_essential_tier_2_pikemen()
+
+	## Emergency towers only — do not drain the Tier 2 upgrade bank.
+	if _should_build_tower(true):
+		_try_place_tower(true)
 
 	if _update_tier_2_town_hall_upgrade():
 		return
@@ -1067,6 +1093,7 @@ func _should_place_barracks() -> bool:
 
 func _run_macro_emergency_checks() -> void:
 	_sync_farm_reservation()
+	_expire_tower_reservation_if_needed()
 
 	_macro_emergency_timer += TICK_INTERVAL_SECONDS
 	if _macro_emergency_timer < MACRO_EMERGENCY_INTERVAL_SECONDS:
@@ -1094,6 +1121,11 @@ func _run_macro_emergency_checks() -> void:
 	var gather_manager: EnemyGatherManager = _get_enemy_gather_manager()
 	if gather_manager != null:
 		gather_manager.request_gather_rebalance()
+
+	## Throttled attack-path learning (also runs when considering towers).
+	var primary_cc: CommandCenter = _resolve_primary_command_center()
+	if primary_cc != null:
+		EnemyAttackPathDefense.update_threat_paths(get_tree(), primary_cc.global_position)
 
 
 func _update_enemy_hero_restoration() -> bool:
@@ -1835,6 +1867,406 @@ func _begin_farm_placement_fail_cooldown() -> void:
 
 func _is_farm_placement_on_fail_cooldown() -> bool:
 	return _get_match_elapsed_seconds() < _farm_placement_fail_cooldown_until
+
+
+func _should_build_tower(emergency_only: bool = false) -> bool:
+	_sync_tower_reservation()
+	_prune_tower_lane_bindings()
+
+	if _is_tower_placement_on_fail_cooldown():
+		return false
+
+	if _is_building_type_in_progress(PLACEMENT_TOWER):
+		return false
+
+	if not _can_start_additional_construction(PLACEMENT_TOWER):
+		return false
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null:
+		return false
+
+	var need: Dictionary = _evaluate_tower_build_need(emergency_only)
+	if not bool(need.get("should_build", false)):
+		return false
+
+	if not _can_afford_tower_without_starving_core():
+		return false
+
+	return true
+
+
+func _try_place_tower(emergency_only: bool = false) -> bool:
+	if _is_tower_placement_on_fail_cooldown():
+		return false
+
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null:
+		return false
+
+	var need: Dictionary = _evaluate_tower_build_need(emergency_only)
+	if not bool(need.get("should_build", false)):
+		return false
+
+	_ensure_tower_reservation()
+	var respect_reservations: bool = not _tower_reservation_active
+	if not EnemyResourceManager.can_afford(TOWER_GOLD_COST, TOWER_WOOD_COST, respect_reservations):
+		return false
+
+	var parent: Node = get_node_or_null(buildings_parent_path)
+	if parent == null or not parent.is_inside_tree():
+		return false
+
+	var anchor_position: Vector3 = command_center.global_position
+	## Prefer expansion CC when fortifying an exposed expansion lane.
+	if need.get("lane", &"") == EnemyAttackPathDefense.LANE_EXPANSION:
+		var expansion_cc: CommandCenter = _find_expansion_command_center()
+		if expansion_cc != null:
+			anchor_position = expansion_cc.global_position
+
+	var existing_buildings: Array[Node3D] = EnemyBuildPlacement.collect_nearby_buildings(
+		anchor_position,
+		parent
+	)
+	var lane: StringName = need.get("lane", EnemyAttackPathDefense.LANE_CENTER)
+	var placement: Dictionary = EnemyAttackPathDefense.find_tower_position(
+		anchor_position,
+		lane,
+		existing_buildings,
+		parent,
+		_get_navigation_map()
+	)
+	var position: Vector3 = placement.get("position", Vector3.INF)
+	if not position.is_finite():
+		var reject: StringName = placement.get("reject", &"blocked")
+		_begin_tower_placement_fail_cooldown()
+		_release_tower_reservation()
+		if OS.is_debug_build() and EnemyAIDebug.is_enabled():
+			EnemyAIDebug.log_event(
+				"AI tower candidate rejected: %s" % String(reject).replace("_", " ")
+			)
+		return false
+
+	if not _can_start_additional_construction(PLACEMENT_TOWER):
+		_release_tower_reservation()
+		return false
+
+	var footprint: Vector2 = EnemyBuildPlacement.get_footprint(PLACEMENT_TOWER)
+	var footprint_reservation_id: int = ConstructionReservations.reserve_footprint(
+		position,
+		footprint,
+		self,
+		ConstructionReservations.FOOTPRINT_RESERVATION_TTL_MSEC
+	)
+
+	if not EnemyResourceManager.try_spend(TOWER_GOLD_COST, TOWER_WOOD_COST, respect_reservations):
+		ConstructionReservations.release_footprint(footprint_reservation_id)
+		return false
+
+	var building: Building = _instantiate_building(PLACEMENT_TOWER)
+	if not NodeSafety.is_alive_node(building):
+		EnemyResourceManager.add_gold(TOWER_GOLD_COST)
+		EnemyResourceManager.add_wood(TOWER_WOOD_COST)
+		ConstructionReservations.release_footprint(footprint_reservation_id)
+		_release_tower_reservation()
+		EnemyAttackPathDefense.remember_failed_site(position)
+		return false
+
+	_tag_enemy_building(building)
+	_add_health_component_if_needed(building, PLACEMENT_TOWER)
+	parent.add_child(building)
+	if not NodeSafety.is_alive_node(building):
+		EnemyResourceManager.add_gold(TOWER_GOLD_COST)
+		EnemyResourceManager.add_wood(TOWER_WOOD_COST)
+		ConstructionReservations.release_footprint(footprint_reservation_id)
+		_release_tower_reservation()
+		EnemyAttackPathDefense.remember_failed_site(position)
+		return false
+
+	building.global_position = position
+	building.set_construction_cost(TOWER_GOLD_COST, TOWER_WOOD_COST, true)
+	building.start_under_construction()
+	building.setup_construction(
+		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
+	)
+	ConstructionReservations.release_footprint(footprint_reservation_id)
+	_bind_tower_lane(building, lane)
+	_connect_tower_destroyed_signal(building)
+	_assign_nearest_builder(building)
+	## Optional second nearby builder for faster fortification under pressure.
+	if need.get("reason", &"") in [
+		EnemyAttackPathDefense.REASON_EMERGENCY,
+		EnemyAttackPathDefense.REASON_REPEATED_ATTACK,
+	]:
+		_assign_nearest_builder(building)
+
+	_tower_reservation_active = false
+	_tower_reservation_msec = 0
+	_tower_placement_fail_cooldown_until = -1.0
+	EnemyBuildPlacement.clear_tower_lane_preference()
+	_log_building_started(PLACEMENT_TOWER)
+	_log_tower_placement(need, placement)
+	return true
+
+
+func _evaluate_tower_build_need(emergency_only: bool) -> Dictionary:
+	var command_center: CommandCenter = _resolve_primary_command_center()
+	if command_center == null:
+		return {"should_build": false}
+
+	var parent: Node = get_node_or_null(buildings_parent_path)
+	var existing: Array[Node3D] = []
+	if parent != null:
+		existing = EnemyBuildPlacement.collect_nearby_buildings(
+			command_center.global_position,
+			parent
+		)
+
+	var coverage_data: Dictionary = EnemyAttackPathDefense.compute_lane_coverage(
+		command_center.global_position,
+		existing
+	)
+	var phase_name: String = "MID_GAME"
+	if _director != null:
+		phase_name = EnemyStrategicDirector.strategic_phase_to_string(_director.get_strategic_phase())
+	var tower_count: int = _count_living_towers()
+	var army_count: int = _count_living_military_units()
+	var threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(get_tree())
+	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
+	var is_emergency: bool = bool(emergency_threat.get("threatened", false)) or (
+		bool(threat.get("threatened", false))
+		and threat.get("reason", &"") in [&"town_center", &"base", &"economy"]
+	)
+	var early_aggression: bool = (
+		bool(threat.get("threatened", false))
+		and phase_name in ["OPENING", "EARLY_ARMY", "CREEPING"]
+	)
+	var has_expansion: bool = _count_living_command_centers() >= 2
+	var expansion_exposed: bool = has_expansion and _is_expansion_route_exposed()
+	var opening_incomplete: bool = (
+		not _has_completed_building(PLACEMENT_BARRACKS)
+		or not _has_completed_building(PLACEMENT_HERO_ALTAR)
+		or not _has_living_enemy_hero()
+	)
+	var weak_army_expanding: bool = (
+		(
+			_director != null
+			and _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.EXPANSION)
+		)
+		and army_count < MIN_ARMY_BEFORE_OPTIONAL_TOWERS + 2
+	)
+
+	var context: Dictionary = {
+		"tower_count": tower_count,
+		"tower_cap": EnemyAttackPathDefense.get_tower_cap_for_phase_name(phase_name),
+		"food_blocked": _needs_farm() or not EnemyResourceManager.has_food_supply(1),
+		"missing_workers": _count_enemy_workers() < MIN_WORKERS_BEFORE_MILITARY,
+		"core_army_starved": (
+			not _has_living_enemy_hero()
+			or (
+				army_count < MIN_ARMY_BEFORE_OPTIONAL_TOWERS
+				and not is_emergency
+				and not early_aggression
+			)
+		),
+		"opening_core_incomplete": opening_incomplete,
+		"emergency": is_emergency,
+		"early_aggression": early_aggression,
+		"weak_army_expanding": weak_army_expanding,
+		"has_production": _has_completed_building(PLACEMENT_BARRACKS),
+		"economy_ready": (
+			_count_enemy_workers() >= MIN_WORKERS_BEFORE_MILITARY
+			and _count_completed_farms() >= 1
+			and EnemyResourceManager.gold >= TOWER_GOLD_COST + TOWER_ARMY_GOLD_BUFFER
+		),
+		"expansion_exposed": expansion_exposed,
+		"has_expansion": has_expansion,
+		"workers_exposed": bool(threat.get("reason", &"") == &"workers") or early_aggression,
+		"lane_coverage": coverage_data.get("coverage", {}),
+		"towers_per_lane": coverage_data.get("towers_per_lane", {}),
+	}
+
+	var need: Dictionary = EnemyAttackPathDefense.evaluate_build_need(
+		get_tree(),
+		command_center.global_position,
+		context
+	)
+	if emergency_only and not bool(need.get("should_build", false)):
+		return need
+	if emergency_only and not (
+		need.get("reason", &"") in [
+			EnemyAttackPathDefense.REASON_EMERGENCY,
+			EnemyAttackPathDefense.REASON_EARLY_RUSH,
+			EnemyAttackPathDefense.REASON_REPEATED_ATTACK,
+			EnemyAttackPathDefense.REASON_WEAK_EXPANSION,
+		]
+	):
+		return {"should_build": false}
+
+	return need
+
+
+func _can_afford_tower_without_starving_core() -> bool:
+	if _has_excess_resources():
+		return EnemyResourceManager.can_afford(TOWER_GOLD_COST, TOWER_WOOD_COST, not _tower_reservation_active)
+
+	var gold_buffer: int = TOWER_ARMY_GOLD_BUFFER
+	if not _has_living_enemy_hero():
+		gold_buffer = maxi(gold_buffer, TOWER_HERO_GOLD_BUFFER)
+
+	## Emergency defense may spend closer to the raw tower cost.
+	var threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
+	if bool(threat.get("threatened", false)):
+		gold_buffer = UnitStats.SWORDSMAN_GOLD_COST
+
+	return EnemyResourceManager.can_afford(
+		TOWER_GOLD_COST + gold_buffer,
+		TOWER_WOOD_COST + (FARM_WOOD_COST if _needs_farm() else 0),
+		not _tower_reservation_active
+	)
+
+
+func _count_living_towers() -> int:
+	var count: int = 0
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is Tower or not _is_living_building(node as Building):
+			continue
+		count += 1
+	return count
+
+
+func _find_expansion_command_center() -> CommandCenter:
+	var primary: CommandCenter = _resolve_primary_command_center()
+	if primary == null:
+		return null
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if not node is CommandCenter or not _is_living_building(node as Building):
+			continue
+		var cc: CommandCenter = node as CommandCenter
+		if cc == primary:
+			continue
+		return cc
+	return null
+
+
+func _is_expansion_route_exposed() -> bool:
+	var primary: CommandCenter = _resolve_primary_command_center()
+	var expansion: CommandCenter = _find_expansion_command_center()
+	if primary == null or expansion == null:
+		return false
+
+	var parent: Node = get_node_or_null(buildings_parent_path)
+	if parent == null:
+		return true
+
+	var buildings: Array[Node3D] = EnemyBuildPlacement.collect_nearby_buildings(
+		expansion.global_position,
+		parent
+	)
+	for building: Node3D in buildings:
+		if building is Tower and is_instance_valid(building):
+			var mid: Vector3 = (primary.global_position + expansion.global_position) * 0.5
+			var to_mid: Vector3 = building.global_position - mid
+			to_mid.y = 0.0
+			if to_mid.length() <= BuildingStats.TOWER_ATTACK_RANGE + 4.0:
+				return false
+	return true
+
+
+func _ensure_tower_reservation() -> void:
+	_expire_tower_reservation_if_needed()
+	if _tower_reservation_active:
+		return
+	EnemyResourceManager.reserve_resources(TOWER_GOLD_COST, TOWER_WOOD_COST)
+	_tower_reservation_active = true
+	_tower_reservation_msec = Time.get_ticks_msec()
+
+
+func _release_tower_reservation() -> void:
+	if not _tower_reservation_active:
+		return
+	EnemyResourceManager.release_reservation(TOWER_GOLD_COST, TOWER_WOOD_COST)
+	_tower_reservation_active = false
+	_tower_reservation_msec = 0
+
+
+func _expire_tower_reservation_if_needed() -> void:
+	if not _tower_reservation_active:
+		return
+	if Time.get_ticks_msec() - _tower_reservation_msec >= TOWER_RESOURCE_RESERVATION_TTL_MSEC:
+		_release_tower_reservation()
+
+
+func _sync_tower_reservation() -> void:
+	_expire_tower_reservation_if_needed()
+	if not _is_building_type_in_progress(PLACEMENT_TOWER) and not _tower_reservation_active:
+		return
+	if not _is_building_type_in_progress(PLACEMENT_TOWER) and _tower_reservation_active:
+		## Drop stale holds when no tower is under construction and TTL already handled.
+		if Time.get_ticks_msec() - _tower_reservation_msec >= TOWER_RESOURCE_RESERVATION_TTL_MSEC:
+			_release_tower_reservation()
+
+
+func _begin_tower_placement_fail_cooldown() -> void:
+	_tower_placement_fail_cooldown_until = (
+		_get_match_elapsed_seconds() + TOWER_PLACEMENT_FAIL_COOLDOWN_SECONDS
+	)
+
+
+func _is_tower_placement_on_fail_cooldown() -> bool:
+	return _get_match_elapsed_seconds() < _tower_placement_fail_cooldown_until
+
+
+func _bind_tower_lane(building: Building, lane: StringName) -> void:
+	if not NodeSafety.is_alive_node(building):
+		return
+	_tower_lane_bindings[building.get_instance_id()] = lane
+
+
+func _prune_tower_lane_bindings() -> void:
+	var stale: Array[int] = []
+	for instance_id: Variant in _tower_lane_bindings.keys():
+		var node: Object = instance_from_id(int(instance_id))
+		if node == null or not is_instance_valid(node):
+			stale.append(int(instance_id))
+	for instance_id: int in stale:
+		_tower_lane_bindings.erase(instance_id)
+
+
+func _connect_tower_destroyed_signal(building: Building) -> void:
+	if not NodeSafety.is_alive_node(building):
+		return
+	var health: Node = building.get_node_or_null("HealthComponent")
+	if health == null:
+		return
+	if health.has_signal("health_depleted") and not health.health_depleted.is_connected(
+		_on_enemy_tower_destroyed.bind(building)
+	):
+		health.health_depleted.connect(_on_enemy_tower_destroyed.bind(building), CONNECT_ONE_SHOT)
+
+
+func _on_enemy_tower_destroyed(building: Building) -> void:
+	if building == null:
+		return
+	var lane: StringName = _tower_lane_bindings.get(building.get_instance_id(), &"")
+	_tower_lane_bindings.erase(building.get_instance_id())
+	var pos: Vector3 = building.global_position if is_instance_valid(building) else Vector3.INF
+	EnemyAttackPathDefense.notify_tower_destroyed(pos, lane)
+
+
+func _log_tower_placement(need: Dictionary, placement: Dictionary) -> void:
+	if not OS.is_debug_build() or not EnemyAIDebug.is_enabled():
+		return
+	var lane: StringName = need.get("lane", placement.get("lane", &"center"))
+	var reason: StringName = need.get("reason", &"")
+	var score: float = float(placement.get("score", need.get("score", 0.0)))
+	EnemyAIDebug.log_event("AI tower lane selected: %s" % String(lane))
+	EnemyAIDebug.log_event(
+		"AI tower reason: %s" % EnemyAttackPathDefense.reason_to_debug_text(reason)
+	)
+	EnemyAIDebug.log_event("AI tower placed at lane score: %.2f" % score)
 
 
 func _should_build_expansion_command_center() -> bool:
@@ -2812,11 +3244,18 @@ func _try_place_building_at_anchor(
 		PLACEMENT_ACADEMY:
 			gold_cost = ACADEMY_GOLD_COST
 			wood_cost = ACADEMY_WOOD_COST
+		PLACEMENT_TOWER:
+			gold_cost = TOWER_GOLD_COST
+			wood_cost = TOWER_WOOD_COST
 		_:
 			return false
 
-	# Farm holds already reserve the cost; spend from total while reserved.
-	var respect_reservations: bool = not (is_farm and _farm_reservation_active)
+	# Farm/tower holds already reserve the cost; spend from total while reserved.
+	var respect_reservations: bool = true
+	if is_farm and _farm_reservation_active:
+		respect_reservations = false
+	elif building_type == PLACEMENT_TOWER and _tower_reservation_active:
+		respect_reservations = false
 	if not EnemyResourceManager.can_afford(gold_cost, wood_cost, respect_reservations):
 		return false
 
@@ -2953,6 +3392,8 @@ func _log_building_started(building_type: StringName) -> void:
 			EnemyAIDebug.log_expanding()
 		PLACEMENT_FARM:
 			EnemyAIDebug.log_building("Farm")
+		PLACEMENT_TOWER:
+			EnemyAIDebug.log_building("Tower")
 		_:
 			pass
 
@@ -2977,6 +3418,8 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return ARTILLERY_DEPOT_SCENE.instantiate() as Building
 		PLACEMENT_ACADEMY:
 			return ACADEMY_SCENE.instantiate() as Building
+		PLACEMENT_TOWER:
+			return TOWER_SCENE.instantiate() as Building
 		_:
 			return null
 
@@ -3007,6 +3450,8 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 			max_health = COMMAND_CENTER_MAX_HEALTH
 		PLACEMENT_STABLE:
 			max_health = STABLE_MAX_HEALTH
+		PLACEMENT_TOWER:
+			max_health = TOWER_MAX_HEALTH
 		_:
 			return
 
@@ -3271,6 +3716,8 @@ func _node_matches_building_type(node: Node, building_type: StringName) -> bool:
 			return node is ArtilleryDepot
 		PLACEMENT_ACADEMY:
 			return node is Academy
+		PLACEMENT_TOWER:
+			return node is Tower
 		_:
 			return false
 

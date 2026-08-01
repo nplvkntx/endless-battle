@@ -32,6 +32,9 @@ const ATTACK_STANDARD_MIN_NON_HERO_UNITS := 6
 const ATTACK_TIMER_MIN_NON_HERO_UNITS := 12
 const ATTACK_DESPERATE_MIN_NON_HERO_UNITS := 6
 const ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS := 5
+## Early creep escort: hero + 4 military minimum (prefer 5–7).
+const CREEP_MIN_NON_HERO_UNITS := 4
+const CREEP_PREFERRED_NON_HERO_UNITS := 5
 const ATTACK_TIMER_STANDARD_SECONDS := 240.0
 const ATTACK_TIMER_DESPERATE_SECONDS := 360.0
 const DEBUG_ATTACK_GATE := false
@@ -56,7 +59,7 @@ const PLAYER_CREEP_DETECT_RADIUS := 28.0
 const CREEP_HERO_WAIT_RADIUS := 18.0
 const PHASE_EARLY_SECONDS := 300.0
 const PHASE_MID_SECONDS := 600.0
-const PHASE_EARLY_MIN_ARMY := 5
+const PHASE_EARLY_MIN_ARMY := 4
 const PHASE_MID_MIN_ARMY := 12
 const PHASE_LATE_MIN_ARMY := 20
 const GROUP_MISSION_COHESION_RATIO := 0.75
@@ -79,6 +82,8 @@ const HERO_MAX_DISTANCE_FROM_ARMY := 16.0
 const HERO_RETREAT_HP_RATIO := 0.35
 const HERO_DEFENSE_CRITICAL_RETREAT_HP_RATIO := 0.20
 const HERO_WAVE_JOIN_HP_RATIO := 0.60
+## Creeping joins sooner than attack waves — do not demand near-full HP.
+const HERO_CREEP_JOIN_HP_RATIO := 0.45
 const HERO_DEFENSIVE_ABILITY_HP_RATIO := 0.40
 const DEFENSE_GATHER_MAX_DISTANCE := 42.0
 const DEFENSE_HERO_EXTRA_GATHER_DISTANCE := 14.0
@@ -1146,7 +1151,8 @@ static func begin_assembly(
 	tree: SceneTree,
 	target_mode: ArmyMode,
 	rally_position: Vector3,
-	required_units: Array
+	required_units: Array,
+	hold_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.RALLY
 ) -> bool:
 	if rally_position == Vector3.ZERO:
 		return false
@@ -1171,8 +1177,15 @@ static func begin_assembly(
 	)
 	_debug_state_change(previous_mode, ArmyMode.ASSEMBLING)
 
+	## Keep creep/attack ownership during assemble — RALLY lets wave regroup steal the squad.
+	var assemble_mission: EnemyUnitMission.Mission = hold_mission
+	if target_mode == ArmyMode.CREEPING:
+		assemble_mission = EnemyUnitMission.Mission.CREEP
+	elif target_mode == ArmyMode.ATTACKING:
+		assemble_mission = EnemyUnitMission.Mission.ATTACK
+
 	with_authorized_orders(func() -> void:
-		command_hold_at_rally(required_units, _assembly_rally, EnemyUnitMission.Mission.RALLY)
+		command_hold_at_rally(required_units, _assembly_rally, assemble_mission)
 	)
 
 	return true
@@ -1275,7 +1288,9 @@ static func build_coordinated_combat_group(
 	tree: SceneTree,
 	rally_position: Vector3,
 	min_non_hero: int,
-	require_hero: bool = true
+	require_hero: bool = true,
+	hero_min_hp_ratio: float = HERO_WAVE_JOIN_HP_RATIO,
+	hero_join_min_non_hero: int = ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
 ) -> Dictionary:
 	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
 	var regrouped_non_hero: Array = filter_units_near_rally(
@@ -1291,7 +1306,7 @@ static func build_coordinated_combat_group(
 		var army_center: Vector3 = compute_army_center(regrouped_non_hero)
 		var hero_ready: bool = (
 			hero != null
-			and regrouped_non_hero.size() >= ATTACK_HERO_JOIN_MIN_NON_HERO_UNITS
+			and regrouped_non_hero.size() >= hero_join_min_non_hero
 			and army_center != Vector3.ZERO
 			and is_living_combat_unit(hero)
 		)
@@ -1299,13 +1314,15 @@ static func build_coordinated_combat_group(
 			can_launch = false
 		elif hero_ready:
 			if (
-				is_hero_healthy_enough_for_wave(hero)
+				get_health_ratio(hero) >= hero_min_hp_ratio
 				and horizontal_distance(hero.global_position, army_center)
 				<= HERO_MAX_DISTANCE_FROM_ARMY
 			):
 				group_units.append(hero)
 			elif require_hero:
 				can_launch = false
+		elif require_hero:
+			can_launch = false
 
 	var hero_included: bool = false
 	for unit: Variant in group_units:
@@ -2957,9 +2974,38 @@ static func pull_straggler_units_to_rally(
 	if rally_position == Vector3.ZERO:
 		return
 
+	## Never yank an active creep/attack/defend squad back to base as "stragglers".
+	if get_army_mode() in [
+		ArmyMode.CREEPING,
+		ArmyMode.ATTACKING,
+		ArmyMode.DEFENDING,
+		ArmyMode.INTERCEPTING,
+		ArmyMode.RETREATING,
+		ArmyMode.ASSEMBLING,
+	]:
+		return
+
+	var main_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_main_army_mission()
+	if main_mission in [
+		EnemyUnitMission.Mission.CREEP,
+		EnemyUnitMission.Mission.ATTACK,
+		EnemyUnitMission.Mission.DEFEND,
+		EnemyUnitMission.Mission.RETREAT,
+	]:
+		return
+
 	var stragglers: Array = []
 	for unit: Variant in collect_living_combat_units(tree):
 		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+
+		var unit_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit as Node)
+		if unit_mission in [
+			EnemyUnitMission.Mission.CREEP,
+			EnemyUnitMission.Mission.ATTACK,
+			EnemyUnitMission.Mission.DEFEND,
+			EnemyUnitMission.Mission.RETREAT,
+		]:
 			continue
 
 		if horizontal_distance((unit as Node3D).global_position, rally_position) > max_distance:
@@ -4151,8 +4197,20 @@ static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) ->
 
 static func build_creep_army(tree: SceneTree, match_elapsed_seconds: float = 0.0) -> Dictionary:
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
-	var min_non_hero: int = get_phase_min_army_size(match_elapsed_seconds)
-	return build_coordinated_combat_group(tree, rally_position, min_non_hero, true)
+	var director: EnemyStrategicDirector = find_strategic_director(tree)
+	var min_non_hero: int = CREEP_MIN_NON_HERO_UNITS
+	if director != null:
+		min_non_hero = maxi(CREEP_MIN_NON_HERO_UNITS, director.get_min_army_size_for_current_phase())
+	elif match_elapsed_seconds > 0.0:
+		min_non_hero = maxi(CREEP_MIN_NON_HERO_UNITS, get_phase_min_army_size(match_elapsed_seconds))
+	return build_coordinated_combat_group(
+		tree,
+		rally_position,
+		min_non_hero,
+		true,
+		HERO_CREEP_JOIN_HP_RATIO,
+		CREEP_MIN_NON_HERO_UNITS
+	)
 
 
 static func is_enemy_base_threatened(tree: SceneTree) -> bool:
@@ -4742,6 +4800,16 @@ static func is_hero_healthy_enough_for_wave(hero) -> bool:
 		return false
 
 	return get_health_ratio(hero) >= HERO_WAVE_JOIN_HP_RATIO
+
+
+static func is_hero_healthy_enough_for_creep(hero) -> bool:
+	if not NodeSafety.is_alive_node(hero):
+		return false
+
+	if not hero is Hero:
+		return false
+
+	return get_health_ratio(hero) >= HERO_CREEP_JOIN_HP_RATIO
 
 
 static func get_health_ratio(node) -> float:

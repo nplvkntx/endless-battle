@@ -309,6 +309,35 @@ static func log_creeping_camp_selected(camp_name: String, distance: float) -> vo
 	)
 
 
+static func log_creep_squad_ready(non_hero_count: int) -> void:
+	log_once(
+		"creeping",
+		"AI creep squad ready: hero + %d units" % non_hero_count
+	)
+
+
+static func log_creep_camp_selected_safety(camp_name: String, safety: float) -> void:
+	log_once(
+		"creeping_camp",
+		"AI selected creep camp: %s, estimated safety: %.2f" % [camp_name, safety]
+	)
+
+
+static func log_creep_mission_started() -> void:
+	log_once("creeping", "AI creep mission started")
+
+
+static func log_creep_retreat(reason: String) -> void:
+	var message: String = "AI retreating from camp"
+	if not reason.is_empty():
+		message += ": %s" % reason
+	log_once("retreat", message)
+
+
+static func log_creep_camp_cleared(camp_name: String) -> void:
+	log_event("AI cleared camp: %s" % camp_name)
+
+
 static func log_creeping_hero_level(level: int) -> void:
 	if level <= _last_creeping_hero_level:
 		return

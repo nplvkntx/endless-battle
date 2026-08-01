@@ -127,6 +127,70 @@ enum LayoutZone {
 static var last_placement_debug: Dictionary = {}
 static var debug_placement_logs: bool = false
 
+## Optional bias for tower planned-slot order (set by EnemyAttackPathDefense).
+static var preferred_tower_lane: StringName = &""
+
+
+static func set_tower_lane_preference(lane: StringName) -> void:
+	preferred_tower_lane = lane
+
+
+static func clear_tower_lane_preference() -> void:
+	preferred_tower_lane = &""
+
+
+static func resolve_base_frame_public(anchor: Vector3) -> Dictionary:
+	return _resolve_base_frame(anchor)
+
+
+static func local_front_right_public(point: Vector3, anchor: Vector3, frame: Dictionary) -> Vector2:
+	return _local_front_right(point, anchor, frame)
+
+
+static func get_tower_slots_for_lane(
+	anchor: Vector3,
+	lane: StringName,
+	existing_buildings: Array[Node3D]
+) -> Array[Vector3]:
+	var previous_lane: StringName = preferred_tower_lane
+	preferred_tower_lane = lane
+	var ground_y: float = get_ground_y(&"tower")
+	var frame: Dictionary = _resolve_base_frame(anchor)
+	var slots: Array[Vector3] = []
+	var unique: Dictionary = {}
+	_append_tower_slots(slots, unique, anchor, ground_y, frame, existing_buildings)
+	preferred_tower_lane = previous_lane
+	return slots
+
+
+static func tower_blocks_reserved_lanes(
+	candidate: Vector3,
+	existing_buildings: Array[Node3D]
+) -> bool:
+	var footprint: Vector2 = get_footprint(&"tower")
+	var frame: Dictionary = {}
+	var anchor: Vector3 = Vector3.ZERO
+	for building: Node3D in existing_buildings:
+		if building is CommandCenter and is_instance_valid(building):
+			anchor = building.global_position
+			frame = _resolve_base_frame(anchor)
+			break
+	if frame.is_empty():
+		return _blocks_production_exit_lane(candidate, footprint, existing_buildings)
+	return (
+		_blocks_reserved_movement_lanes(candidate, footprint, &"tower", anchor, frame)
+		or _blocks_production_exit_lane(candidate, footprint, existing_buildings)
+	)
+
+
+static func is_builder_reachable(from_pos: Vector3, to_pos: Vector3, nav_map: RID) -> bool:
+	if not nav_map.is_valid():
+		return true
+	var from := Vector3(from_pos.x, WORKER_NAV_TEST_Y, from_pos.z)
+	var to := Vector3(to_pos.x, WORKER_NAV_TEST_Y, to_pos.z)
+	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, from, to, true)
+	return path.size() >= MIN_NAV_PATH_POINTS
+
 
 static func find_position(
 	anchor: Vector3,
@@ -781,15 +845,8 @@ static func _append_tower_slots(
 	existing_buildings: Array[Node3D]
 ) -> void:
 	## Outer corners / approach flanks — never courtyard center.
-	var tower_plan: Array[Vector2] = [
-		Vector2(TOWER_FRONT_OFFSET, TOWER_SIDE_OFFSET),
-		Vector2(TOWER_FRONT_OFFSET, -TOWER_SIDE_OFFSET),
-		Vector2(-TOWER_BACK_OFFSET, TOWER_SIDE_OFFSET),
-		Vector2(-TOWER_BACK_OFFSET, -TOWER_SIDE_OFFSET),
-		Vector2(TOWER_FRONT_OFFSET + 2.0, 0.0), ## approach tip beside barracks line
-		Vector2(0.0, TOWER_SIDE_OFFSET + 2.0),
-		Vector2(0.0, -(TOWER_SIDE_OFFSET + 2.0)),
-	]
+	## Order biased by preferred_tower_lane when set by attack-path defense.
+	var tower_plan: Array[Vector2] = _tower_plan_offsets_for_lane(preferred_tower_lane)
 	for offset: Vector2 in tower_plan:
 		var slot: Vector3 = _slot_world_position(
 			anchor,
@@ -799,6 +856,30 @@ static func _append_tower_slots(
 			offset.y
 		)
 		_append_unique_slot(ordered, unique, slot, existing_buildings)
+
+
+static func _tower_plan_offsets_for_lane(lane: StringName) -> Array[Vector2]:
+	var center_tip := Vector2(TOWER_FRONT_OFFSET + 2.0, 0.0)
+	var left_front := Vector2(TOWER_FRONT_OFFSET, TOWER_SIDE_OFFSET)
+	var right_front := Vector2(TOWER_FRONT_OFFSET, -TOWER_SIDE_OFFSET)
+	var left_side := Vector2(0.0, TOWER_SIDE_OFFSET + 2.0)
+	var right_side := Vector2(0.0, -(TOWER_SIDE_OFFSET + 2.0))
+	var left_back := Vector2(-TOWER_BACK_OFFSET, TOWER_SIDE_OFFSET)
+	var right_back := Vector2(-TOWER_BACK_OFFSET, -TOWER_SIDE_OFFSET)
+
+	match lane:
+		&"left":
+			return [left_front, left_side, center_tip, left_back, right_front, right_side, right_back]
+		&"right":
+			return [right_front, right_side, center_tip, right_back, left_front, left_side, left_back]
+		&"expansion":
+			return [left_back, right_back, left_side, right_side, left_front, right_front, center_tip]
+		&"harass":
+			return [left_side, right_side, left_back, right_back, left_front, right_front, center_tip]
+		&"center":
+			return [center_tip, left_front, right_front, left_side, right_side, left_back, right_back]
+		_:
+			return [left_front, right_front, left_back, right_back, center_tip, left_side, right_side]
 
 
 static func _min_town_hall_clearance(footprint: Vector2) -> float:
@@ -1418,6 +1499,8 @@ static func _score_tower_approach(
 	var score: float = 0.0
 	var cand := Vector2(candidate.x, candidate.z)
 	var anchor_xz := Vector2(anchor.x, anchor.z)
+	var frame: Dictionary = _resolve_base_frame(anchor)
+	var local: Vector2 = _local_front_right(candidate, anchor, frame)
 
 	# Prefer base rim / approaches rather than deep interior.
 	if not base_bbox.grow(1.0).has_point(cand):
@@ -1440,6 +1523,26 @@ static func _score_tower_approach(
 		var tree_corridor: float = _distance_point_to_segment(cand, anchor_xz, tree_center)
 		if tree_corridor >= DROPOFF_PATH_WIDTH and tree_corridor <= DROPOFF_PATH_WIDTH + 4.0:
 			score += SCORE_TOWER_APPROACH_BONUS * 0.65
+
+	## Bias toward the attack-path lane currently selected by the fortify planner.
+	match preferred_tower_lane:
+		&"center":
+			if absf(local.y) <= 5.5 and local.x >= 6.0:
+				score += SCORE_TOWER_APPROACH_BONUS * 1.1
+		&"left":
+			if local.y > 3.0 and local.x >= 4.0:
+				score += SCORE_TOWER_APPROACH_BONUS * 1.1
+		&"right":
+			if local.y < -3.0 and local.x >= 4.0:
+				score += SCORE_TOWER_APPROACH_BONUS * 1.1
+		&"expansion":
+			if local.x <= -4.0:
+				score += SCORE_TOWER_APPROACH_BONUS * 1.0
+		&"harass":
+			if absf(local.y) >= 8.0:
+				score += SCORE_TOWER_APPROACH_BONUS * 0.9
+		_:
+			pass
 
 	return score
 

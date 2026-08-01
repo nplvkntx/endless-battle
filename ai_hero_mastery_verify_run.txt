@@ -1,0 +1,15 @@
+Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
+
+selection counts: paladin=100 assassin=100 ranger=100
+AI selected hero: Ranger
+[AIHero] AI selected hero: Ranger
+AI selected hero: Human Paladin
+[AIHero] AI selected hero: Human Paladin
+AI selected hero: Shadow Assassin
+[AIHero] AI selected hero: Shadow Assassin
+AI selected hero: Ranger
+[AIHero] AI selected hero: Ranger
+AI selected hero: Human Paladin
+[AIHero] AI selected hero: Human Paladin
+PASS ai_hero_mastery
+

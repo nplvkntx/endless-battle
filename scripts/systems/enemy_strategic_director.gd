@@ -25,9 +25,9 @@ const DESIRE_HIGH: float = 0.75
 const DESIRE_MEDIUM: float = 0.45
 const DESIRE_LOW: float = 0.20
 
-const EARLY_ARMY_MIN_PIKEMEN: int = 5
-const EARLY_ARMY_SOFT_PIKEMEN: int = 8
-const EARLY_ARMY_TARGET_PIKEMEN: int = 10
+const EARLY_ARMY_MIN_PIKEMEN: int = 4
+const EARLY_ARMY_SOFT_PIKEMEN: int = 6
+const EARLY_ARMY_TARGET_PIKEMEN: int = 7
 const EARLY_ARMY_RALLY_RATIO: float = 0.75
 const CREEP_HERO_LEVEL_REQUIREMENT: int = 3
 const CREEP_REQUIRED_EARLY_CAMPS_MIN: int = 1
@@ -39,8 +39,8 @@ const MID_GAME_MIN_ARMY: int = 12
 const OPENING_WORKER_TARGET: int = 12
 const BASE_HEAVY_DAMAGE_RATIO: float = 0.35
 const RECOVERY_MIN_WORKERS: int = 4
-const PHASE_MIN_ARMY_OPENING: int = 5
-const PHASE_MIN_ARMY_CREEP: int = 5
+const PHASE_MIN_ARMY_OPENING: int = 4
+const PHASE_MIN_ARMY_CREEP: int = 4
 const PHASE_MIN_ARMY_MID: int = 12
 const PHASE_MIN_ARMY_LATE: int = 20
 const ENEMY_TEAM_ID: int = 1
@@ -87,6 +87,10 @@ var snapshot: Dictionary = {}
 func _ready() -> void:
 	EnemyArmyCommand.reset_match_state()
 	EnemyAIDebug.reset_match_state()
+	EnemyAttackPathDefense.reset_match_state()
+	var creep_manager: EnemyCreepManager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	if creep_manager != null:
+		creep_manager.reset_match_state()
 	_match_start_msec = Time.get_ticks_msec()
 	# Stagger strategic ticks away from combat/defense shared frames.
 	_fast_timer = FAST_TICK_SECONDS * 0.2
@@ -635,15 +639,25 @@ func _opening_exit_reason() -> String:
 
 
 func _can_leave_early_army() -> bool:
-	return (
-		snapshot.get("hero_alive", false)
-		and int(snapshot.get("pikemen_count", 0)) >= EARLY_ARMY_MIN_PIKEMEN
-		and snapshot.get("early_army_rallied", false)
+	if not snapshot.get("hero_alive", false):
+		return false
+
+	## Prefer Spearmen, but any military escort of the same size is enough to start creeping.
+	var escort_count: int = maxi(
+		int(snapshot.get("pikemen_count", 0)),
+		int(snapshot.get("combat_unit_count", 0))
 	)
+	if escort_count < EARLY_ARMY_MIN_PIKEMEN:
+		return false
+
+	return snapshot.get("early_army_rallied", false)
 
 
 func _early_army_exit_reason() -> String:
-	return "Hero ready, Pikemen: %d" % int(snapshot.get("pikemen_count", 0))
+	return "Hero ready, escort: %d" % maxi(
+		int(snapshot.get("pikemen_count", 0)),
+		int(snapshot.get("combat_unit_count", 0))
+	)
 
 
 func _can_leave_creeping() -> bool:
@@ -955,6 +969,10 @@ func _update_desires_from_snapshot() -> void:
 
 	if _strategic_phase == StrategicPhase.CREEPING:
 		desires["creep"] = DESIRE_HIGH if hero_alive else DESIRE_LOW
+		## First military objective: keep army desire high enough to finish the escort,
+		## but do not stall creeping waiting for a large attack army.
+		if combat_units < EnemyArmyCommand.CREEP_PREFERRED_NON_HERO_UNITS:
+			desires["army"] = maxf(desires["army"], DESIRE_MEDIUM)
 	elif (
 		_strategic_phase != StrategicPhase.EARLY_ARMY
 		and _strategic_phase != StrategicPhase.OPENING
@@ -1216,10 +1234,21 @@ func _run_recovery_checks() -> void:
 		return
 
 	var main_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_main_army_mission()
+	var creep_manager: EnemyCreepManager = (
+		get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+		if get_parent() != null
+		else null
+	)
+	var creep_mission_active: bool = (
+		creep_manager != null and creep_manager.is_creep_mission_active()
+	)
 	if (
 		main_mission == EnemyUnitMission.Mission.RALLY
 		or main_mission == EnemyUnitMission.Mission.ATTACK
-		or main_mission == EnemyUnitMission.Mission.CREEP
+		or (
+			main_mission == EnemyUnitMission.Mission.CREEP
+			and not creep_mission_active
+		)
 	):
 		EnemyArmyCommand.pull_reinforcement_units_to_rally(tree, rally_position)
 
