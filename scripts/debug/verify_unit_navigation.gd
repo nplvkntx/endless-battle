@@ -115,10 +115,19 @@ func _verify_chase_moving_target(failures: PackedStringArray) -> void:
 	await get_tree().physics_frame
 
 	var approach: Vector3 = unit._compute_attack_approach_position(prey)
+	var expected_standoff: float = CombatTargetValidation.get_preferred_attack_standoff(
+		unit, prey, unit.attack_range, unit.stopping_distance, 0
+	)
 	_expect(
 		failures,
 		"chase: approach standoff stays outside attack target center",
-		_horizontal_distance(approach, prey.global_position) >= maxf(unit.attack_range - unit.stopping_distance, 0.5) - 0.05
+		_horizontal_distance(approach, prey.global_position) >= expected_standoff - 0.05
+	)
+	_expect(
+		failures,
+		"chase: approach lands inside effective attack reach after soft arrival",
+		expected_standoff + Unit.SOFT_ARRIVAL_DISTANCE
+		<= CombatTargetValidation.get_effective_attack_range(unit.attack_range) + 0.05
 	)
 
 	# Allow repath cooldown window, then force an urgent update check via threshold.

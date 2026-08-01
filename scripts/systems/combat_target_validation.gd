@@ -34,6 +34,14 @@ const APPROACH_RING_SPACING := 1.15
 const RANGED_STANDOFF_RATIO := 0.88
 const RANGED_TOO_CLOSE_RATIO := 0.62
 const RANGED_HOLD_RATIO := 0.90
+## Small melee slack so nav soft-arrival / collision jitter does not block strikes.
+const MELEE_ATTACK_RANGE_TOLERANCE := 0.35
+## Preferred approach accounts for Unit soft-arrival (~1.0) so strike range is reached
+## without requiring a second close-in step in the common case.
+const MELEE_APPROACH_ARRIVAL_MARGIN := 1.0
+## Final close-in destination margin when soft-arrival / blocked settle still misses.
+const MELEE_CLOSE_IN_ARRIVAL_MARGIN := 1.0
+const MELEE_BUILDING_EDGE_OFFSET := 0.2
 
 static var _attack_slot_counter_by_target: Dictionary = {}
 ## target_id -> Dictionary[attacker_id -> slot_index]
@@ -467,6 +475,13 @@ static func _call_take_damage(target: Object, amount: float, attacker = null) ->
 	)
 
 
+## Authoritative strike reach: melee adds a small tolerance; ranged uses raw range.
+static func get_effective_attack_range(attack_range: float) -> float:
+	if is_ranged_attack_range(attack_range):
+		return attack_range
+	return attack_range + MELEE_ATTACK_RANGE_TOLERANCE
+
+
 static func is_within_attack_range(
 	attacker: Variant, target: Variant, attack_range: float
 ) -> bool:
@@ -477,13 +492,15 @@ static func is_within_attack_range(
 
 	var attacker_node: Node3D = attacker as Node3D
 	var target_node: Node3D = target as Node3D
+	var effective_range: float = get_effective_attack_range(attack_range)
 
 	if is_attackable_enemy_building(target_node):
 		return (
-			get_horizontal_attack_distance_to_surface(attacker_node, target_node) <= attack_range
+			get_horizontal_attack_distance_to_surface(attacker_node, target_node)
+			<= effective_range
 		)
 
-	return get_horizontal_center_distance(attacker_node, target_node) <= attack_range
+	return get_horizontal_center_distance(attacker_node, target_node) <= effective_range
 
 
 static func get_horizontal_attack_distance_to_surface(from: Variant, target: Variant) -> float:
@@ -899,20 +916,87 @@ static func get_preferred_attack_standoff(
 		attacker_radius = _get_collision_xz_radius(attacker as CollisionObject3D)
 
 	if target != null and is_attackable_enemy_building(target) and target is CollisionObject3D:
-		return (
-			_get_collision_xz_radius(target as CollisionObject3D)
-			+ attacker_radius
-			+ stopping_distance
-			+ ring_bonus
+		# Stand at the visible collision edge — not the building center, and not
+		# attacker_radius past the edge (that previously landed outside strike reach
+		# after soft-arrival shortfall).
+		var building_radius: float = _get_collision_xz_radius(target as CollisionObject3D)
+		var building_effective: float = get_effective_attack_range(attack_range)
+		var edge_offset: float = minf(
+			maxf(MELEE_BUILDING_EDGE_OFFSET, stopping_distance),
+			maxf(building_effective - MELEE_APPROACH_ARRIVAL_MARGIN, stopping_distance)
 		)
+		return building_radius + edge_offset + ring_bonus
 
 	if is_ranged_attack_range(attack_range):
 		return maxf(attack_range * RANGED_STANDOFF_RATIO, stopping_distance) + ring_bonus
 
-	return (
-		maxf(attack_range - stopping_distance, maxf(attacker_radius + 0.35, stopping_distance))
-		+ ring_bonus
+	# Keep approach inside effective strike reach after hard nav acceptance.
+	# Soft-arrival shortfall is recovered by compute_attack_close_position.
+	var melee_effective: float = get_effective_attack_range(attack_range)
+	var arrival_margin: float = maxf(MELEE_APPROACH_ARRIVAL_MARGIN, stopping_distance)
+	var preferred_standoff: float = melee_effective - arrival_margin
+	var clearance: float = maxf(attacker_radius + 0.35, stopping_distance)
+	return maxf(preferred_standoff, clearance) + ring_bonus
+
+
+## Closer strike point used when an approach slot arrival still leaves the attacker
+## outside effective attack range (soft-arrival / blocked settle / unreachable slot).
+static func compute_attack_close_position(
+	attacker: Node3D,
+	target: Node3D,
+	attack_range: float,
+	stopping_distance: float,
+	slot_index: int = 0
+) -> Vector3:
+	if attacker == null or not is_instance_valid(attacker):
+		return Vector3.ZERO
+	if target == null or not is_instance_valid(target):
+		return attacker.global_position
+
+	var effective_range: float = get_effective_attack_range(attack_range)
+	# Step inside effective reach even if soft-arrival fires again on this destination.
+	var close_standoff: float = maxf(
+		effective_range - MELEE_CLOSE_IN_ARRIVAL_MARGIN,
+		stopping_distance
 	)
+	if is_attackable_enemy_building(target) and target is CollisionObject3D:
+		close_standoff = (
+			_get_collision_xz_radius(target as CollisionObject3D)
+			+ maxf(MELEE_BUILDING_EDGE_OFFSET, stopping_distance)
+		)
+
+	var direction: Vector3 = _get_attack_slot_ring_basis(attacker, target)
+	direction = _apply_attack_slot_direction(direction, slot_index)
+	var close_position: Vector3 = target.global_position + direction * close_standoff
+	close_position.y = attacker.global_position.y
+	return close_position
+
+
+## Claim a fresh free slot, releasing the attacker's previous reservation on this target.
+## Prefers the lowest free index so outer-ring / unreachable slots can fall back inward.
+static func reclaim_attack_approach_slot(target, attacker) -> int:
+	if target == null or not is_instance_valid(target):
+		return 0
+	if attacker == null or not is_instance_valid(attacker):
+		return claim_attack_approach_slot(target, attacker)
+
+	release_attack_approach_slot(target, attacker)
+
+	var target_id: int = target.get_instance_id()
+	var occupied: Dictionary = {}
+	if _attack_slot_owners_by_target.has(target_id):
+		var owners: Dictionary = _attack_slot_owners_by_target[target_id]
+		for attacker_id: Variant in owners.keys():
+			occupied[int(owners[attacker_id])] = true
+
+	var next_slot: int = 0
+	while occupied.has(next_slot):
+		next_slot += 1
+
+	_register_attack_approach_slot(target, attacker, next_slot)
+	var next_counter: int = int(_attack_slot_counter_by_target.get(target_id, 0))
+	_attack_slot_counter_by_target[target_id] = maxi(next_counter, next_slot + 1)
+	return next_slot
 
 
 static func is_too_close_for_preferred_range(

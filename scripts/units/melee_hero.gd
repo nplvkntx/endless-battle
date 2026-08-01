@@ -656,6 +656,19 @@ func stop_movement() -> void:
 
 
 func _on_movement_arrived() -> void:
+	# Direct attack chase is only complete when inside effective strike range.
+	# Nav finished / soft-arrival / blocked settle near an approach waypoint must not stop the chase.
+	if (
+		_has_active_attack_order
+		and NodeSafety.is_alive_node(_attack_target)
+		and CombatTargetValidation.is_valid_combat_target(_attack_target)
+		and not _is_in_attack_range(_attack_target)
+		and _approach_slot_should_enter_strike_range()
+	):
+		_has_chase_target = false
+		_update_chase_movement(0.0, true)
+		return
+
 	if _is_patrolling and _has_attack_move_destination:
 		_advance_patrol_waypoint()
 		return
@@ -1046,21 +1059,121 @@ func _update_chase_movement(delta: float = 0.0, force: bool = false) -> void:
 		return
 	if _is_holding_position:
 		return
+	if _is_in_attack_range(_attack_target):
+		return
 
 	if not force and not tick_chase_update_timer(delta, false):
 		return
 
 	var approach_position: Vector3 = _compute_attack_approach_position(_attack_target)
-	if _has_chase_target and has_move_target:
+	var needs_close_in: bool = _needs_attack_close_in(approach_position)
+	if needs_close_in:
+		if _should_reclaim_approach_slot(approach_position):
+			_reclaim_unreachable_approach_slot()
+		approach_position = CombatTargetValidation.compute_attack_close_position(
+			self,
+			_attack_target,
+			attack_range,
+			stopping_distance,
+			maxi(_attack_approach_slot, 0)
+		)
+
+	if _has_chase_target and has_move_target and not needs_close_in:
 		var destination_delta: Vector3 = approach_position - _movement_target
 		destination_delta.y = 0.0
 		if destination_delta.length() < CHASE_TARGET_MOVE_THRESHOLD:
 			return
 
-	if _set_move_destination(approach_position, RepathUrgency.CHASE):
+	var urgency: RepathUrgency = (
+		RepathUrgency.STUCK_RECOVERY if needs_close_in else RepathUrgency.CHASE
+	)
+	if _set_move_destination(approach_position, urgency):
 		_has_chase_target = true
 	elif not has_move_target:
-		_has_chase_target = true
+		# Near-skip rejected a tiny remaining gap — force a close-in destination once.
+		if needs_close_in or force:
+			var close_position: Vector3 = CombatTargetValidation.compute_attack_close_position(
+				self,
+				_attack_target,
+				attack_range,
+				stopping_distance,
+				maxi(_attack_approach_slot, 0)
+			)
+			if _set_move_destination(close_position, RepathUrgency.STUCK_RECOVERY):
+				_has_chase_target = true
+			else:
+				_has_chase_target = true
+		else:
+			_has_chase_target = true
+
+
+func _needs_attack_close_in(approach_position: Vector3) -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return false
+	if _is_in_attack_range(_attack_target):
+		return false
+	# Outer-ring slots intentionally sit outside strike reach — do not collapse inward.
+	if not _approach_slot_should_enter_strike_range():
+		return false
+
+	var to_approach: Vector3 = approach_position - global_position
+	to_approach.y = 0.0
+	var near_approach: bool = to_approach.length() <= get_soft_arrival_radius() + 0.2
+
+	# Settled near the approach waypoint but still outside strike reach.
+	if not has_move_target and near_approach:
+		return true
+
+	if has_move_target:
+		var remaining: Vector3 = _movement_target - global_position
+		remaining.y = 0.0
+		if remaining.length() <= get_soft_arrival_radius() + 0.2 and near_approach:
+			return true
+
+	if (
+		_navigation_agent != null
+		and is_instance_valid(_navigation_agent)
+		and has_move_target
+		and not _navigation_agent.is_target_reachable()
+	):
+		return true
+
+	return false
+
+
+func _approach_slot_should_enter_strike_range() -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return false
+	var slot_standoff: float = CombatTargetValidation.get_preferred_attack_standoff(
+		self,
+		_attack_target,
+		attack_range,
+		stopping_distance,
+		maxi(_attack_approach_slot, 0)
+	)
+	var effective: float = CombatTargetValidation.get_effective_attack_range(attack_range)
+	return slot_standoff <= effective + 0.05
+
+
+func _should_reclaim_approach_slot(_approach_position: Vector3) -> bool:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return false
+
+	# Only rotate slots when the current approach destination is unreachable.
+	return (
+		_navigation_agent != null
+		and is_instance_valid(_navigation_agent)
+		and has_move_target
+		and not _navigation_agent.is_target_reachable()
+	)
+
+
+func _reclaim_unreachable_approach_slot() -> void:
+	if not NodeSafety.is_alive_node(_attack_target):
+		return
+	_attack_approach_slot = CombatTargetValidation.reclaim_attack_approach_slot(
+		_attack_target, self
+	)
 
 
 func _try_attack_move_engagement() -> void:
