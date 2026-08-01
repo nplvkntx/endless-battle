@@ -68,6 +68,8 @@ func _dirty_persistent_match_state() -> void:
 	ControlGroupManager.assign_group(0, [_dirty_control_group_unit])
 	HeroProgressionStore._player_snapshot = {"level": 5}
 	HeroProgressionStore._enemy_snapshot = {"level": 3}
+	HeroProgressionStore.lock_kit(false, HeroCatalog.KIT_PALADIN)
+	HeroProgressionStore.lock_kit(true, HeroCatalog.KIT_SHADOW_ASSASSIN)
 	CommandFeedback.show_move_marker(Vector3(1, 0, 1))
 	CommandFeedback.notify_movement_started(_dirty_control_group_unit)
 	DeathEffects.play_unit_death(_dirty_control_group_unit)
@@ -114,6 +116,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and ControlGroupManager.get_active_group_index() < 0
 		and not HeroProgressionStore.has_saved_progression()
 		and not HeroProgressionStore.has_saved_enemy_progression()
+		and not HeroProgressionStore.has_locked_kit(false)
+		and not HeroProgressionStore.has_locked_kit(true)
 		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
 		and CommandFeedback.get_active_marker_count() == 0
 		and CommandFeedback.get_active_dust_count() == 0
@@ -140,6 +144,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		"control_group_active": ControlGroupManager.get_active_group_index(),
 		"hero_player_saved": HeroProgressionStore.has_saved_progression(),
 		"hero_enemy_saved": HeroProgressionStore.has_saved_enemy_progression(),
+		"hero_player_locked": HeroProgressionStore.has_locked_kit(false),
+		"hero_enemy_locked": HeroProgressionStore.has_locked_kit(true),
 		"army_mode": int(EnemyArmyCommand.get_army_mode()),
 		"strategic_state": int(EnemyArmyCommand.get_strategic_state()),
 		"command_feedback_markers": CommandFeedback.get_active_marker_count(),

@@ -40,6 +40,8 @@ const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_SHADOW_ASSASSIN
 func _ready() -> void:
 	super._ready()
 
+	_sync_selected_kit_from_faction(is_in_group(&"enemy_command_center"))
+
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
 
@@ -90,7 +92,11 @@ func get_active_unit_training_name() -> String:
 
 
 func set_selected_kit(kit_id: StringName) -> void:
-	selected_kit_id = HeroCatalog.normalize_kit_id(kit_id)
+	var is_enemy_owned: bool = is_in_group(&"enemy_command_center")
+	var normalized: StringName = HeroCatalog.normalize_kit_id(kit_id)
+	if not HeroProgressionStore.can_select_kit(is_enemy_owned, normalized):
+		normalized = HeroProgressionStore.get_locked_kit_id(is_enemy_owned)
+	selected_kit_id = normalized
 
 
 func get_selected_kit() -> StringName:
@@ -98,23 +104,53 @@ func get_selected_kit() -> StringName:
 
 
 ## Kit that will actually be spawned for the given owner on the next training,
-## accounting for saved progression from a prior death (retrain restores that kit).
+## accounting for faction lock and saved progression from a prior death.
 func get_pending_training_kit_id(is_enemy_owned: bool = false) -> StringName:
 	return _resolve_spawn_kit_id(is_enemy_owned)
 
 
+## True when this faction may show/train the given kit (unlocked or matches lock).
+func can_offer_kit(kit_id: StringName, is_enemy_owned: bool = false) -> bool:
+	return HeroProgressionStore.can_select_kit(is_enemy_owned, kit_id)
+
+
 ## Resolves which kit the next training session for this owner should spawn.
-## Retraining after a death always restores the previously saved kit; otherwise
-## the player's selection is used, and the enemy defaults to Shadow Assassin.
+## Match lock (set when training begins) wins; then death snapshot; then selection /
+## enemy default. Cancelled initial training keeps the lock so hero swapping is blocked.
 func _resolve_spawn_kit_id(is_enemy_owned: bool) -> StringName:
-	var saved_kit_id: StringName = HeroProgressionStore.get_saved_kit_id(is_enemy_owned)
-	if saved_kit_id != &"":
-		return HeroCatalog.normalize_kit_id(saved_kit_id)
+	var faction_kit: StringName = HeroProgressionStore.get_faction_kit_id(is_enemy_owned)
+	if faction_kit != &"":
+		return faction_kit
 
 	if is_enemy_owned:
 		return ENEMY_DEFAULT_KIT_ID
 
 	return selected_kit_id
+
+
+## Lock faction kit and sync every altar so UI/AI share one choice for the match.
+func _lock_faction_kit_for_training(is_enemy_owned: bool, kit_id: StringName) -> void:
+	var newly_locked: bool = not HeroProgressionStore.has_locked_kit(is_enemy_owned)
+	HeroProgressionStore.lock_kit(is_enemy_owned, kit_id)
+	_sync_selected_kit_from_faction(is_enemy_owned)
+	if newly_locked or HeroProgressionStore.get_locked_kit_id(is_enemy_owned) == kit_id:
+		_notify_all_hero_altars_state_changed()
+
+
+func _sync_selected_kit_from_faction(is_enemy_owned: bool) -> void:
+	var locked: StringName = HeroProgressionStore.get_locked_kit_id(is_enemy_owned)
+	if locked != &"":
+		selected_kit_id = locked
+
+
+static func _notify_all_hero_altars_state_changed() -> void:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return
+
+	for node: Node in tree.get_nodes_in_group("buildings"):
+		if node is HeroAltar and is_instance_valid(node):
+			(node as HeroAltar).hero_altar_state_changed.emit()
 
 
 func _get_time_seconds() -> float:
@@ -225,6 +261,8 @@ func try_train_hero() -> void:
 
 	_training_for_enemy = false
 	_training_kit_id = _resolve_spawn_kit_id(false)
+	## Lock immediately on successful payment so cancel/UI cannot swap kits.
+	_lock_faction_kit_for_training(false, _training_kit_id)
 	_begin_hero_training()
 
 
@@ -245,6 +283,8 @@ func try_begin_hero_training(is_enemy_owned: bool) -> bool:
 
 	_training_for_enemy = is_enemy_owned
 	_training_kit_id = _resolve_spawn_kit_id(is_enemy_owned)
+	## Lock immediately on successful payment so cancel/UI cannot swap kits.
+	_lock_faction_kit_for_training(is_enemy_owned, _training_kit_id)
 	_begin_hero_training()
 	return true
 

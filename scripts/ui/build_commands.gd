@@ -1160,11 +1160,7 @@ func _set_production_icon_visibility(
 	_train_swordsman_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_swordsman_slot)
 	_train_archer_button.visible = show_barracks and _should_use_legacy_train_button(_barracks_archer_slot)
 	_train_worker_button.visible = show_town_center and _should_use_legacy_train_button(_town_center_worker_slot)
-	_train_hero_button.visible = show_hero_altar
-	if _train_assassin_button != null:
-		_train_assassin_button.visible = show_hero_altar
-	if _train_ranger_button != null:
-		_train_ranger_button.visible = show_hero_altar
+	_apply_hero_altar_train_button_visibility(show_hero_altar)
 
 	if USE_PRODUCTION_ICON_SLOTS:
 		if show_barracks:
@@ -1236,7 +1232,8 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 		if _selected_hero_altar == null:
 			return
 
-		_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
+		var kit_id: StringName = _selected_hero_altar.get_pending_training_kit_id(false)
+		_selected_hero_altar.set_selected_kit(kit_id)
 		_selected_hero_altar.try_train_hero()
 	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
 		if _selected_stable == null:
@@ -2015,11 +2012,38 @@ func _get_tracked_hero_for_input() -> Hero:
 
 func _set_hero_altar_button_labels() -> void:
 	var cost_label := " (%d Gold, %d Food)" % [HeroAltar.TRAIN_GOLD_COST, HeroAltar.TRAIN_FOOD_COST]
-	_train_hero_button.text = "Train Hero%s" % cost_label
+	var locked_kit: StringName = HeroProgressionStore.get_locked_kit_id(false)
+	var has_progression: bool = HeroProgressionStore.has_saved_progression()
+	var action_verb: String = "Retrain" if has_progression else "Train"
+
+	if locked_kit == HeroCatalog.KIT_PALADIN or locked_kit == &"":
+		_train_hero_button.text = "%s %s%s" % [
+			action_verb if locked_kit != &"" else "Train",
+			HeroCatalog.get_display_name(HeroCatalog.KIT_PALADIN),
+			cost_label,
+		]
+	else:
+		_train_hero_button.text = "Train Hero%s" % cost_label
+
 	if _train_assassin_button != null:
-		_train_assassin_button.text = "Train Assassin%s" % cost_label
+		if locked_kit == HeroCatalog.KIT_SHADOW_ASSASSIN:
+			_train_assassin_button.text = "%s %s%s" % [
+				action_verb,
+				HeroCatalog.get_display_name(HeroCatalog.KIT_SHADOW_ASSASSIN),
+				cost_label,
+			]
+		else:
+			_train_assassin_button.text = "Train Assassin%s" % cost_label
+
 	if _train_ranger_button != null:
-		_train_ranger_button.text = "Train Ranger%s" % cost_label
+		if locked_kit == HeroCatalog.KIT_RANGER:
+			_train_ranger_button.text = "%s %s%s" % [
+				action_verb,
+				HeroCatalog.get_display_name(HeroCatalog.KIT_RANGER),
+				cost_label,
+			]
+		else:
+			_train_ranger_button.text = "Train Ranger%s" % cost_label
 
 
 func _set_barracks_button_labels() -> void:
@@ -2958,18 +2982,32 @@ func _update_hero_altar_status() -> void:
 	if _tracked_hero_altar == null:
 		return
 
+	var locked_kit: StringName = HeroProgressionStore.get_locked_kit_id(false)
+	var pending_kit: StringName = _tracked_hero_altar.get_pending_training_kit_id(false)
+	var kit_name: String = HeroCatalog.get_display_name(pending_kit)
+
 	if _tracked_hero_altar.player_has_hero():
-		_hero_status_label.text = "Hero: Already active"
+		_hero_status_label.text = "%s: Already active" % kit_name
 	elif _tracked_hero_altar.is_training_hero():
 		_hero_status_label.text = "%s: Training..." % _tracked_hero_altar.get_active_unit_training_name()
+	elif locked_kit != &"":
+		if HeroProgressionStore.has_saved_progression():
+			var level: int = HeroProgressionStore.get_saved_level(false)
+			_hero_status_label.text = "%s: Ready to retrain (Lv %d)" % [kit_name, level]
+		else:
+			_hero_status_label.text = "%s: Ready to train" % kit_name
 	else:
 		_hero_status_label.text = "Hero: Ready to train"
 
-	_train_hero_button.disabled = not _tracked_hero_altar.can_train_hero()
+	_set_hero_altar_button_labels()
+	_apply_hero_altar_train_button_visibility(true)
+
+	var can_train: bool = _tracked_hero_altar.can_train_hero()
+	_train_hero_button.disabled = not can_train
 	if _train_assassin_button != null:
-		_train_assassin_button.disabled = not _tracked_hero_altar.can_train_hero()
+		_train_assassin_button.disabled = not can_train
 	if _train_ranger_button != null:
-		_train_ranger_button.disabled = not _tracked_hero_altar.can_train_hero()
+		_train_ranger_button.disabled = not can_train
 	if USE_PRODUCTION_ICON_SLOTS:
 		_refresh_hero_altar_production_slot()
 	else:
@@ -3417,6 +3455,51 @@ func _apply_hero_altar_command_visibility() -> void:
 	_shop_panel.visible = false
 	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
+	_set_hero_altar_button_labels()
+	_apply_hero_altar_train_button_visibility(true)
+	_update_hero_altar_status()
+
+
+## Show all hero kit buttons until a faction lock exists; then only the locked kit.
+func _apply_hero_altar_train_button_visibility(show_hero_altar: bool) -> void:
+	if not show_hero_altar:
+		_train_hero_button.visible = false
+		if _train_assassin_button != null:
+			_train_assassin_button.visible = false
+		if _train_ranger_button != null:
+			_train_ranger_button.visible = false
+		if _hero_altar_slot != null:
+			_hero_altar_slot.visible = false
+		return
+
+	var locked_kit: StringName = HeroProgressionStore.get_locked_kit_id(false)
+	var show_all: bool = locked_kit == &""
+	if show_all:
+		## Unlocked: kit chooser uses text buttons; hide the single shared icon slot.
+		_train_hero_button.visible = true
+		if _train_assassin_button != null:
+			_train_assassin_button.visible = true
+		if _train_ranger_button != null:
+			_train_ranger_button.visible = true
+		if _hero_altar_slot != null:
+			_hero_altar_slot.visible = false
+		return
+
+	## Locked: one retrain/revive control — prefer production icon when enabled.
+	var use_icon_slot: bool = USE_PRODUCTION_ICON_SLOTS and _hero_altar_slot != null
+	_train_hero_button.visible = (
+		not use_icon_slot and locked_kit == HeroCatalog.KIT_PALADIN
+	)
+	if _train_assassin_button != null:
+		_train_assassin_button.visible = (
+			not use_icon_slot and locked_kit == HeroCatalog.KIT_SHADOW_ASSASSIN
+		)
+	if _train_ranger_button != null:
+		_train_ranger_button.visible = (
+			not use_icon_slot and locked_kit == HeroCatalog.KIT_RANGER
+		)
+	if _hero_altar_slot != null:
+		_hero_altar_slot.visible = use_icon_slot
 
 
 func _apply_town_center_command_visibility() -> void:
@@ -4241,6 +4324,8 @@ func _on_train_archer_pressed() -> void:
 func _on_train_hero_pressed() -> void:
 	if _selected_hero_altar == null:
 		return
+	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_PALADIN):
+		return
 
 	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
 	_selected_hero_altar.try_train_hero()
@@ -4249,6 +4334,8 @@ func _on_train_hero_pressed() -> void:
 func _on_train_assassin_pressed() -> void:
 	if _selected_hero_altar == null:
 		return
+	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_SHADOW_ASSASSIN):
+		return
 
 	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_SHADOW_ASSASSIN)
 	_selected_hero_altar.try_train_hero()
@@ -4256,6 +4343,8 @@ func _on_train_assassin_pressed() -> void:
 
 func _on_train_ranger_pressed() -> void:
 	if _selected_hero_altar == null:
+		return
+	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_RANGER):
 		return
 
 	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_RANGER)
@@ -4654,11 +4743,8 @@ func _get_train_cannon_tooltip() -> String:
 
 
 func _get_train_hero_tooltip() -> String:
-	var kit_id: StringName = HeroCatalog.KIT_PALADIN
-	if _selected_hero_altar != null and is_instance_valid(_selected_hero_altar):
-		kit_id = _selected_hero_altar.get_pending_training_kit_id(false)
 	return TooltipFormatter.format_train_command(
-		HeroCatalog.get_display_name(kit_id),
+		HeroCatalog.get_display_name(HeroCatalog.KIT_PALADIN),
 		HeroAltar.TRAIN_GOLD_COST,
 		0,
 		HeroAltar.TRAIN_FOOD_COST,
