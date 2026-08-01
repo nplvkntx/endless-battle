@@ -9,11 +9,14 @@ extends PanelContainer
 
 const _PLACEHOLDER_HOTKEYS: Array[String] = ["Q", "W", "E", "R", "A", "S", "H", "M", "", ""]
 
+var _tracked_building: Building = null
+
 
 func _ready() -> void:
 	visible = false
-	_legacy_command_panel.visibility_changed.connect(_sync_command_grid)
+	_legacy_command_panel.visibility_changed.connect(_on_legacy_command_panel_visibility_changed)
 	_setup_placeholder_hotkeys()
+	tree_exiting.connect(_disconnect_tracked_building)
 
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -23,6 +26,7 @@ func _ready() -> void:
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
 	if selection_manager.has_signal("inspection_changed"):
 		selection_manager.inspection_changed.connect(_on_inspection_changed)
+	_track_selected_building(selection_manager.selected_building)
 	_refresh_frame_visibility()
 
 
@@ -39,14 +43,89 @@ func _setup_placeholder_hotkeys() -> void:
 
 
 func _on_selection_changed(_units: Array[Unit]) -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	var building: Building = null
+	if selection_manager != null:
+		var building_ref: Variant = selection_manager.selected_building
+		if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+			building = building_ref as Building
+	_track_selected_building(building)
 	_refresh_frame_visibility()
 
 
-func _on_building_selection_changed(_building: Building) -> void:
+func _on_building_selection_changed(building: Building) -> void:
+	_track_selected_building(building)
 	_refresh_frame_visibility()
 
 
 func _on_inspection_changed(_unit: Unit, _building: Building) -> void:
+	_refresh_frame_visibility()
+
+
+func _on_legacy_command_panel_visibility_changed() -> void:
+	_sync_command_grid()
+	# SelectionCommandPanel refreshes on construction completion; keep the frame in sync.
+	_refresh_frame_visibility()
+
+
+func _track_selected_building(building: Building) -> void:
+	if building != null and not is_instance_valid(building):
+		building = null
+
+	if _tracked_building == building:
+		return
+
+	_disconnect_tracked_building()
+	_tracked_building = building
+	if _tracked_building == null:
+		return
+
+	if _tracked_building.has_signal("construction_completed"):
+		if not _tracked_building.construction_completed.is_connected(_on_tracked_building_completed):
+			_tracked_building.construction_completed.connect(_on_tracked_building_completed)
+	elif _tracked_building.has_signal("building_state_changed"):
+		if not _tracked_building.building_state_changed.is_connected(_on_tracked_building_state_changed):
+			_tracked_building.building_state_changed.connect(_on_tracked_building_state_changed)
+
+	if _tracked_building.has_signal("destroyed"):
+		if not _tracked_building.destroyed.is_connected(_on_tracked_building_destroyed):
+			_tracked_building.destroyed.connect(_on_tracked_building_destroyed)
+
+
+func _disconnect_tracked_building() -> void:
+	if _tracked_building == null:
+		return
+
+	if is_instance_valid(_tracked_building):
+		if (
+			_tracked_building.has_signal("construction_completed")
+			and _tracked_building.construction_completed.is_connected(_on_tracked_building_completed)
+		):
+			_tracked_building.construction_completed.disconnect(_on_tracked_building_completed)
+		if (
+			_tracked_building.has_signal("building_state_changed")
+			and _tracked_building.building_state_changed.is_connected(_on_tracked_building_state_changed)
+		):
+			_tracked_building.building_state_changed.disconnect(_on_tracked_building_state_changed)
+		if (
+			_tracked_building.has_signal("destroyed")
+			and _tracked_building.destroyed.is_connected(_on_tracked_building_destroyed)
+		):
+			_tracked_building.destroyed.disconnect(_on_tracked_building_destroyed)
+
+	_tracked_building = null
+
+
+func _on_tracked_building_completed() -> void:
+	_refresh_frame_visibility()
+
+
+func _on_tracked_building_state_changed(_state: StringName) -> void:
+	_refresh_frame_visibility()
+
+
+func _on_tracked_building_destroyed(_building: Building) -> void:
+	_disconnect_tracked_building()
 	_refresh_frame_visibility()
 
 
@@ -90,7 +169,7 @@ func _selection_has_commands(selection_manager: Node) -> bool:
 	var building: Building = building_ref as Building
 
 	if building is CommandCenter:
-		return true
+		return (building as CommandCenter).building_state == Building.STATE_COMPLETED
 
 	if building is Barracks:
 		return (building as Barracks).building_state == Building.STATE_COMPLETED

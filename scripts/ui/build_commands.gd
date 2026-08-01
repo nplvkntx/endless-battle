@@ -2797,6 +2797,21 @@ func _on_building_selection_changed(building: Building) -> void:
 
 	if building is CommandCenter and is_instance_valid(building):
 		_selected_command_center = building as CommandCenter
+		if not _selected_command_center.building_state_changed.is_connected(
+			_on_command_center_building_state_changed
+		):
+			_selected_command_center.building_state_changed.connect(
+				_on_command_center_building_state_changed
+			)
+		if (
+			_selected_command_center.has_signal("construction_completed")
+			and not _selected_command_center.construction_completed.is_connected(
+				_on_command_center_construction_completed
+			)
+		):
+			_selected_command_center.construction_completed.connect(
+				_on_command_center_construction_completed
+			)
 		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
 		_selected_command_center.repeat_state_changed.connect(_on_production_repeat_state_changed)
 		if not _selected_command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
@@ -2889,6 +2904,14 @@ func _on_building_selection_changed(building: Building) -> void:
 	else:
 		_tracked_wall_segment = null
 
+	_refresh_command_visibility()
+
+
+func _on_command_center_building_state_changed(_state: StringName) -> void:
+	_refresh_command_visibility()
+
+
+func _on_command_center_construction_completed() -> void:
 	_refresh_command_visibility()
 
 
@@ -3117,7 +3140,10 @@ func _refresh_command_visibility() -> void:
 		selected_building is WallSegment
 		and (selected_building as WallSegment).can_show_commands()
 	)
-	var show_town_center_commands: bool = selected_building is CommandCenter
+	var show_town_center_commands: bool = (
+		selected_building is CommandCenter
+		and (selected_building as CommandCenter).building_state == Building.STATE_COMPLETED
+	)
 
 	_selected_barracks = selected_building as Barracks if show_barracks_training else null
 	_selected_blacksmith = selected_building as Blacksmith if show_blacksmith_upgrades else null
@@ -3132,7 +3158,8 @@ func _refresh_command_visibility() -> void:
 		selected_building as WallSegment if show_wall_gate_commands else null
 	)
 
-	if show_town_center_commands:
+	# Keep CC tracking while an unfinished Town Hall stays selected so completion can refresh UI.
+	if selected_building is CommandCenter and is_instance_valid(selected_building):
 		_selected_command_center = selected_building as CommandCenter
 	elif _selected_command_center != null:
 		_disconnect_worker_queue_signal()
@@ -4066,6 +4093,23 @@ func _on_production_repeat_state_changed() -> void:
 
 func _disconnect_worker_queue_signal() -> void:
 	if _selected_command_center != null and is_instance_valid(_selected_command_center):
+		if _selected_command_center.building_state_changed.is_connected(
+			_on_command_center_building_state_changed
+		):
+			_selected_command_center.building_state_changed.disconnect(
+				_on_command_center_building_state_changed
+			)
+
+		if (
+			_selected_command_center.has_signal("construction_completed")
+			and _selected_command_center.construction_completed.is_connected(
+				_on_command_center_construction_completed
+			)
+		):
+			_selected_command_center.construction_completed.disconnect(
+				_on_command_center_construction_completed
+			)
+
 		if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
 			_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
 

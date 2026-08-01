@@ -8,6 +8,8 @@ extends StaticBody3D
 signal health_changed(current: float, maximum: float)
 signal construction_progress_changed(progress: float)
 signal building_state_changed(state: StringName)
+## Emitted exactly once when this building transitions from unfinished to completed.
+signal construction_completed
 signal destroyed(building: Building)
 
 const STATE_UNDER_CONSTRUCTION: StringName = &"under_construction"
@@ -593,23 +595,23 @@ func begin_construction() -> void:
 
 ## Marks the building as finished and restores its normal appearance.
 func complete_construction() -> void:
-	building_state = STATE_COMPLETED
-	_construction_progress = 1.0
-	_construction_cost_refunded = true
-	ConstructionReservations.release_build_slots_for_building(self)
-	_apply_completed_visual()
-	building_state_changed.emit(building_state)
-	construction_progress_changed.emit(_construction_progress)
-	apply_engineering_bonus()
+	_finish_construction_state()
 
 
 func set_completed() -> void:
+	_finish_construction_state()
+
+
+func _finish_construction_state() -> void:
+	var was_incomplete: bool = building_state != STATE_COMPLETED
 	building_state = STATE_COMPLETED
 	_construction_progress = 1.0
 	_construction_cost_refunded = true
 	ConstructionReservations.release_build_slots_for_building(self)
 	_apply_completed_visual()
 	building_state_changed.emit(building_state)
+	if was_incomplete:
+		construction_completed.emit()
 	construction_progress_changed.emit(_construction_progress)
 	apply_engineering_bonus()
 

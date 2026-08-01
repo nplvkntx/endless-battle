@@ -716,6 +716,21 @@ func _configure_activity_tracking(building: Building) -> void:
 	if _tracked_activity_building.has_signal("construction_progress_changed"):
 		_tracked_activity_building.construction_progress_changed.connect(_on_activity_state_changed)
 
+	if _tracked_activity_building.has_signal("construction_completed"):
+		if not _tracked_activity_building.construction_completed.is_connected(
+			_on_activity_construction_completed
+		):
+			_tracked_activity_building.construction_completed.connect(
+				_on_activity_construction_completed
+			)
+	elif _tracked_activity_building.has_signal("building_state_changed"):
+		if not _tracked_activity_building.building_state_changed.is_connected(
+			_on_activity_building_state_changed
+		):
+			_tracked_activity_building.building_state_changed.connect(
+				_on_activity_building_state_changed
+			)
+
 	if _tracked_activity_building is CommandCenter:
 		var command_center: CommandCenter = _tracked_activity_building as CommandCenter
 		if (
@@ -736,6 +751,26 @@ func _disconnect_activity_building_signals() -> void:
 	):
 		_tracked_activity_building.construction_progress_changed.disconnect(_on_activity_state_changed)
 
+	if (
+		_tracked_activity_building.has_signal("construction_completed")
+		and _tracked_activity_building.construction_completed.is_connected(
+			_on_activity_construction_completed
+		)
+	):
+		_tracked_activity_building.construction_completed.disconnect(
+			_on_activity_construction_completed
+		)
+
+	if (
+		_tracked_activity_building.has_signal("building_state_changed")
+		and _tracked_activity_building.building_state_changed.is_connected(
+			_on_activity_building_state_changed
+		)
+	):
+		_tracked_activity_building.building_state_changed.disconnect(
+			_on_activity_building_state_changed
+		)
+
 	if _tracked_activity_building is CommandCenter:
 		var command_center: CommandCenter = _tracked_activity_building as CommandCenter
 		if (
@@ -748,6 +783,14 @@ func _disconnect_activity_building_signals() -> void:
 
 
 func _on_activity_state_changed(_progress: float = 0.0) -> void:
+	_update_activity_progress_display()
+
+
+func _on_activity_construction_completed() -> void:
+	_update_activity_progress_display()
+
+
+func _on_activity_building_state_changed(_state: StringName) -> void:
 	_update_activity_progress_display()
 
 
