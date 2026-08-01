@@ -553,6 +553,7 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 	if commandable_units.is_empty():
 		return
 
+	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()
@@ -565,6 +566,10 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 
 	# Marker at accepted command point (click destination), not per-unit spacing slots.
 	CommandFeedback.show_move_marker(ground_position)
+
+
+func _compare_units_by_instance_id(a: Unit, b: Unit) -> bool:
+	return a.get_instance_id() < b.get_instance_id()
 
 
 func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
@@ -583,12 +588,12 @@ func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 	if military_units.is_empty():
 		return
 
+	military_units.sort_custom(_compare_units_by_instance_id)
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
 		unit.issue_order(UnitOrder.attack(target, index), queued)
 
 	_play_attack_target_feedback(target)
-
 
 func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = false) -> void:
 	_purge_invalid_selected_units()
@@ -596,6 +601,7 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 	if commandable_units.is_empty():
 		return
 
+	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()
@@ -624,6 +630,7 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 	if commandable_units.is_empty():
 		return
 
+	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()

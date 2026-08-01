@@ -3,6 +3,7 @@ extends RefCounted
 
 ## NavigationAgent helpers for worker gather/build task movement.
 ## Reuses UnitNavigation for agent validity / configuration.
+## Velocity is applied through Unit.apply_steered_velocity when available.
 
 
 static func can_use(agent: NavigationAgent3D) -> bool:
@@ -35,6 +36,7 @@ static func process_movement(
 	var offset: Vector3 = destination - worker.global_position
 	offset.y = 0.0
 	if _has_reached_task_destination(offset, stopping_distance):
+		_apply_velocity(worker, Vector3.ZERO, move_speed)
 		return true
 
 	if not can_use(agent):
@@ -53,9 +55,7 @@ static func process_movement(
 		process_direct_movement(worker, destination, move_speed, stopping_distance)
 	else:
 		# Keep gather packing tight: no combat-style separation blend on task paths.
-		worker.velocity = direction.normalized() * move_speed
-		worker.velocity.y = 0.0
-		worker.move_and_slide()
+		_apply_velocity(worker, direction.normalized() * move_speed, move_speed)
 
 	return false
 
@@ -69,7 +69,7 @@ static func process_direct_movement(
 	var offset: Vector3 = destination - worker.global_position
 	offset.y = 0.0
 	if _has_reached_task_destination(offset, stopping_distance):
-		worker.velocity = Vector3.ZERO
+		_apply_velocity(worker, Vector3.ZERO, move_speed)
 		return true
 
 	_move_direct(worker, offset, move_speed)
@@ -87,10 +87,26 @@ static func _move_direct(
 	worker: CharacterBody3D, offset: Vector3, move_speed: float
 ) -> void:
 	if offset.length_squared() < 0.0001:
-		worker.velocity = Vector3.ZERO
-		worker.move_and_slide()
+		_apply_velocity(worker, Vector3.ZERO, move_speed)
 		return
 
-	worker.velocity = offset.normalized() * move_speed
+	_apply_velocity(worker, offset.normalized() * move_speed, move_speed)
+
+
+static func _apply_velocity(
+	worker: CharacterBody3D, desired_velocity: Vector3, _max_speed: float
+) -> void:
+	# Authoritative Unit path — no second independent velocity writer.
+	if worker is Unit and (worker as Unit).has_method("apply_steered_velocity"):
+		# Workers on task paths: no soft separation; allow motion even without has_move_target.
+		var unit := worker as Unit
+		if unit.has_move_target:
+			unit.apply_steered_velocity(desired_velocity, -1.0, 0.0, true, false)
+		else:
+			# Gather/build often moves without a Unit move-target flag.
+			unit.apply_steered_velocity(desired_velocity, -1.0, 0.0, true, true)
+		return
+
+	worker.velocity = desired_velocity
 	worker.velocity.y = 0.0
 	worker.move_and_slide()

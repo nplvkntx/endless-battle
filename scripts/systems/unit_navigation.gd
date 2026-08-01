@@ -6,8 +6,9 @@ extends RefCounted
 
 const ARRIVAL_SLOWDOWN_DISTANCE := 1.35
 const ARRIVAL_MIN_SPEED_RATIO := 0.22
-const PATH_POINT_HYSTERESIS_SQ := 0.01 # ~0.1m — ignore only microscopic next-point jitter
-const PATH_POINT_NEAR_DEST_HYSTERESIS_SQ := 0.09 # ~0.3m — damp corridor flips near arrival
+const ARRIVAL_ACCEPTANCE_RADIUS := 0.65
+const PATH_POINT_HYSTERESIS_SQ := 0.04 # ~0.2m — ignore small next-point jitter
+const PATH_POINT_NEAR_DEST_HYSTERESIS_SQ := 0.25 # ~0.5m — damp corridor flips near arrival
 const META_LAST_PATH_POINT := &"_nav_last_path_point"
 
 
@@ -26,8 +27,9 @@ static func configure_agent(agent: NavigationAgent3D, stopping_distance: float) 
 	if agent == null:
 		return
 
-	agent.path_desired_distance = maxf(stopping_distance, 0.15)
-	agent.target_desired_distance = maxf(stopping_distance, 0.15)
+	var accept: float = _acceptance_radius(stopping_distance)
+	agent.path_desired_distance = accept
+	agent.target_desired_distance = accept
 	# RVO avoidance stays off: idle units must never receive safe-velocity drift.
 	# Moving units use UnitSeparation; stationary units do not get soft push.
 	agent.avoidance_enabled = false
@@ -75,7 +77,7 @@ static func process_movement(
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	var arrive_distance: float = _acceptance_radius_for_body(body, stopping_distance)
 	if distance <= arrive_distance:
 		_clear_path_point_cache(body)
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
@@ -93,7 +95,7 @@ static func process_movement(
 
 	var next_position: Vector3 = agent.get_next_path_position()
 	next_position.y = body.global_position.y
-	# Only ignore microscopic next-point jitter; larger swaps must apply for corridors.
+	# Only ignore small next-point jitter; larger swaps must apply for corridors.
 	# Near the destination, use a wider hysteresis so building-adjacent path samples do not flip.
 	var hysteresis_sq: float = PATH_POINT_HYSTERESIS_SQ
 	if distance <= ARRIVAL_SLOWDOWN_DISTANCE * 1.5:
@@ -121,12 +123,14 @@ static func process_movement(
 	if distance < slow_start:
 		speed = _arrival_speed(move_speed, distance, stopping_distance)
 		# Below crawl threshold, prefer stop over endless micro-approach.
-		if distance <= maxf(arrive_distance * 1.35, 0.7):
+		if distance <= maxf(arrive_distance * 1.25, 0.85):
 			_clear_path_point_cache(body)
 			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 			return true
+	# Mute separation near arrival so soft settle can complete.
+	var use_separation: bool = apply_separation and distance > arrive_distance * 2.0
 	var desired_velocity: Vector3 = direction.normalized() * speed
-	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
+	_apply_final_velocity(body, desired_velocity, move_speed, use_separation)
 	return false
 
 
@@ -140,7 +144,7 @@ static func process_direct_movement(
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	var arrive_distance: float = _acceptance_radius_for_body(body, stopping_distance)
 	if distance <= arrive_distance:
 		_clear_path_point_cache(body)
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
@@ -152,12 +156,13 @@ static func process_direct_movement(
 		return true
 
 	var speed: float = _arrival_speed(move_speed, distance, stopping_distance)
-	if distance <= maxf(arrive_distance * 1.35, 0.7):
+	if distance <= maxf(arrive_distance * 1.25, 0.85):
 		_clear_path_point_cache(body)
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
+	var use_separation: bool = apply_separation and distance > arrive_distance * 2.0
 	var desired_velocity: Vector3 = offset.normalized() * speed
-	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
+	_apply_final_velocity(body, desired_velocity, move_speed, use_separation)
 	return false
 
 
@@ -168,11 +173,12 @@ static func _apply_final_velocity(
 	apply_separation: bool
 ) -> void:
 	# Prefer Unit's authoritative smoothing path when available.
+	# Pass -1 so Unit.get_move_separation_blend() owns the blend amount.
 	if body is Unit and (body as Unit).has_method("apply_steered_velocity"):
 		(body as Unit).apply_steered_velocity(
 			desired_velocity,
 			-1.0,
-			UnitSeparation.MOVE_BLEND if apply_separation else 0.0
+			-1.0 if apply_separation else 0.0
 		)
 		return
 
@@ -197,6 +203,16 @@ static func _arrival_speed(move_speed: float, distance: float, stopping_distance
 		1.0
 	)
 	return move_speed * lerpf(ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
+
+
+static func _acceptance_radius(stopping_distance: float) -> float:
+	return maxf(stopping_distance, ARRIVAL_ACCEPTANCE_RADIUS)
+
+
+static func _acceptance_radius_for_body(body: CharacterBody3D, stopping_distance: float) -> float:
+	if body is Unit and (body as Unit).has_method("get_movement_acceptance_radius"):
+		return (body as Unit).get_movement_acceptance_radius()
+	return _acceptance_radius(stopping_distance)
 
 
 static func _clear_path_point_cache(body: CharacterBody3D) -> void:

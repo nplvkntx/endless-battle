@@ -747,7 +747,17 @@ func _resume_attack_move_or_patrol() -> bool:
 func _is_at_attack_move_destination() -> bool:
 	var offset: Vector3 = global_position - _attack_move_destination
 	offset.y = 0.0
-	return offset.length() <= stopping_distance
+	return offset.length() <= get_movement_acceptance_radius()
+
+
+func _should_skip_stuck_recovery() -> bool:
+	# Attacking / holding / waiting in range are not movement deadlocks.
+	if _is_holding_position:
+		return true
+	if _attack_target != null and _is_in_attack_range(_attack_target):
+		if not _should_reposition_for_preferred_range():
+			return true
+	return false
 
 
 func _is_in_attack_range(target: Variant) -> bool:

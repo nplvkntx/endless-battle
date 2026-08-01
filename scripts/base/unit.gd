@@ -17,8 +17,9 @@ signal died(unit: Unit)
 @export var armor_type: DamageService.ArmorType = DamageService.ArmorType.MEDIUM
 
 const UNSTUCK_STUCK_MOVE_RATIO := 0.2
-const UNSTUCK_CONFIRM_SECONDS := 1.25
-const UNSTUCK_DETOUR_START_DELAY := 1.25
+## Stuck only after no meaningful goal-progress for this long (not frame jitter).
+const UNSTUCK_CONFIRM_SECONDS := 1.6
+const UNSTUCK_DETOUR_START_DELAY := 0.35
 const UNSTUCK_DETOUR_COMMIT_TIME := 0.75
 const UNSTUCK_DETOUR_MAX_TIME := 2.0
 const UNSTUCK_MAX_SIDE_FLIPS := 1
@@ -26,7 +27,13 @@ const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
 const UNSTUCK_RECOVERY_COOLDOWN_SECONDS := 1.5
-const UNSTUCK_MIN_REMAINING_DISTANCE := 1.5
+## Must still be meaningfully far from the accepted arrival radius.
+const UNSTUCK_MIN_REMAINING_DISTANCE := 2.25
+## Distance-to-goal must improve by at least this much to count as progress.
+const UNSTUCK_PROGRESS_EPSILON := 0.35
+const UNSTUCK_WAYPOINT_OFFSET := 2.25
+const UNSTUCK_YIELD_SECONDS := 1.1
+const UNSTUCK_CANCEL_AFTER_STAGES := 3
 const MOVE_DEST_TOLERANCE := 1.0
 const MOVE_DEST_NEAR_SKIP := 0.35
 const PLAYER_DEST_NEAR_SKIP := 0.25
@@ -47,16 +54,20 @@ const VISUAL_FACING_TURN_SPEED := 8.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.09
 const VISUAL_FACING_MIN_TURN_DOT := 0.998 # ~3.6deg — ignore tiny facing corrections
 const MOVE_VELOCITY_SMOOTH := 14.0
-const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.01 # ~0.1 m/s — kill micro-corrections
+const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.0225 # ~0.15 m/s — kill micro-corrections
 ## Facing only from meaningful travel velocity / combat facing — never residual push.
-const ROTATION_VELOCITY_MIN_SQ := 0.09 # ~0.3 m/s
+const ROTATION_VELOCITY_MIN_SQ := 0.16 # ~0.4 m/s
 const ORDER_DEST_EQUIVALENCE := 0.35
 ## Settle when blocked by world/buildings near the destination instead of sliding forever.
 const BLOCKED_ARRIVAL_DISTANCE := 3.75
 const BLOCKED_ARRIVAL_CONFIRM_SECONDS := 0.22
+## Non-zero acceptance radius — never require exact destination equality.
+const ARRIVAL_ACCEPTANCE_RADIUS := 0.65
 ## Crawl-arrive: stop when nearly at the destination even if still slowly approaching.
-const SOFT_ARRIVAL_DISTANCE := 0.75
-const SOFT_ARRIVAL_SPEED_SQ := 1.21 # ~1.1 m/s — covers arrival min crawl speed
+const SOFT_ARRIVAL_DISTANCE := 1.0
+const SOFT_ARRIVAL_SPEED_SQ := 2.25 # ~1.5 m/s — covers arrival crawl + residual push
+## Mute travel separation inside this band so groups can settle.
+const ARRIVAL_SEPARATION_MUTE_DISTANCE := 1.35
 
 enum RepathUrgency {
 	NORMAL,
@@ -86,6 +97,10 @@ var _detour_gave_up: bool = false
 var _distance_at_detour_start: float = 0.0
 var _stuck_recovery_cooldown: float = 0.0
 var _stuck_repath_attempted: bool = false
+var _stuck_recovery_stage: int = 0
+var _stuck_progress_anchor_distance: float = -1.0
+var _crowd_yield_seconds: float = 0.0
+var _original_move_destination: Vector3 = Vector3.ZERO
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _chase_update_timer: float = 0.0
@@ -456,6 +471,29 @@ func is_movement_active() -> bool:
 	return has_move_target
 
 
+## Non-zero acceptance radius used by arrival, attack-move settle, and stuck gating.
+func get_movement_acceptance_radius() -> float:
+	return maxf(stopping_distance, ARRIVAL_ACCEPTANCE_RADIUS)
+
+
+## Soft settle band — slightly wider than hard acceptance so crawl approaches finish once.
+func get_soft_arrival_radius() -> float:
+	return maxf(SOFT_ARRIVAL_DISTANCE, get_movement_acceptance_radius() * 1.35)
+
+
+## Separation blend for the current travel frame. Near destination / yield → muted.
+func get_move_separation_blend() -> float:
+	if not is_movement_active():
+		return 0.0
+	if _crowd_yield_seconds > 0.0:
+		return UnitSeparation.MOVE_BLEND * 0.25
+	var remaining: Vector3 = _movement_target - global_position
+	remaining.y = 0.0
+	if remaining.length() <= ARRIVAL_SEPARATION_MUTE_DISTANCE:
+		return 0.0
+	return UnitSeparation.MOVE_BLEND
+
+
 func get_movement_generation() -> int:
 	return _movement_generation
 
@@ -496,7 +534,9 @@ func apply_steered_velocity(
 	if delta < 0.0:
 		delta = get_physics_process_delta_time()
 
-	var blend: float = UnitSeparation.MOVE_BLEND if separation_blend < 0.0 else separation_blend
+	var blend: float = (
+		get_move_separation_blend() if separation_blend < 0.0 else separation_blend
+	)
 
 	var desired: Vector3 = desired_velocity
 	desired.y = 0.0
@@ -516,6 +556,11 @@ func apply_steered_velocity(
 		steered = UnitSeparation.blend_desired_velocity(
 			self, desired, move_speed, blend
 		)
+		# Ignore microscopic steering deltas so left/right avoidance cannot buzz.
+		var steer_delta: Vector3 = steered - desired
+		steer_delta.y = 0.0
+		if steer_delta.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
+			steered = desired
 
 	# Light smoothing only for tiny corrections; large steering changes apply immediately
 	# so corridor peels and gap traversal stay responsive.
@@ -535,6 +580,7 @@ func apply_steered_velocity(
 	velocity = _smoothed_move_velocity
 	velocity.y = 0.0
 	if velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
+		velocity = Vector3.ZERO
 		return
 
 	move_and_slide()
@@ -582,6 +628,28 @@ func _update_stable_move_facing(desired_dir: Vector3) -> void:
 func _complete_movement_arrival() -> void:
 	if not has_move_target:
 		return
+
+	# Recovery waypoint reached — resume the original order destination instead of stopping.
+	if (
+		_stuck_recovery_stage >= 2
+		and _original_move_destination.length_squared() > 0.0001
+	):
+		var to_original: Vector3 = _original_move_destination - global_position
+		to_original.y = 0.0
+		if to_original.length() > get_soft_arrival_radius():
+			var resume: Vector3 = _original_move_destination
+			_stuck_recovery_stage = 3
+			_stuck_progress_anchor_distance = -1.0
+			_stuck_recovery_cooldown = 0.0
+			_crowd_yield_seconds = maxf(_crowd_yield_seconds, UNSTUCK_YIELD_SECONDS * 0.5)
+			if not request_movement_target(resume, RepathUrgency.STUCK_RECOVERY):
+				_begin_movement_generation()
+				_movement_target = resume
+				_original_move_destination = resume
+				has_move_target = true
+				_apply_navigation_destination(resume)
+			return
+
 	# Complete once per movement generation — never re-fire every settle frame.
 	if _arrival_completed_generation == _movement_generation:
 		clear_move_target()
@@ -653,6 +721,7 @@ func request_movement_target(
 	var began_moving: bool = not has_move_target
 	_begin_movement_generation()
 	_movement_target = next_target
+	_original_move_destination = next_target
 	has_move_target = true
 	_last_issued_move_destination = next_target
 	_last_path_request_msec = now_msec
@@ -662,6 +731,7 @@ func request_movement_target(
 		_stuck_repath_attempted = true
 		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
 		_stuck_time = 0.0
+		_stuck_progress_anchor_distance = -1.0
 	else:
 		_reset_unstuck_state()
 	if began_moving:
@@ -795,6 +865,8 @@ func should_run_staggered_update(bucket_count: int = 4) -> bool:
 func _physics_process(delta: float) -> void:
 	if _stuck_recovery_cooldown > 0.0:
 		_stuck_recovery_cooldown = maxf(0.0, _stuck_recovery_cooldown - delta)
+	if _crowd_yield_seconds > 0.0:
+		_crowd_yield_seconds = maxf(0.0, _crowd_yield_seconds - delta)
 
 	# Root / stun from the Buff system freezes locomotion without clearing orders.
 	if not BuffService.can_move(self):
@@ -811,7 +883,7 @@ func _physics_process(delta: float) -> void:
 	var offset: Vector3 = _movement_target - global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	var arrive_distance: float = get_movement_acceptance_radius()
 	if distance <= arrive_distance:
 		_complete_movement_arrival()
 		return
@@ -821,12 +893,13 @@ func _physics_process(delta: float) -> void:
 	var position_before: Vector3 = global_position
 	_previous_position = position_before
 	var direction: Vector3 = offset.normalized() if distance > 0.0001 else Vector3.ZERO
+	var separation_blend: float = get_move_separation_blend()
 
 	if _detour_active and not _detour_gave_up:
 		direction = _get_detour_direction(direction)
 		var detour_velocity: Vector3 = direction * move_speed
 		# Keep separation gentle during unstuck so narrow corridors do not deadlock.
-		apply_steered_velocity(detour_velocity, delta, 0.18)
+		apply_steered_velocity(detour_velocity, delta, minf(separation_blend, 0.12))
 	elif _navigation_active and UnitNavigation.can_use(_navigation_agent):
 		var arrived: bool = UnitNavigation.process_movement(
 			self,
@@ -834,7 +907,7 @@ func _physics_process(delta: float) -> void:
 			_movement_target,
 			move_speed,
 			stopping_distance,
-			true
+			separation_blend > 0.0
 		)
 		if arrived:
 			_complete_movement_arrival()
@@ -854,7 +927,7 @@ func _physics_process(delta: float) -> void:
 				1.0
 			)
 			arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
-		apply_steered_velocity(direction * arrival_speed, delta)
+		apply_steered_velocity(direction * arrival_speed, delta, separation_blend)
 
 	if _try_complete_blocked_arrival(delta, position_before, direction, distance):
 		return
@@ -1128,7 +1201,7 @@ func _try_complete_soft_arrival() -> bool:
 
 	var remaining: Vector3 = _movement_target - global_position
 	remaining.y = 0.0
-	if remaining.length() > maxf(SOFT_ARRIVAL_DISTANCE, stopping_distance * 2.5):
+	if remaining.length() > get_soft_arrival_radius():
 		return false
 
 	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
@@ -1139,16 +1212,25 @@ func _try_complete_soft_arrival() -> bool:
 	return true
 
 
+## Override to suppress stuck recovery while attacking / gathering / holding / waiting.
+func _should_skip_stuck_recovery() -> bool:
+	return false
+
+
 func _update_unstuck(
-	delta: float, position_before: Vector3, forward: Vector3, distance: float
+	delta: float, _position_before: Vector3, forward: Vector3, distance: float
 ) -> void:
-	var moved: Vector3 = global_position - position_before
-	moved.y = 0.0
-	var moved_distance: float = moved.length()
-	var expected_move: float = move_speed * delta * UNSTUCK_STUCK_MOVE_RATIO
-	var hit_obstacle: bool = get_slide_collision_count() > 0
-	var making_progress: bool = moved_distance >= expected_move
-	var moving_toward_target: bool = making_progress and moved.dot(forward) > 0.0
+	if _should_skip_stuck_recovery():
+		_stuck_time = 0.0
+		_is_confirmed_stuck = false
+		return
+
+	var accept: float = get_movement_acceptance_radius()
+	# Already arrived / settling — never stuck.
+	if distance <= maxf(UNSTUCK_MIN_REMAINING_DISTANCE, accept * 2.5):
+		_stuck_time = 0.0
+		_is_confirmed_stuck = false
+		return
 
 	if _detour_active:
 		_detour_time += delta
@@ -1157,7 +1239,7 @@ func _update_unstuck(
 			_reset_unstuck_state()
 			return
 
-		if moving_toward_target and distance < _distance_at_detour_start - stopping_distance:
+		if distance < _distance_at_detour_start - UNSTUCK_PROGRESS_EPSILON:
 			_reset_unstuck_state()
 			return
 
@@ -1174,25 +1256,26 @@ func _update_unstuck(
 				_detour_gave_up = true
 				_detour_active = false
 				_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
+				_advance_stuck_recovery(distance)
 
 		return
 
 	if _detour_gave_up:
-		if making_progress:
+		# After detour, fall through to staged recovery rather than looping forever.
+		if _stuck_progress_anchor_distance < 0.0:
+			_stuck_progress_anchor_distance = distance
+		if distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
 			_reset_unstuck_state()
-		return
+			return
 
-	if moving_toward_target or distance <= UNSTUCK_MIN_REMAINING_DISTANCE:
+	# Meaningful progress = closing on the destination, not raw frame displacement.
+	if _stuck_progress_anchor_distance < 0.0:
+		_stuck_progress_anchor_distance = distance
+
+	if distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
+		_stuck_progress_anchor_distance = distance
 		_stuck_time = 0.0
 		_is_confirmed_stuck = false
-		return
-
-	if not hit_obstacle and making_progress:
-		_stuck_time = 0.0
-		_is_confirmed_stuck = false
-		return
-
-	if not hit_obstacle and _stuck_time <= 0.0 and making_progress:
 		return
 
 	_stuck_time += delta
@@ -1203,17 +1286,93 @@ func _update_unstuck(
 	if _stuck_recovery_cooldown > 0.0:
 		return
 
-	# First recovery: one controlled repath to the same destination.
-	if not _stuck_repath_attempted:
-		_stuck_repath_attempted = true
-		request_movement_target(_movement_target, RepathUrgency.STUCK_RECOVERY)
-		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
-		_stuck_time = 0.0
-		return
+	_advance_stuck_recovery(distance)
 
-	# Second recovery: lateral unstuck nudge, then cooldown.
-	if _stuck_time >= UNSTUCK_DETOUR_START_DELAY:
-		_begin_detour(forward, distance)
+
+## Staged recovery: repath → nearby waypoint → yield crowd → resume → cancel last.
+func _advance_stuck_recovery(distance: float) -> void:
+	_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
+	_stuck_time = 0.0
+	_stuck_progress_anchor_distance = distance
+
+	match _stuck_recovery_stage:
+		0:
+			# Stage 1: refresh path once to the original destination.
+			_stuck_recovery_stage = 1
+			_stuck_repath_attempted = true
+			var resume_target: Vector3 = (
+				_original_move_destination
+				if _original_move_destination.length_squared() > 0.0001
+				else _movement_target
+			)
+			request_movement_target(resume_target, RepathUrgency.STUCK_RECOVERY)
+		1:
+			# Stage 2: nearby reachable waypoint, then continue to original goal.
+			_stuck_recovery_stage = 2
+			var waypoint: Vector3 = _compute_stuck_recovery_waypoint(distance)
+			request_movement_target(waypoint, RepathUrgency.STUCK_RECOVERY)
+		2:
+			# Stage 3: temporarily yield / reduce crowd pressure, keep destination.
+			_stuck_recovery_stage = 3
+			_crowd_yield_seconds = UNSTUCK_YIELD_SECONDS
+			var detour_forward: Vector3 = _movement_target - global_position
+			detour_forward.y = 0.0
+			if detour_forward.length_squared() > 0.0001:
+				_begin_detour(detour_forward.normalized(), distance)
+		_:
+			# Stage 4+: cancel only as final fallback — never teleport.
+			_stuck_recovery_stage = 0
+			_original_move_destination = Vector3.ZERO
+			if _arrival_completed_generation == _movement_generation:
+				clear_move_target()
+			else:
+				_arrival_completed_generation = _movement_generation
+				clear_move_target()
+				_on_movement_arrived()
+
+
+func _compute_stuck_recovery_waypoint(distance: float) -> Vector3:
+	var goal: Vector3 = (
+		_original_move_destination
+		if _original_move_destination.length_squared() > 0.0001
+		else _movement_target
+	)
+	var to_goal: Vector3 = goal - global_position
+	to_goal.y = 0.0
+	if to_goal.length_squared() < 0.0001:
+		return goal
+
+	var forward: Vector3 = to_goal.normalized()
+	var right: Vector3 = forward.cross(Vector3.UP)
+	if right.length_squared() < 0.0001:
+		right = Vector3.RIGHT
+	else:
+		right = right.normalized()
+
+	var side: float = _detour_side if _detour_side != 0.0 else 1.0
+	var offset_distance: float = minf(UNSTUCK_WAYPOINT_OFFSET, maxf(distance * 0.35, 1.25))
+	var min_clearance: float = offset_distance * 0.8
+
+	var candidate: Vector3 = (
+		global_position + forward * (offset_distance * 0.55) + right * (side * offset_distance)
+	)
+	candidate.y = global_position.y
+	var probe_dir: Vector3 = candidate - global_position
+	probe_dir.y = 0.0
+	if probe_dir.length_squared() > 0.0001 and _probe_clearance(probe_dir.normalized()) >= min_clearance:
+		return candidate
+
+	candidate = (
+		global_position + forward * (offset_distance * 0.55) - right * (side * offset_distance)
+	)
+	candidate.y = global_position.y
+	probe_dir = candidate - global_position
+	probe_dir.y = 0.0
+	if probe_dir.length_squared() > 0.0001 and _probe_clearance(probe_dir.normalized()) >= min_clearance:
+		return candidate
+
+	# Fall back: short step toward the goal.
+	return global_position + forward * offset_distance * 0.75
 
 
 func _reset_unstuck_state() -> void:
@@ -1226,7 +1385,10 @@ func _reset_unstuck_state() -> void:
 	_detour_gave_up = false
 	_distance_at_detour_start = 0.0
 	_stuck_repath_attempted = false
+	_stuck_recovery_stage = 0
+	_stuck_progress_anchor_distance = -1.0
 	_blocked_arrival_time = 0.0
+	# Keep _crowd_yield_seconds ticking — do not clear mid-yield.
 
 
 func _setup_navigation_agent() -> void:

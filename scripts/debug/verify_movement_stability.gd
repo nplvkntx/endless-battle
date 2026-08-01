@@ -24,6 +24,7 @@ func _ready() -> void:
 	_verify_separation_forward_preserve(failures)
 	_verify_standing_uses_authoritative_path(failures)
 	_verify_movement_active_gate(failures)
+	_verify_progress_stuck_and_arrival_api(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -348,11 +349,47 @@ func _verify_separation_forward_preserve(failures: PackedStringArray) -> void:
 	body.set_meta(&"_sep_push_cache", Vector3(-1.0, 0.0, 0.0))
 	body.set_meta(&"_sep_push_cache_time", float(Time.get_ticks_msec()) * 0.001)
 	var desired := Vector3(0.0, 0.0, 5.0)
-	var blended: Vector3 = UnitSeparation.blend_desired_velocity(body, desired, 5.0, 0.55)
+	var blended: Vector3 = UnitSeparation.blend_desired_velocity(body, desired, 5.0, 0.22)
 	_expect(failures, "forward preserve: still moves forward", blended.z > 2.5)
 	_expect(failures, "forward preserve: not reversed", blended.z > 0.0)
 	body.free()
 
+
+func _verify_progress_stuck_and_arrival_api(failures: PackedStringArray) -> void:
+	print("verify: progress stuck + arrival API present")
+	var source: String = FileAccess.get_file_as_string("res://scripts/base/unit.gd")
+	_expect(
+		failures,
+		"acceptance radius helper present",
+		source.contains("func get_movement_acceptance_radius")
+	)
+	_expect(
+		failures,
+		"progress-based stuck anchor present",
+		source.contains("_stuck_progress_anchor_distance")
+	)
+	_expect(
+		failures,
+		"staged stuck recovery present",
+		source.contains("func _advance_stuck_recovery")
+	)
+	_expect(
+		failures,
+		"crowd yield present",
+		source.contains("_crowd_yield_seconds")
+	)
+	var sep_source: String = FileAccess.get_file_as_string("res://scripts/systems/unit_separation.gd")
+	_expect(
+		failures,
+		"separation blend is bounded correction",
+		sep_source.contains("const MOVE_BLEND := 0.22")
+		and sep_source.contains("MAX_PUSH_SPEED_RATIO")
+	)
+	_expect(
+		failures,
+		"friendly-only soft separation",
+		sep_source.contains("Soft avoidance is friendly-only")
+	)
 
 func _verify_standing_uses_authoritative_path(failures: PackedStringArray) -> void:
 	print("verify: standing separation is steering input only")

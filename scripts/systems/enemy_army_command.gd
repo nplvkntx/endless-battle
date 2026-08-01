@@ -104,7 +104,8 @@ const MAX_GROUP_ORDERS_PER_FRAME := 12
 const PERF_DIAG_INTERVAL_SECONDS := 5.0
 const FORMATION_CACHE_DEST_THRESHOLD := 3.0
 const FORMATION_SLOT_SKIP_DISTANCE := 1.5
-const FORMATION_CACHE_REFRESH_SECONDS := 2.5
+## Keep formation slots for the life of an order — do not reshuffle every AI tick.
+const FORMATION_CACHE_REFRESH_SECONDS := 90.0
 const GROUP_ORDER_DEST_TOLERANCE := 4.5
 const GROUP_ORDER_SIGNATURE_TTL_SECONDS := 5.0
 const DEFENSE_THREAT_CACHE_SECONDS := 0.35
@@ -5209,11 +5210,21 @@ static func _order_units_for_formation(units: Array) -> Array:
 		else:
 			melee_units.append(unit)
 
+	melee_units.sort_custom(_compare_units_by_instance_id)
+	ranged_units.sort_custom(_compare_units_by_instance_id)
+	hero_units.sort_custom(_compare_units_by_instance_id)
+
 	var ordered_units: Array = []
 	ordered_units.append_array(melee_units)
 	ordered_units.append_array(ranged_units)
 	ordered_units.append_array(hero_units)
 	return ordered_units
+
+
+static func _compare_units_by_instance_id(a: Variant, b: Variant) -> bool:
+	var a_id: int = (a as Node).get_instance_id() if NodeSafety.is_alive_node(a) else 0
+	var b_id: int = (b as Node).get_instance_id() if NodeSafety.is_alive_node(b) else 0
+	return a_id < b_id
 
 
 static func _compute_attack_formation_targets(
@@ -5227,8 +5238,9 @@ static func _compute_attack_formation_targets(
 	var army_center: Vector3 = compute_army_center(units)
 	var forward: Vector3 = destination - army_center
 	forward.y = 0.0
-	if forward.length_squared() < 0.01:
-		forward = Vector3(0.0, 0.0, 1.0)
+	# Near the objective the live army center is noisy — freeze a stable world axis.
+	if forward.length_squared() < 4.0:
+		forward = Vector3(0.0, 0.0, 1.0 if destination.z >= army_center.z else -1.0)
 	else:
 		forward = forward.normalized()
 

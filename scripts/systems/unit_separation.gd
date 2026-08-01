@@ -2,21 +2,24 @@ class_name UnitSeparation
 extends RefCounted
 
 ## Soft unit-to-unit avoidance (WC3-style). Units do not hard-collide with each other;
-## nearby units apply a short-range push so armies unpack instead of stacking.
-## Push is cached and lightly hysteretic; forward motion is preserved against full reverses.
+## nearby friendly units apply a short-range push so armies unpack instead of stacking.
+## Push is a small bounded correction only; forward motion is preserved against full reverses.
+## Hostile units are not soft-steered apart (they remain packing / blocking obstacles).
 
 const DEFAULT_RADIUS := 0.55
 const QUERY_RADIUS := 1.35
 const MIN_SEPARATION := 1.05
-const MOVE_BLEND := 0.48
-const IDLE_PUSH_SPEED_RATIO := 0.28
-const COMBAT_PUSH_SPEED_RATIO := 0.16
+## Small bounded correction — never compete with path following as a second full steering system.
+const MOVE_BLEND := 0.22
+const MAX_PUSH_SPEED_RATIO := 0.35
+const IDLE_PUSH_SPEED_RATIO := 0.22
+const COMBAT_PUSH_SPEED_RATIO := 0.12
 const MAX_NEIGHBORS := 10
 const OVERLAP_EPSILON := 0.04
-const MIN_FORWARD_RATIO := 0.25
-const PUSH_CACHE_SECONDS := 0.05
-const SIDE_HYSTERESIS_SECONDS := 0.18
-const PUSH_DEAD_ZONE_SQ := 0.01 # ~0.1 — ignore soft separation noise
+const MIN_FORWARD_RATIO := 0.35
+const PUSH_CACHE_SECONDS := 0.06
+const SIDE_HYSTERESIS_SECONDS := 0.28
+const PUSH_DEAD_ZONE_SQ := 0.0225 # ~0.15 — ignore soft separation noise
 ## Combat standing previously used a soft magnitude gate; hard-overlap query replaces it.
 const STANDING_SMOOTH := 12.0
 
@@ -95,31 +98,42 @@ static func blend_desired_velocity(
 
 	var desired: Vector3 = desired_velocity
 	desired.y = 0.0
-	var push_velocity: Vector3 = push * max_speed
+	# Cap push magnitude so separation stays a correction, not a second steering system.
+	var push_velocity: Vector3 = push * (max_speed * MAX_PUSH_SPEED_RATIO)
 	var blended: Vector3
 	if desired.length_squared() < 0.0001:
 		blended = push_velocity * IDLE_PUSH_SPEED_RATIO
 	else:
 		var desired_dir: Vector3 = desired.normalized()
 		var desired_speed: float = minf(desired.length(), max_speed)
-		var effective_blend: float = clampf(blend, 0.0, 1.0)
-		# Neighbor ahead → rearward push. Soften so corridors remain passable.
+		var effective_blend: float = clampf(blend, 0.0, MOVE_BLEND)
+		# Neighbor ahead → rearward push. Soften so corridors remain passable / queue forms.
 		var forward_push: float = push.dot(desired_dir)
 		if forward_push < -0.25:
-			effective_blend *= 0.4
+			# Rear pressure: kill lateral so rear units do not shove front units sideways.
+			effective_blend *= 0.25
+			var forward_part: Vector3 = desired_dir * push.dot(desired_dir)
+			push = forward_part
+			if push.length_squared() > 0.0001:
+				push = push.normalized()
+			push_velocity = push * (max_speed * MAX_PUSH_SPEED_RATIO * 0.5)
 		else:
 			# Path-relative side hysteresis (left/right of travel), not world axes.
 			push = _apply_path_side_hysteresis(body, push, desired_dir)
-			push_velocity = push * max_speed
+			push_velocity = push * (max_speed * MAX_PUSH_SPEED_RATIO)
 
-		# Original-style blend, then clamp so separation cannot fully reverse travel.
+		# Bounded blend, then clamp so separation cannot reverse travel unless blocked.
 		blended = desired.lerp(desired + push_velocity, effective_blend)
 		var forward_speed: float = blended.dot(desired_dir)
 		var min_forward: float = desired_speed * MIN_FORWARD_RATIO
 		if forward_push < -0.25:
-			min_forward = desired_speed * 0.12
+			min_forward = desired_speed * 0.2
 		if forward_speed < min_forward:
 			blended += desired_dir * (min_forward - forward_speed)
+
+		# Never let avoidance reverse the travel direction.
+		if blended.dot(desired_dir) < 0.0:
+			blended = desired_dir * maxf(desired_speed * 0.15, 0.05)
 
 		if blended.length() > max_speed:
 			blended = blended.normalized() * max_speed
@@ -139,7 +153,7 @@ static func _apply_path_side_hysteresis(
 	right = right.normalized()
 
 	var lateral: float = push.dot(right)
-	if absf(lateral) < 0.08:
+	if absf(lateral) < 0.1:
 		return push
 
 	var now_sec: float = float(Time.get_ticks_msec()) * 0.001
@@ -234,6 +248,16 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 		return Vector3.ZERO
 
 	var self_radius: float = get_unit_radius(body)
+	var self_team: int = -999
+	var self_dest: Vector3 = Vector3.ZERO
+	var self_has_dest: bool = false
+	if body is Unit:
+		var self_unit := body as Unit
+		self_team = self_unit.team_id
+		if self_unit.has_move_target:
+			self_has_dest = true
+			self_dest = self_unit.get_movement_destination()
+
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = _get_probe_shape()
 	query.transform = Transform3D(Basis.IDENTITY, body.global_position)
@@ -258,6 +282,12 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 			continue
 
 		var other: CharacterBody3D = collider as CharacterBody3D
+		# Soft avoidance is friendly-only. Hostiles remain packing blockers (no soft peel).
+		if not hard_overlap_only and other is Unit and self_team >= 0:
+			var other_team: int = (other as Unit).team_id
+			if other_team >= 0 and other_team != self_team:
+				continue
+
 		var offset: Vector3 = body.global_position - other.global_position
 		offset.y = 0.0
 		var distance: float = offset.length()
@@ -284,6 +314,26 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 			direction = offset / distance
 
 		var weight: float = (desired - distance) / desired
+
+		# Queue through passages: if the other unit is ahead toward our destination,
+		# keep only rearward pressure (no sideways shove on the front unit).
+		if self_has_dest and not hard_overlap_only:
+			var self_to_goal: Vector3 = self_dest - body.global_position
+			self_to_goal.y = 0.0
+			var other_to_goal: Vector3 = self_dest - other.global_position
+			other_to_goal.y = 0.0
+			if (
+				self_to_goal.length_squared() > 0.01
+				and other_to_goal.length() + 0.35 < self_to_goal.length()
+			):
+				var goal_dir: Vector3 = self_to_goal.normalized()
+				var rearward: float = -direction.dot(goal_dir)
+				if rearward > 0.0:
+					direction = -goal_dir
+					weight *= 0.55
+				else:
+					weight *= 0.15
+
 		push += direction * weight
 		contributors += 1
 
