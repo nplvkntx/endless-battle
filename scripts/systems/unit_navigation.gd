@@ -28,6 +28,8 @@ static func configure_agent(agent: NavigationAgent3D, stopping_distance: float) 
 
 	agent.path_desired_distance = maxf(stopping_distance, 0.15)
 	agent.target_desired_distance = maxf(stopping_distance, 0.15)
+	# RVO avoidance stays off: idle units must never receive safe-velocity drift.
+	# Moving units use UnitSeparation; stationary units do not get soft push.
 	agent.avoidance_enabled = false
 
 
@@ -56,7 +58,10 @@ static func clear(agent: NavigationAgent3D, unit_position: Vector3) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
 
+	agent.avoidance_enabled = false
 	agent.target_position = unit_position
+	if agent.has_method("set_velocity_forced"):
+		agent.set_velocity_forced(Vector3.ZERO)
 
 
 static func process_movement(

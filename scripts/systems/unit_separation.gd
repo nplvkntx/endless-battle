@@ -17,8 +17,7 @@ const MIN_FORWARD_RATIO := 0.25
 const PUSH_CACHE_SECONDS := 0.05
 const SIDE_HYSTERESIS_SECONDS := 0.18
 const PUSH_DEAD_ZONE_SQ := 0.01 # ~0.1 — ignore soft separation noise
-## Combat standing: only unpack when heavily overlapped (avoids attack shuffle).
-const COMBAT_HARD_OVERLAP_SQ := 0.36 # push magnitude >= 0.6
+## Combat standing previously used a soft magnitude gate; hard-overlap query replaces it.
 const STANDING_SMOOTH := 12.0
 
 const META_PUSH_CACHE := &"_sep_push_cache"
@@ -78,7 +77,7 @@ static func compute_push(body: CharacterBody3D, use_cache: bool = true) -> Vecto
 		if now_sec - cache_time < PUSH_CACHE_SECONDS:
 			return body.get_meta(META_PUSH_CACHE) as Vector3
 
-	var push: Vector3 = _query_push(body)
+	var push: Vector3 = _query_push(body, false)
 	body.set_meta(META_PUSH_CACHE, push)
 	body.set_meta(META_PUSH_CACHE_TIME, now_sec)
 	return push
@@ -168,21 +167,22 @@ static func _apply_path_side_hysteresis(
 	return push
 
 
-## Returns a soft unpack velocity. Does NOT write body.velocity — Unit.apply_steered_velocity owns that.
+## Stationary correction only for genuine collision-body intersection.
+## Nearby-but-not-overlapping units must stay still (no endless soft slide).
+## Does NOT write body.velocity — Unit.apply_steered_velocity owns that.
 static func compute_standing_desired_velocity(
 	body: CharacterBody3D,
 	move_speed: float,
 	combat_mode: bool = false
 ) -> Vector3:
-	var push: Vector3 = compute_push(body)
+	var push: Vector3 = compute_hard_overlap_push(body)
 	var ratio: float = COMBAT_PUSH_SPEED_RATIO if combat_mode else IDLE_PUSH_SPEED_RATIO
 	var target_velocity: Vector3 = Vector3.ZERO
 	if push.length_squared() >= PUSH_DEAD_ZONE_SQ:
-		# Combat: only unpack hard overlaps so in-range units do not shuffle.
-		if combat_mode and push.length_squared() < COMBAT_HARD_OVERLAP_SQ:
-			target_velocity = Vector3.ZERO
-		else:
-			target_velocity = push * move_speed * ratio
+		# Tiny one-shot-style peel; combat stays even quieter.
+		target_velocity = push * move_speed * ratio
+		if combat_mode:
+			target_velocity *= 0.65
 
 	var previous: Vector3 = Vector3.ZERO
 	if body.has_meta(META_STANDING_VEL):
@@ -201,17 +201,25 @@ static func compute_standing_desired_velocity(
 	return smoothed
 
 
+## Push only when collision radii actually intersect (not soft MIN_SEPARATION packing).
+static func compute_hard_overlap_push(body: CharacterBody3D) -> Vector3:
+	return _query_push(body, true)
+
+
 ## Compatibility wrapper — prefer Unit.apply_standing_separation so velocity is applied once.
 static func apply_standing_push(
 	body: CharacterBody3D,
 	move_speed: float,
 	combat_mode: bool = false
 ) -> bool:
-	var desired: Vector3 = compute_standing_desired_velocity(body, move_speed, combat_mode)
-	if body is Unit and (body as Unit).has_method("apply_steered_velocity"):
-		(body as Unit).apply_steered_velocity(desired, -1.0, 0.0, false)
-		return desired.length_squared() >= PUSH_DEAD_ZONE_SQ
+	if body is Unit and (body as Unit).has_method("apply_standing_separation"):
+		var before: Vector3 = body.global_position
+		(body as Unit).apply_standing_separation(combat_mode)
+		var delta: Vector3 = body.global_position - before
+		delta.y = 0.0
+		return delta.length_squared() >= PUSH_DEAD_ZONE_SQ
 
+	var desired: Vector3 = compute_standing_desired_velocity(body, move_speed, combat_mode)
 	body.velocity = desired
 	body.velocity.y = 0.0
 	if desired.length_squared() < PUSH_DEAD_ZONE_SQ:
@@ -220,7 +228,7 @@ static func apply_standing_push(
 	return true
 
 
-static func _query_push(body: CharacterBody3D) -> Vector3:
+static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) -> Vector3:
 	var world: World3D = body.get_world_3d()
 	if world == null:
 		return Vector3.ZERO
@@ -253,10 +261,16 @@ static func _query_push(body: CharacterBody3D) -> Vector3:
 		var offset: Vector3 = body.global_position - other.global_position
 		offset.y = 0.0
 		var distance: float = offset.length()
-		var desired: float = maxf(
-			MIN_SEPARATION,
-			self_radius + get_unit_radius(other) + OVERLAP_EPSILON
-		)
+		var other_radius: float = get_unit_radius(other)
+		var desired: float
+		if hard_overlap_only:
+			# Genuine body intersection only — close neighbors must not keep sliding.
+			desired = self_radius + other_radius
+		else:
+			desired = maxf(
+				MIN_SEPARATION,
+				self_radius + other_radius + OVERLAP_EPSILON
+			)
 		if distance >= desired:
 			continue
 

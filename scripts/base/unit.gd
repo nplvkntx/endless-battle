@@ -48,6 +48,8 @@ const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.09
 const VISUAL_FACING_MIN_TURN_DOT := 0.998 # ~3.6deg — ignore tiny facing corrections
 const MOVE_VELOCITY_SMOOTH := 14.0
 const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.01 # ~0.1 m/s — kill micro-corrections
+## Facing only from meaningful travel velocity / combat facing — never residual push.
+const ROTATION_VELOCITY_MIN_SQ := 0.09 # ~0.3 m/s
 const ORDER_DEST_EQUIVALENCE := 0.35
 ## Settle when blocked by world/buildings near the destination instead of sliding forever.
 const BLOCKED_ARRIVAL_DISTANCE := 3.75
@@ -105,6 +107,11 @@ var _smoothed_move_velocity: Vector3 = Vector3.ZERO
 var _desired_move_facing: Vector3 = Vector3.ZERO
 var _stable_move_facing: Vector3 = Vector3.ZERO
 var _blocked_arrival_time: float = 0.0
+## Bumped whenever movement starts, changes destination, arrives, or is cancelled.
+## Stale NavigationAgent avoidance callbacks must match this generation.
+var _movement_generation: int = 0
+var _nav_velocity_request_generation: int = -1
+var _arrival_completed_generation: int = -1
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -421,9 +428,12 @@ func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency
 
 ## Clears movement and navigation without canceling combat orders.
 func clear_move_target() -> void:
+	if has_move_target or _nav_velocity_request_generation >= 0:
+		_invalidate_movement_generation()
 	has_move_target = false
 	_clear_residual_movement()
 	_navigation_active = false
+	_set_navigation_avoidance_enabled(false)
 	_clear_navigation_agent()
 	_reset_unstuck_state()
 
@@ -436,16 +446,53 @@ func stop_movement() -> void:
 	clear_move_target()
 
 
+## True when navigation / steered locomotion may apply non-zero velocity.
+## Idle, hold, attack-in-range, gather/deposit wait, and arrival must return false.
+func is_movement_active() -> bool:
+	if not is_inside_tree():
+		return false
+	if not NodeSafety.is_alive_node(self):
+		return false
+	return has_move_target
+
+
+func get_movement_generation() -> int:
+	return _movement_generation
+
+
+func _invalidate_movement_generation() -> void:
+	_movement_generation += 1
+	_nav_velocity_request_generation = -1
+
+
+func _begin_movement_generation() -> void:
+	_movement_generation += 1
+	_arrival_completed_generation = -1
+	_nav_velocity_request_generation = _movement_generation
+
+
 ## Authoritative locomotion step: optional separation, velocity smoothing, then move_and_slide.
 ## Call once per physics frame. Chase repaths must not reset smoothing (they only change destination).
 ## separation_blend < 0 uses UnitSeparation.MOVE_BLEND; 0 disables separation.
 ## update_facing=false for standing unpack so residual push does not spin the unit.
+## allow_stationary_correction=true only for hard body-overlap peel while idle/attacking.
 func apply_steered_velocity(
 	desired_velocity: Vector3,
 	delta: float = -1.0,
 	separation_blend: float = -1.0,
-	update_facing: bool = true
+	update_facing: bool = true,
+	allow_stationary_correction: bool = false
 ) -> void:
+	if not is_inside_tree() or not NodeSafety.is_alive_node(self):
+		velocity = Vector3.ZERO
+		_smoothed_move_velocity = Vector3.ZERO
+		return
+
+	if not is_movement_active() and not allow_stationary_correction:
+		_smoothed_move_velocity = Vector3.ZERO
+		velocity = Vector3.ZERO
+		return
+
 	if delta < 0.0:
 		delta = get_physics_process_delta_time()
 
@@ -459,13 +506,13 @@ func apply_steered_velocity(
 		velocity = Vector3.ZERO
 		return
 
-	# Face the path/desired steering direction, not post-separation lateral push.
-	if update_facing:
+	# Face only meaningful travel direction — never tiny residual / separation noise.
+	if update_facing and desired.length_squared() >= ROTATION_VELOCITY_MIN_SQ:
 		_desired_move_facing = desired.normalized()
 		_update_stable_move_facing(_desired_move_facing)
 
 	var steered: Vector3 = desired
-	if blend > 0.0:
+	if blend > 0.0 and is_movement_active():
 		steered = UnitSeparation.blend_desired_velocity(
 			self, desired, move_speed, blend
 		)
@@ -493,12 +540,21 @@ func apply_steered_velocity(
 	move_and_slide()
 
 
-## Idle / in-combat soft unpack — steering input only; velocity applied once via apply_steered_velocity.
+## Stationary halt, plus a tiny peel only when collision bodies truly intersect.
+## Soft proximity packing is travel-only (blend_desired_velocity while movement-active).
 func apply_standing_separation(combat_mode: bool = false) -> void:
+	if is_movement_active():
+		return
+
 	var desired: Vector3 = UnitSeparation.compute_standing_desired_velocity(
 		self, move_speed, combat_mode
 	)
-	apply_steered_velocity(desired, -1.0, 0.0, false)
+	if desired.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
+		_smoothed_move_velocity = Vector3.ZERO
+		velocity = Vector3.ZERO
+		return
+
+	apply_steered_velocity(desired, -1.0, 0.0, false, true)
 
 
 func _clear_residual_movement() -> void:
@@ -524,6 +580,13 @@ func _update_stable_move_facing(desired_dir: Vector3) -> void:
 
 
 func _complete_movement_arrival() -> void:
+	if not has_move_target:
+		return
+	# Complete once per movement generation — never re-fire every settle frame.
+	if _arrival_completed_generation == _movement_generation:
+		clear_move_target()
+		return
+	_arrival_completed_generation = _movement_generation
 	clear_move_target()
 	_on_movement_arrived()
 
@@ -588,6 +651,7 @@ func request_movement_target(
 		next_target = BearTrap.adjust_destination_away_from_traps(self, next_target)
 
 	var began_moving: bool = not has_move_target
+	_begin_movement_generation()
 	_movement_target = next_target
 	has_move_target = true
 	_last_issued_move_destination = next_target
@@ -740,7 +804,7 @@ func _physics_process(delta: float) -> void:
 	if not has_move_target:
 		_reset_unstuck_state()
 		_blocked_arrival_time = 0.0
-		# Soft unpack when idle so armies do not remain permanently stacked.
+		# Hard body-intersection peel only — nearby idle units must not soft-slide.
 		apply_standing_separation(false)
 		return
 
@@ -1172,6 +1236,9 @@ func _setup_navigation_agent() -> void:
 		return
 
 	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
+	_set_navigation_avoidance_enabled(false)
+	if not _navigation_agent.velocity_computed.is_connected(_on_navigation_velocity_computed):
+		_navigation_agent.velocity_computed.connect(_on_navigation_velocity_computed)
 	call_deferred("_sync_navigation_agent_position")
 
 
@@ -1191,6 +1258,8 @@ func _apply_navigation_destination(destination: Vector3) -> void:
 		return
 
 	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
+	# Keep RVO off — manual UnitSeparation handles moving units only.
+	_set_navigation_avoidance_enabled(false)
 	if not UnitNavigation.can_use(_navigation_agent):
 		_navigation_active = false
 		UnitNavigation.apply_destination(_navigation_agent, destination)
@@ -1200,6 +1269,7 @@ func _apply_navigation_destination(destination: Vector3) -> void:
 	UnitNavigation.apply_destination(_navigation_agent, destination)
 	_navigation_active = true
 	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
+	_nav_velocity_request_generation = _movement_generation
 	call_deferred("_refresh_navigation_active_state")
 
 
@@ -1222,7 +1292,57 @@ func _clear_navigation_agent() -> void:
 	if _navigation_agent == null:
 		return
 
+	_set_navigation_avoidance_enabled(false)
 	UnitNavigation.clear(_navigation_agent, global_position)
+
+
+func _set_navigation_avoidance_enabled(enabled: bool) -> void:
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		return
+	_navigation_agent.avoidance_enabled = enabled
+	if not enabled and _navigation_agent.has_method("set_velocity_forced"):
+		_navigation_agent.set_velocity_forced(Vector3.ZERO)
+
+
+## Guard for delayed NavigationAgent avoidance callbacks.
+## Even with avoidance disabled, a stale safe-velocity must never restart idle motion.
+func _on_navigation_velocity_computed(safe_velocity: Vector3) -> void:
+	if not is_movement_active():
+		_reject_navigation_velocity()
+		return
+	if _nav_velocity_request_generation != _movement_generation:
+		_reject_navigation_velocity()
+		return
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		_reject_navigation_velocity()
+		return
+	if _navigation_agent.is_navigation_finished():
+		_reject_navigation_velocity()
+		return
+
+	var remaining: Vector3 = _movement_target - global_position
+	remaining.y = 0.0
+	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	if remaining.length() <= arrive_distance:
+		_reject_navigation_velocity()
+		return
+
+	var horizontal: Vector3 = Vector3(safe_velocity.x, 0.0, safe_velocity.z)
+	if horizontal.length_squared() < ROTATION_VELOCITY_MIN_SQ:
+		_reject_navigation_velocity()
+		return
+
+	# Avoidance is intentionally disabled project-wide; if re-enabled later, still
+	# route through the authoritative steered path with generation checks above.
+	apply_steered_velocity(horizontal, -1.0, 0.0, true)
+
+
+func _reject_navigation_velocity() -> void:
+	_smoothed_move_velocity = Vector3.ZERO
+	velocity = Vector3.ZERO
+	if _navigation_agent != null and is_instance_valid(_navigation_agent):
+		if _navigation_agent.has_method("set_velocity_forced"):
+			_navigation_agent.set_velocity_forced(Vector3.ZERO)
 
 
 func _update_navigation_path_validity(delta: float) -> void:

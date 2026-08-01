@@ -19,8 +19,11 @@ func _ready() -> void:
 	await _verify_chase_preserves_smoothing(failures)
 	await _verify_arrival_settles(failures)
 	await _verify_blocked_near_building_settles(failures)
+	await _verify_idle_cluster_no_slide(failures)
+	await _verify_stale_avoidance_callback_ignored(failures)
 	_verify_separation_forward_preserve(failures)
 	_verify_standing_uses_authoritative_path(failures)
+	_verify_movement_active_gate(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -150,7 +153,7 @@ func _verify_attack_range_stable(failures: PackedStringArray) -> void:
 		drift.y = 0.0
 		max_drift = maxf(max_drift, drift.length())
 
-	_expect(failures, "attack range: low standing drift", max_drift <= 0.85)
+	_expect(failures, "attack range: low standing drift", max_drift <= 0.35)
 	target.queue_free()
 	await _free_harness(harness)
 
@@ -180,7 +183,7 @@ func _verify_arrival_settles(failures: PackedStringArray) -> void:
 		drift.y = 0.0
 		max_drift = maxf(max_drift, drift.length())
 
-	_expect(failures, "arrival: settled drift low", max_drift <= 0.35)
+	_expect(failures, "arrival: settled drift low", max_drift <= 0.15)
 	_expect(
 		failures,
 		"arrival: residual velocity near zero",
@@ -271,6 +274,72 @@ func _verify_chase_preserves_smoothing(failures: PackedStringArray) -> void:
 	await _free_harness(harness)
 
 
+func _verify_idle_cluster_no_slide(failures: PackedStringArray) -> void:
+	print("verify: idle cluster does not soft-slide")
+	var harness: Dictionary = await _spawn_nav_harness()
+	# Hide harness unit so it does not sit on top of the cluster origin.
+	var harness_unit: Swordsman = harness["unit"]
+	harness_unit.global_position = Vector3(20.0, 0.0, 20.0)
+	harness_unit.stop_movement()
+
+	var units: Array[Swordsman] = []
+	for index: int in 6:
+		var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+		harness["root"].add_child(unit)
+		unit.add_to_group(&"units")
+		unit.team_id = 0
+		# Nearby but not stacked (~1.2m).
+		unit.global_position = Vector3(float(index % 3) * 1.2, 0.0, float(index / 3) * 1.2)
+		units.append(unit)
+
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var origins: Array[Vector3] = []
+	for unit: Swordsman in units:
+		origins.append(unit.global_position)
+
+	var max_drift: float = 0.0
+	var start_msec: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_msec < 2500:
+		await get_tree().physics_frame
+		for index: int in units.size():
+			var drift: Vector3 = units[index].global_position - origins[index]
+			drift.y = 0.0
+			max_drift = maxf(max_drift, drift.length())
+
+	_expect(failures, "idle cluster: no soft proximity slide", max_drift <= 0.08)
+	for unit: Swordsman in units:
+		unit.queue_free()
+	await _free_harness(harness)
+
+
+func _verify_stale_avoidance_callback_ignored(failures: PackedStringArray) -> void:
+	print("verify: stale avoidance callback ignored after stop")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(-5.0, 0.0, 0.0)
+	await _wait_nav_ready(unit)
+	unit.set_movement_target(Vector3(6.0, 0.0, 0.0))
+	await get_tree().physics_frame
+	var gen_before_stop: int = unit.get_movement_generation()
+	unit.stop_movement()
+	await get_tree().physics_frame
+	_expect(failures, "stop: generation advanced", unit.get_movement_generation() != gen_before_stop)
+	_expect(failures, "stop: not movement-active", not unit.is_movement_active())
+
+	# Simulate a delayed NavigationAgent avoidance callback from the old order.
+	unit._nav_velocity_request_generation = gen_before_stop
+	unit._on_navigation_velocity_computed(Vector3(3.0, 0.0, 0.0))
+	await get_tree().physics_frame
+	_expect(
+		failures,
+		"stale callback: velocity stays zero",
+		Vector3(unit.velocity.x, 0.0, unit.velocity.z).length() < 0.05
+	)
+	_expect(failures, "stale callback: still not movement-active", not unit.is_movement_active())
+	await _free_harness(harness)
+
+
 func _verify_separation_forward_preserve(failures: PackedStringArray) -> void:
 	print("verify: separation preserves forward motion")
 	var body := CharacterBody3D.new()
@@ -295,15 +364,43 @@ func _verify_standing_uses_authoritative_path(failures: PackedStringArray) -> vo
 	)
 	_expect(
 		failures,
-		"standing routes through apply_steered_velocity",
+		"standing halt zeros velocity without soft push",
 		source.contains("func apply_standing_separation")
-		and source.contains("apply_steered_velocity(desired")
+		and source.contains("allow_stationary_correction")
+		and source.contains("if is_movement_active()")
+	)
+	_expect(
+		failures,
+		"movement generation + velocity_computed guard present",
+		source.contains("func is_movement_active")
+		and source.contains("_on_navigation_velocity_computed")
+		and source.contains("_movement_generation")
 	)
 	var sep_source: String = FileAccess.get_file_as_string("res://scripts/systems/unit_separation.gd")
 	_expect(
 		failures,
 		"separation compute does not own Unit locomotion",
 		sep_source.contains("func compute_standing_desired_velocity")
+	)
+	_expect(
+		failures,
+		"standing uses hard-overlap push only",
+		sep_source.contains("func compute_hard_overlap_push")
+	)
+
+
+func _verify_movement_active_gate(failures: PackedStringArray) -> void:
+	print("verify: movement-active gate conditions")
+	var source: String = FileAccess.get_file_as_string("res://scripts/base/unit.gd")
+	_expect(
+		failures,
+		"gate blocks steered motion without move target",
+		source.contains("if not is_movement_active() and not allow_stationary_correction")
+	)
+	_expect(
+		failures,
+		"arrival completes once per generation",
+		source.contains("_arrival_completed_generation")
 	)
 
 
