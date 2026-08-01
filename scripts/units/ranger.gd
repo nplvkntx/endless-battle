@@ -208,6 +208,11 @@ func get_ability_active_status_text(ability_id: StringName) -> String:
 
 
 func try_ai_cast_abilities(context: Dictionary) -> void:
+	## Kit micro is owned by AIHeroMastery (tactical states + combo planner).
+	## Keep a lightweight fallback if mastery is unavailable.
+	if context.get("mastery_owned", false):
+		return
+
 	var health_ratio: float = float(context.get("health_ratio", 1.0))
 	var retreating: bool = bool(context.get("retreating", false))
 	var nearby_enemy_count: int = int(context.get("nearby_enemy_count", 0))
@@ -216,7 +221,6 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 		context.get("defensive_hp_ratio", DEFAULT_DEFENSIVE_HP_RATIO)
 	)
 
-	# R — escape, ambush before a fight, or approach a valuable (wounded) target.
 	if can_use_camouflage():
 		if health_ratio < defensive_hp_ratio or retreating:
 			try_camouflage()
@@ -225,8 +229,6 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 		elif _has_valuable_hunt_prey_nearby():
 			try_camouflage()
 
-	# Q — kite / escape / reposition. During R, roll preserves camouflage and may extend it,
-	# but only when there is a useful reposition (never solely to farm duration).
 	if can_use_combat_roll():
 		if _camouflage_active:
 			if (
@@ -239,20 +241,56 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 		elif health_ratio < defensive_hp_ratio or retreating or _is_melee_threat_nearby():
 			try_combat_roll(_resolve_ai_roll_target())
 
-	# While camouflaged hunting, prefer closing on wounded enemy heroes.
 	if _camouflage_active:
 		_ai_prefer_hunt_movement()
 
-	# W — traps near self / army / retreat path.
 	if can_use_bear_trap():
 		if nearby_enemy_count > 0 or retreating or _should_defend_with_trap():
 			try_bear_trap(_resolve_ai_trap_position(retreating))
 
-	# E — poke heroes / pierce clumps.
 	if can_use_crossbow_bolt():
 		if nearby_enemy_count >= aoe_needed or _has_hero_in_bolt_range():
 			try_crossbow_bolt()
 
+
+func get_bear_trap_charges() -> int:
+	return _trap_charges
+
+
+func is_camouflage_active() -> bool:
+	return _camouflage_active or _camouflage_remaining > 0.0
+
+
+func ai_has_melee_threat_nearby() -> bool:
+	return _is_melee_threat_nearby()
+
+
+func ai_has_valuable_hunt_prey_nearby() -> bool:
+	return _has_valuable_hunt_prey_nearby()
+
+
+func ai_should_reposition_while_hunting() -> bool:
+	return _ai_should_reposition_while_hunting()
+
+
+func ai_resolve_roll_target() -> Vector3:
+	return _resolve_ai_roll_target()
+
+
+func ai_resolve_roll_target_while_camouflaged() -> Vector3:
+	return _resolve_ai_roll_target_while_camouflaged()
+
+
+func ai_prefer_hunt_movement() -> void:
+	_ai_prefer_hunt_movement()
+
+
+func ai_resolve_trap_position(retreating: bool) -> Vector3:
+	return _resolve_ai_trap_position(retreating)
+
+
+func ai_has_hero_in_bolt_range() -> bool:
+	return _has_hero_in_bolt_range()
 
 func _tick_hero_abilities(delta: float) -> void:
 	_tick_combat_roll_cooldown(delta)

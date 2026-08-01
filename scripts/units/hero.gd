@@ -147,6 +147,10 @@ func get_ability_active_status_text(ability_id: StringName) -> String:
 
 
 func try_ai_cast_abilities(context: Dictionary) -> void:
+	## Kit micro is owned by AIHeroMastery (tactical states + combo planner).
+	if context.get("mastery_owned", false):
+		return
+
 	var health_ratio: float = float(context.get("health_ratio", 1.0))
 	var aoe_count: int = int(context.get("nearby_enemy_count", 0))
 	var aoe_needed: int = int(context.get("aoe_needed", 3))
@@ -166,7 +170,6 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 
 	if can_use_ground_slam() and aoe_count >= aoe_needed:
 		try_ground_slam()
-
 
 func _tick_hero_abilities(delta: float) -> void:
 	_tick_ground_slam_cooldown(delta)

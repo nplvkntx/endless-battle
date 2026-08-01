@@ -195,6 +195,10 @@ func get_ability_active_status_text(ability_id: StringName) -> String:
 
 
 func try_ai_cast_abilities(context: Dictionary) -> void:
+	## Kit micro is owned by AIHeroMastery (tactical states + combo planner).
+	if context.get("mastery_owned", false):
+		return
+
 	var health_ratio: float = float(context.get("health_ratio", 1.0))
 	var retreating: bool = bool(context.get("retreating", false))
 	var nearby_enemy_count: int = int(context.get("nearby_enemy_count", 0))
@@ -212,11 +216,9 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 	var wants_dash: bool = can_use_dash(dash_range)
 	var wants_engage: bool = can_use_axe_mark(axe_mark_range) or wants_dash
 
-	# Smoke before diving, when retreating, or when low HP.
 	if can_use_smoke() and (wants_dash or retreating or health_ratio < defensive_hp_ratio):
 		try_smoke()
 
-	# Mark before engaging.
 	if wants_engage and can_use_axe_mark(axe_mark_range):
 		try_axe_mark()
 
@@ -225,7 +227,6 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 
 	if can_use_slash() and nearby_enemy_count >= aoe_needed:
 		try_slash()
-
 
 func _tick_hero_abilities(delta: float) -> void:
 	_tick_axe_mark_cooldown(delta)

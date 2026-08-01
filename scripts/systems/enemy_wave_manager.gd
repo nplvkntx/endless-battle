@@ -466,8 +466,10 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 	if not NodeSafety.is_alive_node(hero):
 		return
 
-	if hero.has_method("try_ai_cast_abilities"):
-		hero.try_ai_cast_abilities({
+	## Single owner for AI hero tactical state, targeting, and ability micro.
+	AIHeroMastery.tick(
+		hero as Hero,
+		{
 			"health_ratio": health_ratio,
 			"nearby_enemy_count": _count_player_military_near_hero(hero),
 			"aoe_needed": EnemyArmyCommand.HERO_AOE_PLAYER_COUNT,
@@ -475,37 +477,9 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 			"power_strike_range": EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE,
 			"execute_range": HERO_EXECUTE_SEARCH_RANGE,
 			"retreating": health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
-		})
-		return
-
-	if (
-		health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO
-		and hero.has_method("can_use_divine_protection")
-		and hero.can_use_divine_protection()
-	):
-		hero.try_divine_protection()
-
-	if not NodeSafety.is_alive_node(hero):
-		return
-
-	if hero.has_method("can_use_execute") and hero.can_use_execute(
-		HERO_EXECUTE_SEARCH_RANGE
-	):
-		hero.try_execute()
-	elif hero.has_method("can_use_power_strike") and hero.can_use_power_strike(
-		EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE
-	):
-		hero.try_power_strike()
-
-	if not NodeSafety.is_alive_node(hero):
-		return
-
-	if (
-		hero.has_method("can_use_ground_slam")
-		and hero.can_use_ground_slam()
-		and _count_player_military_near_hero(hero) >= EnemyArmyCommand.HERO_AOE_PLAYER_COUNT
-	):
-		hero.try_ground_slam()
+			"mastery_owned": true,
+		}
+	)
 
 
 func _spend_enemy_hero_ability_points(hero) -> void:

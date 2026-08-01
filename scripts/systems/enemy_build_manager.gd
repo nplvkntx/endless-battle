@@ -425,6 +425,9 @@ func _try_train_early_army_hero() -> void:
 	if hero_altar.is_training_hero():
 		return
 
+	## Lock equal-weight random kit once before the first Altar training order.
+	AIHeroMastery.ensure_enemy_hero_choice()
+
 	if hero_altar.try_train_enemy_hero():
 		EnemyAIDebug.log_early_army("Training Hero")
 
@@ -1105,6 +1108,8 @@ func _update_enemy_hero_restoration() -> bool:
 		_try_place_building(PLACEMENT_HERO_ALTAR)
 
 	if hero_altar != null:
+		## Retrain the same locked kit after death — never reroll.
+		AIHeroMastery.ensure_enemy_hero_choice()
 		if hero_altar.try_train_enemy_hero():
 			EnemyAIDebug.log_training("Hero")
 

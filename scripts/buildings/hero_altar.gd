@@ -28,8 +28,8 @@ var _rally_next_slot: int = 0
 var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
 ## Player-selected kit for the next training (UI writes this).
 var selected_kit_id: StringName = HeroCatalog.KIT_PALADIN
-## Enemy training defaults to Shadow Assassin (unless a saved enemy kit exists)
-## so AI assassin behavior is exercised without requiring extra UI.
+## Fallback only when AIHeroMastery has not locked a kit yet (should be rare).
+## Normal AI flow locks an equal-weight random kit before the first train order.
 const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_SHADOW_ASSASSIN
 
 @onready var _health_component: HealthComponent = get_node_or_null(
