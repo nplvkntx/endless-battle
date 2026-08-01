@@ -17,8 +17,12 @@ static func is_target_reachable(agent: NavigationAgent3D, target: Vector3) -> bo
 	if not can_use(agent):
 		return false
 
+	# Probe without permanently replacing an in-flight destination (avoids repath spam).
+	var previous_target: Vector3 = agent.target_position
 	agent.target_position = target
-	return agent.is_target_reachable()
+	var reachable: bool = agent.is_target_reachable()
+	agent.target_position = previous_target
+	return reachable
 
 
 static func process_movement(

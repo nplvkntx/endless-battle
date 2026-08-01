@@ -465,7 +465,10 @@ func _physics_process(delta: float) -> void:
 	_update_build_trip()
 
 
-func set_movement_target(target: Vector3) -> bool:
+func set_movement_target(
+	target: Vector3,
+	urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER
+) -> bool:
 	if (
 		_is_enemy_worker()
 		and WorkerAiUnstuck.blocks_external_commands(self)
@@ -487,11 +490,11 @@ func set_movement_target(target: Vector3) -> bool:
 	# build approach moves and AI unstuck nudges must bypass that path.
 	var applied: bool
 	if _issuing_order:
-		applied = super.set_movement_target(target)
+		applied = super.set_movement_target(target, urgency)
 	elif _is_on_task_movement() or _ai_unstuck_internal_move:
 		applied = request_movement_target(target, RepathUrgency.NORMAL)
 	else:
-		applied = super.set_movement_target(target)
+		applied = super.set_movement_target(target, urgency)
 	if not applied:
 		return false
 
@@ -580,8 +583,12 @@ func _refresh_task_navigation() -> void:
 			call_deferred("_try_repath_task_movement")
 		return
 
-	_navigation_agent.target_position = _task_movement_destination
-	PerfCounters.record_navigation_path_request()
+	var previous_target: Vector3 = _navigation_agent.target_position
+	var refresh_delta: Vector3 = _task_movement_destination - previous_target
+	refresh_delta.y = 0.0
+	if refresh_delta.length_squared() >= 0.04:
+		_navigation_agent.target_position = _task_movement_destination
+		PerfCounters.record_navigation_path_request()
 	_check_task_navigation_reachable.call_deferred()
 
 

@@ -24,6 +24,7 @@ const WARN_TARGET_SEARCHES_PER_SEC := 80.0
 const SECTION_WARN_USEC := 12000
 const ORDER_BUDGET_WARN_COOLDOWN_SECONDS := 2.0
 const EXCESSIVE_RATE_WARN_COOLDOWN_SECONDS := 3.0
+const DUPLICATE_GROUP_ORDER_WARN_COOLDOWN_SECONDS := 8.0
 
 var _window_elapsed: float = 0.0
 var _counts: Dictionary = {}
@@ -43,6 +44,7 @@ var _last_fps: float = 0.0
 var _avg_fps: float = 0.0
 var _recent_low_fps: float = 0.0
 var _last_order_budget_warn_msec: int = 0
+var _last_duplicate_group_order_warn_msec: int = 0
 var _last_excessive_warn_msec: Dictionary = {}
 var verbose_ai_logging: bool = false
 
@@ -81,14 +83,15 @@ func record_get_nodes_in_group_call() -> void:
 
 
 func record_navigation_path_request() -> void:
+	## Single instrumentation point for NavigationAgent target writes.
 	bump(KEY_PATH_RECALCULATIONS)
 	bump(KEY_NAV_PATH_REQUESTS)
 	bump(KEY_REPATH_REQUESTS)
 
 
 func record_repath_request() -> void:
-	bump(KEY_REPATH_REQUESTS)
-	bump(KEY_PATH_RECALCULATIONS)
+	## Alias kept for call sites that decide a repath without going through UnitNavigation.
+	record_navigation_path_request()
 
 
 func record_ai_economy_update() -> void:
@@ -257,6 +260,15 @@ func warn_order_budget_reached(budget: int) -> void:
 
 
 func warn_duplicate_group_order() -> void:
+	## Throttled: duplicate skips are expected after the fix; only log occasionally.
+	if not verbose_ai_logging:
+		var now_msec: int = Time.get_ticks_msec()
+		if (
+			now_msec - _last_duplicate_group_order_warn_msec
+			< int(DUPLICATE_GROUP_ORDER_WARN_COOLDOWN_SECONDS * 1000.0)
+		):
+			return
+		_last_duplicate_group_order_warn_msec = now_msec
 	_warn_rate_once(&"duplicate_group_order", 0.0, "Group order skipped: duplicate destination")
 
 

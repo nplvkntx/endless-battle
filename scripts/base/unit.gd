@@ -29,22 +29,28 @@ const UNSTUCK_RECOVERY_COOLDOWN_SECONDS := 1.5
 const UNSTUCK_MIN_REMAINING_DISTANCE := 1.5
 const MOVE_DEST_TOLERANCE := 1.0
 const MOVE_DEST_NEAR_SKIP := 0.35
-const REPATH_COOLDOWN_NORMAL_SECONDS := 0.7
-const REPATH_COOLDOWN_FORMATION_SECONDS := 1.0
-const REPATH_COOLDOWN_URGENT_SECONDS := 0.35
-const REPATH_COOLDOWN_STUCK_SECONDS := 0.75
-const REPATH_STAGGER_OFFSET_SECONDS := 0.08
-const PATH_VALIDITY_CHECK_INTERVAL := 0.55
-const CHASE_TARGET_MOVE_THRESHOLD := 1.25
+const PLAYER_DEST_NEAR_SKIP := 0.25
+const REPATH_COOLDOWN_NORMAL_SECONDS := 0.85
+const REPATH_COOLDOWN_FORMATION_SECONDS := 1.15
+const REPATH_COOLDOWN_CHASE_SECONDS := 1.0
+const REPATH_COOLDOWN_URGENT_SECONDS := 0.4
+const REPATH_COOLDOWN_STUCK_SECONDS := 0.9
+const REPATH_STAGGER_OFFSET_SECONDS := 0.1
+const PATH_VALIDITY_CHECK_INTERVAL := 0.7
+const CHASE_TARGET_MOVE_THRESHOLD := 1.75
+const CHASE_UPDATE_INTERVAL := 0.35
+const CHASE_UPDATE_JITTER := 0.25
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
 const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
 const VISUAL_FACING_TURN_SPEED := 12.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.04
+const ORDER_DEST_EQUIVALENCE := 0.35
 
 enum RepathUrgency {
 	NORMAL,
 	FORMATION,
+	CHASE,
 	URGENT,
 	STUCK_RECOVERY,
 	PLAYER_ORDER,
@@ -71,6 +77,7 @@ var _stuck_recovery_cooldown: float = 0.0
 var _stuck_repath_attempted: bool = false
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
+var _chase_update_timer: float = 0.0
 var _last_issued_move_destination: Vector3 = Vector3.ZERO
 var _last_requested_destination: Vector3 = Vector3.ZERO
 var _last_path_request_msec: int = 0
@@ -218,7 +225,7 @@ func command_attack(_target: Node3D, _assigned_slot: int = -1) -> void:
 	pass
 
 
-func command_attack_move(_destination: Vector3) -> void:
+func command_attack_move(_destination: Vector3, _urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER) -> void:
 	pass
 
 
@@ -254,13 +261,29 @@ func issue_order(order: UnitOrder, queued: bool = false) -> bool:
 		return true
 
 	if queued:
+		if _is_duplicate_queued_order(order):
+			return true
 		if _active_order != null:
 			_order_queue.append(order)
 			return true
 	else:
+		if _active_order != null and _active_order.is_equivalent(order, ORDER_DEST_EQUIVALENCE):
+			# Equivalent non-shift order: keep current nav/attack/animation state.
+			return true
 		_order_queue.clear()
 
 	return _start_order(order)
+
+
+func _is_duplicate_queued_order(order: UnitOrder) -> bool:
+	if _active_order != null and _order_queue.is_empty():
+		if _active_order.is_equivalent(order, ORDER_DEST_EQUIVALENCE):
+			return true
+	if not _order_queue.is_empty():
+		var last_queued: UnitOrder = _order_queue[_order_queue.size() - 1]
+		if last_queued != null and last_queued.is_equivalent(order, ORDER_DEST_EQUIVALENCE):
+			return true
+	return false
 
 
 func issue_stop() -> void:
@@ -375,12 +398,12 @@ func notify_order_completed(order_type: UnitOrder.Type) -> void:
 ## Sets a single move target. Player/rally orders apply immediately and replace the queue
 ## unless issued through the order system (`_issuing_order`).
 ## Returns true when a real destination update was applied.
-func set_movement_target(target: Vector3) -> bool:
+func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER) -> bool:
 	if not _issuing_order:
 		_order_queue.clear()
 		_active_order = UnitOrder.move(target)
 		_prepare_for_new_player_order()
-	return request_movement_target(target, RepathUrgency.PLAYER_ORDER)
+	return request_movement_target(target, urgency)
 
 
 ## Clears movement and navigation without canceling combat orders.
@@ -426,14 +449,19 @@ func request_movement_target(
 		0.0,
 		global_position.z - next_target.z
 	).length()
-	if distance_to_new <= stopping_distance + MOVE_DEST_NEAR_SKIP:
+	var near_skip: float = (
+		PLAYER_DEST_NEAR_SKIP
+		if urgency == RepathUrgency.PLAYER_ORDER
+		else MOVE_DEST_NEAR_SKIP
+	)
+	if distance_to_new <= stopping_distance + near_skip:
 		if has_move_target:
 			var current_delta: float = Vector3(
 				_movement_target.x - next_target.x,
 				0.0,
 				_movement_target.z - next_target.z
 			).length()
-			if current_delta <= MOVE_DEST_TOLERANCE:
+			if current_delta <= _destination_change_threshold(urgency):
 				return false
 		else:
 			return false
@@ -444,14 +472,12 @@ func request_movement_target(
 			0.0,
 			_movement_target.z - next_target.z
 		).length()
-		if urgency != RepathUrgency.STUCK_RECOVERY and urgency != RepathUrgency.PLAYER_ORDER:
-			if destination_delta < MOVE_DEST_NEAR_SKIP:
-				return false
+		# Always skip effectively-equal destinations (including player/AI re-clicks).
+		if destination_delta < near_skip and urgency != RepathUrgency.STUCK_RECOVERY:
+			return false
 
-			if (
-				urgency != RepathUrgency.URGENT
-				and destination_delta < MOVE_DEST_TOLERANCE
-			):
+		if urgency != RepathUrgency.STUCK_RECOVERY and urgency != RepathUrgency.PLAYER_ORDER:
+			if destination_delta < _destination_change_threshold(urgency):
 				return false
 
 		if not _can_request_repath(destination_delta, urgency, now_msec):
@@ -474,10 +500,23 @@ func request_movement_target(
 		_stuck_time = 0.0
 	else:
 		_reset_unstuck_state()
-	PerfCounters.record_repath_request()
 	if began_moving:
 		CommandFeedback.notify_movement_started(self)
 	return true
+
+
+func _destination_change_threshold(urgency: RepathUrgency) -> float:
+	match urgency:
+		RepathUrgency.PLAYER_ORDER:
+			return PLAYER_DEST_NEAR_SKIP
+		RepathUrgency.CHASE:
+			return CHASE_TARGET_MOVE_THRESHOLD
+		RepathUrgency.FORMATION:
+			return MOVE_DEST_TOLERANCE * 1.5
+		RepathUrgency.URGENT:
+			return MOVE_DEST_NEAR_SKIP
+		_:
+			return MOVE_DEST_TOLERANCE
 
 
 func get_movement_destination() -> Vector3:
@@ -493,7 +532,29 @@ func uses_navigation_agent() -> bool:
 
 
 func get_repath_stagger_offset_seconds() -> float:
-	return float(abs(get_instance_id()) % 7) * REPATH_STAGGER_OFFSET_SECONDS
+	return float(abs(get_instance_id()) % 11) * REPATH_STAGGER_OFFSET_SECONDS
+
+
+func get_chase_update_bucket_offset() -> float:
+	return float(abs(get_instance_id()) % 13) * (CHASE_UPDATE_JITTER / 4.0)
+
+
+## Stagger moving-target chase updates across units so armies do not repath together.
+func tick_chase_update_timer(delta: float, force: bool = false) -> bool:
+	if force:
+		_chase_update_timer = 0.0
+		return true
+
+	_chase_update_timer -= delta
+	if _chase_update_timer > 0.0:
+		return false
+
+	_chase_update_timer = (
+		CHASE_UPDATE_INTERVAL
+		+ get_chase_update_bucket_offset()
+		+ randf() * CHASE_UPDATE_JITTER
+	)
+	return true
 
 
 func _can_request_repath(
@@ -508,6 +569,8 @@ func _can_request_repath(
 	match urgency:
 		RepathUrgency.FORMATION:
 			cooldown = REPATH_COOLDOWN_FORMATION_SECONDS
+		RepathUrgency.CHASE:
+			cooldown = REPATH_COOLDOWN_CHASE_SECONDS
 		RepathUrgency.URGENT:
 			cooldown = REPATH_COOLDOWN_URGENT_SECONDS
 		RepathUrgency.STUCK_RECOVERY:
@@ -516,7 +579,11 @@ func _can_request_repath(
 			cooldown = REPATH_COOLDOWN_NORMAL_SECONDS
 
 	# Meaningful destination changes stay responsive even under normal urgency.
-	if destination_delta >= MOVE_DEST_TOLERANCE * 4.0 and urgency != RepathUrgency.STUCK_RECOVERY:
+	if (
+		destination_delta >= MOVE_DEST_TOLERANCE * 4.0
+		and urgency != RepathUrgency.STUCK_RECOVERY
+		and urgency != RepathUrgency.CHASE
+	):
 		cooldown = minf(cooldown, REPATH_COOLDOWN_URGENT_SECONDS)
 
 	cooldown += get_repath_stagger_offset_seconds()

@@ -83,6 +83,37 @@ func clear_invalid_target() -> void:
 		target = null
 
 
+## True when issuing `other` would not change behavior (same type/target/destination).
+func is_equivalent(other: UnitOrder, destination_tolerance: float = 0.35) -> bool:
+	if other == null or type != other.type:
+		return false
+
+	match type:
+		Type.MOVE, Type.ATTACK_MOVE:
+			var delta: Vector3 = destination - other.destination
+			delta.y = 0.0
+			return delta.length() <= destination_tolerance
+		Type.ATTACK, Type.BUILD:
+			var self_target: Node3D = get_alive_target()
+			var other_target: Node3D = other.get_alive_target()
+			if self_target == null or other_target == null:
+				return false
+			return self_target == other_target and assigned_slot == other.assigned_slot
+		Type.HOLD_POSITION, Type.STOP:
+			return true
+		Type.PATROL:
+			if patrol_points.size() != other.patrol_points.size():
+				return false
+			for index: int in patrol_points.size():
+				var point_delta: Vector3 = patrol_points[index] - other.patrol_points[index]
+				point_delta.y = 0.0
+				if point_delta.length() > destination_tolerance:
+					return false
+			return true
+		_:
+			return false
+
+
 func describe() -> String:
 	match type:
 		Type.MOVE:

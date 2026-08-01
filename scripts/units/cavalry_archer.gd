@@ -150,6 +150,13 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 	if not CombatTargetValidation.is_attack_target_for_attacker(self, target):
 		return
 
+	if (
+		_attack_target == target
+		and _has_active_attack_order
+		and (assigned_slot < 0 or assigned_slot == _attack_approach_slot)
+	):
+		return
+
 	_assign_attack_approach_slot(target, assigned_slot)
 	_set_attack_target(target)
 	if _attack_target == null:
@@ -204,11 +211,29 @@ func _on_attack_target_tree_exiting(expected_instance_id: int) -> void:
 	_resume_attack_move()
 
 
-func command_attack_move(destination: Vector3) -> void:
-	_attack_move_destination = destination
+func command_attack_move(
+	destination: Vector3,
+	urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER
+) -> void:
+	var flat_destination: Vector3 = Vector3(destination.x, global_position.y, destination.z)
+	if _has_attack_move_destination:
+		var existing_delta: Vector3 = flat_destination - _attack_move_destination
+		existing_delta.y = 0.0
+		var skip_threshold: float = (
+			PLAYER_DEST_NEAR_SKIP
+			if urgency == RepathUrgency.PLAYER_ORDER
+			else MOVE_DEST_TOLERANCE
+		)
+		if existing_delta.length() <= skip_threshold:
+			if has_move_target or _attack_target != null:
+				return
+			if _is_at_attack_move_destination():
+				return
+
+	_attack_move_destination = flat_destination
 	_has_attack_move_destination = true
 	cancel_attack()
-	_set_move_destination(destination, RepathUrgency.PLAYER_ORDER)
+	_set_move_destination(flat_destination, urgency)
 
 
 func cancel_attack_move() -> void:
@@ -225,10 +250,13 @@ func cancel_attack() -> void:
 	_has_active_attack_order = false
 
 
-func set_movement_target(target: Vector3) -> bool:
+func set_movement_target(
+	target: Vector3,
+	urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER
+) -> bool:
 	cancel_attack_move()
 	cancel_attack()
-	return _set_move_destination(target, RepathUrgency.PLAYER_ORDER)
+	return _set_move_destination(target, urgency)
 
 
 func stop_movement() -> void:
@@ -335,7 +363,7 @@ func _try_retarget_higher_priority_during_attack() -> void:
 func _process_attack(delta: float) -> void:
 	if _is_in_attack_range(_attack_target):
 		if _should_reposition_for_preferred_range():
-			_update_chase_movement()
+			_update_chase_movement(delta)
 			super._physics_process(delta)
 			if _attack_target != null and _is_in_attack_range(_attack_target):
 				if not _should_reposition_for_preferred_range():
@@ -345,7 +373,7 @@ func _process_attack(delta: float) -> void:
 		_stop_and_attack(delta)
 		return
 
-	_update_chase_movement()
+	_update_chase_movement(delta)
 	super._physics_process(delta)
 
 	if _attack_target != null and _is_in_attack_range(_attack_target):
@@ -475,12 +503,15 @@ func _on_health_depleted() -> void:
 
 
 func _begin_chase() -> void:
-	_update_chase_movement()
+	_update_chase_movement(0.0, true)
 
 
-func _update_chase_movement() -> void:
+func _update_chase_movement(delta: float = 0.0, force: bool = false) -> void:
 	if not NodeSafety.is_alive_node(_attack_target):
 		cancel_attack()
+		return
+
+	if not force and not tick_chase_update_timer(delta, false):
 		return
 
 	var approach_position: Vector3 = _compute_attack_approach_position(_attack_target)
@@ -490,7 +521,7 @@ func _update_chase_movement() -> void:
 		if destination_delta.length() < CHASE_TARGET_MOVE_THRESHOLD:
 			return
 
-	if _set_move_destination(approach_position, RepathUrgency.NORMAL):
+	if _set_move_destination(approach_position, RepathUrgency.CHASE):
 		_has_chase_target = true
 	elif not has_move_target:
 		_has_chase_target = true
@@ -519,7 +550,7 @@ func _resume_attack_move() -> void:
 		return
 
 	_has_chase_target = false
-	_set_move_destination(_attack_move_destination)
+	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
 
 
 func _is_at_attack_move_destination() -> bool:

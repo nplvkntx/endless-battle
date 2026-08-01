@@ -122,9 +122,9 @@ func _verify_chase_moving_target(failures: PackedStringArray) -> void:
 	)
 
 	# Allow repath cooldown window, then force an urgent update check via threshold.
-	await _wait_msec(800)
+	await _wait_msec(1200)
 	unit._has_chase_target = true
-	unit._update_chase_movement()
+	unit._update_chase_movement(0.0, true)
 	var dest_delta: float = _horizontal_distance(unit.get_movement_destination(), first_dest)
 	_expect(
 		failures,

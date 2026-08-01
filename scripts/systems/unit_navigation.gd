@@ -29,6 +29,13 @@ static func apply_destination(agent: NavigationAgent3D, destination: Vector3) ->
 	if agent == null or not is_instance_valid(agent):
 		return
 
+	# Skip no-op writes — NavigationAgent recalculates on every target_position assignment.
+	var previous: Vector3 = agent.target_position
+	var delta: Vector3 = destination - previous
+	delta.y = 0.0
+	if delta.length_squared() < 0.04: # ~0.2m
+		return
+
 	agent.target_position = destination
 	PerfCounters.record_navigation_path_request()
 

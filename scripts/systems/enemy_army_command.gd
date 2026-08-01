@@ -105,8 +105,8 @@ const PERF_DIAG_INTERVAL_SECONDS := 5.0
 const FORMATION_CACHE_DEST_THRESHOLD := 3.0
 const FORMATION_SLOT_SKIP_DISTANCE := 1.5
 const FORMATION_CACHE_REFRESH_SECONDS := 2.5
-const GROUP_ORDER_DEST_TOLERANCE := 3.0
-const GROUP_ORDER_SIGNATURE_TTL_SECONDS := 2.0
+const GROUP_ORDER_DEST_TOLERANCE := 4.5
+const GROUP_ORDER_SIGNATURE_TTL_SECONDS := 5.0
 const DEFENSE_THREAT_CACHE_SECONDS := 0.35
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
@@ -4857,7 +4857,8 @@ static func _issue_attack_move(unit: Variant, destination: Vector3) -> void:
 	if not (unit as Object).has_method("command_attack_move"):
 		return
 
-	(unit as Object).call("command_attack_move", destination)
+	# AI formation moves use FORMATION urgency so they respect repath cooldowns.
+	(unit as Object).call("command_attack_move", destination, Unit.RepathUrgency.FORMATION)
 
 
 static func _issue_spaced_group_orders(
@@ -4911,6 +4912,9 @@ static func _issue_spaced_group_orders(
 		})
 
 	if pending_orders.is_empty():
+		# All units individually skipped — still record signature so AI does not
+		# keep recomputing identical formation destinations every tick.
+		_record_group_order_signature(ordered_units, center, mission, use_attack_move)
 		return
 
 	_record_group_order_signature(ordered_units, center, mission, use_attack_move)
@@ -5338,7 +5342,7 @@ static func _issue_hold_at_rally(unit: Variant, rally_position: Vector3) -> void
 		return
 
 	if (unit as Object).has_method("set_movement_target"):
-		(unit as Object).call("set_movement_target", rally_position)
+		(unit as Object).call("set_movement_target", rally_position, Unit.RepathUrgency.FORMATION)
 		return
 
 	_issue_attack_move(unit, rally_position)
