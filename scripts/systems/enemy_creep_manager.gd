@@ -281,6 +281,10 @@ func _update_creeping() -> void:
 	if EnemyArmyCommand.is_finishing_mode_active():
 		return
 
+	if EnemyAggression.should_suspend_creeping():
+		_cancel_creep_mission("aggression mode")
+		return
+
 	if EnemyArmyCommand.is_defense_blocking_offense():
 		_set_creep_mission(CreepMission.NONE)
 		return

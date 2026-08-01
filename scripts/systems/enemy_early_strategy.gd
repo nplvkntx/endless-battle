@@ -25,7 +25,15 @@ static func should_attack_early(tree: SceneTree, rally_position: Vector3) -> boo
 	if tree == null or rally_position == Vector3.ZERO:
 		return false
 
+	if EnemyAggression.should_bypass_wave_delay():
+		return true
+
 	return not _assess_vulnerability(tree, rally_position).get("reasons", []).is_empty()
+
+
+## Public wrapper for greed / vulnerability signals used by aggression scoring.
+static func is_player_expanding_greedily(tree: SceneTree) -> bool:
+	return _is_player_expanding_greedily(tree)
 
 
 ## Returns whether a planned wave should commit to attack based on army size and visible player power.

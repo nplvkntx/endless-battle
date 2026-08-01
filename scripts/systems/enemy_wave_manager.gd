@@ -91,6 +91,7 @@ func _process(delta: float) -> void:
 	_process_wave_gather(delta)
 	_process_large_army_fallback(delta)
 	_process_finishing_mode(delta)
+	_process_aggression_mode(delta)
 
 	_hero_behavior_timer += delta
 	if _hero_behavior_timer >= HERO_BEHAVIOR_INTERVAL_SECONDS:
@@ -810,6 +811,9 @@ func _should_delay_offensive_wave(rally_position: Vector3) -> bool:
 	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
 		return true
 
+	if EnemyAggression.should_bypass_wave_delay():
+		return false
+
 	if _director != null:
 		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.MID_GAME):
 			return false
@@ -1327,6 +1331,88 @@ func _process_finishing_mode(delta: float) -> void:
 
 	_finishing_attack_retry_timer = 0.0
 	_try_launch_finishing_attack()
+
+
+func _process_aggression_mode(_delta: float) -> void:
+	if EnemyArmyCommand.is_finishing_mode_active():
+		return
+
+	if not EnemyAggression.is_aggression_mode_active():
+		return
+
+	if EnemyArmyCommand.blocks_player_offense(get_tree()):
+		return
+
+	var retreat: Dictionary = EnemyAggression.should_retreat_aggression(get_tree())
+	if bool(retreat.get("should_retreat", false)):
+		EnemyAggression.notify_attack_failed()
+		var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+		if rally_position != Vector3.ZERO:
+			EnemyArmyCommand.initiate_group_retreat(
+				get_tree(),
+				"Aggression retreat: %s" % String(retreat.get("reason", &"failed"))
+			)
+		if _director != null:
+			_director.notify_attack_failed()
+		return
+
+	if EnemyArmyCommand.is_emergency_defense_active():
+		## Counter-pressure may keep the push alive via should_allow_finishing_during_emergency.
+		if not EnemyAggression.is_counter_pressure_active():
+			return
+
+	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
+		return
+
+	if EnemyArmyCommand.is_attack_wave_active():
+		return
+
+	_try_launch_aggression_attack()
+
+
+func _try_launch_aggression_attack() -> void:
+	if not EnemyAggression.is_aggression_mode_active():
+		return
+	if not EnemyArmyCommand.can_launch_player_attack(get_tree()):
+		return
+
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	if rally_position == Vector3.ZERO:
+		return
+
+	var wave_plan: Dictionary = EnemyArmyCommand.build_attack_wave_units(
+		get_tree(),
+		EnemyAggression.AGGRESSION_MIN_ARMY_UNITS
+	)
+	if not bool(wave_plan.get("can_launch", false)):
+		return
+
+	var wave_units: Array = wave_plan.get("units", [])
+	var objective: Dictionary = EnemyArmyCommand.resolve_attack_objective(
+		get_tree(),
+		rally_position
+	)
+	var attack_destination: Vector3 = objective.get("position", Vector3.ZERO)
+	if attack_destination == Vector3.ZERO or wave_units.is_empty():
+		return
+
+	_rebuilding_army_after_wave = false
+	EnemyArmyCommand.set_rebuilding_army(false)
+	if _director != null:
+		_director.set_attack_target_position(attack_destination)
+
+	if EnemyArmyCommand.try_begin_attack_wave_preparation(
+		get_tree(),
+		wave_units,
+		attack_destination,
+		EnemyAggression.AGGRESSION_MIN_ARMY_UNITS,
+		_get_match_elapsed_seconds()
+	):
+		if _director != null:
+			_director.notify_attack_launched()
+		return
+
+	_launch_attack_wave(wave_units, attack_destination)
 
 
 func _try_launch_finishing_wave() -> void:

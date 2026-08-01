@@ -190,6 +190,15 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 		if EnemyArmyCommand.blocks_player_offense(tree):
 			threat = _filter_early_phase_defense_threat(tree, rally_position, threat)
 
+	## Counter hero-rush: leave a small home guard and keep the main army attacking.
+	if (
+		threat.get("threatened", false)
+		and EnemyAggression.is_counter_pressure_active()
+		and not EnemyArmyCommand.is_emergency_threat_serious(tree, threat)
+	):
+		_issue_minimal_home_defense(tree, rally_position, threat)
+		return
+
 	if threat.get("threatened", false):
 		_threat_clear_timer = 0.0
 
@@ -255,6 +264,49 @@ func _update_standard_defense(tree: SceneTree, rally_position: Vector3) -> void:
 		EnemyArmyCommand.with_authorized_orders(func() -> void:
 			EnemyArmyCommand.command_regroup_at_rally(tree, rally_position)
 		)
+
+
+func _issue_minimal_home_defense(
+	tree: SceneTree,
+	rally_position: Vector3,
+	threat: Dictionary
+) -> void:
+	var intercept_position: Vector3 = EnemyArmyCommand.resolve_defense_intercept_position(
+		tree,
+		threat,
+		rally_position
+	)
+	if intercept_position == Vector3.ZERO:
+		intercept_position = rally_position
+
+	var all_units: Array = EnemyArmyCommand.collect_living_combat_units(tree)
+	var budget: int = EnemyAggression.get_home_defense_budget(all_units.size())
+	if budget <= 0:
+		return
+
+	var defenders: Array = []
+	for unit: Variant in all_units:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+		if EnemyArmyCommand.is_hero_unit(unit as Node):
+			continue
+		defenders.append(unit)
+		if defenders.size() >= budget:
+			break
+
+	if defenders.is_empty():
+		return
+
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_attack_move(
+			defenders,
+			intercept_position,
+			EnemyUnitMission.Mission.DEFEND
+		)
+	)
+	EnemyAIDebug.log_event(
+		"Counter-pressure: %d home defenders, main army keeps attacking" % defenders.size()
+	)
 
 
 ## During OPENING/EARLY_ARMY/CREEPING/TIER_2 only defend threats inside the base radius.

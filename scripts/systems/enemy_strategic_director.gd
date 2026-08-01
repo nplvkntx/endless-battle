@@ -244,6 +244,9 @@ func get_desire(key: String) -> float:
 
 
 func should_prioritize_creep() -> bool:
+	if EnemyAggression.should_suspend_creeping():
+		return false
+
 	if _phase_interrupt_active or get_desire("defense") >= DESIRE_HIGH:
 		return false
 
@@ -282,8 +285,11 @@ func should_prioritize_attack() -> bool:
 	if not can_launch_player_attack():
 		return false
 
-	if get_desire("defense") >= DESIRE_HIGH:
+	if get_desire("defense") >= DESIRE_HIGH and not EnemyAggression.is_counter_pressure_active():
 		return false
+
+	if EnemyAggression.is_aggression_mode_active():
+		return get_desire("attack") >= DESIRE_MEDIUM
 
 	if is_phase_at_least(StrategicPhase.MID_GAME):
 		return get_desire("attack") >= DESIRE_MEDIUM
@@ -356,18 +362,22 @@ func should_boost_worker_production() -> bool:
 func notify_attack_launched() -> void:
 	_recent_attack_failed = false
 	_set_main_mission(EnemyUnitMission.Mission.ATTACK, "attack wave launched")
+	EnemyAggression.notify_attack_succeeded_partial()
 
 
 func notify_attack_failed() -> void:
 	_recent_attack_failed = true
 	_recent_loss_timer = 45.0
 	_set_main_mission(EnemyUnitMission.Mission.RALLY, "attack failed, rebuilding")
+	EnemyAggression.notify_attack_failed()
 
 
 func notify_army_losses() -> void:
 	_recent_loss_timer = 30.0
 	desires["army"] = maxf(desires["army"], DESIRE_HIGH)
-	desires["attack"] = minf(desires["attack"], DESIRE_LOW)
+	## Keep attack desire low while rebuilding, unless aggression still owns the push.
+	if not EnemyAggression.is_aggression_mode_active():
+		desires["attack"] = minf(desires["attack"], DESIRE_LOW)
 
 
 func set_creep_target(camp) -> void:
@@ -992,13 +1002,26 @@ func _update_desires_from_snapshot() -> void:
 		_phase_interrupt_active
 		or not hero_alive
 		or EnemyArmyCommand.is_rebuilding_army()
-		or _recent_loss_timer > 0.0
-		or _recent_attack_failed
+		or (_recent_loss_timer > 0.0 and not EnemyAggression.is_aggression_mode_active())
+		or (_recent_attack_failed and not EnemyAggression.is_aggression_mode_active())
 		or not is_phase_at_least(StrategicPhase.EXPANSION)
 	):
 		desires["attack"] = minf(desires["attack"], DESIRE_LOW)
-	elif not _can_launch_offensive_attack():
+	elif not _can_launch_offensive_attack() and not EnemyAggression.is_aggression_mode_active():
 		desires["attack"] = DESIRE_LOW
+	elif EnemyAggression.should_boost_attack_desire():
+		var confidence: EnemyAggression.Confidence = EnemyAggression.get_confidence()
+		match confidence:
+			EnemyAggression.Confidence.VERY_HIGH:
+				desires["attack"] = 1.0
+			EnemyAggression.Confidence.HIGH:
+				desires["attack"] = maxf(desires["attack"], 0.9)
+			EnemyAggression.Confidence.MEDIUM:
+				desires["attack"] = maxf(desires["attack"], DESIRE_HIGH)
+			_:
+				desires["attack"] = maxf(desires["attack"], DESIRE_MEDIUM)
+		desires["creep"] = minf(desires["creep"], DESIRE_LOW)
+		desires["army"] = maxf(desires["army"], DESIRE_HIGH)
 	elif visible_enemy_power > 0 and army_power >= int(float(visible_enemy_power) * EnemyArmyCommand.PLAYER_ARMY_STRENGTH_RATIO):
 		desires["attack"] = clampf(
 			0.5 + float(army_power - visible_enemy_power) / 600.0,
@@ -1015,6 +1038,10 @@ func _update_desires_from_snapshot() -> void:
 			DESIRE_LOW,
 			DESIRE_MEDIUM
 		)
+
+	if EnemyAggression.should_suspend_creeping():
+		desires["creep"] = 0.0
+		desires["expansion"] = minf(desires["expansion"], DESIRE_LOW)
 
 	if _strategic_phase == StrategicPhase.EXPANSION:
 		desires["expansion"] = DESIRE_HIGH if economy_healthy else DESIRE_MEDIUM

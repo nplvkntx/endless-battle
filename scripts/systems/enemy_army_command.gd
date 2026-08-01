@@ -440,6 +440,7 @@ static func reset_match_state() -> void:
 	_finishing_mode_exit_cooldown = 0.0
 	_finishing_mode_eval_timer = 0.0
 	_last_finishing_objective = null
+	EnemyAggression.reset_match_state()
 	_emergency_defense_active = false
 	_emergency_threat_position = Vector3.ZERO
 	_emergency_reason = &""
@@ -1431,6 +1432,10 @@ static func is_finishing_mode_active() -> bool:
 	return _finishing_mode_active
 
 
+static func is_aggression_mode_active() -> bool:
+	return EnemyAggression.is_aggression_mode_active()
+
+
 static func is_emergency_defense_active() -> bool:
 	return _emergency_defense_active
 
@@ -1489,6 +1494,8 @@ static func deactivate_emergency_defense() -> void:
 
 
 static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
+	EnemyAggression.update(tree, delta)
+
 	if _finishing_mode_exit_cooldown > 0.0:
 		_finishing_mode_exit_cooldown = maxf(0.0, _finishing_mode_exit_cooldown - delta)
 
@@ -1513,6 +1520,15 @@ static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
 	var enter_eval: Dictionary = _evaluate_finishing_activation(tree)
 	if enter_eval.get("should_enter", false):
 		_set_finishing_mode(true, String(enter_eval.get("reason", "unknown")))
+		return
+
+	## Very high lethal opportunity escalates into finishing (end the game).
+	if (
+		EnemyAggression.is_aggression_mode_active()
+		and EnemyAggression.get_confidence() == EnemyAggression.Confidence.VERY_HIGH
+		and EnemyAggression.get_lethal_score() >= EnemyAggression.FINISHING_LETHAL_THRESHOLD
+	):
+		_set_finishing_mode(true, "lethal_opportunity")
 
 
 static func set_rebuilding_army(rebuilding: bool) -> void:
@@ -3147,6 +3163,25 @@ static func evaluate_attack_gate(
 			match_elapsed_seconds
 		)
 
+	if EnemyAggression.is_aggression_mode_active():
+		var aggression_min: int = EnemyAggression.AGGRESSION_MIN_ARMY_UNITS
+		if total_combat_count >= aggression_min and non_hero_count >= ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS:
+			return _finalize_attack_gate(
+				{
+					"can_commit": true,
+					"reason": &"aggression_mode",
+					"total_combat_count": total_combat_count,
+					"confidence": EnemyAggression.confidence_name(EnemyAggression.get_confidence()),
+				},
+				debug_context,
+				match_elapsed_seconds
+			)
+		return _finalize_attack_gate(
+			{"can_commit": false, "reason": &"aggression_too_weak"},
+			debug_context,
+			match_elapsed_seconds
+		)
+
 	if non_hero_count < ABSOLUTE_MIN_ATTACK_NON_HERO_UNITS:
 		return _finalize_attack_gate(
 			{"can_commit": false, "reason": &"suicide_attack"},
@@ -3266,10 +3301,15 @@ static func evaluate_attack_gate(
 		)
 
 	if known_player_strength > 0.0:
+		var attack_style: StringName = (
+			&"aggressive"
+			if EnemyAggression.should_use_aggressive_strength_gate()
+			else &"normal"
+		)
 		var strength_gate: Dictionary = evaluate_strength_gate(
 			wave_strength,
 			known_player_strength,
-			&"normal"
+			attack_style
 		)
 		if not strength_gate.get("allowed", false) and not large_army_ready:
 			_debug_combat(
@@ -4171,6 +4211,20 @@ static func should_rebuild_army_after_wave(
 
 
 static func build_attack_wave_units(tree: SceneTree, min_non_hero_units: int) -> Dictionary:
+	## Aggression mode: commit nearly the whole combat army (leave minimal home defense).
+	if EnemyAggression.is_aggression_mode_active():
+		var aggression_units: Array = EnemyAggression.build_aggression_attack_force(tree)
+		var aggression_non_hero: int = 0
+		for unit: Variant in aggression_units:
+			if unit != null and is_instance_valid(unit) and not is_hero_unit(unit as Node):
+				aggression_non_hero += 1
+		var aggression_min: int = mini(min_non_hero_units, EnemyAggression.AGGRESSION_MIN_ARMY_UNITS)
+		return {
+			"units": aggression_units,
+			"can_launch": aggression_non_hero >= aggression_min,
+			"non_hero_count": aggression_non_hero,
+		}
+
 	var non_hero_units: Array = collect_living_non_hero_combat_units(tree)
 	var can_launch: bool = non_hero_units.size() >= min_non_hero_units
 	var wave_units: Array = non_hero_units.duplicate()
@@ -4366,6 +4420,17 @@ static func should_allow_finishing_during_emergency(
 	tree: SceneTree,
 	threat: Dictionary
 ) -> bool:
+	## Counter-pressure: if the player hero-rushes with a tiny army while we are
+	## significantly stronger, keep the main push alive instead of turtle-defending.
+	if (
+		EnemyAggression.is_counter_pressure_active()
+		and EnemyAggression.is_aggression_mode_active()
+		and not is_emergency_threat_serious(tree, threat)
+	):
+		var reason_cp: StringName = threat.get("reason", &"")
+		if reason_cp not in [&"town_center", &"production"]:
+			return true
+
 	if not _finishing_mode_active:
 		return false
 
@@ -4711,6 +4776,9 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 	if _finishing_mode_active:
 		return resolve_finishing_attack_objective(tree, fallback_position)
 
+	if EnemyAggression.should_prefer_town_hall_focus():
+		return EnemyAggression.resolve_aggression_attack_objective(tree, fallback_position)
+
 	if (
 		_attack_wave_target_node != null
 		and NodeSafety.is_alive_node(_attack_wave_target_node)
@@ -4721,15 +4789,17 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 			"position": _attack_wave_target_position,
 		}
 
-	var exposed_army: Dictionary = _find_exposed_player_army_cluster(tree, fallback_position)
-	if not exposed_army.is_empty():
-		return {
-			"node": exposed_army.get("node"),
-			"position": exposed_army.get("position", fallback_position),
-		}
+	## During aggression, do not chase mid-map armies — go for the base.
+	if not EnemyAggression.is_aggression_mode_active():
+		var exposed_army: Dictionary = _find_exposed_player_army_cluster(tree, fallback_position)
+		if not exposed_army.is_empty():
+			return {
+				"node": exposed_army.get("node"),
+				"position": exposed_army.get("position", fallback_position),
+			}
 
 	var production_building: Node3D = _find_player_production_building(tree, fallback_position)
-	if production_building != null:
+	if production_building != null and not EnemyAggression.should_prefer_town_hall_focus():
 		return {
 			"node": production_building,
 			"position": production_building.global_position,
@@ -4739,7 +4809,7 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 		tree,
 		fallback_position
 	)
-	if important_building != null:
+	if important_building != null and not EnemyAggression.is_aggression_mode_active():
 		return {
 			"node": important_building,
 			"position": important_building.global_position,

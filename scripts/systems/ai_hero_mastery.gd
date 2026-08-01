@@ -352,6 +352,7 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 	var hp_ratio: float = EnemyArmyCommand.get_health_ratio(target)
 	var kit_id: StringName = StringName(str(situation.get("kit_id", "")))
 	var score: float = dist
+	var aggression_active: bool = EnemyAggression.is_aggression_mode_active()
 
 	if target is Hero:
 		score -= 400.0
@@ -362,12 +363,30 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 			var enemy_kit: StringName = (target as Hero).get_hero_kit_id()
 			if enemy_kit == HeroCatalog.KIT_RANGER:
 				score -= 80.0
+		## During lethal push, do not chase heroes away from the Town Hall.
+		if aggression_active and EnemyAggression.should_prefer_town_hall_focus():
+			score += 350.0
 		return score
 
 	if target is Building:
 		# Avoid buildings while dangerous units are actively attacking the hero.
-		if int(situation.get("nearby_enemy_count", 0)) > 0 and _is_under_unit_pressure(hero):
+		if (
+			int(situation.get("nearby_enemy_count", 0)) > 0
+			and _is_under_unit_pressure(hero)
+			and not aggression_active
+		):
 			return 9000.0
+		if aggression_active:
+			if target is CommandCenter:
+				score -= 520.0 if kit_id != HeroCatalog.KIT_SHADOW_ASSASSIN else 420.0
+			elif target is Barracks or target is HeroAltar:
+				score -= 360.0
+			elif kit_id == HeroCatalog.KIT_PALADIN:
+				## Paladin fronts siege — keep priority on buildings.
+				score -= 180.0
+			else:
+				score -= 120.0
+			return score
 		if bool(situation.get("fight_is_safe", false)):
 			score += 200.0
 		else:
@@ -375,6 +394,10 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 		return score
 
 	if target is Worker:
+		if aggression_active and kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
+			## Assassin dives exposed workers before/alongside Town Hall pressure.
+			score -= 220.0
+			return score
 		if bool(situation.get("allow_worker_harass", false)):
 			score += 80.0
 		else:
@@ -383,6 +406,8 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 
 	## Neutral camps: keep hero in XP range and focus dangerous creeps.
 	if CombatTargetValidation.is_neutral_creep(target):
+		if aggression_active:
+			return 8000.0
 		var creep_damage: int = 8
 		if "attack_damage" in target:
 			creep_damage = int(target.get("attack_damage"))
@@ -405,6 +430,11 @@ func _target_priority_score(hero: Hero, target: Node3D, situation: Dictionary) -
 	if hp_ratio <= 0.35:
 		score -= 50.0
 
+	## Ranger keeps max range while army sieges — deprioritize diving melee packs.
+	if aggression_active and kit_id == HeroCatalog.KIT_RANGER:
+		if UnitFormationRole.is_melee_role(role):
+			score += 120.0
+
 	return score
 
 
@@ -422,9 +452,15 @@ func _find_priority_target(
 		and float(situation.get("health_ratio", 1.0)) > 0.55
 	)
 	situation["allow_worker_harass"] = (
-		StringName(str(situation.get("kit_id", ""))) == HeroCatalog.KIT_SHADOW_ASSASSIN
-		and float(situation.get("health_ratio", 1.0)) > 0.6
-		and not bool(situation.get("outnumbered", false))
+		(
+			StringName(str(situation.get("kit_id", ""))) == HeroCatalog.KIT_SHADOW_ASSASSIN
+			and float(situation.get("health_ratio", 1.0)) > 0.6
+			and not bool(situation.get("outnumbered", false))
+		)
+		or (
+			EnemyAggression.is_aggression_mode_active()
+			and StringName(str(situation.get("kit_id", ""))) == HeroCatalog.KIT_SHADOW_ASSASSIN
+		)
 	)
 
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(hero):
