@@ -188,11 +188,12 @@ func _begin_corpse_fade_by_id(corpse_id: int, fade_duration: float) -> void:
 	if entry.is_empty():
 		return
 
-	var corpse: Node3D = entry.get("node") as Node3D
-	if corpse == null or not is_instance_valid(corpse):
+	var corpse_ref: Variant = entry.get("node")
+	if not NodeSafety.is_alive_node(corpse_ref):
 		_remove_corpse_entry(corpse_id)
 		return
 
+	var corpse: Node3D = corpse_ref as Node3D
 	var mesh_instance := corpse.get_node_or_null("CorpseMesh") as MeshInstance3D
 	var material: StandardMaterial3D = null
 	if mesh_instance != null:
@@ -213,9 +214,10 @@ func _finish_corpse_by_id(corpse_id: int) -> void:
 	if entry.is_empty():
 		return
 
-	var corpse: Node3D = entry.get("node") as Node3D
-	if corpse != null and is_instance_valid(corpse):
-		DeathFxPool.release_corpse(corpse)
+	var corpse_ref: Variant = entry.get("node")
+	if not NodeSafety.is_alive_node(corpse_ref):
+		return
+	DeathFxPool.release_corpse(corpse_ref as Node3D)
 
 
 func _find_corpse_entry(corpse_id: int) -> Dictionary:
@@ -234,28 +236,28 @@ func _remove_corpse_entry(corpse_id: int) -> void:
 
 
 func _kill_entry_tween(entry: Dictionary) -> void:
-	var tween: Tween = entry.get("tween") as Tween
-	if tween != null and tween.is_valid():
+	var tween_ref: Variant = entry.get("tween")
+	if tween_ref == null or not is_instance_valid(tween_ref):
+		return
+	var tween: Tween = tween_ref as Tween
+	if tween.is_valid():
 		tween.kill()
 
 
 func _fx_parent() -> Node:
-	var tree: SceneTree = get_tree()
-	if tree == null:
-		return null
-	var current: Node = tree.current_scene
-	if current != null:
-		return current
-	return tree.root
+	# Parent under this autoload so match-scene teardown cannot free live FX
+	# while DeathEffects tweens are still running.
+	return self
 
 
 func _prune_active_particles() -> void:
 	var now_msec: int = Time.get_ticks_msec()
 	var write: int = 0
 	for entry: Dictionary in _active_particles:
-		var particles: GPUParticles3D = entry.get("node") as GPUParticles3D
-		if particles == null or not is_instance_valid(particles):
+		var particles_ref: Variant = entry.get("node")
+		if not NodeSafety.is_alive_node(particles_ref):
 			continue
+		var particles: GPUParticles3D = particles_ref as GPUParticles3D
 		if now_msec >= int(entry.get("release_msec", 0)):
 			DeathFxPool.release_particles(particles, entry.get("kind") as DeathFxPool.FxKind)
 			continue
@@ -267,8 +269,8 @@ func _prune_active_particles() -> void:
 func _prune_active_corpses() -> void:
 	var write: int = 0
 	for entry: Dictionary in _active_corpses:
-		var corpse: Node3D = entry.get("node") as Node3D
-		if corpse == null or not is_instance_valid(corpse):
+		var corpse_ref: Variant = entry.get("node")
+		if not NodeSafety.is_alive_node(corpse_ref):
 			_kill_entry_tween(entry)
 			continue
 		_active_corpses[write] = entry
@@ -280,9 +282,12 @@ func _force_release_oldest_particle() -> void:
 	if _active_particles.is_empty():
 		return
 	var entry: Dictionary = _active_particles.pop_front()
-	var particles: GPUParticles3D = entry.get("node") as GPUParticles3D
-	if particles != null and is_instance_valid(particles):
-		DeathFxPool.release_particles(particles, entry.get("kind") as DeathFxPool.FxKind)
+	var particles_ref: Variant = entry.get("node")
+	if NodeSafety.is_alive_node(particles_ref):
+		DeathFxPool.release_particles(
+			particles_ref as GPUParticles3D,
+			entry.get("kind") as DeathFxPool.FxKind
+		)
 
 
 func _force_release_oldest_corpse() -> void:
@@ -290,27 +295,27 @@ func _force_release_oldest_corpse() -> void:
 		return
 	var entry: Dictionary = _active_corpses.pop_front()
 	_kill_entry_tween(entry)
-	var corpse: Node3D = entry.get("node") as Node3D
-	if corpse != null and is_instance_valid(corpse):
-		DeathFxPool.release_corpse(corpse)
+	var corpse_ref: Variant = entry.get("node")
+	if NodeSafety.is_alive_node(corpse_ref):
+		DeathFxPool.release_corpse(corpse_ref as Node3D)
 
 
 func _release_active_particles_now() -> void:
 	# Free directly — clear_all also resets the pool, and release-to-pool can fail
 	# if called while the scene tree is still setting up children (match prepare).
 	for entry: Dictionary in _active_particles:
-		var particles: GPUParticles3D = entry.get("node") as GPUParticles3D
-		if particles != null and is_instance_valid(particles):
-			_detach_and_free(particles)
+		var particles_ref: Variant = entry.get("node")
+		if NodeSafety.is_alive_node(particles_ref):
+			_detach_and_free(particles_ref as Node)
 	_active_particles.clear()
 
 
 func _release_active_corpses_now() -> void:
 	for entry: Dictionary in _active_corpses:
 		_kill_entry_tween(entry)
-		var corpse: Node3D = entry.get("node") as Node3D
-		if corpse != null and is_instance_valid(corpse):
-			_detach_and_free(corpse)
+		var corpse_ref: Variant = entry.get("node")
+		if NodeSafety.is_alive_node(corpse_ref):
+			_detach_and_free(corpse_ref as Node)
 	_active_corpses.clear()
 
 

@@ -255,7 +255,7 @@ func _track_member(member: Node, group_index: int) -> void:
 			var unit: Unit = member as Unit
 			if not unit.died.is_connected(_on_tracked_unit_died):
 				unit.died.connect(_on_tracked_unit_died)
-			var exit_handler: Callable = _on_tracked_node_tree_exiting.bind(unit)
+			var exit_handler: Callable = _on_tracked_node_tree_exiting.bind(id)
 			entry["tree_exiting"] = exit_handler
 			if not unit.tree_exiting.is_connected(exit_handler):
 				unit.tree_exiting.connect(exit_handler, CONNECT_ONE_SHOT)
@@ -263,7 +263,7 @@ func _track_member(member: Node, group_index: int) -> void:
 			var building: Building = member as Building
 			if not building.destroyed.is_connected(_on_tracked_building_destroyed):
 				building.destroyed.connect(_on_tracked_building_destroyed)
-			var exit_handler: Callable = _on_tracked_node_tree_exiting.bind(building)
+			var exit_handler: Callable = _on_tracked_node_tree_exiting.bind(id)
 			entry["tree_exiting"] = exit_handler
 			if not building.tree_exiting.is_connected(exit_handler):
 				building.tree_exiting.connect(exit_handler, CONNECT_ONE_SHOT)
@@ -330,8 +330,12 @@ func _on_tracked_building_destroyed(building: Building) -> void:
 	_remove_member_from_all_groups(building)
 
 
-func _on_tracked_node_tree_exiting(node: Node) -> void:
-	_remove_member_from_all_groups(node)
+func _on_tracked_node_tree_exiting(expected_instance_id: int) -> void:
+	var node_ref: Variant = instance_from_id(expected_instance_id)
+	if not NodeSafety.is_alive_node(node_ref) or not node_ref is Node:
+		_tracked_members.erase(expected_instance_id)
+		return
+	_remove_member_from_all_groups(node_ref as Node)
 
 
 func _remove_member_from_all_groups(member: Node) -> void:

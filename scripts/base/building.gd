@@ -254,10 +254,11 @@ func _cleanup_damage_visuals() -> void:
 func _release_registered_builders_on_destroy() -> void:
 	_prune_invalid_builders()
 
-	for builder: Worker in _registered_builders.duplicate():
-		if not NodeSafety.is_alive_node(builder):
+	for builder_ref: Variant in _registered_builders.duplicate():
+		if not NodeSafety.is_alive_node(builder_ref):
 			continue
 
+		var builder: Worker = builder_ref as Worker
 		if builder.has_method(&"notify_building_destroyed"):
 			builder.notify_building_destroyed(self)
 
@@ -631,9 +632,9 @@ func _on_construction_timer_finished() -> void:
 		return
 
 	complete_construction()
-	for builder: Worker in _registered_builders:
-		if is_instance_valid(builder):
-			builder.on_building_construction_finished()
+	for builder_ref: Variant in _registered_builders:
+		if NodeSafety.is_alive_node(builder_ref):
+			(builder_ref as Worker).on_building_construction_finished()
 	_registered_builders.clear()
 
 
@@ -776,15 +777,16 @@ func _update_construction_progress_bar() -> void:
 
 func _prune_invalid_builders() -> void:
 	for index: int in range(_registered_builders.size() - 1, -1, -1):
-		var builder: Worker = _registered_builders[index]
-		if builder == null or not is_instance_valid(builder):
+		var builder_ref: Variant = _registered_builders[index]
+		if not NodeSafety.is_alive_node(builder_ref):
 			_registered_builders.remove_at(index)
 
 
 func _has_active_builder_in_range() -> bool:
-	for builder: Worker in _registered_builders:
-		if builder == null or not is_instance_valid(builder):
+	for builder_ref: Variant in _registered_builders:
+		if not NodeSafety.is_alive_node(builder_ref):
 			continue
+		var builder: Worker = builder_ref as Worker
 		if builder.is_actively_constructing_building(self):
 			return true
 	return false

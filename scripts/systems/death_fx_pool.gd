@@ -35,10 +35,11 @@ static func acquire_particles(kind: FxKind) -> GPUParticles3D:
 	var idle: Array[GPUParticles3D] = _idle_particles_for(kind)
 	var particles: GPUParticles3D = null
 	while not idle.is_empty():
-		var candidate: GPUParticles3D = idle.pop_back()
-		if candidate != null and is_instance_valid(candidate):
-			particles = candidate
-			break
+		var candidate_ref: Variant = idle.pop_back()
+		if not NodeSafety.is_alive_node(candidate_ref):
+			continue
+		particles = candidate_ref as GPUParticles3D
+		break
 
 	if particles == null:
 		particles = _create_particles(kind)
@@ -53,10 +54,11 @@ static func acquire_particles(kind: FxKind) -> GPUParticles3D:
 static func acquire_corpse() -> Node3D:
 	var corpse: Node3D = null
 	while not _corpse_idle.is_empty():
-		var candidate: Node3D = _corpse_idle.pop_back()
-		if candidate != null and is_instance_valid(candidate):
-			corpse = candidate
-			break
+		var candidate_ref: Variant = _corpse_idle.pop_back()
+		if not NodeSafety.is_alive_node(candidate_ref):
+			continue
+		corpse = candidate_ref as Node3D
+		break
 
 	if corpse == null:
 		corpse = _create_corpse()
@@ -161,16 +163,16 @@ static func _detach_from_current_parent(node: Node) -> void:
 
 
 static func _release_idle_particles(idle: Array[GPUParticles3D]) -> void:
-	for particles: GPUParticles3D in idle:
-		if particles != null and is_instance_valid(particles):
-			particles.queue_free()
+	for particles_ref: Variant in idle:
+		if NodeSafety.is_alive_node(particles_ref):
+			(particles_ref as GPUParticles3D).queue_free()
 	idle.clear()
 
 
 static func _release_idle_nodes(idle: Array[Node3D]) -> void:
-	for node: Node3D in idle:
-		if node != null and is_instance_valid(node):
-			node.queue_free()
+	for node_ref: Variant in idle:
+		if NodeSafety.is_alive_node(node_ref):
+			(node_ref as Node3D).queue_free()
 	idle.clear()
 
 

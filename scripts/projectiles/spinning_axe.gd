@@ -12,8 +12,9 @@ const OVERSHOOT_TRAVEL_MULT := 1.5
 
 @onready var _mesh: MeshInstance3D = $MeshInstance3D
 
-var _target: Node3D = null
-var _attacker: Node = null
+var _target: Variant = null
+var _attacker: Variant = null
+var _target_tree_exiting_handler: Callable = Callable()
 var _damage: float = 0.0
 var _speed: float = ShadowAssassinStats.AXE_MARK_PROJECTILE_SPEED
 var _direction: Vector3 = Vector3.ZERO
@@ -31,8 +32,9 @@ func launch(
 	attacker: Node = null,
 	on_hit_callback: Callable = Callable()
 ) -> void:
-	_target = NodeSafety.safe_node(target) as Node3D
-	_attacker = NodeSafety.safe_node(attacker) as Node
+	_clear_target_lifetime_watch()
+	_target = NodeSafety.safe_node(target)
+	_attacker = NodeSafety.safe_node(attacker)
 	_damage = damage
 	_on_hit_callback = on_hit_callback
 	global_position = spawn_position
@@ -43,7 +45,9 @@ func launch(
 		queue_free()
 		return
 
-	var to_target: Vector3 = _target.global_position - spawn_position
+	_watch_target_lifetime(_target as Node3D)
+
+	var to_target: Vector3 = (_target as Node3D).global_position - spawn_position
 	to_target.y = 0.0
 
 	if to_target.length_squared() < 0.001:
@@ -56,7 +60,40 @@ func launch(
 
 
 func _on_axe_tree_exiting() -> void:
+	_clear_target_lifetime_watch()
 	PerfCounters.unregister_projectile()
+
+
+func _watch_target_lifetime(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	_target_tree_exiting_handler = _on_target_tree_exiting.bind(target.get_instance_id())
+	if not target.tree_exiting.is_connected(_target_tree_exiting_handler):
+		target.tree_exiting.connect(_target_tree_exiting_handler, CONNECT_ONE_SHOT)
+
+
+func _clear_target_lifetime_watch() -> void:
+	if not _target_tree_exiting_handler.is_valid():
+		_target_tree_exiting_handler = Callable()
+		return
+
+	var target_ref: Variant = _target
+	if (
+		NodeSafety.is_alive_node(target_ref)
+		and target_ref is Node
+		and (target_ref as Node).tree_exiting.is_connected(_target_tree_exiting_handler)
+	):
+		(target_ref as Node).tree_exiting.disconnect(_target_tree_exiting_handler)
+
+	_target_tree_exiting_handler = Callable()
+
+
+func _on_target_tree_exiting(expected_instance_id: int) -> void:
+	_target_tree_exiting_handler = Callable()
+	var target_ref: Variant = _target
+	if NodeSafety.is_alive_node(target_ref) and int(target_ref.get_instance_id()) != expected_instance_id:
+		return
+	_target = null
 
 
 func _physics_process(delta: float) -> void:
@@ -99,7 +136,7 @@ func _update_homing_direction(delta: float) -> void:
 	if not _is_target_alive():
 		return
 
-	var to_target: Vector3 = _target.global_position - global_position
+	var to_target: Vector3 = (_target as Node3D).global_position - global_position
 	to_target.y = 0.0
 	if to_target.length_squared() <= 0.0001:
 		return
@@ -113,6 +150,7 @@ func _update_homing_direction(delta: float) -> void:
 
 func _is_target_alive() -> bool:
 	if not NodeSafety.is_alive_node(_target):
+		_clear_target_lifetime_watch()
 		_target = null
 		return false
 
@@ -123,7 +161,7 @@ func _is_close_to_target() -> bool:
 	if not _is_target_alive():
 		return false
 
-	var offset: Vector3 = global_position - _target.global_position
+	var offset: Vector3 = global_position - (_target as Node3D).global_position
 	offset.y = 0.0
 	return offset.length() <= HIT_DISTANCE
 
@@ -132,7 +170,7 @@ func _apply_hit() -> void:
 	if not _is_target_alive():
 		return
 
-	var hit_target: Node3D = _target
+	var hit_target: Node3D = _target as Node3D
 	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(_attacker)
 	if not DamageService.apply_damage(hit_target, _damage, safe_attacker):
 		return

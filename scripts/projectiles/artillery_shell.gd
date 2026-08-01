@@ -8,7 +8,7 @@ const HIT_DISTANCE := 0.6
 const MAX_LIFETIME := 8.0
 
 var _aim_position: Vector3 = Vector3.ZERO
-var _attacker: Node = null
+var _attacker: Variant = null
 var _damage: float = 0.0
 var _splash_radius: float = 0.0
 var _splash_min_damage_ratio: float = 0.5
@@ -28,7 +28,7 @@ func launch(
 	attacker: Node = null,
 	splash_min_damage_ratio: float = 0.5
 ) -> void:
-	_attacker = NodeSafety.safe_node(attacker) as Node
+	_attacker = NodeSafety.safe_node(attacker)
 	_damage = damage
 	_splash_radius = splash_radius
 	_splash_min_damage_ratio = splash_min_damage_ratio

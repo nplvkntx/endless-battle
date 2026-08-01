@@ -11,7 +11,7 @@ var attack_range: float = 10.0
 var attack_cooldown: float = 1.5
 var attack_cooldown_timer: float = 0.0
 var target_search_timer: float = 0.0
-var cached_attack_target: Node3D = null
+var cached_attack_target: Variant = null
 
 
 func randomize_search_timer() -> void:
@@ -34,10 +34,11 @@ func update(delta: float, owner: Node3D) -> Node3D:
 	if attack_cooldown_timer > 0.0:
 		return null
 
-	var target: Node3D = cached_attack_target
-	if target == null:
+	if not NodeSafety.is_alive_node(cached_attack_target):
+		cached_attack_target = null
 		return null
 
+	var target: Node3D = cached_attack_target as Node3D
 	if not CombatTargetValidation.is_within_attack_range(owner, target, attack_range):
 		cached_attack_target = null
 		return null

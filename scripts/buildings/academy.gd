@@ -100,12 +100,12 @@ func _begin_research(upgrade_id: StringName) -> void:
 	research_state_changed.emit()
 
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(_research_seconds)
-	wait_timer.timeout.connect(func() -> void:
-		_on_research_finished(session)
-	, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(_on_research_finished.bind(session), CONNECT_ONE_SHOT)
 
 
 func _on_research_finished(session: int) -> void:
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
 	if session != _research_session:
 		return
 

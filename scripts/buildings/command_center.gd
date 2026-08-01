@@ -340,9 +340,7 @@ func _begin_tier_upgrade(target_tier: int) -> void:
 
 	var duration: float = _get_upgrade_duration_for_tier(target_tier)
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(duration)
-	wait_timer.timeout.connect(func() -> void:
-		_on_tier_upgrade_finished(session)
-	, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(_on_tier_upgrade_finished.bind(session), CONNECT_ONE_SHOT)
 
 
 func _on_tier_upgrade_finished(session: int) -> void:
@@ -723,12 +721,12 @@ func _start_next_training() -> void:
 	_is_training = true
 	_training_started_at = _get_time_seconds()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(func() -> void:
-		_on_training_finished(session)
-	, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(_on_training_finished.bind(session), CONNECT_ONE_SHOT)
 
 
 func _on_training_finished(session: int) -> void:
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
 	if session != _training_session:
 		return
 

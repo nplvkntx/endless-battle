@@ -79,11 +79,8 @@ func _verify_hero_death_larger(failures: PackedStringArray) -> void:
 
 	# Hero corpse scale should be larger than a unit corpse.
 	var hero_scale: float = 0.0
-	for child: Node in get_children():
-		if child.name == "PooledCorpse" or String(child.name).begins_with("PooledCorpse"):
-			hero_scale = maxf(hero_scale, (child as Node3D).scale.x)
-	# Corpses are parented to current_scene (this node in headless verify).
-	for child: Node in get_children():
+	# Corpses are parented under the DeathEffects autoload (stable across match scenes).
+	for child: Node in DeathEffects.get_children():
 		if child is Node3D and child.get_node_or_null("CorpseMesh") != null:
 			hero_scale = maxf(hero_scale, (child as Node3D).scale.x)
 
@@ -185,13 +182,16 @@ func _verify_pool_reuse(failures: PackedStringArray) -> void:
 	DeathEffects._active_particles.clear()
 	DeathEffects._active_corpses.clear()
 	for entry: Dictionary in particle_snapshot:
-		var particles: GPUParticles3D = entry.get("node") as GPUParticles3D
-		if particles != null and is_instance_valid(particles):
-			DeathFxPool.release_particles(particles, entry.get("kind") as DeathFxPool.FxKind)
+		var particles_ref: Variant = entry.get("node")
+		if NodeSafety.is_alive_node(particles_ref):
+			DeathFxPool.release_particles(
+				particles_ref as GPUParticles3D,
+				entry.get("kind") as DeathFxPool.FxKind
+			)
 	for entry: Dictionary in corpse_snapshot:
-		var corpse: Node3D = entry.get("node") as Node3D
-		if corpse != null and is_instance_valid(corpse):
-			DeathFxPool.release_corpse(corpse)
+		var corpse_ref: Variant = entry.get("node")
+		if NodeSafety.is_alive_node(corpse_ref):
+			DeathFxPool.release_corpse(corpse_ref as Node3D)
 
 	idle_dust = DeathFxPool.get_idle_count(DeathFxPool.FxKind.UNIT_DUST)
 	idle_blood = DeathFxPool.get_idle_count(DeathFxPool.FxKind.BLOOD)

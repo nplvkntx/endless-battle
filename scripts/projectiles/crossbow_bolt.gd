@@ -6,7 +6,7 @@ extends Node3D
 
 const MAX_LIFETIME := 3.5
 
-var _attacker: Node = null
+var _attacker: Variant = null
 var _damage: float = 0.0
 var _direction: Vector3 = Vector3.ZERO
 var _speed: float = RangerStats.CROSSBOW_BOLT_SPEED
@@ -30,7 +30,7 @@ func launch(
 	attacker: Node = null,
 	pierce_damage_mult: float = RangerStats.CROSSBOW_BOLT_PIERCE_DAMAGE_MULT
 ) -> void:
-	_attacker = NodeSafety.safe_node(attacker) as Node
+	_attacker = NodeSafety.safe_node(attacker)
 	_damage = damage
 	_pierce_mult = pierce_damage_mult
 	global_position = spawn_position

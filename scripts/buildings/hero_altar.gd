@@ -256,12 +256,12 @@ func _begin_hero_training() -> void:
 	_training_started_at = _get_time_seconds()
 	hero_altar_state_changed.emit()
 	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
-	wait_timer.timeout.connect(func() -> void:
-		_on_hero_training_finished(session)
-	, CONNECT_ONE_SHOT)
+	wait_timer.timeout.connect(_on_hero_training_finished.bind(session), CONNECT_ONE_SHOT)
 
 
 func _on_hero_training_finished(session: int) -> void:
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
 	if session != _hero_training_session:
 		return
 

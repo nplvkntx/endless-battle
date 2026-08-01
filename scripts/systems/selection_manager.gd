@@ -955,9 +955,14 @@ func _on_unit_died(unit: Unit) -> void:
 	_remove_unit_from_selection(unit, true)
 
 
-func _on_selected_unit_tree_exiting(unit: Unit) -> void:
-	_clear_unit_tree_exiting_handler(unit)
+func _on_selected_unit_tree_exiting(expected_instance_id: int) -> void:
+	_unit_tree_exiting_handlers.erase(expected_instance_id)
 
+	var unit_ref: Variant = instance_from_id(expected_instance_id)
+	if not NodeSafety.is_alive_node(unit_ref) or not unit_ref is Unit:
+		return
+
+	var unit: Unit = unit_ref as Unit
 	if not selected_units.has(unit):
 		return
 
@@ -985,7 +990,7 @@ func _track_unit_selection(unit: Unit) -> void:
 	if _unit_tree_exiting_handlers.has(unit_id):
 		return
 
-	var handler: Callable = _on_selected_unit_tree_exiting.bind(unit)
+	var handler: Callable = _on_selected_unit_tree_exiting.bind(unit_id)
 	_unit_tree_exiting_handlers[unit_id] = handler
 	unit.tree_exiting.connect(handler, CONNECT_ONE_SHOT)
 

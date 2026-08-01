@@ -108,7 +108,7 @@ func _try_connect_worker(node: Node) -> void:
 		return
 
 	var on_idle: Callable = _on_worker_idle_status_changed
-	var on_exit: Callable = _on_worker_tree_exiting.bind(worker)
+	var on_exit: Callable = _on_worker_tree_exiting.bind(id)
 	worker.idle_status_changed.connect(on_idle)
 	worker.tree_exiting.connect(on_exit, CONNECT_ONE_SHOT)
 	_connected_workers[id] = {"idle": on_idle, "exit": on_exit}
@@ -119,21 +119,20 @@ func _on_worker_idle_status_changed(_is_idle: bool) -> void:
 	_refresh()
 
 
-func _on_worker_tree_exiting(worker: Worker) -> void:
-	if worker == null:
+func _on_worker_tree_exiting(expected_instance_id: int) -> void:
+	if not _connected_workers.has(expected_instance_id):
 		return
-	var id: int = worker.get_instance_id()
-	if not _connected_workers.has(id):
-		return
-	var handlers: Dictionary = _connected_workers[id]
+	var handlers: Dictionary = _connected_workers[expected_instance_id]
 	var idle_handler: Callable = handlers.get("idle", Callable())
+	var worker_ref: Variant = instance_from_id(expected_instance_id)
 	if (
-		idle_handler.is_valid()
-		and is_instance_valid(worker)
-		and worker.idle_status_changed.is_connected(idle_handler)
+		NodeSafety.is_alive_node(worker_ref)
+		and worker_ref is Worker
+		and idle_handler.is_valid()
+		and (worker_ref as Worker).idle_status_changed.is_connected(idle_handler)
 	):
-		worker.idle_status_changed.disconnect(idle_handler)
-	_connected_workers.erase(id)
+		(worker_ref as Worker).idle_status_changed.disconnect(idle_handler)
+	_connected_workers.erase(expected_instance_id)
 	_refresh()
 
 
