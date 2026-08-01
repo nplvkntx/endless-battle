@@ -12,6 +12,8 @@ var gold: int = MatchConfig.NORMAL_STARTING_GOLD
 var wood: int = MatchConfig.NORMAL_STARTING_WOOD
 var food_current: int = MatchConfig.HUMAN_STARTING_FOOD
 var food_max: int = MatchConfig.HUMAN_STARTING_FOOD_MAX
+var _reserved_gold: int = 0
+var _reserved_wood: int = 0
 
 
 func _ready() -> void:
@@ -24,6 +26,8 @@ func reset_to_starting_values() -> void:
 	wood = MatchConfig.NORMAL_STARTING_WOOD
 	food_current = MatchConfig.HUMAN_STARTING_FOOD
 	food_max = MatchConfig.HUMAN_STARTING_FOOD_MAX
+	_reserved_gold = 0
+	_reserved_wood = 0
 	_emit_resource_state()
 
 
@@ -56,8 +60,38 @@ func add_food_max(amount: int) -> void:
 	food_changed.emit(food_current, food_max)
 
 
-func can_afford(gold_cost: int, wood_cost: int) -> bool:
+func can_afford(gold_cost: int, wood_cost: int, respect_reservations: bool = true) -> bool:
+	if respect_reservations:
+		return get_spendable_gold() >= gold_cost and get_spendable_wood() >= wood_cost
 	return gold >= gold_cost and wood >= wood_cost
+
+
+func get_spendable_gold() -> int:
+	return maxi(0, gold - _reserved_gold)
+
+
+func get_spendable_wood() -> int:
+	return maxi(0, wood - _reserved_wood)
+
+
+## Soft-hold gold/wood for queued construction. Released on cancel/death/invalid place.
+func reserve_resources(gold_amount: int, wood_amount: int) -> void:
+	if gold_amount > 0:
+		_reserved_gold += gold_amount
+	if wood_amount > 0:
+		_reserved_wood += wood_amount
+
+
+func release_reservation(gold_amount: int, wood_amount: int) -> void:
+	if gold_amount > 0:
+		_reserved_gold = maxi(0, _reserved_gold - gold_amount)
+	if wood_amount > 0:
+		_reserved_wood = maxi(0, _reserved_wood - wood_amount)
+
+
+func clear_reservations() -> void:
+	_reserved_gold = 0
+	_reserved_wood = 0
 
 
 func has_food_supply(additional: int) -> bool:
@@ -124,5 +158,6 @@ func try_spend(gold_cost: int, wood_cost: int) -> bool:
 
 	gold -= gold_cost
 	wood -= wood_cost
+	release_reservation(gold_cost, wood_cost)
 	resources_changed.emit()
 	return true

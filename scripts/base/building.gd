@@ -67,6 +67,8 @@ var _selection_indicator: Node3D
 var _construction_progress_bar: Node3D
 var _construction_progress_fill: MeshInstance3D
 var _construction_progress_fill_material: StandardMaterial3D
+## True while foundation waits for a Shift-queued builder (visual distinction).
+var _awaiting_queued_builder: bool = false
 
 
 func _ready() -> void:
@@ -300,6 +302,18 @@ func start_under_construction() -> void:
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
 	play_selection_pulse()
+
+
+## Marks foundation as a future Shift-queued build (vs actively constructing).
+func set_awaiting_queued_builder(awaiting: bool) -> void:
+	if _awaiting_queued_builder == awaiting:
+		return
+	_awaiting_queued_builder = awaiting
+	_refresh_queued_builder_visual()
+
+
+func is_awaiting_queued_builder() -> bool:
+	return _awaiting_queued_builder
 
 
 func setup_construction(duration: float) -> void:
@@ -558,6 +572,9 @@ func register_builder(worker: Worker) -> void:
 	if worker not in _registered_builders:
 		_registered_builders.append(worker)
 
+	if _awaiting_queued_builder:
+		set_awaiting_queued_builder(false)
+
 	if building_state == STATE_UNDER_CONSTRUCTION:
 		begin_construction()
 
@@ -643,6 +660,7 @@ func _apply_under_construction_visual() -> void:
 	if _construction_stage_visuals != null:
 		_construction_stage_visuals.begin_construction()
 		_construction_stage_visuals.update_progress(_construction_progress)
+		_refresh_queued_builder_visual()
 		return
 
 	# Legacy fallback if stage visuals cannot initialize.
@@ -653,6 +671,17 @@ func _apply_under_construction_visual() -> void:
 	placeholder_material.albedo_color = Color(0.6, 0.6, 0.6, CONSTRUCTION_PLACEHOLDER_ALPHA)
 	placeholder_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_instance.material_override = placeholder_material
+	_refresh_queued_builder_visual()
+
+
+func _refresh_queued_builder_visual() -> void:
+	# Future queued foundations use a cooler progress tint; active builds keep warm amber.
+	if _construction_progress_fill_material == null:
+		return
+	if _awaiting_queued_builder:
+		_construction_progress_fill_material.albedo_color = Color(0.35, 0.55, 0.9, 1.0)
+	else:
+		_construction_progress_fill_material.albedo_color = Color(0.55, 0.35, 0.15, 1.0)
 
 
 func _ensure_construction_stage_visuals() -> void:
@@ -718,6 +747,7 @@ func _ensure_construction_progress_bar() -> void:
 	_construction_progress_bar.add_child(_construction_progress_fill)
 
 	_construction_progress_bar.position.y = _estimate_construction_progress_bar_height()
+	_refresh_queued_builder_visual()
 
 
 func _estimate_construction_progress_bar_height() -> float:

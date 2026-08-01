@@ -240,6 +240,7 @@ func _show_unit_info(unit: Unit) -> void:
 		_hide_inventory_display()
 	_configure_stats_display(unit)
 	_hide_production_display()
+	_configure_worker_order_queue_display(unit)
 
 
 func _show_building_info(building: Building) -> void:
@@ -1336,6 +1337,16 @@ func _get_unit_info(unit: Unit) -> Dictionary:
 	if unit is EnemyDummy:
 		return {"name": "Enemy Dummy", "type": "Unit", "portrait_key": "enemy_dummy"}
 	return {}
+
+
+func _configure_worker_order_queue_display(unit: Unit) -> void:
+	if not (unit is Worker):
+		return
+	var queued_count: int = unit.get_queued_orders().size()
+	if queued_count <= 0:
+		return
+	_building_detail_label.text = "Queue: %d" % queued_count
+	_building_detail_label.visible = true
 
 
 func _get_hero_portrait_info(hero: Hero, name_prefix: String) -> Dictionary:

@@ -292,6 +292,8 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
+	_clear_order_queue_internal()
+	_active_order = null
 	_cancel_build_trip()
 	cancel_gathering()
 	EnemyUnitMission.clear_unit_mission(self)
@@ -315,7 +317,7 @@ func _on_health_depleted() -> void:
 func _exit_tree() -> void:
 	_cancel_build_trip()
 	cancel_gathering()
-	EnemyUnitMission.clear_unit_mission(self)
+	super._exit_tree()
 
 
 func _sanitize_stored_targets() -> void:
@@ -516,6 +518,22 @@ func _prepare_for_new_player_order() -> void:
 	cancel_gathering()
 	if _build_trip_state != BuildTripState.IDLE:
 		_cancel_build_trip()
+
+
+func _adopt_blocking_activity_as_active_order() -> void:
+	if _active_order != null:
+		return
+	if _gather_state != GatherTripState.IDLE:
+		var source: GatherableResource = null
+		if NodeSafety.is_alive_node(_gather_source):
+			source = _gather_source as GatherableResource
+		if source != null:
+			_active_order = UnitOrder.gather(source)
+			_active_order.status = UnitOrder.Status.ACTIVE
+			return
+	if _build_trip_state != BuildTripState.IDLE and NodeSafety.is_alive_node(_building_target):
+		_active_order = UnitOrder.build(_building_target as Building)
+		_active_order.status = UnitOrder.Status.ACTIVE
 
 
 func _is_on_task_movement() -> bool:
@@ -832,7 +850,8 @@ func get_pinned_starting_gold_mine() -> GoldMine:
 
 
 func _start_gathering(source: GatherableResource, player_ordered: bool = true) -> void:
-	if player_ordered:
+	# Order-system gather keeps the shared queue; direct player gather replaces it.
+	if player_ordered and not _issuing_order:
 		clear_order_queue()
 		_active_order = null
 	_cancel_build_trip()
@@ -891,6 +910,10 @@ func _start_gathering(source: GatherableResource, player_ordered: bool = true) -
 	_clear_wood_chop_spot()
 	_gather_state = GatherTripState.TO_SOURCE
 	_set_movement_to_gather_source(source)
+	# Direct player gather (not via issue_order) becomes the active order so Shift can append.
+	if player_ordered and not _issuing_order:
+		_active_order = UnitOrder.gather(source)
+		_active_order.status = UnitOrder.Status.ACTIVE
 	_debug_log_ai_gather_state("start_gathering_committed")
 
 
@@ -993,13 +1016,15 @@ func on_building_construction_finished() -> void:
 		_wall_build_job.on_worker_segment_finished(self, finished_building)
 		return
 
-	# Advance shift-queued orders before resuming gather.
-	if has_queued_orders():
-		notify_order_completed(UnitOrder.Type.BUILD)
-		return
-
+	# Advance unified Shift queue (or clear active BUILD) before resuming gather.
 	if _active_order != null and _active_order.type == UnitOrder.Type.BUILD:
-		_active_order = null
+		notify_order_completed(UnitOrder.Type.BUILD)
+		if get_active_order() != null:
+			return
+	elif has_queued_orders():
+		_advance_order_queue()
+		if get_active_order() != null:
+			return
 
 	if _try_resume_suspended_gathering():
 		return
@@ -1019,6 +1044,11 @@ func notify_building_destroyed(building: Building) -> void:
 		return
 
 	_cancel_build_trip()
+	# Failed/invalid build: skip this order and continue the shared queue.
+	if _active_order != null and _active_order.type == UnitOrder.Type.BUILD:
+		var active_target: Node3D = _active_order.get_alive_target()
+		if active_target == null or active_target == building:
+			_advance_order_queue()
 
 
 func _notify_enemy_worker_needs_gather_job() -> void:

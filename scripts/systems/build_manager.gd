@@ -419,11 +419,24 @@ func _place_building() -> void:
 
 	var workers: Array[Worker] = _get_selected_workers()
 	building.setup_construction(_get_construction_duration(workers.size(), _active_placement))
+	var queued: bool = Input.is_key_pressed(KEY_SHIFT)
+	if queued:
+		building.set_awaiting_queued_builder(true)
+	# Spend-on-place is the reservation; cost refunds live on the Building.
 	for worker: Worker in workers:
-		worker.start_construction_order(building)
+		var build_order: UnitOrder = UnitOrder.build(building)
+		build_order.building_type = _active_placement
+		build_order.reservation_gold = gold_cost
+		build_order.reservation_wood = wood_cost
+		build_order.world_position = placement_position
+		worker.issue_order(build_order, queued)
 
 	_release_ghost_footprint_reservation()
-	_cancel_placement()
+	if queued:
+		# WC3-style: keep placement mode for another Shift-place.
+		_refresh_ghost_footprint_reservation(_placement_ghost.global_position)
+	else:
+		_cancel_placement()
 
 
 func _get_building_scene(placement_type: StringName) -> PackedScene:
@@ -790,10 +803,19 @@ func _place_wall_line() -> void:
 		ResourceManager.add_wood(wood_cost)
 		return
 
-	var wall_job := WallBuildJob.new(placed_buildings, workers)
-	wall_job.start()
-
-	_cancel_placement()
+	var queued: bool = Input.is_key_pressed(KEY_SHIFT)
+	if queued and not placed_buildings.is_empty():
+		for building: Building in placed_buildings:
+			building.set_awaiting_queued_builder(true)
+		for worker: Worker in workers:
+			worker.issue_order(UnitOrder.build(placed_buildings[0]), true)
+		_wall_drag_has_start = false
+		_clear_wall_drag_ghosts()
+		# Stay in wall placement mode while Shift is held.
+	else:
+		var wall_job := WallBuildJob.new(placed_buildings, workers)
+		wall_job.start()
+		_cancel_placement()
 
 
 func _create_wall_ghost() -> Node3D:

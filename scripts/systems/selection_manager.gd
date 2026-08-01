@@ -525,7 +525,7 @@ func _handle_right_click(screen_position: Vector2) -> void:
 
 	var gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
 	if gold_mine != null:
-		_dispatch_gold_mine_gather_command(gold_mine)
+		_dispatch_gold_mine_gather_command(gold_mine, queued)
 		return
 
 	var ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
@@ -694,7 +694,7 @@ func _dispatch_construction_command(building: Building, queued: bool = false) ->
 		return
 
 	if building is WallSegment:
-		_dispatch_wall_chain_construction_command(building as WallSegment)
+		_dispatch_wall_chain_construction_command(building as WallSegment, queued)
 		return
 
 	InputManager.disarm_all_command_modes()
@@ -713,7 +713,7 @@ func _dispatch_construction_command(building: Building, queued: bool = false) ->
 		_play_construction_target_feedback(building)
 
 
-func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment) -> void:
+func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment, queued: bool = false) -> void:
 	if not NodeSafety.is_alive_node(clicked_segment):
 		return
 
@@ -736,8 +736,12 @@ func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment) -> 
 	if workers.is_empty():
 		return
 
-	var wall_job := WallBuildJob.new(segments, workers)
-	wall_job.start()
+	if queued:
+		for worker: Worker in workers:
+			worker.issue_order(UnitOrder.build(segments[0]), true)
+	else:
+		var wall_job := WallBuildJob.new(segments, workers)
+		wall_job.start()
 	_play_construction_target_feedback(clicked_segment)
 
 
@@ -761,14 +765,14 @@ func _play_construction_target_feedback(building: Building) -> void:
 	building.play_target_feedback()
 
 
-func _dispatch_gold_mine_gather_command(gold_mine: GoldMine) -> void:
+func _dispatch_gold_mine_gather_command(gold_mine: GoldMine, queued: bool = false) -> void:
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
 	for unit: Unit in selected_units:
 		if not _is_commandable_unit(unit):
 			continue
 		if unit is Worker:
-			(unit as Worker).command_gather_gold_mine(gold_mine)
+			unit.issue_order(UnitOrder.gather(gold_mine), queued)
 			dispatched_to_worker = true
 	if dispatched_to_worker:
 		_play_gather_target_feedback(gold_mine)

@@ -33,12 +33,13 @@ func _input(event: InputEvent) -> void:
 	if tree == null or not is_instance_valid(tree) or tree.is_queued_for_deletion():
 		return
 
+	var queued: bool = Input.is_key_pressed(KEY_SHIFT)
 	var dispatched_to_worker := false
 	for unit: Node in selected_units:
 		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
 			continue
 		if unit is Worker:
-			(unit as Worker).command_gather_tree(tree)
+			(unit as Worker).issue_order(UnitOrder.gather(tree), queued)
 			dispatched_to_worker = true
 
 	if dispatched_to_worker and tree != null and is_instance_valid(tree) and tree.has_method("play_target_feedback"):

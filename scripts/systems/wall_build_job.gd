@@ -193,6 +193,12 @@ func _prune_stale_claims() -> void:
 func _finish_worker(worker: Worker) -> void:
 	if NodeSafety.is_alive_node(worker):
 		worker.clear_wall_build_job_assignment()
+		# Wall chain complete for this worker — advance unified Shift queue.
+		if (
+			worker.get_active_order() != null
+			and worker.get_active_order().type == UnitOrder.Type.BUILD
+		):
+			worker.notify_order_completed(UnitOrder.Type.BUILD)
 
 	_workers.erase(worker)
 

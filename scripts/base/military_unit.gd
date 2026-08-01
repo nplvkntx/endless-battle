@@ -657,6 +657,8 @@ func get_current_health() -> int:
 func _on_health_depleted() -> void:
 	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
+	_clear_order_queue_internal()
+	_active_order = null
 	_clear_hold_position_state()
 	_clear_patrol_state()
 	cancel_attack_move()

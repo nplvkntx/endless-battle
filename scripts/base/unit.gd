@@ -204,6 +204,8 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	EnemyUnitMission.clear_unit_mission(self)
+	_clear_order_queue_internal()
+	_active_order = null
 	if _visual_animator != null:
 		_visual_animator.release()
 		_visual_animator = null
@@ -298,14 +300,17 @@ func issue_order(order: UnitOrder, queued: bool = false) -> bool:
 	if queued:
 		if _is_duplicate_queued_order(order):
 			return true
+		# Adopt gather/build activity as the active order so Shift can append.
+		_adopt_blocking_activity_as_active_order()
 		if _active_order != null:
+			order.status = UnitOrder.Status.PENDING
 			_order_queue.append(order)
 			return true
 	else:
 		if _active_order != null and _active_order.is_equivalent(order, ORDER_DEST_EQUIVALENCE):
 			# Equivalent non-shift order: keep current nav/attack/animation state.
 			return true
-		_order_queue.clear()
+		_clear_order_queue_internal()
 
 	return _start_order(order)
 
@@ -322,13 +327,20 @@ func _is_duplicate_queued_order(order: UnitOrder) -> bool:
 
 
 func issue_stop() -> void:
-	_order_queue.clear()
+	_clear_order_queue_internal()
 	_active_order = null
 	_prepare_for_new_player_order()
 	stop_movement()
 
 
 func clear_order_queue() -> void:
+	_clear_order_queue_internal()
+
+
+func _clear_order_queue_internal() -> void:
+	for queued: UnitOrder in _order_queue:
+		if queued != null:
+			queued.status = UnitOrder.Status.CANCELLED
 	_order_queue.clear()
 
 
@@ -344,6 +356,14 @@ func has_queued_orders() -> bool:
 	return not _order_queue.is_empty()
 
 
+## Active order plus pending queue entries (for worker UI).
+func get_order_queue_length() -> int:
+	var count: int = _order_queue.size()
+	if _active_order != null:
+		count += 1
+	return count
+
+
 func _can_accept_order(order: UnitOrder) -> bool:
 	match order.type:
 		UnitOrder.Type.ATTACK, UnitOrder.Type.ATTACK_MOVE:
@@ -352,7 +372,7 @@ func _can_accept_order(order: UnitOrder) -> bool:
 			return supports_hold_position()
 		UnitOrder.Type.PATROL:
 			return supports_patrol()
-		UnitOrder.Type.BUILD:
+		UnitOrder.Type.BUILD, UnitOrder.Type.GATHER:
 			return self is Worker
 		UnitOrder.Type.MOVE, UnitOrder.Type.STOP:
 			return true
@@ -362,11 +382,13 @@ func _can_accept_order(order: UnitOrder) -> bool:
 
 func _start_order(order: UnitOrder) -> bool:
 	_active_order = order
+	order.status = UnitOrder.Status.ACTIVE
 	_issuing_order = true
 	_prepare_for_new_player_order()
 	var applied: bool = _apply_order(order)
 	_issuing_order = false
 	if not applied and order.type != UnitOrder.Type.HOLD_POSITION:
+		order.status = UnitOrder.Status.CANCELLED
 		_active_order = null
 		_advance_order_queue()
 		return false
@@ -375,6 +397,11 @@ func _start_order(order: UnitOrder) -> bool:
 
 ## Override to cancel attack / hold / patrol / gather before a replacement order.
 func _prepare_for_new_player_order() -> void:
+	pass
+
+
+## Worker override: promote in-progress gather/build into `_active_order` for Shift-append.
+func _adopt_blocking_activity_as_active_order() -> void:
 	pass
 
 
@@ -398,24 +425,68 @@ func _apply_order(order: UnitOrder) -> bool:
 			command_patrol(order.patrol_points)
 			return true
 		UnitOrder.Type.BUILD:
-			var build_target: Node3D = order.get_alive_target()
-			if self is Worker and build_target is Building:
-				(self as Worker).start_construction_order(build_target as Building)
-				return true
-			return false
+			return _apply_build_order(order)
+		UnitOrder.Type.GATHER:
+			return _apply_gather_order(order)
 		_:
 			return false
 
 
+func _apply_build_order(order: UnitOrder) -> bool:
+	var build_target: Node3D = order.get_alive_target()
+	if not (self is Worker) or not (build_target is Building):
+		return false
+	var building: Building = build_target as Building
+	if not building.is_being_constructed():
+		return false
+	var worker: Worker = self as Worker
+	if building is WallSegment:
+		var segments: Array[Building] = WallSegment.collect_unfinished_chain_segments(
+			building as WallSegment
+		)
+		if segments.is_empty():
+			return false
+		var wall_job := WallBuildJob.new(segments, [worker])
+		wall_job.start()
+		return true
+	worker.start_construction_order(building)
+	return true
+
+
+func _apply_gather_order(order: UnitOrder) -> bool:
+	if not (self is Worker):
+		return false
+	var gather_target: Node3D = order.get_alive_target()
+	if gather_target == null:
+		return false
+	var worker: Worker = self as Worker
+	if gather_target is GoldMine:
+		worker.command_gather_gold_mine(gather_target as GoldMine, true)
+		return true
+	if gather_target is WoodTree:
+		worker.command_gather_tree(gather_target as WoodTree, true)
+		return true
+	return false
+
+
 func _advance_order_queue() -> void:
+	if _active_order != null:
+		_active_order.status = UnitOrder.Status.DONE
 	_active_order = null
 	while not _order_queue.is_empty():
 		var next_order: UnitOrder = _order_queue.pop_front()
 		if next_order == null:
 			continue
 		if next_order.is_target_order() and not NodeSafety.is_alive_node(next_order.target):
+			next_order.status = UnitOrder.Status.CANCELLED
 			continue
+		if next_order.type == UnitOrder.Type.BUILD:
+			var build_node: Node3D = next_order.get_alive_target()
+			if build_node is Building and not (build_node as Building).is_being_constructed():
+				next_order.status = UnitOrder.Status.CANCELLED
+				continue
 		if not _can_accept_order(next_order):
+			next_order.status = UnitOrder.Status.CANCELLED
 			continue
 		_start_order(next_order)
 		return
