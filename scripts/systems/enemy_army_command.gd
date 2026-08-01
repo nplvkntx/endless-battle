@@ -5189,35 +5189,13 @@ static func _refresh_perf_overlay_status(_tree: SceneTree) -> void:
 	)
 
 static func _order_units_for_formation(units: Array) -> Array:
-	var melee_units: Array = []
-	var ranged_units: Array = []
-	var hero_units: Array = []
-
-	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit):
-			continue
-
-		if unit is Worker:
-			continue
-
-		if not is_living_combat_unit(unit as Node):
-			continue
-
-		if is_hero_unit(unit as Node):
-			hero_units.append(unit)
-		elif unit is Archer or unit is CavalryArcher or unit is Cannon:
-			ranged_units.append(unit)
-		else:
-			melee_units.append(unit)
-
-	melee_units.sort_custom(_compare_units_by_instance_id)
-	ranged_units.sort_custom(_compare_units_by_instance_id)
-	hero_units.sort_custom(_compare_units_by_instance_id)
-
+	var eligible: Array = FormationManager.collect_eligible_units(units, true)
+	var heroes: Array = FormationManager.collect_heroes(units)
+	eligible.sort_custom(UnitFormationRole.compare_units_front_first)
+	heroes.sort_custom(_compare_units_by_instance_id)
 	var ordered_units: Array = []
-	ordered_units.append_array(melee_units)
-	ordered_units.append_array(ranged_units)
-	ordered_units.append_array(hero_units)
+	ordered_units.append_array(eligible)
+	ordered_units.append_array(heroes)
 	return ordered_units
 
 
@@ -5228,6 +5206,34 @@ static func _compare_units_by_instance_id(a: Variant, b: Variant) -> bool:
 
 
 static func _compute_attack_formation_targets(
+	units: Array,
+	destination: Vector3,
+	spacing: float
+) -> Array[Vector3]:
+	if units.is_empty():
+		return []
+
+	var mode_name: StringName = StringName(ArmyMode.keys()[_army_mode])
+	var defending: bool = _army_mode in [
+		ArmyMode.DEFENDING,
+		ArmyMode.INTERCEPTING,
+		ArmyMode.REGROUPING,
+	]
+	var targets: Array[Vector3] = FormationManager.ai_issue_move(
+		units,
+		destination,
+		true,
+		mode_name,
+		defending
+	)
+	if targets.size() == units.size():
+		return targets
+
+	# Fallback to legacy line layout if AI formation returned mismatched size.
+	return _compute_legacy_line_formation_targets(units, destination, spacing)
+
+
+static func _compute_legacy_line_formation_targets(
 	units: Array,
 	destination: Vector3,
 	spacing: float

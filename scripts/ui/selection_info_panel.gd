@@ -199,7 +199,16 @@ func _show_multiple_units(units: Array[Unit], category: StringName) -> void:
 		&"combat":
 			_set_portrait("multiple")
 			_name_label.text = "Multiple Units"
-			_type_label.text = "%d units selected" % units.size()
+			var summary: Dictionary = FormationManager.get_selection_formation_summary(units)
+			if bool(summary.get("has_eligible", false)) and int(summary.get("in_formation_count", 0)) > 0:
+				_type_label.text = "%d units · %s / %d (%d formed)" % [
+					units.size(),
+					String(summary.get("shape_name", "Formation")),
+					int(summary.get("size_preset", 15)),
+					int(summary.get("in_formation_count", 0)),
+				]
+			else:
+				_type_label.text = "%d units selected" % units.size()
 		&"mixed":
 			_set_portrait("mixed")
 			_name_label.text = "Multiple Units"

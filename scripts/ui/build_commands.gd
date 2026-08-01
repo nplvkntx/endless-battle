@@ -294,6 +294,16 @@ var _town_center_upgrade_slot: ProductionIconSlot = null
 var _hero_altar_slot: ProductionIconSlot = null
 var _build_icon_slots: Dictionary = {}
 
+## Formation command controls (created at runtime).
+var _formation_panel: VBoxContainer = null
+var _formation_shape_row: HBoxContainer = null
+var _formation_size_row: HBoxContainer = null
+var _formation_status_label: Label = null
+var _formation_shape_buttons: Dictionary = {}
+var _formation_size_buttons: Dictionary = {}
+var _formation_dissolve_button: Button = null
+var _formation_controls_ready: bool = false
+
 
 func _ready() -> void:
 	visible = false
@@ -374,6 +384,7 @@ func _ready() -> void:
 	_connect_academy_upgrade_buttons()
 	_connect_shop_item_buttons()
 	_setup_wall_gate_buttons()
+	_setup_formation_controls()
 	_setup_command_tooltips()
 	_hide_all_hero_upgrade_buttons()
 
@@ -2999,6 +3010,7 @@ func _clear_all_command_ui() -> void:
 	_shop_panel.visible = false
 	_wall_gate_panel.visible = false
 	_hero_panel.visible = false
+	_set_formation_controls_visible(false)
 
 	_clear_queue_row(_worker_queue_row)
 	_clear_queue_row(_swordsman_queue_row)
@@ -3244,6 +3256,7 @@ func _refresh_command_visibility() -> void:
 	)
 
 	_update_auto_training_label()
+	_refresh_formation_control_state()
 
 	visible = (
 		single_worker
@@ -3294,6 +3307,7 @@ func _apply_hero_command_visibility() -> void:
 	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = true
+	_set_formation_controls_visible(_selection_has_formation_eligible_units())
 
 
 func _apply_worker_command_visibility() -> void:
@@ -3315,6 +3329,7 @@ func _apply_worker_command_visibility() -> void:
 	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
+	_set_formation_controls_visible(false)
 
 
 func _apply_combat_command_visibility() -> void:
@@ -3335,6 +3350,7 @@ func _apply_combat_command_visibility() -> void:
 	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
+	_set_formation_controls_visible(true)
 
 
 func _apply_unit_order_button_visibility(show_combat_orders: bool, show_stop: bool = true) -> void:
@@ -3362,6 +3378,7 @@ func _apply_mixed_unit_command_visibility() -> void:
 	_wall_gate_panel.visible = false
 	_clear_queue_row(_worker_queue_row)
 	_hero_panel.visible = false
+	_set_formation_controls_visible(_selection_has_formation_eligible_units())
 
 
 func _apply_barracks_command_visibility() -> void:
@@ -3557,6 +3574,7 @@ func _apply_hidden_command_buttons() -> void:
 	_stable_panel.visible = false
 	_shop_panel.visible = false
 	_wall_gate_panel.visible = false
+	_set_formation_controls_visible(false)
 	_hero_panel.visible = false
 
 
@@ -3685,6 +3703,223 @@ func _on_hold_position_pressed() -> void:
 
 func _on_patrol_pressed() -> void:
 	InputManager.arm_patrol()
+
+
+func _setup_formation_controls() -> void:
+	if _formation_controls_ready:
+		return
+	_formation_controls_ready = true
+
+	var right_panel: HBoxContainer = _right_panel
+	if right_panel == null:
+		return
+
+	_formation_panel = VBoxContainer.new()
+	_formation_panel.name = "FormationPanel"
+	_formation_panel.visible = false
+	_formation_panel.add_theme_constant_override("separation", 4)
+	right_panel.add_child(_formation_panel)
+	# Keep formation panel after combat buttons
+	right_panel.move_child(_formation_panel, _buttons_row.get_index() + 1)
+
+	_formation_status_label = Label.new()
+	_formation_status_label.name = "FormationStatusLabel"
+	_formation_status_label.text = "Formation"
+	_formation_status_label.add_theme_font_size_override("font_size", 12)
+	_formation_panel.add_child(_formation_status_label)
+
+	_formation_shape_row = HBoxContainer.new()
+	_formation_shape_row.name = "FormationShapeRow"
+	_formation_shape_row.add_theme_constant_override("separation", 4)
+	_formation_panel.add_child(_formation_shape_row)
+
+	var shapes: Array = [
+		FormationLayout.Shape.SQUARE,
+		FormationLayout.Shape.LINE,
+		FormationLayout.Shape.ARROW,
+		FormationLayout.Shape.HOLLOW_SQUARE,
+	]
+	for shape: Variant in shapes:
+		var shape_id: FormationLayout.Shape = shape as FormationLayout.Shape
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(40, 40)
+		button.toggle_mode = true
+		button.icon = FormationIcons.get_shape_icon(shape_id)
+		button.expand_icon = true
+		button.pressed.connect(_on_formation_shape_pressed.bind(shape_id))
+		_formation_shape_row.add_child(button)
+		_formation_shape_buttons[shape_id] = button
+		var shape_name: String = String(FormationLayout.SHAPE_NAMES.get(shape_id, "Formation"))
+		var behavior: String = String(FormationLayout.SHAPE_BEHAVIORS.get(shape_id, ""))
+		TooltipManager.bind_static_tooltip(
+			button,
+			"%s\n%s\nClick to form selected military units." % [shape_name, behavior]
+		)
+
+	_formation_size_row = HBoxContainer.new()
+	_formation_size_row.name = "FormationSizeRow"
+	_formation_size_row.add_theme_constant_override("separation", 4)
+	_formation_panel.add_child(_formation_size_row)
+
+	for size_preset: int in FormationLayout.SIZE_PRESETS:
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(40, 40)
+		button.toggle_mode = true
+		button.text = str(size_preset)
+		button.icon = FormationIcons.get_size_icon(size_preset)
+		button.expand_icon = true
+		button.pressed.connect(_on_formation_size_pressed.bind(size_preset))
+		_formation_size_row.add_child(button)
+		_formation_size_buttons[size_preset] = button
+		var size_blurb: String = _formation_size_tooltip(size_preset)
+		TooltipManager.bind_static_tooltip(
+			button,
+			"Formation Size %d\n%s\nSets the target group size before forming." % [size_preset, size_blurb]
+		)
+
+	_formation_dissolve_button = Button.new()
+	_formation_dissolve_button.name = "DissolveFormationButton"
+	_formation_dissolve_button.custom_minimum_size = Vector2(40, 40)
+	_formation_dissolve_button.icon = FormationIcons.get_dissolve_icon()
+	_formation_dissolve_button.expand_icon = true
+	_formation_dissolve_button.pressed.connect(_on_formation_dissolve_pressed)
+	_formation_panel.add_child(_formation_dissolve_button)
+	TooltipManager.bind_static_tooltip(
+		_formation_dissolve_button,
+		"Dissolve Formation\nBreak formation membership for selected units."
+	)
+
+	FormationManager.player_formation_prefs_changed.connect(_on_formation_prefs_changed)
+	FormationManager.formations_changed.connect(_refresh_formation_control_state)
+	_sync_formation_button_toggles()
+
+
+func _formation_size_tooltip(size_preset: int) -> String:
+	match size_preset:
+		5:
+			return "Small squad. Tight and responsive."
+		15:
+			return "Standard tactical formation."
+		30:
+			return "Large battle formation."
+		50:
+			return "Major army formation."
+		_:
+			return "Formation size preset."
+
+
+func _set_formation_controls_visible(should_show: bool) -> void:
+	if _formation_panel == null:
+		return
+	_formation_panel.visible = should_show
+	if should_show:
+		_refresh_formation_control_state()
+
+
+func _selection_has_formation_eligible_units() -> bool:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return false
+	var selected: Array = selection_manager.selected_units
+	return not FormationManager.collect_eligible_units(selected, true).is_empty()
+
+
+func _refresh_formation_control_state() -> void:
+	if _formation_panel == null or not _formation_panel.visible:
+		_sync_formation_button_toggles()
+		return
+
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	var selected: Array = []
+	if selection_manager != null:
+		selected = selection_manager.selected_units
+
+	var summary: Dictionary = FormationManager.get_selection_formation_summary(selected)
+	var has_eligible: bool = bool(summary.get("has_eligible", false))
+	_formation_panel.modulate = Color.WHITE if has_eligible else Color(1, 1, 1, 0.45)
+
+	for button: Variant in _formation_shape_buttons.values():
+		(button as Button).disabled = not has_eligible
+	for button: Variant in _formation_size_buttons.values():
+		(button as Button).disabled = not has_eligible
+	if _formation_dissolve_button != null:
+		_formation_dissolve_button.disabled = int(summary.get("in_formation_count", 0)) <= 0
+
+	if _formation_status_label != null:
+		var shape_name: String = String(summary.get("shape_name", "Square"))
+		var size_preset: int = int(summary.get("size_preset", FormationManager.get_player_size()))
+		var membership: int = int(summary.get("in_formation_count", 0))
+		var eligible: int = int(summary.get("eligible_count", 0))
+		_formation_status_label.text = "%s / %d  (%d/%d formed)" % [
+			shape_name,
+			size_preset,
+			membership,
+			eligible,
+		]
+
+	_sync_formation_button_toggles()
+
+
+func _sync_formation_button_toggles() -> void:
+	var current_shape: FormationLayout.Shape = FormationManager.get_player_shape()
+	for shape: Variant in _formation_shape_buttons.keys():
+		var button: Button = _formation_shape_buttons[shape] as Button
+		button.set_pressed_no_signal(int(shape) == int(current_shape))
+
+	var current_size: int = FormationManager.get_player_size()
+	for size_preset: Variant in _formation_size_buttons.keys():
+		var button: Button = _formation_size_buttons[size_preset] as Button
+		button.set_pressed_no_signal(int(size_preset) == current_size)
+
+
+func _on_formation_prefs_changed(_shape: int, _size_preset: int) -> void:
+	_sync_formation_button_toggles()
+	_refresh_formation_control_state()
+
+
+func _on_formation_shape_pressed(shape: FormationLayout.Shape) -> void:
+	FormationManager.set_player_shape(shape)
+	_apply_formation_to_selection()
+
+
+func _on_formation_size_pressed(size_preset: int) -> void:
+	FormationManager.set_player_size(size_preset)
+	_apply_formation_to_selection()
+
+
+func _on_formation_dissolve_pressed() -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return
+	FormationManager.dissolve_selected_formations(selection_manager.selected_units)
+	FormationManager.hide_preview()
+	_refresh_formation_control_state()
+
+
+func _apply_formation_to_selection() -> void:
+	var selection_manager: Node = get_node_or_null(selection_manager_path)
+	if selection_manager == null:
+		return
+	var selected: Array = selection_manager.selected_units
+	var created: Array[int] = FormationManager.form_selected_units(selected)
+	if created.is_empty():
+		_refresh_formation_control_state()
+		return
+
+	# Snap/reform formed units around their current center so slots are visible.
+	for fid: int in created:
+		var group: FormationGroup = FormationManager.get_formation(fid)
+		if group == null:
+			continue
+		group.recompute_anchor_from_members()
+		group.ensure_slots_assigned()
+		FormationManager.show_preview(group)
+		for unit: Variant in group.get_alive_members():
+			var target: Vector3 = group.get_world_slot_for_unit(unit as Node)
+			if unit is Unit:
+				(unit as Unit).issue_order(UnitOrder.move(target), false)
+
+	_refresh_formation_control_state()
 
 
 func _on_worker_queue_changed(_queue_count: int) -> void:
