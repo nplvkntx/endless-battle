@@ -52,3 +52,5 @@ func disarm_patrol() -> void:
 func disarm_all_command_modes() -> void:
 	attack_move_armed = false
 	patrol_armed = false
+	if HeroAbilityTargetingController != null and HeroAbilityTargetingController.is_targeting():
+		HeroAbilityTargetingController.cancel_targeting()

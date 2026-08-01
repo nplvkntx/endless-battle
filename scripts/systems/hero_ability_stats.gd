@@ -83,6 +83,7 @@ const KIT_DEFAULT_BASE_STATS: Dictionary = {
 		HeroAbilityProgression.ABILITY_W: {
 			STAT_EFFECT: ShadowAssassinStats.SMOKE_DURATION,
 			STAT_SPLASH: ShadowAssassinStats.SMOKE_RADIUS,
+			STAT_RANGE: ShadowAssassinStats.SMOKE_CAST_RANGE,
 			STAT_COOLDOWN: ShadowAssassinStats.SMOKE_COOLDOWN,
 			STAT_MANA: ShadowAssassinStats.SMOKE_MANA_COST,
 		},

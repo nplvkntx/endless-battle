@@ -36,6 +36,7 @@ const AXE_MARK_MANA_REFUND_RATIO: float = 0.5
 # --- W: Smoke ---
 const SMOKE_DURATION: float = 6.0
 const SMOKE_RADIUS: float = 4.0
+const SMOKE_CAST_RANGE: float = 7.0
 const SMOKE_MOVE_SPEED_BONUS: float = 1.5
 const SMOKE_REVEAL_SECONDS: float = 1.25
 const SMOKE_COOLDOWN: float = 18.0

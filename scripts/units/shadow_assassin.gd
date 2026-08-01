@@ -96,8 +96,8 @@ func _require_ability_learned(ability_id: StringName) -> bool:
 	return false
 
 
-func try_cast_q(_target: Variant = null) -> bool:
-	return try_axe_mark()
+func try_cast_q(target: Variant = null) -> bool:
+	return try_axe_mark(target)
 
 
 func try_cast_w(target: Variant = null) -> bool:
@@ -108,22 +108,61 @@ func try_cast_e(_target: Variant = null) -> bool:
 	return try_slash()
 
 
-func try_cast_r(_target: Variant = null) -> bool:
-	return try_dash()
+func try_cast_r(target: Variant = null) -> bool:
+	return try_dash(target)
+
+
+func get_ability_definition(ability_id: StringName) -> HeroAbilityDefinition:
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			var axe := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.TARGET_ENEMY,
+				get_ability_range(ability_id)
+			)
+			axe.allows_move_to_cast = true
+			axe.can_target_buildings = false
+			axe.can_target_creeps = true
+			axe.can_target_enemies = true
+			return axe
+		HeroAbilityProgression.ABILITY_W:
+			var smoke := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.CIRCULAR_AREA,
+				ShadowAssassinStats.SMOKE_CAST_RANGE
+			)
+			smoke.effect_radius = get_ability_splash_radius(ability_id)
+			smoke.clamps_ground_to_range = true
+			smoke.allows_move_to_cast = false
+			smoke.can_target_allies = true
+			return smoke
+		HeroAbilityProgression.ABILITY_E:
+			var slash := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.CIRCULAR_SELF,
+				0.0
+			)
+			slash.effect_radius = get_ability_splash_radius(ability_id)
+			slash.allows_move_to_cast = false
+			slash.show_cast_range = false
+			return slash
+		HeroAbilityProgression.ABILITY_R:
+			var dash := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.DASH_TARGET,
+				get_ability_range(ability_id)
+			)
+			dash.allows_move_to_cast = true
+			dash.can_target_buildings = false
+			dash.can_target_creeps = true
+			dash.can_target_enemies = true
+			return dash
+		_:
+			return null
 
 
 func get_ability_target_mode(ability_id: StringName) -> int:
-	match ability_id:
-		HeroAbilityProgression.ABILITY_Q:
-			return AbilityTargetMode.UNIT
-		HeroAbilityProgression.ABILITY_W:
-			return AbilityTargetMode.GROUND
-		HeroAbilityProgression.ABILITY_E:
-			return AbilityTargetMode.INSTANT
-		HeroAbilityProgression.ABILITY_R:
-			return AbilityTargetMode.UNIT
-		_:
-			return AbilityTargetMode.INSTANT
+	return super.get_ability_target_mode(ability_id)
 
 
 func get_ability_cooldown_remaining(ability_id: StringName) -> float:
@@ -302,7 +341,7 @@ func can_use_axe_mark(search_range: float = -1.0) -> bool:
 	return NodeSafety.is_alive_node(_resolve_axe_mark_target(resolved_range))
 
 
-func try_axe_mark() -> bool:
+func try_axe_mark(target: Variant = null) -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
@@ -317,12 +356,20 @@ func try_axe_mark() -> bool:
 		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_axe_mark_target(get_ability_range(HeroAbilityProgression.ABILITY_Q))
-	if target == null:
+	var cast_range: float = get_ability_range(HeroAbilityProgression.ABILITY_Q)
+	var resolved: Node3D = null
+	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
+		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+		if clicked != null and _horizontal_distance_to(clicked) <= cast_range:
+			resolved = clicked
+	else:
+		resolved = _resolve_axe_mark_target(cast_range)
+
+	if resolved == null:
 		_show_ability_feedback("No valid target")
 		return false
 
-	_execute_axe_mark(target)
+	_execute_axe_mark(resolved)
 	return true
 
 
@@ -428,6 +475,13 @@ func try_smoke(target: Variant = null) -> bool:
 	var cast_position: Vector3 = global_position
 	if target is Vector3:
 		cast_position = target as Vector3
+		var offset: Vector3 = cast_position - global_position
+		offset.y = 0.0
+		var place_range: float = ShadowAssassinStats.SMOKE_CAST_RANGE
+		if offset.length() > place_range:
+			offset = offset.normalized() * place_range
+			cast_position = global_position + offset
+		cast_position.y = 0.0
 
 	_execute_smoke(cast_position)
 	return true
@@ -672,7 +726,7 @@ func can_use_dash(search_range: float = -1.0) -> bool:
 	return NodeSafety.is_alive_node(_resolve_dash_target(resolved_range))
 
 
-func try_dash() -> bool:
+func try_dash(target: Variant = null) -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
@@ -687,12 +741,20 @@ func try_dash() -> bool:
 		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_dash_target(get_ability_range(HeroAbilityProgression.ABILITY_R))
-	if target == null:
+	var cast_range: float = get_ability_range(HeroAbilityProgression.ABILITY_R)
+	var resolved: Node3D = null
+	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
+		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+		if clicked != null and _horizontal_distance_to(clicked) <= cast_range:
+			resolved = clicked
+	else:
+		resolved = _resolve_dash_target(cast_range)
+
+	if resolved == null:
 		_show_ability_feedback("No valid target")
 		return false
 
-	_execute_dash(target)
+	_execute_dash(resolved)
 	return true
 
 

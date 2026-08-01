@@ -231,6 +231,21 @@ var _last_click_time_msec: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Ability targeting consumes world clicks before selection / orders.
+	if HeroAbilityTargetingController != null and HeroAbilityTargetingController.is_targeting():
+		if event is InputEventMouseButton:
+			var mouse_button := event as InputEventMouseButton
+			if mouse_button.pressed:
+				match mouse_button.button_index:
+					MOUSE_BUTTON_LEFT:
+						if HeroAbilityTargetingController.try_handle_left_click(mouse_button.position):
+							get_viewport().set_input_as_handled()
+							return
+					MOUSE_BUTTON_RIGHT:
+						if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
+							get_viewport().set_input_as_handled()
+							return
+
 	# Avoid scanning large selections on every mouse-move frame.
 	if event is InputEventKey:
 		var key_event := event as InputEventKey
@@ -878,6 +893,8 @@ func _set_selected_units(units: Array[Unit]) -> void:
 	_clear_building_selection()
 	_apply_units_selection_diff(next_units)
 	selection_changed.emit(selected_units)
+	if HeroAbilityTargetingController != null:
+		HeroAbilityTargetingController.on_selection_changed()
 
 
 func _apply_units_selection_diff(next_units: Array[Unit]) -> void:

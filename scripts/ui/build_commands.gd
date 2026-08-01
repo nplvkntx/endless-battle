@@ -392,6 +392,11 @@ func _ready() -> void:
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
 	_on_building_selection_changed(selection_manager.selected_building)
 	_on_selection_changed(selection_manager.selected_units)
+	if HeroAbilityTargetingController != null:
+		if not HeroAbilityTargetingController.targeting_changed.is_connected(
+			_on_hero_ability_targeting_changed
+		):
+			HeroAbilityTargetingController.targeting_changed.connect(_on_hero_ability_targeting_changed)
 	set_process(false)
 
 
@@ -1843,16 +1848,35 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 
-## Casts an ability on any Hero subclass. Prefers the kit-agnostic try_cast_*
-## entry point (used by non-Paladin kits like Shadow Assassin) and falls back
-## to the legacy Paladin-named method so existing Paladin behavior is unchanged.
+## Casts an ability on any Hero subclass via the shared targeting controller.
+## Instant self-casts fire immediately; all other types enter targeting mode.
 func _try_cast_hero_ability(
 	hero: Hero, generic_method: StringName, legacy_method: StringName
 ) -> void:
+	if hero is MeleeHero:
+		var ability_id: StringName = _ability_id_from_cast_method(generic_method)
+		if not ability_id.is_empty():
+			HeroAbilityTargetingController.begin_targeting(hero as MeleeHero, ability_id)
+			return
+
 	if hero.has_method(generic_method):
 		hero.call(generic_method)
 	elif hero.has_method(legacy_method):
 		hero.call(legacy_method)
+
+
+func _ability_id_from_cast_method(generic_method: StringName) -> StringName:
+	match generic_method:
+		&"try_cast_q":
+			return HeroAbilityProgression.ABILITY_Q
+		&"try_cast_w":
+			return HeroAbilityProgression.ABILITY_W
+		&"try_cast_e":
+			return HeroAbilityProgression.ABILITY_E
+		&"try_cast_r":
+			return HeroAbilityProgression.ABILITY_R
+		_:
+			return &""
 
 
 func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
@@ -2299,6 +2323,23 @@ func _on_selection_changed(units: Array[Unit]) -> void:
 	if not units.is_empty() and _get_authoritative_selected_building() == null:
 		_disconnect_all_building_tracking()
 	_refresh_command_visibility()
+	if HeroAbilityTargetingController != null:
+		HeroAbilityTargetingController.on_selection_changed()
+
+
+func _on_hero_ability_targeting_changed() -> void:
+	_update_hero_abilities_ui()
+
+
+func _apply_ability_targeting_highlight(button: Button, ability_id: StringName) -> void:
+	if button == null:
+		return
+	var is_active: bool = (
+		HeroAbilityTargetingController != null
+		and HeroAbilityTargetingController.is_targeting()
+		and HeroAbilityTargetingController.get_active_ability_id() == ability_id
+	)
+	button.modulate = Color(1.25, 1.15, 0.55, 1.0) if is_active else Color.WHITE
 
 
 func _set_tracked_hero(hero: Hero) -> void:
@@ -2350,7 +2391,14 @@ func _update_hero_abilities_ui() -> void:
 	_update_power_strike_ui()
 	_update_execute_ui()
 	_update_all_hero_upgrade_arrows()
+	_refresh_ability_targeting_highlights()
 
+
+func _refresh_ability_targeting_highlights() -> void:
+	_apply_ability_targeting_highlight(_ground_slam_button, HeroAbilityProgression.ABILITY_Q)
+	_apply_ability_targeting_highlight(_divine_protection_button, HeroAbilityProgression.ABILITY_W)
+	_apply_ability_targeting_highlight(_power_strike_button, HeroAbilityProgression.ABILITY_E)
+	_apply_ability_targeting_highlight(_execute_button, HeroAbilityProgression.ABILITY_R)
 
 func _update_passive_ui() -> void:
 	if _passive_button == null or _passive_status_label == null:

@@ -60,22 +60,66 @@ func try_cast_w(_target: Variant = null) -> bool:
 	return try_divine_protection()
 
 
-func try_cast_e(_target: Variant = null) -> bool:
-	return try_power_strike()
+func try_cast_e(target: Variant = null) -> bool:
+	return try_power_strike(target)
 
 
-func try_cast_r(_target: Variant = null) -> bool:
-	return try_execute()
+func try_cast_r(target: Variant = null) -> bool:
+	return try_execute(target)
+
+
+func get_ability_definition(ability_id: StringName) -> HeroAbilityDefinition:
+	match ability_id:
+		HeroAbilityProgression.ABILITY_Q:
+			var slam := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.CIRCULAR_SELF,
+				0.0
+			)
+			slam.effect_radius = get_ground_slam_radius()
+			slam.allows_move_to_cast = false
+			slam.can_target_enemies = true
+			slam.can_target_creeps = true
+			slam.show_cast_range = false
+			return slam
+		HeroAbilityProgression.ABILITY_W:
+			var shield := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.INSTANT_SELF,
+				0.0
+			)
+			shield.allows_move_to_cast = false
+			shield.show_cast_range = false
+			return shield
+		HeroAbilityProgression.ABILITY_E:
+			var strike := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.TARGET_ENEMY,
+				ATTACK_MOVE_ENGAGEMENT_RANGE
+			)
+			# Kit chase-casts into melee after the player confirms a target.
+			strike.allows_move_to_cast = false
+			strike.can_target_buildings = false
+			strike.can_target_creeps = true
+			strike.can_target_enemies = true
+			return strike
+		HeroAbilityProgression.ABILITY_R:
+			var execute_def := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.TARGET_ENEMY,
+				ATTACK_MOVE_ENGAGEMENT_RANGE
+			)
+			execute_def.allows_move_to_cast = false
+			execute_def.can_target_buildings = false
+			execute_def.can_target_creeps = true
+			execute_def.can_target_enemies = true
+			return execute_def
+		_:
+			return null
 
 
 func get_ability_target_mode(ability_id: StringName) -> int:
-	match ability_id:
-		HeroAbilityProgression.ABILITY_Q, HeroAbilityProgression.ABILITY_W:
-			return AbilityTargetMode.INSTANT
-		HeroAbilityProgression.ABILITY_E, HeroAbilityProgression.ABILITY_R:
-			return AbilityTargetMode.UNIT
-		_:
-			return AbilityTargetMode.INSTANT
+	return super.get_ability_target_mode(ability_id)
 
 
 func get_ability_cooldown_remaining(ability_id: StringName) -> float:
@@ -348,7 +392,7 @@ func can_use_power_strike(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) ->
 	)
 
 
-func try_power_strike() -> bool:
+func try_power_strike(target: Variant = null) -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
@@ -369,12 +413,17 @@ func try_power_strike() -> bool:
 		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_power_strike_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
-	if target == null:
+	var resolved: Node3D = null
+	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
+		resolved = NodeSafety.safe_node(target) as Node3D
+	else:
+		resolved = _resolve_power_strike_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
+
+	if resolved == null:
 		_show_ability_feedback("No valid target")
 		return false
 
-	_begin_power_strike(target)
+	_begin_power_strike(resolved)
 	return true
 
 
@@ -592,7 +641,7 @@ func can_use_execute(search_range: float = ATTACK_MOVE_ENGAGEMENT_RANGE) -> bool
 	return NodeSafety.is_alive_node(target)
 
 
-func try_execute() -> bool:
+func try_execute(target: Variant = null) -> bool:
 	if _health_component.current_health <= 0:
 		return false
 
@@ -617,12 +666,19 @@ func try_execute() -> bool:
 		_show_ability_feedback("Not enough mana")
 		return false
 
-	var target: Node3D = _resolve_execute_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
-	if target == null:
+	var resolved: Node3D = null
+	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
+		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+		if clicked != null and _can_execute_target(clicked):
+			resolved = clicked
+	else:
+		resolved = _resolve_execute_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
+
+	if resolved == null:
 		_show_ability_feedback("No valid target")
 		return false
 
-	_begin_execute(target)
+	_begin_execute(resolved)
 	return true
 
 

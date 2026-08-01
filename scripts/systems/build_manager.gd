@@ -275,6 +275,8 @@ func _start_placement(placement_type: StringName) -> void:
 	_disable_ghost_processing(_placement_ghost)
 	_ghost_material = _apply_ghost_material(_placement_ghost)
 	buildings_parent.add_child(_placement_ghost)
+	if HeroAbilityTargetingController != null:
+		HeroAbilityTargetingController.cancel_targeting()
 	set_process(true)
 
 

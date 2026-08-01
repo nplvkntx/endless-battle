@@ -117,18 +117,56 @@ func try_cast_r(_target: Variant = null) -> bool:
 	return try_camouflage()
 
 
-func get_ability_target_mode(ability_id: StringName) -> int:
+func get_ability_definition(ability_id: StringName) -> HeroAbilityDefinition:
 	match ability_id:
 		HeroAbilityProgression.ABILITY_Q:
-			return AbilityTargetMode.GROUND
+			var roll := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.DASH_DIRECTION,
+				RangerStats.COMBAT_ROLL_DISTANCE
+			)
+			roll.max_travel_distance = RangerStats.COMBAT_ROLL_DISTANCE
+			roll.clamps_ground_to_range = true
+			roll.allows_move_to_cast = false
+			roll.terrain_blocks = true
+			return roll
 		HeroAbilityProgression.ABILITY_W:
-			return AbilityTargetMode.GROUND
+			var trap := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.CIRCULAR_AREA,
+				RangerStats.BEAR_TRAP_PLACE_RANGE
+			)
+			trap.effect_radius = RangerStats.BEAR_TRAP_TRIGGER_RADIUS
+			trap.clamps_ground_to_range = true
+			trap.allows_move_to_cast = false
+			return trap
 		HeroAbilityProgression.ABILITY_E:
-			return AbilityTargetMode.GROUND
+			var bolt := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.DIRECTIONAL_LINE,
+				RangerStats.CROSSBOW_BOLT_RANGE
+			)
+			bolt.max_travel_distance = RangerStats.CROSSBOW_BOLT_RANGE
+			bolt.line_width = RangerStats.CROSSBOW_BOLT_HIT_RADIUS * 2.0
+			bolt.pierces_units = true
+			bolt.clamps_ground_to_range = true
+			bolt.allows_move_to_cast = false
+			return bolt
 		HeroAbilityProgression.ABILITY_R:
-			return AbilityTargetMode.INSTANT
+			var camo := HeroAbilityDefinition.make(
+				ability_id,
+				HeroAbilityDefinition.TargetingType.INSTANT_SELF,
+				0.0
+			)
+			camo.allows_move_to_cast = false
+			camo.show_cast_range = false
+			return camo
 		_:
-			return AbilityTargetMode.INSTANT
+			return null
+
+
+func get_ability_target_mode(ability_id: StringName) -> int:
+	return super.get_ability_target_mode(ability_id)
 
 
 func get_ability_cooldown_remaining(ability_id: StringName) -> float:
@@ -213,28 +251,17 @@ func _on_basic_attack_landed(_target: Node3D) -> void:
 
 
 ## Ranged basic attacks — fire projectiles instead of melee DamageService hits.
-func _stop_and_attack(delta: float) -> void:
-	clear_move_target()
-	_has_chase_target = false
-	_is_backing_off_for_range = false
-	apply_standing_separation(true)
-
-	_attack_cooldown_timer -= delta
-	if _attack_cooldown_timer > 0.0:
-		return
-
-	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
-		_finish_attack_target_lost()
-		return
-
-	var strike_target: Node3D = _attack_target
+func _deliver_basic_attack_hit(strike_target: Node3D) -> bool:
+	if not CombatTargetValidation.is_valid_combat_target(strike_target):
+		return false
 	_break_camouflage_from_action(false)
 	_fire_basic_arrow(strike_target)
-	_attack_cooldown_timer = attack_cooldown
-	_play_attack_animation()
+	return true
 
-	if not NodeSafety.is_alive_node(_attack_target):
-		_finish_attack_target_lost()
+
+func _stop_and_attack(delta: float) -> void:
+	# Use shared windup / cooldown / kite path from MeleeHero.
+	super._stop_and_attack(delta)
 
 
 func _fire_basic_arrow(target: Node3D) -> void:

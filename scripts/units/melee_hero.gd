@@ -12,6 +12,7 @@ const HEALTH_BAR_WIDTH := 1.4
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ATTACK_LUNGE_DISTANCE := 0.4
 const ATTACK_LUNGE_DURATION := 0.12
+const ATTACK_WINDUP_DURATION := 0.12
 const MOVE_SPEED_PER_LEVEL_AFTER_18 := HeroStats.MOVE_SPEED_PER_LEVEL_AFTER_18
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 const HOLD_RETURN_DISTANCE := 1.25
@@ -45,6 +46,11 @@ var _body_material: StandardMaterial3D
 var _body_base_color: Color
 ## Set by subclass `_tick_hero_abilities` when an ability owns the physics frame.
 var _ability_consumed_physics_frame: bool = false
+var _attack_windup_active: bool = false
+var _attack_windup_timer: float = 0.0
+var _move_to_cast_ability_id: StringName = &""
+var _move_to_cast_target: Node3D = null
+var _has_move_to_cast: bool = false
 
 
 func _ready() -> void:
@@ -69,6 +75,12 @@ func _ready() -> void:
 		mana_changed.emit(current_mana, max_mana)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	died.connect(_notify_hero_altars_of_death)
+	died.connect(_on_hero_died_cancel_targeting)
+
+
+func _on_hero_died_cancel_targeting(_unit: Unit) -> void:
+	if HeroAbilityTargetingController != null:
+		HeroAbilityTargetingController.on_hero_died(self)
 
 
 func get_hero_kit_id() -> StringName:
@@ -162,7 +174,81 @@ enum AbilityTargetMode { INSTANT, SELF, UNIT, GROUND }
 
 
 func get_ability_target_mode(ability_id: StringName) -> int:
-	return AbilityTargetMode.INSTANT
+	var definition: HeroAbilityDefinition = get_ability_definition(ability_id)
+	if definition == null:
+		return AbilityTargetMode.INSTANT
+	match definition.targeting_type:
+		HeroAbilityDefinition.TargetingType.INSTANT_SELF, \
+		HeroAbilityDefinition.TargetingType.NO_TARGET, \
+		HeroAbilityDefinition.TargetingType.CIRCULAR_SELF:
+			return AbilityTargetMode.INSTANT
+		HeroAbilityDefinition.TargetingType.TARGET_ENEMY, \
+		HeroAbilityDefinition.TargetingType.TARGET_ALLY, \
+		HeroAbilityDefinition.TargetingType.TARGET_UNIT, \
+		HeroAbilityDefinition.TargetingType.DASH_TARGET:
+			return AbilityTargetMode.UNIT
+		HeroAbilityDefinition.TargetingType.TARGET_GROUND, \
+		HeroAbilityDefinition.TargetingType.CIRCULAR_AREA, \
+		HeroAbilityDefinition.TargetingType.DIRECTIONAL_LINE, \
+		HeroAbilityDefinition.TargetingType.DASH_DIRECTION, \
+		HeroAbilityDefinition.TargetingType.CONE:
+			return AbilityTargetMode.GROUND
+		_:
+			return AbilityTargetMode.INSTANT
+
+
+## Kit-specific targeting metadata for the shared player targeting controller.
+func get_ability_definition(_ability_id: StringName) -> HeroAbilityDefinition:
+	return null
+
+
+func snap_ability_navigation_point(desired: Vector3) -> Vector3:
+	var result: Vector3 = Vector3(desired.x, global_position.y, desired.z)
+	if _navigation_agent != null and UnitNavigation.can_use(_navigation_agent):
+		var nav_map: RID = _navigation_agent.get_navigation_map()
+		if nav_map != RID():
+			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, result)
+			result = Vector3(snapped.x, global_position.y, snapped.z)
+	return result
+
+
+func begin_move_to_cast(ability_id: StringName, target: Node3D) -> void:
+	if not NodeSafety.is_alive_node(target):
+		return
+	var definition: HeroAbilityDefinition = get_ability_definition(ability_id)
+	if definition == null:
+		return
+
+	# Clear other orders without wiping this pending cast.
+	_on_prepare_for_new_player_order()
+	_clear_hold_position_state()
+	_clear_patrol_state()
+	cancel_attack_move()
+	cancel_attack()
+
+	_move_to_cast_ability_id = ability_id
+	_move_to_cast_target = NodeSafety.safe_node(target) as Node3D
+	_has_move_to_cast = _move_to_cast_target != null
+	if not _has_move_to_cast:
+		return
+
+	var slot: int = CombatTargetValidation.claim_attack_approach_slot(_move_to_cast_target, self)
+	_set_move_destination(
+		_compute_attack_approach_position(_move_to_cast_target, slot),
+		RepathUrgency.PLAYER_ORDER
+	)
+
+
+func cancel_move_to_cast() -> void:
+	if _has_move_to_cast and NodeSafety.is_alive_node(_move_to_cast_target):
+		CombatTargetValidation.release_attack_approach_slot(_move_to_cast_target, self)
+	_has_move_to_cast = false
+	_move_to_cast_ability_id = &""
+	_move_to_cast_target = null
+
+
+func is_player_controlled_hero() -> bool:
+	return not CombatTargetValidation.is_enemy_faction(self)
 
 
 func get_ability_cooldown_remaining(ability_id: StringName) -> float:
@@ -272,6 +358,7 @@ func _prepare_for_new_player_order() -> void:
 	_on_prepare_for_new_player_order()
 	_clear_hold_position_state()
 	_clear_patrol_state()
+	cancel_move_to_cast()
 	cancel_attack_move()
 	cancel_attack()
 
@@ -485,6 +572,12 @@ func cancel_attack() -> void:
 	_is_backing_off_for_range = false
 	_has_active_attack_order = false
 	_committed_attack_order = false
+	_clear_attack_windup()
+
+
+func _clear_attack_windup() -> void:
+	_attack_windup_active = false
+	_attack_windup_timer = 0.0
 
 
 func _clear_hold_position_state() -> void:
@@ -608,6 +701,7 @@ func _physics_process(delta: float) -> void:
 
 	_sanitize_attack_target()
 	_sanitize_hero_ability_targets()
+	_sanitize_move_to_cast_target()
 
 	_ability_consumed_physics_frame = false
 	_tick_hero_abilities(delta)
@@ -616,12 +710,17 @@ func _physics_process(delta: float) -> void:
 	if _ability_consumed_physics_frame:
 		return
 
+	if _has_move_to_cast:
+		_process_move_to_cast(delta)
+		return
+
 	var can_scan_targets: bool = tick_combat_target_scan_timer(delta)
 
 	if _is_holding_position:
 		_update_hold_position(can_scan_targets, delta)
 		return
 
+	# Player heroes never idle-auto-acquire; AI heroes and Attack-Move keep acquisition.
 	if _attack_target == null and not has_move_target:
 		if can_scan_targets:
 			_try_auto_attack()
@@ -682,6 +781,10 @@ func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
+	# Player-controlled heroes require explicit Attack / Attack-Move / right-click.
+	if is_player_controlled_hero():
+		return
+
 	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
 		return
 
@@ -731,6 +834,11 @@ func _stop_and_attack(delta: float) -> void:
 	_is_backing_off_for_range = false
 	apply_standing_separation(true)
 
+	# Windup in progress: finish or wait. Move orders cancel via cancel_attack().
+	if _attack_windup_active:
+		_tick_attack_windup(delta)
+		return
+
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:
 		return
@@ -739,29 +847,97 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
+	# Start windup — damage / projectile only after windup completes.
+	_attack_windup_active = true
+	_attack_windup_timer = get_attack_windup_duration()
+	_play_attack_animation()
+
+
+func get_attack_windup_duration() -> float:
+	return ATTACK_WINDUP_DURATION
+
+
+func _tick_attack_windup(delta: float) -> void:
+	_attack_windup_timer -= delta
+	if _attack_windup_timer > 0.0:
+		return
+
+	_attack_windup_active = false
+	_attack_windup_timer = 0.0
+	_complete_basic_attack_strike()
+
+
+func _complete_basic_attack_strike() -> void:
+	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
+		_finish_attack_target_lost()
+		return
+
 	var strike_target: Node3D = _attack_target
+	if not _deliver_basic_attack_hit(strike_target):
+		_finish_attack_target_lost()
+		return
+
+	_attack_cooldown_timer = attack_cooldown
+
+	if strike_target == null or not is_instance_valid(strike_target):
+		_finish_attack_target_lost()
+		return
+
+	_on_basic_attack_landed(strike_target)
+
+	if not NodeSafety.is_alive_node(_attack_target):
+		_finish_attack_target_lost()
+
+
+## Override in ranged kits to fire projectiles instead of melee DamageService hits.
+func _deliver_basic_attack_hit(strike_target: Node3D) -> bool:
 	if not DamageService.apply_damage(
 		strike_target,
 		float(attack_damage),
 		self,
 		{DamageService.OPT_IS_BASIC_ATTACK: true}
 	):
-		_finish_attack_target_lost()
-		return
-
-	_attack_cooldown_timer = attack_cooldown
-
-	# Freed objects must never be cast/used. queue_free targets remain valid this frame.
-	if strike_target == null or not is_instance_valid(strike_target):
-		_finish_attack_target_lost()
-		return
-
+		return false
 	MeleeHitSound.play_at(self, strike_target.global_position)
-	_play_attack_animation()
-	_on_basic_attack_landed(strike_target)
+	return true
 
-	if not NodeSafety.is_alive_node(_attack_target):
-		_finish_attack_target_lost()
+
+func _sanitize_move_to_cast_target() -> void:
+	if not _has_move_to_cast:
+		return
+	if not NodeSafety.is_alive_node(_move_to_cast_target):
+		cancel_move_to_cast()
+		clear_move_target()
+		return
+	if not CombatTargetValidation.is_valid_combat_target(_move_to_cast_target):
+		cancel_move_to_cast()
+		clear_move_target()
+
+
+func _process_move_to_cast(_delta: float) -> void:
+	if not _has_move_to_cast or not NodeSafety.is_alive_node(_move_to_cast_target):
+		cancel_move_to_cast()
+		return
+
+	var definition: HeroAbilityDefinition = get_ability_definition(_move_to_cast_ability_id)
+	var required_range: float = attack_range
+	if definition != null and definition.cast_range > 0.0:
+		required_range = definition.cast_range
+
+	if _horizontal_distance_to(_move_to_cast_target) <= required_range:
+		var ability_id: StringName = _move_to_cast_ability_id
+		var target: Node3D = _move_to_cast_target
+		cancel_move_to_cast()
+		clear_move_target()
+		try_cast_ability(ability_id, target)
+		return
+
+	if not has_move_target:
+		_set_move_destination(
+			_compute_attack_approach_position(_move_to_cast_target, -1),
+			RepathUrgency.PLAYER_ORDER
+		)
+	super._physics_process(_delta)
 
 
 func _should_reposition_for_preferred_range() -> bool:
