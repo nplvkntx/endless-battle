@@ -13,6 +13,7 @@ const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
 const ACADEMY_SCENE: PackedScene = preload("res://scenes/buildings/academy.tscn")
 const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
+const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
 const GOLD_MINE_SCENE: PackedScene = preload("res://scenes/resources/gold_mine.tscn")
 
 
@@ -23,7 +24,10 @@ func _ready() -> void:
 
 	print("verify_ai_base_layout: start")
 	_verify_no_overlaps_and_determinism(failures)
+	_verify_barracks_form_front_row(failures)
 	_verify_farms_form_compact_rows(failures)
+	_verify_tech_behind_or_beside_line(failures)
+	_verify_towers_on_outer_defense(failures)
 	_verify_production_clusters_near_town_hall(failures)
 	_verify_resource_routes_kept_clear(failures)
 	_verify_failed_placement_recovers(failures)
@@ -102,6 +106,81 @@ func _verify_no_overlaps_and_determinism(failures: PackedStringArray) -> void:
 	root.free()
 
 
+func _verify_barracks_form_front_row(failures: PackedStringArray) -> void:
+	print("verify: barracks front row toward map center")
+	var root := Node3D.new()
+	add_child(root)
+
+	## Enemy-like corner: front snaps toward map center (-X).
+	var town_hall: Building = _spawn_completed(
+		root,
+		&"command_center",
+		Vector3(31.0, 0.0, 28.0)
+	)
+	var buildings: Array[Node3D] = [town_hall]
+	var barracks_positions: Array[Vector3] = []
+
+	for _i: int in 3:
+		var pos: Vector3 = EnemyBuildPlacement.find_position(
+			town_hall.global_position,
+			&"barracks",
+			buildings,
+			false,
+			root,
+			RID()
+		)
+		_expect(failures, "barracks placeable in row", pos.is_finite())
+		if not pos.is_finite():
+			break
+		barracks_positions.append(pos)
+		buildings.append(_spawn_completed(root, &"barracks", pos))
+
+	if barracks_positions.size() == 3:
+		var frame: Dictionary = EnemyBuildPlacement._resolve_base_frame(town_hall.global_position)
+		var front: Vector2 = frame.get("front", Vector2.LEFT)
+		var locals: Array[Vector2] = []
+		for pos: Vector3 in barracks_positions:
+			locals.append(
+				EnemyBuildPlacement._local_front_right(pos, town_hall.global_position, frame)
+			)
+
+		var front_spread: float = 0.0
+		var right_vals: Array[float] = []
+		for local: Vector2 in locals:
+			right_vals.append(local.y)
+			_expect(
+				failures,
+				"barracks toward map center (front>0)",
+				local.x >= EnemyBuildPlacement.BARRACKS_ROW_FRONT_OFFSET - 1.5
+			)
+			## Must sit on the enemy-facing side, not behind the CC.
+			_expect(failures, "barracks not behind CC", local.x > 2.0)
+
+		front_spread = absf(locals[0].x - locals[1].x)
+		front_spread = maxf(front_spread, absf(locals[1].x - locals[2].x))
+		front_spread = maxf(front_spread, absf(locals[0].x - locals[2].x))
+		_expect(failures, "barracks share one row (aligned fronts)", front_spread <= 1.25)
+
+		right_vals.sort()
+		var spacing_01: float = absf(right_vals[1] - right_vals[0])
+		var spacing_12: float = absf(right_vals[2] - right_vals[1])
+		_expect(
+			failures,
+			"barracks consistent spacing",
+			absf(spacing_01 - EnemyBuildPlacement.BARRACKS_SLOT_SPACING) <= 1.25
+			and absf(spacing_12 - EnemyBuildPlacement.BARRACKS_SLOT_SPACING) <= 1.25
+		)
+
+		## Front should point toward map center from this corner base.
+		_expect(
+			failures,
+			"base front faces map center",
+			front.x < -0.5 and is_zero_approx(front.y)
+		)
+
+	root.free()
+
+
 func _verify_farms_form_compact_rows(failures: PackedStringArray) -> void:
 	print("verify: farm rows/clusters")
 	var root := Node3D.new()
@@ -131,9 +210,18 @@ func _verify_farms_form_compact_rows(failures: PackedStringArray) -> void:
 		farm_positions.append(pos)
 
 	if farm_positions.size() >= 3:
+		var frame: Dictionary = EnemyBuildPlacement._resolve_base_frame(town_hall.global_position)
 		var aligned_pairs: int = 0
 		var close_pairs: int = 0
+		var behind_count: int = 0
 		for i: int in farm_positions.size():
+			var local_i: Vector2 = EnemyBuildPlacement._local_front_right(
+				farm_positions[i],
+				town_hall.global_position,
+				frame
+			)
+			if local_i.x < -2.0:
+				behind_count += 1
 			for j: int in range(i + 1, farm_positions.size()):
 				var a: Vector3 = farm_positions[i]
 				var b: Vector3 = farm_positions[j]
@@ -146,11 +234,106 @@ func _verify_farms_form_compact_rows(failures: PackedStringArray) -> void:
 
 		_expect(failures, "farms: at least one aligned row/col pair", aligned_pairs >= 1)
 		_expect(failures, "farms: multiple farms stay clustered", close_pairs >= 2)
+		_expect(failures, "farms: prefer map-edge / behind CC", behind_count >= 3)
 
 		var max_dist_from_th: float = 0.0
 		for pos: Vector3 in farm_positions:
 			max_dist_from_th = maxf(max_dist_from_th, _horizontal(pos, town_hall.global_position))
 		_expect(failures, "farms: stay within compact outer band", max_dist_from_th <= 24.0)
+
+	root.free()
+
+
+func _verify_tech_behind_or_beside_line(failures: PackedStringArray) -> void:
+	print("verify: tech buildings behind/beside barracks line")
+	var root := Node3D.new()
+	add_child(root)
+
+	var town_hall: Building = _spawn_completed(root, &"command_center", Vector3(20.0, 0.0, 20.0))
+	var buildings: Array[Node3D] = [town_hall]
+	## Seed a barracks row so "in front of army" is well defined.
+	for _i: int in 2:
+		var bpos: Vector3 = EnemyBuildPlacement.find_position(
+			town_hall.global_position,
+			&"barracks",
+			buildings,
+			false,
+			root,
+			RID()
+		)
+		if bpos.is_finite():
+			buildings.append(_spawn_completed(root, &"barracks", bpos))
+
+	var frame: Dictionary = EnemyBuildPlacement._resolve_base_frame(town_hall.global_position)
+	var tech_types: Array[StringName] = [
+		&"blacksmith", &"shop", &"hero_altar", &"stable", &"academy", &"artillery_depot",
+	]
+	for building_type: StringName in tech_types:
+		var pos: Vector3 = EnemyBuildPlacement.find_position(
+			town_hall.global_position,
+			building_type,
+			buildings,
+			false,
+			root,
+			RID()
+		)
+		_expect(failures, "tech placeable: %s" % String(building_type), pos.is_finite())
+		if not pos.is_finite():
+			continue
+
+		var local: Vector2 = EnemyBuildPlacement._local_front_right(
+			pos,
+			town_hall.global_position,
+			frame
+		)
+		_expect(
+			failures,
+			"tech not in front of barracks line: %s" % String(building_type),
+			local.x <= EnemyBuildPlacement.BARRACKS_ROW_FRONT_OFFSET + 0.5
+		)
+		buildings.append(_spawn_completed(root, building_type, pos))
+
+	root.free()
+
+
+func _verify_towers_on_outer_defense(failures: PackedStringArray) -> void:
+	print("verify: towers on outer defensive positions")
+	var root := Node3D.new()
+	add_child(root)
+
+	var town_hall: Building = _spawn_completed(root, &"command_center", Vector3(12.0, 0.0, 12.0))
+	var buildings: Array[Node3D] = [town_hall]
+	var tower_positions: Array[Vector3] = []
+	for _i: int in 4:
+		var pos: Vector3 = EnemyBuildPlacement.find_position(
+			town_hall.global_position,
+			&"tower",
+			buildings,
+			false,
+			root,
+			RID()
+		)
+		_expect(failures, "tower placeable", pos.is_finite())
+		if not pos.is_finite():
+			break
+		tower_positions.append(pos)
+		buildings.append(_spawn_completed(root, &"tower", pos))
+
+	if tower_positions.size() >= 2:
+		var frame: Dictionary = EnemyBuildPlacement._resolve_base_frame(town_hall.global_position)
+		var outer_count: int = 0
+		for pos: Vector3 in tower_positions:
+			var local: Vector2 = EnemyBuildPlacement._local_front_right(
+				pos,
+				town_hall.global_position,
+				frame
+			)
+			var dist: float = _horizontal(pos, town_hall.global_position)
+			## Not clustered on the courtyard center.
+			_expect(failures, "tower outside courtyard core", dist >= 6.0)
+			if absf(local.x) >= 8.0 or absf(local.y) >= 8.0:
+				outer_count += 1
+		_expect(failures, "towers prefer outer corners/approaches", outer_count >= 2)
 
 	root.free()
 
@@ -389,6 +572,8 @@ func _instantiate_type(building_type: StringName) -> Building:
 			return ACADEMY_SCENE.instantiate() as Building
 		&"artillery_depot":
 			return ARTILLERY_DEPOT_SCENE.instantiate() as Building
+		&"tower":
+			return TOWER_SCENE.instantiate() as Building
 		&"command_center":
 			return COMMAND_CENTER_SCENE.instantiate() as Building
 		_:

@@ -8,7 +8,7 @@ const FOOTPRINT_RESERVATION_TTL_MSEC: int = 15000
 const BUILD_SLOT_RESERVATION_TTL_MSEC: int = 45000
 const FARM_RESOURCE_RESERVATION_TTL_MSEC: int = 30000
 const MAX_BUILD_SLOTS_PER_BUILDING: int = 8
-const FOOTPRINT_PADDING: float = 0.8
+const FOOTPRINT_PADDING: float = 0.4
 
 ## reservation_id -> {center: Vector3, footprint: Vector2, owner_id: int, expires_msec: int}
 static var _footprint_reservations: Dictionary = {}

@@ -2,17 +2,19 @@ class_name EnemyBuildPlacement
 extends RefCounted
 
 ## Shared building placement rules: grid snap, map bounds, footprints, and AI position search.
-## AI placement prefers compact, zone-aware clusters around the town hall while preserving
-## walkable lanes to resources, construction points, and production exits.
+## AI uses deterministic row/slot anchors relative to the Command Center (front = toward map
+## center), then falls back to compact gap-fill while preserving walkable movement lanes.
 
 const GRID_SIZE: float = 1.0
 const MAP_MIN_X: float = -50.0
 const MAP_MAX_X: float = 50.0
 const MAP_MIN_Z: float = -50.0
 const MAP_MAX_Z: float = 50.0
+const MAP_CENTER_XZ := Vector2(0.0, 0.0)
 
-## Footprint-edge gap shared with player placement / reservations (keeps walk lanes).
-const BUILDING_PADDING: float = 0.8
+## Footprint-edge safety margin shared with player placement / reservations.
+## Kept small so preview, collision, and nav blocking stay visually tight.
+const BUILDING_PADDING: float = 0.4
 const FOOTPRINT_PROBE_HEIGHT: float = 2.5
 const PLACEMENT_COLLISION_MASK: int = (
 	PhysicsLayers.WORLD | PhysicsLayers.UNITS | PhysicsLayers.BUILDINGS
@@ -29,8 +31,36 @@ const COMMAND_CENTER_DROP_OFF_OFFSET_X: float = 3.0
 
 ## Extra clear space around the town hall and production exits for workers / trained units.
 const LANE_CLEARANCE: float = 1.5
-const PRODUCTION_EXIT_LENGTH: float = 3.0
-const TH_ACCESS_LANE: float = 1.2
+const PRODUCTION_EXIT_LENGTH: float = 3.5
+const TH_ACCESS_LANE: float = 1.5
+const ARMY_LANE_HALF_WIDTH: float = 2.0
+const SLOT_OCCUPIED_TOLERANCE: float = 1.1
+
+## Barracks defensive row (front of CC, toward map center / enemy approach).
+const BARRACKS_ROW_SLOTS: int = 3
+const BARRACKS_ROW_FRONT_OFFSET: float = 8.0
+const BARRACKS_SLOT_SPACING: float = 4.5
+const BARRACKS_ROW2_FRONT_OFFSET: float = 12.5
+const BARRACKS_REAR_LANE_DEPTH: float = 2.0
+
+## Farm rows (toward map edge / behind CC). Fill one row before starting the next.
+const FARM_ROW_SLOTS: int = 4
+const FARM_ROW_BACK_OFFSET: float = 9.0
+const FARM_SLOT_SPACING: float = 2.6
+const FARM_ROW_PITCH: float = 2.2
+const FARM_MAX_ROWS: int = 3
+
+## Tech / utility side rows (behind or beside the barracks line, not in front).
+## Kept outside the central army lane half-width (~6.5).
+const TECH_SIDE_OFFSET: float = 9.0
+const TECH_SLOT_SPACING: float = 3.6
+const TECH_BACK_BIAS: float = 2.0
+const TECH_ROW_SLOTS: int = 3
+
+## Tower outer defensive corners / approach flanks.
+const TOWER_FRONT_OFFSET: float = 11.0
+const TOWER_SIDE_OFFSET: float = 10.0
+const TOWER_BACK_OFFSET: float = 10.5
 
 const FARM_SIZE := Vector2(2.0, 1.4)
 const BARRACKS_SIZE := Vector2(3.5, 2.5)
@@ -118,31 +148,29 @@ static func find_position(
 		anchor.z
 	)
 	var base_bbox: Rect2 = _compute_base_bbox(anchor, existing_buildings)
+	var frame: Dictionary = _resolve_base_frame(anchor)
 	var debug_enabled: bool = _is_placement_debug_enabled()
 	var reject_counts: Dictionary = {}
 	var scored_samples: Array[Dictionary] = []
 
-	var candidate_phases: Array = _generate_candidate_phases(
-		anchor,
-		footprint,
-		ground_y,
-		zone,
-		existing_buildings,
-		prefer_expansion
-	)
-
 	var best_position: Vector3 = Vector3.INF
 	var best_score: float = -INF
 	var total_candidates: int = 0
+	var chosen_source: String = "none"
 
-	for phase_candidates: Variant in candidate_phases:
-		var candidates: Array[Vector3] = phase_candidates
-		total_candidates += candidates.size()
-		var phase_best: Vector3 = Vector3.INF
-		var phase_best_score: float = -INF
-
-		for candidate: Vector3 in candidates:
-			var reject_reason: String = _evaluate_hard_filters(
+	# Planned row/slot anchors first — deterministic, no random offsets.
+	if not prefer_expansion and zone != LayoutZone.EXPANSION:
+		var planned_slots: Array[Vector3] = _generate_planned_slots(
+			anchor,
+			building_type,
+			footprint,
+			ground_y,
+			frame,
+			existing_buildings
+		)
+		total_candidates += planned_slots.size()
+		for candidate: Vector3 in planned_slots:
+			var planned_reject: String = _evaluate_hard_filters(
 				candidate,
 				building_type,
 				footprint,
@@ -153,55 +181,103 @@ static func find_position(
 				trees,
 				tree_center,
 				nav_map,
-				nav_from
+				nav_from,
+				frame
 			)
-			if not reject_reason.is_empty():
+			if not planned_reject.is_empty():
 				if debug_enabled:
-					_count_reject(reject_counts, reject_reason)
+					_count_reject(reject_counts, planned_reject)
 				continue
 
-			var score: float = _score_compact_position(
-				candidate,
-				anchor,
-				building_type,
-				footprint,
-				zone,
-				existing_buildings,
-				gold_mines,
-				trees,
-				tree_center,
-				base_bbox
-			)
-			if debug_enabled and scored_samples.size() < 12:
-				scored_samples.append({
-					"pos": Vector2(candidate.x, candidate.z),
-					"score": snappedf(score, 0.01),
-				})
-
-			if _is_better_placement(
-				candidate,
-				score,
-				phase_best,
-				phase_best_score,
-				anchor
-			):
-				phase_best_score = score
-				phase_best = candidate
-
-		# Prefer filling nearby / preferred-zone gaps before expanding outward.
-		if phase_best.is_finite():
-			best_position = phase_best
-			best_score = phase_best_score
+			best_position = candidate
+			best_score = 1000.0
+			chosen_source = "planned_slot"
 			break
+
+	if not best_position.is_finite():
+		var candidate_phases: Array = _generate_candidate_phases(
+			anchor,
+			footprint,
+			ground_y,
+			zone,
+			existing_buildings,
+			prefer_expansion,
+			frame,
+			building_type
+		)
+
+		for phase_candidates: Variant in candidate_phases:
+			var candidates: Array[Vector3] = phase_candidates
+			total_candidates += candidates.size()
+			var phase_best: Vector3 = Vector3.INF
+			var phase_best_score: float = -INF
+
+			for candidate: Vector3 in candidates:
+				var reject_reason: String = _evaluate_hard_filters(
+					candidate,
+					building_type,
+					footprint,
+					anchor,
+					existing_buildings,
+					scene_root,
+					gold_mines,
+					trees,
+					tree_center,
+					nav_map,
+					nav_from,
+					frame
+				)
+				if not reject_reason.is_empty():
+					if debug_enabled:
+						_count_reject(reject_counts, reject_reason)
+					continue
+
+				var score: float = _score_compact_position(
+					candidate,
+					anchor,
+					building_type,
+					footprint,
+					zone,
+					existing_buildings,
+					gold_mines,
+					trees,
+					tree_center,
+					base_bbox,
+					frame
+				)
+				if debug_enabled and scored_samples.size() < 12:
+					scored_samples.append({
+						"pos": Vector2(candidate.x, candidate.z),
+						"score": snappedf(score, 0.01),
+					})
+
+				if _is_better_placement(
+					candidate,
+					score,
+					phase_best,
+					phase_best_score,
+					anchor
+				):
+					phase_best_score = score
+					phase_best = candidate
+
+			# Prefer filling nearby / preferred-zone gaps before expanding outward.
+			if phase_best.is_finite():
+				best_position = phase_best
+				best_score = phase_best_score
+				chosen_source = "fallback_search"
+				break
 
 	if debug_enabled:
 		last_placement_debug = {
 			"building_type": String(building_type),
 			"zone": _zone_name(zone),
 			"anchor": Vector2(anchor.x, anchor.z),
+			"front": frame.get("front", Vector2.ZERO),
 			"candidates": total_candidates,
 			"rejects": reject_counts.duplicate(),
 			"samples": scored_samples.duplicate(),
+			"source": chosen_source,
 			"chosen": (
 				Vector2(best_position.x, best_position.z) if best_position.is_finite()
 				else Vector2(INF, INF)
@@ -401,15 +477,328 @@ static func _zone_preferred_radius(zone: LayoutZone) -> Vector2:
 	## Returns (min_preferred, max_preferred) distance from the town-hall anchor.
 	match zone:
 		LayoutZone.CORE:
-			return Vector2(5.0, 13.0)
+			return Vector2(5.0, 14.0)
 		LayoutZone.FARM:
-			return Vector2(11.0, 20.0)
+			return Vector2(8.0, 18.0)
 		LayoutZone.DEFENSE:
-			return Vector2(13.0, 22.0)
+			return Vector2(10.0, 22.0)
 		LayoutZone.EXPANSION:
 			return Vector2(16.0, 30.0)
 		_:
 			return Vector2(5.0, 18.0)
+
+
+static func _resolve_base_frame(anchor: Vector3) -> Dictionary:
+	## Front faces map center (likely enemy approach), snapped to nearest cardinal so
+	## row anchors stay axis-aligned and deterministic.
+	var to_center := Vector2(MAP_CENTER_XZ.x - anchor.x, MAP_CENTER_XZ.y - anchor.z)
+	if to_center.length_squared() < 0.0001:
+		to_center = Vector2(-1.0, 0.0)
+
+	var front: Vector2
+	if absf(to_center.x) >= absf(to_center.y):
+		front = Vector2(signf(to_center.x), 0.0)
+	else:
+		front = Vector2(0.0, signf(to_center.y))
+
+	## Clockwise perpendicular in XZ: (x, z) -> (z, -x)
+	var right := Vector2(front.y, -front.x)
+	return {
+		"front": front,
+		"right": right,
+		"back": -front,
+		"left": -right,
+	}
+
+
+static func _slot_world_position(
+	anchor: Vector3,
+	ground_y: float,
+	frame: Dictionary,
+	front_offset: float,
+	right_offset: float
+) -> Vector3:
+	var front: Vector2 = frame.get("front", Vector2(-1.0, 0.0))
+	var right: Vector2 = frame.get("right", Vector2(0.0, 1.0))
+	var pos := Vector3(
+		anchor.x + front.x * front_offset + right.x * right_offset,
+		ground_y,
+		anchor.z + front.y * front_offset + right.y * right_offset
+	)
+	return snap_to_grid(pos)
+
+
+static func _local_front_right(point: Vector3, anchor: Vector3, frame: Dictionary) -> Vector2:
+	var front: Vector2 = frame.get("front", Vector2(-1.0, 0.0))
+	var right: Vector2 = frame.get("right", Vector2(0.0, 1.0))
+	var delta := Vector2(point.x - anchor.x, point.z - anchor.z)
+	return Vector2(delta.dot(front), delta.dot(right))
+
+
+static func _is_slot_occupied(
+	slot: Vector3,
+	existing_buildings: Array[Node3D],
+	match_type: StringName = &""
+) -> bool:
+	for building: Node3D in existing_buildings:
+		if building == null or not is_instance_valid(building):
+			continue
+		if match_type != &"" and not _building_matches_type(building, match_type):
+			continue
+		var offset: Vector3 = building.global_position - slot
+		offset.y = 0.0
+		if offset.length() <= SLOT_OCCUPIED_TOLERANCE:
+			return true
+	return false
+
+
+static func _building_matches_type(building: Node3D, building_type: StringName) -> bool:
+	match building_type:
+		&"farm":
+			return building is Farm
+		&"barracks":
+			return building is Barracks
+		&"blacksmith":
+			return building is Blacksmith
+		&"stable":
+			return building is Stable
+		&"artillery_depot":
+			return building is ArtilleryDepot
+		&"academy":
+			return building is Academy
+		&"shop":
+			return building is Shop
+		&"tower":
+			return building is Tower
+		&"wall_segment":
+			return building is WallSegment
+		&"hero_altar":
+			return building is HeroAltar
+		&"command_center":
+			return building is CommandCenter
+		_:
+			return false
+
+
+static func _generate_planned_slots(
+	anchor: Vector3,
+	building_type: StringName,
+	_footprint: Vector2,
+	ground_y: float,
+	frame: Dictionary,
+	existing_buildings: Array[Node3D]
+) -> Array[Vector3]:
+	var slots: Array[Vector3] = []
+	var unique: Dictionary = {}
+
+	match building_type:
+		&"barracks":
+			_append_barracks_row_slots(slots, unique, anchor, ground_y, frame, existing_buildings)
+		&"farm":
+			_append_farm_row_slots(slots, unique, anchor, ground_y, frame, existing_buildings)
+		&"tower":
+			_append_tower_slots(slots, unique, anchor, ground_y, frame, existing_buildings)
+		&"blacksmith":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		&"shop":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		&"hero_altar":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		&"stable":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		&"academy":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		&"artillery_depot":
+			_append_tech_row_slots(
+				slots, unique, anchor, ground_y, frame, existing_buildings, building_type
+			)
+		_:
+			pass
+
+	return slots
+
+
+static func _append_unique_slot(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	slot: Vector3,
+	existing_buildings: Array[Node3D],
+	skip_if_any_building: bool = true
+) -> void:
+	var key: String = "%d:%d" % [int(round(slot.x)), int(round(slot.z))]
+	if unique.has(key):
+		return
+	if skip_if_any_building and _is_slot_occupied(slot, existing_buildings):
+		return
+	unique[key] = true
+	ordered.append(slot)
+
+
+static func _append_barracks_row_slots(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	anchor: Vector3,
+	ground_y: float,
+	frame: Dictionary,
+	existing_buildings: Array[Node3D]
+) -> void:
+	## Prefer a single organized row of up to 3, then a second forward row if needed.
+	var row_offsets: Array[float] = [BARRACKS_ROW_FRONT_OFFSET, BARRACKS_ROW2_FRONT_OFFSET]
+	var lateral_indices: Array[int] = [0, -1, 1] ## center first, then flanks
+	for front_offset: float in row_offsets:
+		for index: int in lateral_indices:
+			var slot: Vector3 = _slot_world_position(
+				anchor,
+				ground_y,
+				frame,
+				front_offset,
+				float(index) * BARRACKS_SLOT_SPACING
+			)
+			_append_unique_slot(ordered, unique, slot, existing_buildings)
+
+
+static func _append_farm_row_slots(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	anchor: Vector3,
+	ground_y: float,
+	frame: Dictionary,
+	existing_buildings: Array[Node3D]
+) -> void:
+	## Edge-parallel rows behind the CC. Fill row N before starting row N+1.
+	var half_span: float = float(FARM_ROW_SLOTS - 1) * 0.5
+	for row: int in range(FARM_MAX_ROWS):
+		var back_offset: float = FARM_ROW_BACK_OFFSET + float(row) * FARM_ROW_PITCH
+		var front_offset: float = -back_offset
+		var row_added: int = 0
+		for slot_i: int in range(FARM_ROW_SLOTS):
+			var lateral: float = (float(slot_i) - half_span) * FARM_SLOT_SPACING
+			var slot: Vector3 = _slot_world_position(
+				anchor,
+				ground_y,
+				frame,
+				front_offset,
+				lateral
+			)
+			var before: int = ordered.size()
+			_append_unique_slot(ordered, unique, slot, existing_buildings)
+			if ordered.size() > before:
+				row_added += 1
+		## Keep offering later rows even if this row had blockers — recovery continues.
+		if row_added == 0 and row > 0:
+			## Still try remaining rows; do not abort the whole plan.
+			pass
+
+
+static func _append_tech_row_slots(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	anchor: Vector3,
+	ground_y: float,
+	frame: Dictionary,
+	existing_buildings: Array[Node3D],
+	building_type: StringName
+) -> void:
+	## Left row: blacksmith / shop / hero altar. Right row: stable / academy / artillery.
+	## Slots run beside then slightly behind the CC — never past the barracks front line.
+	var prefer_left: bool = (
+		building_type == &"blacksmith"
+		or building_type == &"shop"
+		or building_type == &"hero_altar"
+	)
+	var side_signs: Array[float] = []
+	if prefer_left:
+		side_signs.append(-1.0)
+		side_signs.append(1.0)
+	else:
+		side_signs.append(1.0)
+		side_signs.append(-1.0)
+
+	var type_slot: int = _tech_preferred_slot_index(building_type)
+	## front-local offsets: slightly beside courtyard, then stepping backward.
+	var front_slots: Array[float] = []
+	front_slots.append(1.0)
+	front_slots.append(-TECH_BACK_BIAS)
+	front_slots.append(-TECH_BACK_BIAS - TECH_SLOT_SPACING)
+
+	for side_sign: float in side_signs:
+		for slot_i: int in range(TECH_ROW_SLOTS):
+			var ordered_index: int = (type_slot + slot_i) % TECH_ROW_SLOTS
+			var front_offset: float = front_slots[ordered_index]
+			var right_offset: float = side_sign * TECH_SIDE_OFFSET
+			var slot: Vector3 = _slot_world_position(
+				anchor,
+				ground_y,
+				frame,
+				front_offset,
+				right_offset
+			)
+			_append_unique_slot(ordered, unique, slot, existing_buildings)
+
+		## Second column one spacing farther out if the inner column is blocked.
+		for slot_i: int in range(TECH_ROW_SLOTS):
+			var ordered_index: int = (type_slot + slot_i) % TECH_ROW_SLOTS
+			var front_offset: float = front_slots[ordered_index]
+			var right_offset: float = side_sign * (TECH_SIDE_OFFSET + TECH_SLOT_SPACING)
+			var slot: Vector3 = _slot_world_position(
+				anchor,
+				ground_y,
+				frame,
+				front_offset,
+				right_offset
+			)
+			_append_unique_slot(ordered, unique, slot, existing_buildings)
+
+
+static func _tech_preferred_slot_index(building_type: StringName) -> int:
+	match building_type:
+		&"blacksmith", &"stable":
+			return 0
+		&"shop", &"academy":
+			return 1
+		&"hero_altar", &"artillery_depot":
+			return 2
+		_:
+			return 0
+
+
+static func _append_tower_slots(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	anchor: Vector3,
+	ground_y: float,
+	frame: Dictionary,
+	existing_buildings: Array[Node3D]
+) -> void:
+	## Outer corners / approach flanks — never courtyard center.
+	var tower_plan: Array[Vector2] = [
+		Vector2(TOWER_FRONT_OFFSET, TOWER_SIDE_OFFSET),
+		Vector2(TOWER_FRONT_OFFSET, -TOWER_SIDE_OFFSET),
+		Vector2(-TOWER_BACK_OFFSET, TOWER_SIDE_OFFSET),
+		Vector2(-TOWER_BACK_OFFSET, -TOWER_SIDE_OFFSET),
+		Vector2(TOWER_FRONT_OFFSET + 2.0, 0.0), ## approach tip beside barracks line
+		Vector2(0.0, TOWER_SIDE_OFFSET + 2.0),
+		Vector2(0.0, -(TOWER_SIDE_OFFSET + 2.0)),
+	]
+	for offset: Vector2 in tower_plan:
+		var slot: Vector3 = _slot_world_position(
+			anchor,
+			ground_y,
+			frame,
+			offset.x,
+			offset.y
+		)
+		_append_unique_slot(ordered, unique, slot, existing_buildings)
 
 
 static func _min_town_hall_clearance(footprint: Vector2) -> float:
@@ -452,10 +841,11 @@ static func _generate_candidate_phases(
 	ground_y: float,
 	zone: LayoutZone,
 	existing_buildings: Array[Node3D],
-	prefer_expansion: bool
+	prefer_expansion: bool,
+	frame: Dictionary = {},
+	building_type: StringName = &""
 ) -> Array:
-	## Phase 0 = compact nearby/gap-fill; phase 1 = expanded recovery. First non-empty
-	## successful phase wins so the base fills inward before sprawling.
+	## Fallback after planned slots fail: gap-fill along rows, then expand rings.
 	var phases: Array = []
 
 	if prefer_expansion or zone == LayoutZone.EXPANSION:
@@ -476,6 +866,28 @@ static func _generate_candidate_phases(
 	var min_clearance: float = _min_town_hall_clearance(footprint)
 	var compact: Array[Vector3] = []
 	var compact_unique: Dictionary = {}
+
+	## Prefer continuing the same row pattern before free-form rings.
+	if not frame.is_empty() and building_type != &"":
+		var row_recovery: Array[Vector3] = _generate_planned_slots(
+			anchor,
+			building_type,
+			footprint,
+			ground_y,
+			frame,
+			[] ## include occupied slots as recovery probes only if clear via filters
+		)
+		for slot: Vector3 in row_recovery:
+			_append_candidate(compact, compact_unique, slot, ground_y)
+		_append_row_aligned_recovery_candidates(
+			compact,
+			compact_unique,
+			anchor,
+			footprint,
+			ground_y,
+			frame,
+			building_type
+		)
 
 	_append_gap_fill_candidates(
 		compact,
@@ -505,6 +917,87 @@ static func _generate_candidate_phases(
 	phases.append(expanded)
 
 	return phases
+
+
+static func _append_row_aligned_recovery_candidates(
+	ordered: Array[Vector3],
+	unique: Dictionary,
+	anchor: Vector3,
+	footprint: Vector2,
+	ground_y: float,
+	frame: Dictionary,
+	building_type: StringName
+) -> void:
+	## Shift along the row axis by one footprint step when the exact slot is blocked.
+	var step: float = maxf(footprint.x, footprint.y) + BUILDING_PADDING + 0.5
+	match building_type:
+		&"farm":
+			for row: int in range(FARM_MAX_ROWS + 1):
+				var front_offset: float = -(FARM_ROW_BACK_OFFSET + float(row) * FARM_ROW_PITCH)
+				for lateral_i: int in range(-FARM_ROW_SLOTS, FARM_ROW_SLOTS + 1):
+					_append_candidate(
+						ordered,
+						unique,
+						_slot_world_position(
+							anchor,
+							ground_y,
+							frame,
+							front_offset,
+							float(lateral_i) * FARM_SLOT_SPACING
+						),
+						ground_y
+					)
+		&"barracks":
+			for front_offset: float in [
+				BARRACKS_ROW_FRONT_OFFSET,
+				BARRACKS_ROW2_FRONT_OFFSET,
+				BARRACKS_ROW_FRONT_OFFSET + step,
+			]:
+				for lateral_i: int in range(-2, 3):
+					_append_candidate(
+						ordered,
+						unique,
+						_slot_world_position(
+							anchor,
+							ground_y,
+							frame,
+							front_offset,
+							float(lateral_i) * BARRACKS_SLOT_SPACING
+						),
+						ground_y
+					)
+		&"blacksmith", &"shop", &"hero_altar", &"stable", &"academy", &"artillery_depot":
+			for side_sign: float in [-1.0, 1.0]:
+				for slot_i: int in range(TECH_ROW_SLOTS + 2):
+					_append_candidate(
+						ordered,
+						unique,
+						_slot_world_position(
+							anchor,
+							ground_y,
+							frame,
+							-TECH_BACK_BIAS - float(slot_i) * TECH_SLOT_SPACING,
+							side_sign * TECH_SIDE_OFFSET
+						),
+						ground_y
+					)
+		&"tower":
+			for front_i: int in range(-1, 2):
+				for side_i: int in [-1, 1]:
+					_append_candidate(
+						ordered,
+						unique,
+						_slot_world_position(
+							anchor,
+							ground_y,
+							frame,
+							TOWER_FRONT_OFFSET + float(front_i) * step,
+							float(side_i) * TOWER_SIDE_OFFSET
+						),
+						ground_y
+					)
+		_:
+			pass
 
 
 static func _compare_buildings_by_anchor_distance(
@@ -650,7 +1143,8 @@ static func _evaluate_hard_filters(
 	trees: Array[Node3D],
 	tree_center: Vector2,
 	nav_map: RID,
-	nav_from: Vector3
+	nav_from: Vector3,
+	frame: Dictionary = {}
 ) -> String:
 	if anchor.distance_squared_to(candidate) > BASE_SEARCH_RADIUS * BASE_SEARCH_RADIUS:
 		return "out_of_search_radius"
@@ -660,6 +1154,15 @@ static func _evaluate_hard_filters(
 
 	if _horizontal_distance(candidate, anchor) < _min_town_hall_clearance(footprint):
 		return "blocks_town_hall_access"
+
+	if not frame.is_empty() and _blocks_reserved_movement_lanes(
+		candidate,
+		footprint,
+		building_type,
+		anchor,
+		frame
+	):
+		return "blocks_movement_lane"
 
 	if not is_position_valid(candidate, building_type, existing_buildings, scene_root):
 		return "overlap_or_blocked"
@@ -673,11 +1176,77 @@ static func _evaluate_hard_filters(
 	if _blocks_gate_opening(candidate, footprint, existing_buildings):
 		return "blocks_gate"
 
+	## Production buildings may sit beside each other in a row; only non-production
+	## (farms/towers/tech) are hard-blocked from sealing their exits.
+	if not _is_production_building_type(building_type):
+		if _blocks_production_exit_lane(candidate, footprint, existing_buildings):
+			return "blocks_production_exit"
+
 	var nav_to: Vector3 = Vector3(candidate.x, WORKER_NAV_TEST_Y, candidate.z)
 	if not _is_nav_reachable(nav_map, nav_from, nav_to):
 		return "nav_unreachable"
 
 	return ""
+
+
+static func _blocks_reserved_movement_lanes(
+	candidate: Vector3,
+	_footprint: Vector2,
+	building_type: StringName,
+	anchor: Vector3,
+	frame: Dictionary
+) -> bool:
+	## Keep courtyard, barracks rear lane, side army passages, and retreat corridor clear.
+	## Planned barracks/tower slots that intentionally sit on the defensive line are exempt
+	## from the front-lane check only.
+	var local: Vector2 = _local_front_right(candidate, anchor, frame)
+	var front_dot: float = local.x
+	var right_dot: float = local.y
+
+	## Central courtyard around the town hall (center distance; half-extent handled by
+	## `_min_town_hall_clearance` already).
+	var courtyard_radius: float = (
+		maxf(COMMAND_CENTER_SIZE.x, COMMAND_CENTER_SIZE.y) * 0.5 + TH_ACCESS_LANE
+	)
+	if Vector2(front_dot, right_dot).length() < courtyard_radius:
+		return true
+
+	var is_barracks: bool = building_type == &"barracks"
+	var is_tower: bool = building_type == &"tower"
+
+	## Lane between CC and barracks row — army + worker rally path.
+	var rear_lane_min: float = courtyard_radius * 0.5
+	var rear_lane_max: float = (
+		BARRACKS_ROW_FRONT_OFFSET - BARRACKS_SIZE.y * 0.5 - BUILDING_PADDING
+	)
+	var rear_lane_half_width: float = (
+		BARRACKS_SLOT_SPACING * float(BARRACKS_ROW_SLOTS - 1) * 0.5 + ARMY_LANE_HALF_WIDTH
+	)
+	if not is_barracks and front_dot > rear_lane_min and front_dot < rear_lane_max:
+		if absf(right_dot) < rear_lane_half_width:
+			return true
+
+	## Do not place farms / tech in front of the barracks defensive line.
+	var is_tech_or_farm: bool = (
+		building_type == &"farm"
+		or building_type == &"blacksmith"
+		or building_type == &"shop"
+		or building_type == &"hero_altar"
+		or building_type == &"stable"
+		or building_type == &"academy"
+		or building_type == &"artillery_depot"
+	)
+	if is_tech_or_farm and front_dot > BARRACKS_ROW_FRONT_OFFSET - 1.0:
+		return true
+
+	## Front production exit strip ahead of the barracks row (units leave toward the enemy).
+	if not is_barracks and not is_tower:
+		var exit_min: float = BARRACKS_ROW_FRONT_OFFSET + BARRACKS_SIZE.y * 0.5 + BUILDING_PADDING
+		var exit_max: float = exit_min + PRODUCTION_EXIT_LENGTH
+		if front_dot > exit_min and front_dot < exit_max and absf(right_dot) < rear_lane_half_width:
+			return true
+
+	return false
 
 
 static func _score_compact_position(
@@ -690,11 +1259,15 @@ static func _score_compact_position(
 	gold_mines: Array[Node3D],
 	trees: Array[Node3D],
 	tree_center: Vector2,
-	base_bbox: Rect2
+	base_bbox: Rect2,
+	frame: Dictionary = {}
 ) -> float:
 	var score: float = 0.0
 	var cand_xz := Vector2(candidate.x, candidate.z)
 	var anchor_dist: float = _horizontal_distance(candidate, anchor)
+	var local: Vector2 = Vector2.ZERO
+	if not frame.is_empty():
+		local = _local_front_right(candidate, anchor, frame)
 
 	# Soft preference to stay inside the zone band (not a hard reject — recovery expands out).
 	var band: Vector2 = _zone_preferred_radius(zone)
@@ -707,16 +1280,23 @@ static func _score_compact_position(
 	match zone:
 		LayoutZone.CORE:
 			score -= anchor_dist * 1.6
+			## Prefer behind/beside the barracks line, not past it toward the enemy.
+			if not frame.is_empty() and local.x > BARRACKS_ROW_FRONT_OFFSET + 1.0:
+				score -= (local.x - BARRACKS_ROW_FRONT_OFFSET) * 4.0
 		LayoutZone.FARM:
 			score -= anchor_dist * 0.2
-			if anchor_dist >= band.x and anchor_dist <= band.y:
+			if not frame.is_empty():
+				## Prefer map-edge / back side and edge-parallel alignment.
+				if local.x < -FARM_ROW_BACK_OFFSET + 2.0:
+					score += SCORE_FARM_OUTER_BONUS * 1.5
+				score -= absf(local.x + FARM_ROW_BACK_OFFSET) * 0.35
+			elif anchor_dist >= band.x and anchor_dist <= band.y:
 				score += SCORE_FARM_OUTER_BONUS
-				# Prefer the outer half of the farm band for the first farms.
-				var band_mid: float = (band.x + band.y) * 0.5
-				if anchor_dist >= band_mid:
-					score += SCORE_FARM_OUTER_BONUS * 0.75
 		LayoutZone.DEFENSE:
 			score -= anchor_dist * 0.25
+			if not frame.is_empty():
+				## Prefer outer corners over interior.
+				score += minf(absf(local.x), absf(local.y)) * 0.15
 		LayoutZone.EXPANSION:
 			score -= absf(anchor_dist - 20.0) * 0.4
 		_:
@@ -962,6 +1542,17 @@ static func _is_production_building_node(building: Node3D) -> bool:
 	)
 
 
+static func _is_production_building_type(building_type: StringName) -> bool:
+	return building_type in [
+		&"barracks",
+		&"stable",
+		&"artillery_depot",
+		&"academy",
+		&"command_center",
+		&"hero_altar",
+	]
+
+
 static func _compute_base_bbox(anchor: Vector3, existing_buildings: Array[Node3D]) -> Rect2:
 	var min_x: float = anchor.x
 	var max_x: float = anchor.x
@@ -1048,10 +1639,11 @@ static func _log_placement_debug(info: Dictionary) -> void:
 		]
 
 	print(
-		"[AI Placement] %s zone=%s candidates=%s chosen=%s rejects={%s}"
+		"[AI Placement] %s zone=%s source=%s candidates=%s chosen=%s rejects={%s}"
 		% [
 			str(info.get("building_type", "?")),
 			str(info.get("zone", "?")),
+			str(info.get("source", "?")),
 			str(info.get("candidates", 0)),
 			chosen_text,
 			", ".join(reject_parts),
