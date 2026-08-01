@@ -43,8 +43,11 @@ const CHASE_UPDATE_JITTER := 0.25
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
 const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
-const VISUAL_FACING_TURN_SPEED := 12.0
-const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.04
+const VISUAL_FACING_TURN_SPEED := 8.0
+const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.09
+const VISUAL_FACING_MIN_TURN_DOT := 0.998 # ~3.6deg — ignore tiny facing corrections
+const MOVE_VELOCITY_SMOOTH := 14.0
+const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.0025
 const ORDER_DEST_EQUIVALENCE := 0.35
 
 enum RepathUrgency {
@@ -92,6 +95,9 @@ var _navigation_agent: NavigationAgent3D
 var _navigation_active: bool = false
 var _path_validity_timer: float = 0.0
 var _feedback_tween: Tween
+var _smoothed_move_velocity: Vector3 = Vector3.ZERO
+var _desired_move_facing: Vector3 = Vector3.ZERO
+var _stable_move_facing: Vector3 = Vector3.ZERO
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -409,7 +415,7 @@ func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency
 ## Clears movement and navigation without canceling combat orders.
 func clear_move_target() -> void:
 	has_move_target = false
-	velocity = Vector3.ZERO
+	_clear_residual_movement()
 	_navigation_active = false
 	_clear_navigation_agent()
 	_reset_unstuck_state()
@@ -421,6 +427,81 @@ func stop_movement() -> void:
 		_order_queue.clear()
 		_active_order = null
 	clear_move_target()
+
+
+## Authoritative locomotion step: optional separation, velocity smoothing, then move_and_slide.
+## Call once per physics frame. Chase repaths must not reset smoothing (they only change destination).
+## separation_blend < 0 uses UnitSeparation.MOVE_BLEND; 0 disables separation.
+func apply_steered_velocity(
+	desired_velocity: Vector3,
+	delta: float = -1.0,
+	separation_blend: float = -1.0
+) -> void:
+	if delta < 0.0:
+		delta = get_physics_process_delta_time()
+
+	var blend: float = UnitSeparation.MOVE_BLEND if separation_blend < 0.0 else separation_blend
+
+	var desired: Vector3 = desired_velocity
+	desired.y = 0.0
+
+	if desired.length_squared() <= MOVE_VELOCITY_DEAD_ZONE_SQ:
+		_smoothed_move_velocity = Vector3.ZERO
+		velocity = Vector3.ZERO
+		return
+
+	# Face the path/desired steering direction, not post-separation lateral push.
+	_desired_move_facing = desired.normalized()
+	_update_stable_move_facing(_desired_move_facing)
+
+	var steered: Vector3 = desired
+	if blend > 0.0:
+		steered = UnitSeparation.blend_desired_velocity(
+			self, desired, move_speed, blend
+		)
+
+	# Light smoothing only for tiny corrections; large steering changes apply immediately
+	# so corridor peels and gap traversal stay responsive.
+	var delta_vel: Vector3 = steered - _smoothed_move_velocity
+	if (
+		_smoothed_move_velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ
+		or delta_vel.length_squared() > 0.36
+		or steered.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ
+	):
+		_smoothed_move_velocity = steered
+	else:
+		var smooth: float = minf(1.0, delta * MOVE_VELOCITY_SMOOTH)
+		_smoothed_move_velocity = _smoothed_move_velocity.lerp(steered, maxf(smooth, 0.45))
+	if _smoothed_move_velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
+		_smoothed_move_velocity = Vector3.ZERO
+
+	velocity = _smoothed_move_velocity
+	velocity.y = 0.0
+	if velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
+		return
+
+	move_and_slide()
+
+
+func _clear_residual_movement() -> void:
+	velocity = Vector3.ZERO
+	_smoothed_move_velocity = Vector3.ZERO
+	_desired_move_facing = Vector3.ZERO
+	UnitSeparation.clear_state(self)
+	if has_meta(&"_nav_last_path_point"):
+		remove_meta(&"_nav_last_path_point")
+
+
+func _update_stable_move_facing(desired_dir: Vector3) -> void:
+	if desired_dir.length_squared() < 0.0001:
+		return
+	if _stable_move_facing.length_squared() < 0.0001:
+		_stable_move_facing = desired_dir
+		return
+	# Ignore negligible direction changes to prevent facing oscillation.
+	if _stable_move_facing.dot(desired_dir) >= VISUAL_FACING_MIN_TURN_DOT:
+		return
+	_stable_move_facing = desired_dir
 
 
 func _complete_movement_arrival() -> void:
@@ -634,16 +715,14 @@ func _physics_process(delta: float) -> void:
 
 	# Root / stun from the Buff system freezes locomotion without clearing orders.
 	if not BuffService.can_move(self):
-		velocity = Vector3.ZERO
+		_clear_residual_movement()
 		return
 
 	if not has_move_target:
 		_reset_unstuck_state()
 		# Soft unpack when idle so armies do not remain permanently stacked.
-		if should_run_staggered_update(2):
-			UnitSeparation.apply_standing_push(self, move_speed, false)
-		else:
-			velocity = Vector3.ZERO
+		# Use cached push every frame; refresh neighbors on a staggered cadence.
+		UnitSeparation.apply_standing_push(self, move_speed, false)
 		return
 
 	var offset: Vector3 = _movement_target - global_position
@@ -663,11 +742,7 @@ func _physics_process(delta: float) -> void:
 		direction = _get_detour_direction(direction)
 		var detour_velocity: Vector3 = direction * move_speed
 		# Keep separation gentle during unstuck so narrow corridors do not deadlock.
-		velocity = UnitSeparation.blend_desired_velocity(
-			self, detour_velocity, move_speed, 0.25
-		)
-		velocity.y = 0.0
-		move_and_slide()
+		apply_steered_velocity(detour_velocity, delta, 0.18)
 	elif _navigation_active and UnitNavigation.can_use(_navigation_agent):
 		var arrived: bool = UnitNavigation.process_movement(
 			self,
@@ -680,18 +755,22 @@ func _physics_process(delta: float) -> void:
 		if arrived:
 			_complete_movement_arrival()
 			return
-		var moved: Vector3 = global_position - position_before
-		moved.y = 0.0
-		if moved.length_squared() > 0.0001:
-			direction = moved.normalized()
+		if _desired_move_facing.length_squared() > 0.0001:
+			direction = _desired_move_facing
 	else:
 		if direction.length_squared() < 0.0001:
 			_complete_movement_arrival()
 			return
-		var direct_velocity: Vector3 = direction * move_speed
-		velocity = UnitSeparation.blend_desired_velocity(self, direct_velocity, move_speed)
-		velocity.y = 0.0
-		move_and_slide()
+		var arrival_speed: float = move_speed
+		var slow_start: float = maxf(stopping_distance * 2.0, UnitNavigation.ARRIVAL_SLOWDOWN_DISTANCE)
+		if distance < slow_start:
+			var t: float = clampf(
+				(distance - stopping_distance) / maxf(0.001, slow_start - stopping_distance),
+				0.0,
+				1.0
+			)
+			arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
+		apply_steered_velocity(direction * arrival_speed, delta)
 
 	_update_unstuck(delta, position_before, direction, distance)
 	CommandFeedback.notify_unit_moving(self)
@@ -741,6 +820,10 @@ func get_facing_direction() -> Vector3:
 	if attack_direction.length_squared() > 0.001:
 		return attack_direction
 
+	# Prefer stable path facing over post-separation velocity to avoid wobble.
+	if has_move_target and _stable_move_facing.length_squared() > 0.001:
+		return _stable_move_facing
+
 	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
 	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
 		return horizontal_velocity.normalized()
@@ -755,6 +838,7 @@ func _update_visual_facing(delta: float) -> void:
 
 	var direction: Vector3 = get_facing_direction()
 	if direction.length_squared() <= 0.001:
+		# Do not rotate stationary units continuously from residual steering.
 		return
 
 	var target_yaw: float = atan2(direction.x, direction.z) + _visual_facing_yaw_offset
@@ -763,8 +847,13 @@ func _update_visual_facing(delta: float) -> void:
 		_visual_facing_initialized = true
 		return
 
+	var current_yaw: float = _visual_pivot.rotation.y
+	var yaw_delta: float = absf(angle_difference(current_yaw, target_yaw))
+	if yaw_delta < 0.04:
+		return
+
 	var blend: float = minf(1.0, delta * VISUAL_FACING_TURN_SPEED)
-	_visual_pivot.rotation.y = lerp_angle(_visual_pivot.rotation.y, target_yaw, blend)
+	_visual_pivot.rotation.y = lerp_angle(current_yaw, target_yaw, blend)
 
 
 func _setup_visual_animator() -> void:

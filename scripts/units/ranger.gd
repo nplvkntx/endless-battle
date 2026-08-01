@@ -216,6 +216,7 @@ func _on_basic_attack_landed(_target: Node3D) -> void:
 func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
+	_is_backing_off_for_range = false
 	UnitSeparation.apply_standing_push(self, move_speed, true)
 
 	_attack_cooldown_timer -= delta

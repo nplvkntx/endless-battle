@@ -26,6 +26,8 @@ var _attack_approach_slot: int = -1
 var _attack_cooldown_timer: float = 0.0
 var _has_chase_target: bool = false
 var _has_active_attack_order: bool = false
+## True while backing off to preferred ranged standoff (hysteresis vs too-close).
+var _is_backing_off_for_range: bool = false
 ## True for explicit Attack orders; false for attack-move / patrol opportunistic fights.
 var _committed_attack_order: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
@@ -344,6 +346,7 @@ func cancel_attack() -> void:
 	_attack_target = null
 	_attack_approach_slot = -1
 	_has_chase_target = false
+	_is_backing_off_for_range = false
 	_has_active_attack_order = false
 	_committed_attack_order = false
 
@@ -538,9 +541,11 @@ func _process_attack(delta: float) -> void:
 			super._physics_process(delta)
 			if _attack_target != null and _is_in_attack_range(_attack_target):
 				if not _should_reposition_for_preferred_range():
+					_is_backing_off_for_range = false
 					_stop_and_attack(delta)
 			return
 
+		_is_backing_off_for_range = false
 		_stop_and_attack(delta)
 		return
 
@@ -548,12 +553,15 @@ func _process_attack(delta: float) -> void:
 	super._physics_process(delta)
 
 	if _attack_target != null and _is_in_attack_range(_attack_target):
-		_stop_and_attack(delta)
+		if not _should_reposition_for_preferred_range():
+			_is_backing_off_for_range = false
+			_stop_and_attack(delta)
 
 
 func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
+	_is_backing_off_for_range = false
 	UnitSeparation.apply_standing_push(self, move_speed, true)
 
 	_attack_cooldown_timer -= delta
@@ -573,17 +581,36 @@ func _stop_and_attack(delta: float) -> void:
 
 func _should_reposition_for_preferred_range() -> bool:
 	if not NodeSafety.is_alive_node(_attack_target):
+		_is_backing_off_for_range = false
 		return false
 	if _is_holding_position:
+		_is_backing_off_for_range = false
 		return false
 
-	return CombatTargetValidation.is_too_close_for_preferred_range(
+	# Hysteresis: once backing off, keep moving until preferred hold range is reached.
+	if _is_backing_off_for_range:
+		if CombatTargetValidation.is_at_preferred_hold_range(
+			self,
+			_attack_target,
+			attack_range,
+			stopping_distance,
+			maxi(_attack_approach_slot, 0)
+		):
+			_is_backing_off_for_range = false
+			return false
+		return true
+
+	if CombatTargetValidation.is_too_close_for_preferred_range(
 		self,
 		_attack_target,
 		attack_range,
 		stopping_distance,
 		maxi(_attack_approach_slot, 0)
-	)
+	):
+		_is_backing_off_for_range = true
+		return true
+
+	return false
 
 
 ## Override for unit-specific strike delivery. Return false if the strike failed.

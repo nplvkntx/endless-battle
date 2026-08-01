@@ -4,6 +4,11 @@ extends RefCounted
 ## Shared NavigationAgent3D helpers for combat and general unit movement.
 ## Workers keep WorkerTaskNavigation for gather/build; non-task moves use Unit.
 
+const ARRIVAL_SLOWDOWN_DISTANCE := 1.35
+const ARRIVAL_MIN_SPEED_RATIO := 0.22
+const PATH_POINT_HYSTERESIS_SQ := 0.01 # ~0.1m — ignore only microscopic next-point jitter
+const META_LAST_PATH_POINT := &"_nav_last_path_point"
+
 
 static func can_use(agent: NavigationAgent3D) -> bool:
 	if agent == null or not is_instance_valid(agent):
@@ -57,8 +62,10 @@ static func process_movement(
 ) -> bool:
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
-	if offset.length() <= stopping_distance:
-		body.velocity = Vector3.ZERO
+	var distance: float = offset.length()
+	if distance <= stopping_distance:
+		_clear_path_point_cache(body)
+		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
 
 	if not can_use(agent):
@@ -72,6 +79,19 @@ static func process_movement(
 		)
 
 	var next_position: Vector3 = agent.get_next_path_position()
+	next_position.y = body.global_position.y
+	# Only ignore microscopic next-point jitter; larger swaps must apply for corridors.
+	if body.has_meta(META_LAST_PATH_POINT):
+		var previous: Vector3 = body.get_meta(META_LAST_PATH_POINT) as Vector3
+		var delta: Vector3 = next_position - previous
+		delta.y = 0.0
+		if delta.length_squared() < PATH_POINT_HYSTERESIS_SQ:
+			next_position = previous
+		else:
+			body.set_meta(META_LAST_PATH_POINT, next_position)
+	else:
+		body.set_meta(META_LAST_PATH_POINT, next_position)
+
 	var direction: Vector3 = next_position - body.global_position
 	direction.y = 0.0
 	if direction.length_squared() < 0.0001:
@@ -79,14 +99,12 @@ static func process_movement(
 			body, destination, move_speed, stopping_distance, apply_separation
 		)
 
-	var desired_velocity: Vector3 = direction.normalized() * move_speed
-	if apply_separation:
-		desired_velocity = UnitSeparation.blend_desired_velocity(
-			body, desired_velocity, move_speed
-		)
-	body.velocity = desired_velocity
-	body.velocity.y = 0.0
-	body.move_and_slide()
+	var speed: float = move_speed
+	var slow_start: float = maxf(stopping_distance * 2.0, ARRIVAL_SLOWDOWN_DISTANCE)
+	if distance < slow_start:
+		speed = _arrival_speed(move_speed, distance, stopping_distance)
+	var desired_velocity: Vector3 = direction.normalized() * speed
+	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
 	return false
 
 
@@ -99,21 +117,61 @@ static func process_direct_movement(
 ) -> bool:
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
-	if offset.length() <= stopping_distance:
-		body.velocity = Vector3.ZERO
+	var distance: float = offset.length()
+	if distance <= stopping_distance:
+		_clear_path_point_cache(body)
+		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
 
 	if offset.length_squared() < 0.0001:
-		body.velocity = Vector3.ZERO
-		body.move_and_slide()
+		_clear_path_point_cache(body)
+		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
 
-	var desired_velocity: Vector3 = offset.normalized() * move_speed
-	if apply_separation:
-		desired_velocity = UnitSeparation.blend_desired_velocity(
-			body, desired_velocity, move_speed
+	var speed: float = _arrival_speed(move_speed, distance, stopping_distance)
+	var desired_velocity: Vector3 = offset.normalized() * speed
+	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
+	return false
+
+
+static func _apply_final_velocity(
+	body: CharacterBody3D,
+	desired_velocity: Vector3,
+	max_speed: float,
+	apply_separation: bool
+) -> void:
+	# Prefer Unit's authoritative smoothing path when available.
+	if body is Unit and (body as Unit).has_method("apply_steered_velocity"):
+		(body as Unit).apply_steered_velocity(
+			desired_velocity,
+			-1.0,
+			UnitSeparation.MOVE_BLEND if apply_separation else 0.0
 		)
-	body.velocity = desired_velocity
+		return
+
+	var final_velocity: Vector3 = desired_velocity
+	if apply_separation:
+		final_velocity = UnitSeparation.blend_desired_velocity(
+			body, desired_velocity, max_speed
+		)
+	body.velocity = final_velocity
 	body.velocity.y = 0.0
 	body.move_and_slide()
-	return false
+
+
+static func _arrival_speed(move_speed: float, distance: float, stopping_distance: float) -> float:
+	var slow_start: float = maxf(stopping_distance * 2.0, ARRIVAL_SLOWDOWN_DISTANCE)
+	if distance >= slow_start:
+		return move_speed
+
+	var t: float = clampf(
+		(distance - stopping_distance) / maxf(0.001, slow_start - stopping_distance),
+		0.0,
+		1.0
+	)
+	return move_speed * lerpf(ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
+
+
+static func _clear_path_point_cache(body: CharacterBody3D) -> void:
+	if body != null and body.has_meta(META_LAST_PATH_POINT):
+		body.remove_meta(META_LAST_PATH_POINT)

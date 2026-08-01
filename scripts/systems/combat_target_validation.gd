@@ -32,8 +32,8 @@ const ATTACK_SLOT_ANGLE_STEP := TAU / float(ATTACK_SLOTS_PER_RING)
 const MELEE_RANGE_THRESHOLD := 3.5
 const APPROACH_RING_SPACING := 1.15
 const RANGED_STANDOFF_RATIO := 0.88
-const RANGED_TOO_CLOSE_RATIO := 0.72
-const RANGED_HOLD_RATIO := 0.85
+const RANGED_TOO_CLOSE_RATIO := 0.68
+const RANGED_HOLD_RATIO := 0.86
 
 static var _attack_slot_counter_by_target: Dictionary = {}
 ## target_id -> Dictionary[attacker_id -> slot_index]
