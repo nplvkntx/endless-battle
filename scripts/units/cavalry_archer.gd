@@ -390,7 +390,7 @@ func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
 	_is_backing_off_for_range = false
-	UnitSeparation.apply_standing_push(self, move_speed, true)
+	apply_standing_separation(true)
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:

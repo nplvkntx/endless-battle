@@ -7,6 +7,7 @@ extends RefCounted
 const ARRIVAL_SLOWDOWN_DISTANCE := 1.35
 const ARRIVAL_MIN_SPEED_RATIO := 0.22
 const PATH_POINT_HYSTERESIS_SQ := 0.01 # ~0.1m — ignore only microscopic next-point jitter
+const PATH_POINT_NEAR_DEST_HYSTERESIS_SQ := 0.09 # ~0.3m — damp corridor flips near arrival
 const META_LAST_PATH_POINT := &"_nav_last_path_point"
 
 
@@ -35,12 +36,18 @@ static func apply_destination(agent: NavigationAgent3D, destination: Vector3) ->
 		return
 
 	# Skip no-op writes — NavigationAgent recalculates on every target_position assignment.
+	# Exception: refresh when finished so teleports / re-orders to the same point still repath
+	# (including Vector3.ZERO, the agent default).
 	var previous: Vector3 = agent.target_position
 	var delta: Vector3 = destination - previous
 	delta.y = 0.0
-	if delta.length_squared() < 0.04: # ~0.2m
+	var same_target: bool = delta.length_squared() < 0.04 # ~0.2m
+	if same_target and not agent.is_navigation_finished():
 		return
 
+	if same_target:
+		# Identical assignment may be ignored by NavigationServer — nudge then set.
+		agent.target_position = destination + Vector3(0.05, 0.0, 0.0)
 	agent.target_position = destination
 	PerfCounters.record_navigation_path_request()
 
@@ -63,7 +70,8 @@ static func process_movement(
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	if distance <= stopping_distance:
+	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	if distance <= arrive_distance:
 		_clear_path_point_cache(body)
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
@@ -81,11 +89,15 @@ static func process_movement(
 	var next_position: Vector3 = agent.get_next_path_position()
 	next_position.y = body.global_position.y
 	# Only ignore microscopic next-point jitter; larger swaps must apply for corridors.
+	# Near the destination, use a wider hysteresis so building-adjacent path samples do not flip.
+	var hysteresis_sq: float = PATH_POINT_HYSTERESIS_SQ
+	if distance <= ARRIVAL_SLOWDOWN_DISTANCE * 1.5:
+		hysteresis_sq = PATH_POINT_NEAR_DEST_HYSTERESIS_SQ
 	if body.has_meta(META_LAST_PATH_POINT):
 		var previous: Vector3 = body.get_meta(META_LAST_PATH_POINT) as Vector3
 		var delta: Vector3 = next_position - previous
 		delta.y = 0.0
-		if delta.length_squared() < PATH_POINT_HYSTERESIS_SQ:
+		if delta.length_squared() < hysteresis_sq:
 			next_position = previous
 		else:
 			body.set_meta(META_LAST_PATH_POINT, next_position)
@@ -103,6 +115,11 @@ static func process_movement(
 	var slow_start: float = maxf(stopping_distance * 2.0, ARRIVAL_SLOWDOWN_DISTANCE)
 	if distance < slow_start:
 		speed = _arrival_speed(move_speed, distance, stopping_distance)
+		# Below crawl threshold, prefer stop over endless micro-approach.
+		if distance <= maxf(arrive_distance * 1.35, 0.7):
+			_clear_path_point_cache(body)
+			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+			return true
 	var desired_velocity: Vector3 = direction.normalized() * speed
 	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
 	return false
@@ -118,7 +135,8 @@ static func process_direct_movement(
 	var offset: Vector3 = destination - body.global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	if distance <= stopping_distance:
+	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	if distance <= arrive_distance:
 		_clear_path_point_cache(body)
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
@@ -129,6 +147,10 @@ static func process_direct_movement(
 		return true
 
 	var speed: float = _arrival_speed(move_speed, distance, stopping_distance)
+	if distance <= maxf(arrive_distance * 1.35, 0.7):
+		_clear_path_point_cache(body)
+		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+		return true
 	var desired_velocity: Vector3 = offset.normalized() * speed
 	_apply_final_velocity(body, desired_velocity, move_speed, apply_separation)
 	return false

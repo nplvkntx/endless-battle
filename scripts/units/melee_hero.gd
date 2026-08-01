@@ -666,19 +666,19 @@ func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
 			var nearby: Node3D = _find_closest_attack_target_in_range()
 			if nearby != null:
 				_begin_attack_on_target(nearby, -1, false)
-		UnitSeparation.apply_standing_push(self, move_speed, true)
+		apply_standing_separation(true)
 		return
 
 	if not CombatTargetValidation.is_valid_combat_target(_attack_target):
 		cancel_attack()
-		UnitSeparation.apply_standing_push(self, move_speed, true)
+		apply_standing_separation(true)
 		return
 
 	if _is_in_attack_range(_attack_target):
 		_stop_and_attack(delta)
 	else:
 		cancel_attack()
-		UnitSeparation.apply_standing_push(self, move_speed, true)
+		apply_standing_separation(true)
 
 
 func _try_auto_attack() -> void:
@@ -729,7 +729,7 @@ func _stop_and_attack(delta: float) -> void:
 	clear_move_target()
 	_has_chase_target = false
 	_is_backing_off_for_range = false
-	UnitSeparation.apply_standing_push(self, move_speed, true)
+	apply_standing_separation(true)
 
 	_attack_cooldown_timer -= delta
 	if _attack_cooldown_timer > 0.0:

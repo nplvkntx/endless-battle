@@ -9,15 +9,17 @@ const DEFAULT_RADIUS := 0.55
 const QUERY_RADIUS := 1.35
 const MIN_SEPARATION := 1.05
 const MOVE_BLEND := 0.48
-const IDLE_PUSH_SPEED_RATIO := 0.35
-const COMBAT_PUSH_SPEED_RATIO := 0.22
+const IDLE_PUSH_SPEED_RATIO := 0.28
+const COMBAT_PUSH_SPEED_RATIO := 0.16
 const MAX_NEIGHBORS := 10
 const OVERLAP_EPSILON := 0.04
 const MIN_FORWARD_RATIO := 0.25
 const PUSH_CACHE_SECONDS := 0.05
 const SIDE_HYSTERESIS_SECONDS := 0.18
-const PUSH_DEAD_ZONE_SQ := 0.0025
-const STANDING_SMOOTH := 10.0
+const PUSH_DEAD_ZONE_SQ := 0.01 # ~0.1 — ignore soft separation noise
+## Combat standing: only unpack when heavily overlapped (avoids attack shuffle).
+const COMBAT_HARD_OVERLAP_SQ := 0.36 # push magnitude >= 0.6
+const STANDING_SMOOTH := 12.0
 
 const META_PUSH_CACHE := &"_sep_push_cache"
 const META_PUSH_CACHE_TIME := &"_sep_push_cache_time"
@@ -166,17 +168,18 @@ static func _apply_path_side_hysteresis(
 	return push
 
 
-static func apply_standing_push(
+## Returns a soft unpack velocity. Does NOT write body.velocity — Unit.apply_steered_velocity owns that.
+static func compute_standing_desired_velocity(
 	body: CharacterBody3D,
 	move_speed: float,
 	combat_mode: bool = false
-) -> bool:
+) -> Vector3:
 	var push: Vector3 = compute_push(body)
 	var ratio: float = COMBAT_PUSH_SPEED_RATIO if combat_mode else IDLE_PUSH_SPEED_RATIO
 	var target_velocity: Vector3 = Vector3.ZERO
 	if push.length_squared() >= PUSH_DEAD_ZONE_SQ:
 		# Combat: only unpack hard overlaps so in-range units do not shuffle.
-		if combat_mode and push.length_squared() < 0.09:
+		if combat_mode and push.length_squared() < COMBAT_HARD_OVERLAP_SQ:
 			target_velocity = Vector3.ZERO
 		else:
 			target_velocity = push * move_speed * ratio
@@ -194,11 +197,25 @@ static func apply_standing_push(
 		smoothed = Vector3.ZERO
 
 	body.set_meta(META_STANDING_VEL, smoothed)
-	body.velocity = smoothed
-	body.velocity.y = 0.0
-	if smoothed.length_squared() < PUSH_DEAD_ZONE_SQ:
-		return false
+	smoothed.y = 0.0
+	return smoothed
 
+
+## Compatibility wrapper — prefer Unit.apply_standing_separation so velocity is applied once.
+static func apply_standing_push(
+	body: CharacterBody3D,
+	move_speed: float,
+	combat_mode: bool = false
+) -> bool:
+	var desired: Vector3 = compute_standing_desired_velocity(body, move_speed, combat_mode)
+	if body is Unit and (body as Unit).has_method("apply_steered_velocity"):
+		(body as Unit).apply_steered_velocity(desired, -1.0, 0.0, false)
+		return desired.length_squared() >= PUSH_DEAD_ZONE_SQ
+
+	body.velocity = desired
+	body.velocity.y = 0.0
+	if desired.length_squared() < PUSH_DEAD_ZONE_SQ:
+		return false
 	body.move_and_slide()
 	return true
 

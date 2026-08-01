@@ -47,8 +47,14 @@ const VISUAL_FACING_TURN_SPEED := 8.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.09
 const VISUAL_FACING_MIN_TURN_DOT := 0.998 # ~3.6deg — ignore tiny facing corrections
 const MOVE_VELOCITY_SMOOTH := 14.0
-const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.0025
+const MOVE_VELOCITY_DEAD_ZONE_SQ := 0.01 # ~0.1 m/s — kill micro-corrections
 const ORDER_DEST_EQUIVALENCE := 0.35
+## Settle when blocked by world/buildings near the destination instead of sliding forever.
+const BLOCKED_ARRIVAL_DISTANCE := 3.75
+const BLOCKED_ARRIVAL_CONFIRM_SECONDS := 0.22
+## Crawl-arrive: stop when nearly at the destination even if still slowly approaching.
+const SOFT_ARRIVAL_DISTANCE := 0.75
+const SOFT_ARRIVAL_SPEED_SQ := 1.21 # ~1.1 m/s — covers arrival min crawl speed
 
 enum RepathUrgency {
 	NORMAL,
@@ -98,6 +104,7 @@ var _feedback_tween: Tween
 var _smoothed_move_velocity: Vector3 = Vector3.ZERO
 var _desired_move_facing: Vector3 = Vector3.ZERO
 var _stable_move_facing: Vector3 = Vector3.ZERO
+var _blocked_arrival_time: float = 0.0
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -432,10 +439,12 @@ func stop_movement() -> void:
 ## Authoritative locomotion step: optional separation, velocity smoothing, then move_and_slide.
 ## Call once per physics frame. Chase repaths must not reset smoothing (they only change destination).
 ## separation_blend < 0 uses UnitSeparation.MOVE_BLEND; 0 disables separation.
+## update_facing=false for standing unpack so residual push does not spin the unit.
 func apply_steered_velocity(
 	desired_velocity: Vector3,
 	delta: float = -1.0,
-	separation_blend: float = -1.0
+	separation_blend: float = -1.0,
+	update_facing: bool = true
 ) -> void:
 	if delta < 0.0:
 		delta = get_physics_process_delta_time()
@@ -451,8 +460,9 @@ func apply_steered_velocity(
 		return
 
 	# Face the path/desired steering direction, not post-separation lateral push.
-	_desired_move_facing = desired.normalized()
-	_update_stable_move_facing(_desired_move_facing)
+	if update_facing:
+		_desired_move_facing = desired.normalized()
+		_update_stable_move_facing(_desired_move_facing)
 
 	var steered: Vector3 = desired
 	if blend > 0.0:
@@ -483,10 +493,19 @@ func apply_steered_velocity(
 	move_and_slide()
 
 
+## Idle / in-combat soft unpack — steering input only; velocity applied once via apply_steered_velocity.
+func apply_standing_separation(combat_mode: bool = false) -> void:
+	var desired: Vector3 = UnitSeparation.compute_standing_desired_velocity(
+		self, move_speed, combat_mode
+	)
+	apply_steered_velocity(desired, -1.0, 0.0, false)
+
+
 func _clear_residual_movement() -> void:
 	velocity = Vector3.ZERO
 	_smoothed_move_velocity = Vector3.ZERO
 	_desired_move_facing = Vector3.ZERO
+	_blocked_arrival_time = 0.0
 	UnitSeparation.clear_state(self)
 	if has_meta(&"_nav_last_path_point"):
 		remove_meta(&"_nav_last_path_point")
@@ -720,15 +739,16 @@ func _physics_process(delta: float) -> void:
 
 	if not has_move_target:
 		_reset_unstuck_state()
+		_blocked_arrival_time = 0.0
 		# Soft unpack when idle so armies do not remain permanently stacked.
-		# Use cached push every frame; refresh neighbors on a staggered cadence.
-		UnitSeparation.apply_standing_push(self, move_speed, false)
+		apply_standing_separation(false)
 		return
 
 	var offset: Vector3 = _movement_target - global_position
 	offset.y = 0.0
 	var distance: float = offset.length()
-	if distance <= stopping_distance:
+	var arrive_distance: float = maxf(stopping_distance, 0.5)
+	if distance <= arrive_distance:
 		_complete_movement_arrival()
 		return
 
@@ -772,6 +792,13 @@ func _physics_process(delta: float) -> void:
 			arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
 		apply_steered_velocity(direction * arrival_speed, delta)
 
+	if _try_complete_blocked_arrival(delta, position_before, direction, distance):
+		return
+
+	# Crawl settle: units that slow-walk forever at ~0.3–0.6m must stop cleanly.
+	if _try_complete_soft_arrival():
+		return
+
 	_update_unstuck(delta, position_before, direction, distance)
 	CommandFeedback.notify_unit_moving(self)
 
@@ -783,13 +810,9 @@ func _process(delta: float) -> void:
 
 ## Override to map gameplay state to idle/move/work loop clips.
 func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	# Standing separation must not flip walk/idle every frame.
 	if has_move_target:
 		return UnitVisualAnimator.LoopState.MOVE
-
-	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
-	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
-		return UnitVisualAnimator.LoopState.MOVE
-
 	return UnitVisualAnimator.LoopState.IDLE
 
 
@@ -824,10 +847,7 @@ func get_facing_direction() -> Vector3:
 	if has_move_target and _stable_move_facing.length_squared() > 0.001:
 		return _stable_move_facing
 
-	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
-	if horizontal_velocity.length_squared() > VISUAL_FACING_VELOCITY_THRESHOLD_SQ:
-		return horizontal_velocity.normalized()
-
+	# Stationary / unpacking units keep their last visual yaw — do not rotate from push velocity.
 	return Vector3.ZERO
 
 
@@ -993,6 +1013,68 @@ func _is_direct_path_clear(forward: Vector3, distance: float) -> bool:
 	return space_state.intersect_ray(query).is_empty()
 
 
+## When pressed against a building/world collider near the destination, settle instead of
+## oscillating between path desire and collision slide (classic Town Hall jitter).
+func _try_complete_blocked_arrival(
+	delta: float, position_before: Vector3, forward: Vector3, distance: float
+) -> bool:
+	if distance > maxf(BLOCKED_ARRIVAL_DISTANCE, stopping_distance * 4.0):
+		_blocked_arrival_time = 0.0
+		return false
+
+	var moved: Vector3 = global_position - position_before
+	moved.y = 0.0
+	var expected_move: float = move_speed * delta * UNSTUCK_STUCK_MOVE_RATIO
+	var hit_obstacle: bool = get_slide_collision_count() > 0
+	if not hit_obstacle or moved.length() >= expected_move:
+		_blocked_arrival_time = 0.0
+		return false
+
+	var blocked_toward_goal: bool = false
+	if forward.length_squared() > 0.0001:
+		var goal_dir: Vector3 = forward.normalized()
+		for index: int in get_slide_collision_count():
+			var collision: KinematicCollision3D = get_slide_collision(index)
+			var normal: Vector3 = collision.get_normal()
+			normal.y = 0.0
+			if normal.length_squared() < 0.0001:
+				continue
+			if normal.normalized().dot(goal_dir) < -0.15:
+				blocked_toward_goal = true
+				break
+	else:
+		blocked_toward_goal = true
+
+	if not blocked_toward_goal:
+		_blocked_arrival_time = 0.0
+		return false
+
+	_blocked_arrival_time += delta
+	if _blocked_arrival_time < BLOCKED_ARRIVAL_CONFIRM_SECONDS:
+		return false
+
+	_blocked_arrival_time = 0.0
+	_complete_movement_arrival()
+	return true
+
+
+func _try_complete_soft_arrival() -> bool:
+	if not has_move_target:
+		return false
+
+	var remaining: Vector3 = _movement_target - global_position
+	remaining.y = 0.0
+	if remaining.length() > maxf(SOFT_ARRIVAL_DISTANCE, stopping_distance * 2.5):
+		return false
+
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	if horizontal_velocity.length_squared() > SOFT_ARRIVAL_SPEED_SQ:
+		return false
+
+	_complete_movement_arrival()
+	return true
+
+
 func _update_unstuck(
 	delta: float, position_before: Vector3, forward: Vector3, distance: float
 ) -> void:
@@ -1080,6 +1162,7 @@ func _reset_unstuck_state() -> void:
 	_detour_gave_up = false
 	_distance_at_detour_start = 0.0
 	_stuck_repath_attempted = false
+	_blocked_arrival_time = 0.0
 
 
 func _setup_navigation_agent() -> void:

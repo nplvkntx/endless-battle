@@ -17,7 +17,10 @@ func _ready() -> void:
 	await _verify_stop_clears_velocity(failures)
 	await _verify_attack_range_stable(failures)
 	await _verify_chase_preserves_smoothing(failures)
+	await _verify_arrival_settles(failures)
+	await _verify_blocked_near_building_settles(failures)
 	_verify_separation_forward_preserve(failures)
+	_verify_standing_uses_authoritative_path(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -147,8 +150,92 @@ func _verify_attack_range_stable(failures: PackedStringArray) -> void:
 		drift.y = 0.0
 		max_drift = maxf(max_drift, drift.length())
 
-	_expect(failures, "attack range: low standing drift", max_drift <= 1.25)
+	_expect(failures, "attack range: low standing drift", max_drift <= 0.85)
 	target.queue_free()
+	await _free_harness(harness)
+
+
+func _verify_arrival_settles(failures: PackedStringArray) -> void:
+	print("verify: arrival settles without micro-slide")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(-4.0, 0.0, 0.0)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await _wait_nav_ready(unit)
+	# Avoid Vector3.ZERO destination edge-cases with default NavigationAgent target_position.
+	unit.set_movement_target(Vector3(1.0, 0.0, 0.0))
+
+	var deadline_msec: int = Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < deadline_msec and unit.has_move_target:
+		await get_tree().physics_frame
+
+	_expect(failures, "arrival: move target cleared", not unit.has_move_target)
+	var origin: Vector3 = unit.global_position
+	var max_drift: float = 0.0
+	var start_msec: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_msec < 2000:
+		await get_tree().physics_frame
+		var drift: Vector3 = unit.global_position - origin
+		drift.y = 0.0
+		max_drift = maxf(max_drift, drift.length())
+
+	_expect(failures, "arrival: settled drift low", max_drift <= 0.35)
+	_expect(
+		failures,
+		"arrival: residual velocity near zero",
+		Vector3(unit.velocity.x, 0.0, unit.velocity.z).length() < 0.12
+	)
+	await _free_harness(harness)
+
+
+func _verify_blocked_near_building_settles(failures: PackedStringArray) -> void:
+	print("verify: blocked near building settles")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(-6.0, 0.0, 0.0)
+
+	var building := StaticBody3D.new()
+	building.collision_layer = PhysicsLayers.BUILDINGS
+	building.collision_mask = 0
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(4.0, 3.0, 4.0)
+	shape.shape = box
+	building.add_child(shape)
+	harness["root"].add_child(building)
+	building.global_position = Vector3(2.0, 1.5, 0.0)
+
+	await _wait_nav_ready(unit)
+	# Destination slightly inside / behind the building collider.
+	unit.set_movement_target(Vector3(2.0, 0.0, 0.0))
+
+	var deadline_msec: int = Time.get_ticks_msec() + 4500
+	while Time.get_ticks_msec() < deadline_msec and unit.has_move_target:
+		await get_tree().physics_frame
+
+	_expect(failures, "blocked arrival: eventually settles", not unit.has_move_target)
+
+	var origin: Vector3 = unit.global_position
+	var max_drift: float = 0.0
+	var heading_flips: int = 0
+	var previous_sign: float = 0.0
+	var start_msec: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_msec < 2000:
+		await get_tree().physics_frame
+		var drift: Vector3 = unit.global_position - origin
+		drift.y = 0.0
+		max_drift = maxf(max_drift, drift.length())
+		var vel: Vector3 = Vector3(unit.velocity.x, 0.0, unit.velocity.z)
+		if vel.length_squared() > 0.05:
+			var lateral_sign: float = signf(vel.z)
+			if previous_sign != 0.0 and lateral_sign != 0.0 and lateral_sign != previous_sign:
+				heading_flips += 1
+			previous_sign = lateral_sign
+
+	_expect(failures, "blocked arrival: post-settle drift low", max_drift <= 0.45)
+	_expect(failures, "blocked arrival: no heading oscillation", heading_flips <= 2)
+	building.queue_free()
 	await _free_harness(harness)
 
 
@@ -196,6 +283,28 @@ func _verify_separation_forward_preserve(failures: PackedStringArray) -> void:
 	_expect(failures, "forward preserve: still moves forward", blended.z > 2.5)
 	_expect(failures, "forward preserve: not reversed", blended.z > 0.0)
 	body.free()
+
+
+func _verify_standing_uses_authoritative_path(failures: PackedStringArray) -> void:
+	print("verify: standing separation is steering input only")
+	var source: String = FileAccess.get_file_as_string("res://scripts/base/unit.gd")
+	_expect(
+		failures,
+		"authoritative apply_steered_velocity present",
+		source.contains("func apply_steered_velocity")
+	)
+	_expect(
+		failures,
+		"standing routes through apply_steered_velocity",
+		source.contains("func apply_standing_separation")
+		and source.contains("apply_steered_velocity(desired")
+	)
+	var sep_source: String = FileAccess.get_file_as_string("res://scripts/systems/unit_separation.gd")
+	_expect(
+		failures,
+		"separation compute does not own Unit locomotion",
+		sep_source.contains("func compute_standing_desired_velocity")
+	)
 
 
 func _sample_heading_stats(unit: Unit, seconds: float) -> Dictionary:
