@@ -10,6 +10,11 @@ const BEAR_TRAP_SCENE: PackedScene = preload("res://scenes/effects/bear_trap.tsc
 const DEFAULT_AOE_NEEDED := 2
 const DEFAULT_DEFENSIVE_HP_RATIO := 0.35
 const ROLL_SQUASH_DURATION := 0.22
+const HUNT_PRIORITY_HERO := 0
+const HUNT_PRIORITY_MILITARY := 1
+const HUNT_PRIORITY_WORKER := 2
+const HUNT_PRIORITY_OTHER := 3
+const WOUNDED_HEALTH_RATIO := 0.65
 
 var _combat_roll_cooldown_timer: float = 0.0
 var _bear_trap_cooldown_timer: float = 0.0
@@ -24,13 +29,18 @@ var _roll_remaining: float = 0.0
 var _roll_speed_bonus: float = 0.0
 var _roll_base_move_speed: float = 0.0
 
+## Authoritative Camouflage state (stealth). Hunting MS is separate and conditional.
 var _camouflage_remaining: float = 0.0
 var _camouflage_active: bool = false
-var _camouflage_restore_timer: float = 0.0
-var _camouflage_speed_bonus_applied: float = 0.0
+var _hunting_speed_bonus_applied: float = 0.0
+var _hunted_target: Node3D = null
+var _hunt_retarget_timer: float = 0.0
 
 var _roll_squash_tween: Tween
 var _active_traps: Array[BearTrap] = []
+var _hunt_speed_indicator: MeshInstance3D = null
+var _hunt_trail: MeshInstance3D = null
+var _hunt_trail_mesh: BoxMesh = null
 
 
 func _ready() -> void:
@@ -45,6 +55,7 @@ func _ready() -> void:
 	_trap_charges = RangerStats.BEAR_TRAP_MAX_CHARGES
 
 	super._ready()
+	_ensure_hunt_visuals()
 
 
 func get_hero_kit_id() -> StringName:
@@ -188,12 +199,9 @@ func get_ability_active_status_text(ability_id: StringName) -> String:
 		HeroAbilityProgression.ABILITY_W:
 			return "%d/%d" % [_trap_charges, RangerStats.BEAR_TRAP_MAX_CHARGES]
 		HeroAbilityProgression.ABILITY_R:
-			if _camouflage_active:
-				return "Hidden %.1fs" % _camouflage_remaining
-			if _camouflage_restore_timer > 0.0 and _camouflage_remaining > 0.0:
-				return "Restore %.1fs" % _camouflage_restore_timer
-			if _camouflage_remaining > 0.0:
-				return "%.1fs" % _camouflage_remaining
+			if _camouflage_active or _camouflage_remaining > 0.0:
+				var hunt_suffix: String = " · Hunt" if _hunting_speed_bonus_applied > 0.0 else ""
+				return "Hidden %.1fs%s" % [_camouflage_remaining, hunt_suffix]
 			return ""
 		_:
 			return ""
@@ -208,17 +216,32 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 		context.get("defensive_hp_ratio", DEFAULT_DEFENSIVE_HP_RATIO)
 	)
 
-	# R — escape when low, or ambush before a large fight.
+	# R — escape, ambush before a fight, or approach a valuable (wounded) target.
 	if can_use_camouflage():
 		if health_ratio < defensive_hp_ratio or retreating:
 			try_camouflage()
-		elif nearby_enemy_count >= aoe_needed and not _camouflage_active:
+		elif nearby_enemy_count >= aoe_needed:
+			try_camouflage()
+		elif _has_valuable_hunt_prey_nearby():
 			try_camouflage()
 
-	# Q — kite melee / escape / reposition.
+	# Q — kite / escape / reposition. During R, roll preserves camouflage and may extend it,
+	# but only when there is a useful reposition (never solely to farm duration).
 	if can_use_combat_roll():
-		if health_ratio < defensive_hp_ratio or retreating or _is_melee_threat_nearby():
+		if _camouflage_active:
+			if (
+				health_ratio < defensive_hp_ratio
+				or retreating
+				or _is_melee_threat_nearby()
+				or _ai_should_reposition_while_hunting()
+			):
+				try_combat_roll(_resolve_ai_roll_target_while_camouflaged())
+		elif health_ratio < defensive_hp_ratio or retreating or _is_melee_threat_nearby():
 			try_combat_roll(_resolve_ai_roll_target())
+
+	# While camouflaged hunting, prefer closing on wounded enemy heroes.
+	if _camouflage_active:
+		_ai_prefer_hunt_movement()
 
 	# W — traps near self / army / retreat path.
 	if can_use_bear_trap():
@@ -244,17 +267,18 @@ func _tick_hero_abilities(delta: float) -> void:
 
 func _sanitize_hero_ability_targets() -> void:
 	_sanitize_active_traps()
+	_sanitize_hunted_target()
 
 
 func _on_basic_attack_landed(_target: Node3D) -> void:
-	_break_camouflage_from_action(false)
+	_break_camouflage_from_action()
 
 
 ## Ranged basic attacks — fire projectiles instead of melee DamageService hits.
 func _deliver_basic_attack_hit(strike_target: Node3D) -> bool:
 	if not CombatTargetValidation.is_valid_combat_target(strike_target):
 		return false
-	_break_camouflage_from_action(false)
+	_break_camouflage_from_action()
 	_fire_basic_arrow(strike_target)
 	return true
 
@@ -337,13 +361,9 @@ func _execute_combat_roll(destination: Vector3) -> void:
 	mana_changed.emit(current_mana, max_mana)
 	_combat_roll_cooldown_timer = get_ability_cooldown(HeroAbilityProgression.ABILITY_Q)
 
-	# Special: Q while camouflaged temporarily breaks stealth, then may restore.
-	var was_camouflaged: bool = _camouflage_active or (
-		_camouflage_remaining > 0.0 and _camouflage_restore_timer > 0.0
-	)
-	_break_camouflage_from_action(true)
-	if was_camouflaged and _camouflage_remaining > 0.0:
-		_camouflage_restore_timer = RangerStats.CAMOUFLAGE_ROLL_RESTORE_SECONDS
+	# Q during Camouflage preserves stealth and extends remaining duration (clamped).
+	if _camouflage_active or _camouflage_remaining > 0.0:
+		_extend_camouflage_from_combat_roll()
 
 	cancel_attack_move()
 	cancel_attack()
@@ -357,6 +377,21 @@ func _execute_combat_roll(destination: Vector3) -> void:
 	set_movement_target(destination)
 	_play_roll_squash()
 	ImpactEffects.play_ground_impact(global_position, 0.85)
+
+
+func _extend_camouflage_from_combat_roll() -> void:
+	if _camouflage_remaining <= 0.0 and not _camouflage_active:
+		return
+
+	var rank: int = get_ability_rank(HeroAbilityProgression.ABILITY_R)
+	var max_extended: float = RangerStats.get_camouflage_max_extended_duration(rank)
+	_camouflage_remaining = minf(
+		_camouflage_remaining + RangerStats.CAMOUFLAGE_ROLL_EXTEND_SECONDS,
+		max_extended
+	)
+	if not _camouflage_active:
+		_apply_camouflage_hidden(true)
+	CamouflageBuff.sync_duration(self, _camouflage_remaining)
 
 
 func _tick_combat_roll_state(delta: float) -> void:
@@ -456,7 +491,7 @@ func _execute_bear_trap(place_position: Vector3) -> void:
 	if _trap_charges < RangerStats.BEAR_TRAP_MAX_CHARGES and _trap_recharge_timer <= 0.0:
 		_trap_recharge_timer = RangerStats.BEAR_TRAP_RECHARGE_SECONDS
 
-	_break_camouflage_from_action(false)
+	_break_camouflage_from_action()
 
 	var trap: BearTrap = BEAR_TRAP_SCENE.instantiate() as BearTrap
 	if trap == null:
@@ -575,7 +610,7 @@ func _execute_crossbow_bolt(direction: Vector3) -> void:
 	current_mana = maxi(0, current_mana - cost)
 	mana_changed.emit(current_mana, max_mana)
 	_crossbow_bolt_cooldown_timer = get_ability_cooldown(HeroAbilityProgression.ABILITY_E)
-	_break_camouflage_from_action(false)
+	_break_camouflage_from_action()
 
 	var bolt: CrossbowBolt = CROSSBOW_BOLT_SCENE.instantiate() as CrossbowBolt
 	if bolt == null:
@@ -628,11 +663,14 @@ func try_camouflage() -> bool:
 		return false
 	if not _require_ability_learned(HeroAbilityProgression.ABILITY_R):
 		return false
+
+	# Manual cancel — ends ultimate immediately without refunding mana/CD.
+	if _camouflage_active or _camouflage_remaining > 0.0:
+		_break_camouflage_from_action()
+		return true
+
 	if _camouflage_cooldown_timer > 0.0:
 		_show_ability_feedback("Camouflage on cooldown (%.0fs)" % ceilf(_camouflage_cooldown_timer))
-		return false
-	if _camouflage_active or _camouflage_remaining > 0.0:
-		_show_ability_feedback("Already camouflaged")
 		return false
 	if current_mana < get_ability_mana_cost(HeroAbilityProgression.ABILITY_R):
 		_show_ability_feedback("Not enough mana")
@@ -651,60 +689,295 @@ func _execute_camouflage() -> void:
 	_camouflage_remaining = RangerStats.get_camouflage_duration(
 		get_ability_rank(HeroAbilityProgression.ABILITY_R)
 	)
-	_camouflage_restore_timer = 0.0
+	_hunt_retarget_timer = 0.0
 	_apply_camouflage_hidden(true)
+	CamouflageBuff.apply(self, self, _camouflage_remaining)
+	_refresh_hunted_target(true)
 
 
 func _apply_camouflage_hidden(hidden: bool) -> void:
 	_camouflage_active = hidden
 	StealthService.set_combat_hidden(self, hidden)
-	if hidden:
-		if _camouflage_speed_bonus_applied <= 0.0:
-			_camouflage_speed_bonus_applied = RangerStats.CAMOUFLAGE_MOVE_SPEED_BONUS
-			move_speed += _camouflage_speed_bonus_applied
-	else:
-		if _camouflage_speed_bonus_applied > 0.0:
-			move_speed = maxf(move_speed - _camouflage_speed_bonus_applied, 0.1)
-			_camouflage_speed_bonus_applied = 0.0
+	if not hidden:
+		_clear_hunting_speed_bonus()
+		_clear_hunted_target()
+		_update_hunt_visuals(false)
 
 
-## break_only_stealth: Q special — ends visibility but keeps remaining duration for restore.
-func _break_camouflage_from_action(break_only_stealth: bool) -> void:
+## Offensive actions and expiry permanently end Camouflage for this cast.
+func _break_camouflage_from_action() -> void:
 	if _camouflage_remaining <= 0.0 and not _camouflage_active:
-		_camouflage_restore_timer = 0.0
 		return
 
-	if break_only_stealth:
-		if _camouflage_active:
-			_apply_camouflage_hidden(false)
-		return
-
-	# Permanent break from AA / W / E.
 	_camouflage_remaining = 0.0
-	_camouflage_restore_timer = 0.0
+	_clear_hunting_speed_bonus()
+	_clear_hunted_target()
+	CamouflageBuff.remove(self)
 	if _camouflage_active or is_combat_hidden():
 		_apply_camouflage_hidden(false)
+	else:
+		_update_hunt_visuals(false)
 
 
 func _tick_camouflage_state(delta: float) -> void:
-	if _camouflage_remaining > 0.0:
-		_camouflage_remaining = maxf(_camouflage_remaining - delta, 0.0)
-		if _camouflage_remaining <= 0.0:
-			_camouflage_restore_timer = 0.0
-			if _camouflage_active:
-				_apply_camouflage_hidden(false)
-			return
+	if _camouflage_remaining <= 0.0 and not _camouflage_active:
+		return
 
-	if _camouflage_restore_timer > 0.0:
-		_camouflage_restore_timer = maxf(_camouflage_restore_timer - delta, 0.0)
-		if _camouflage_restore_timer <= 0.0 and _camouflage_remaining > 0.0 and not _camouflage_active:
-			_apply_camouflage_hidden(true)
+	if _health_component.current_health <= 0:
+		_break_camouflage_from_action()
+		return
+
+	_camouflage_remaining = maxf(_camouflage_remaining - delta, 0.0)
+	if _camouflage_remaining <= 0.0:
+		_break_camouflage_from_action()
+		return
+
+	CamouflageBuff.sync_duration(self, _camouflage_remaining)
+	_tick_hunting_movement(delta)
+
+
+func _tick_hunting_movement(delta: float) -> void:
+	if not _camouflage_active:
+		_clear_hunting_speed_bonus()
+		_update_hunt_visuals(false)
+		return
+
+	_hunt_retarget_timer = maxf(_hunt_retarget_timer - delta, 0.0)
+	if _hunt_retarget_timer <= 0.0:
+		_refresh_hunted_target(false)
+		_hunt_retarget_timer = RangerStats.CAMOUFLAGE_HUNT_RETARGET_INTERVAL
+
+	_sanitize_hunted_target()
+	var hunting: bool = _should_grant_hunting_speed()
+	_set_hunting_speed_bonus(hunting)
+	_update_hunt_visuals(hunting)
+
+
+func _should_grant_hunting_speed() -> bool:
+	if not _is_valid_hunt_target(_hunted_target):
+		return false
+
+	var move_dir: Vector3 = _get_horizontal_move_direction()
+	if move_dir.length_squared() < 0.001:
+		return false
+
+	var to_prey: Vector3 = _hunted_target.global_position - global_position
+	to_prey.y = 0.0
+	if to_prey.length_squared() < 0.001:
+		return false
+
+	return move_dir.normalized().dot(to_prey.normalized()) >= RangerStats.CAMOUFLAGE_HUNT_ALIGN_DOT
+
+
+func _get_horizontal_move_direction() -> Vector3:
+	var vel: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	if vel.length() >= RangerStats.CAMOUFLAGE_HUNT_MIN_MOVE_SPEED:
+		return vel.normalized()
+
+	if has_move_target and _navigation_agent != null:
+		var target_pos: Vector3 = _navigation_agent.target_position
+		var to_target: Vector3 = target_pos - global_position
+		to_target.y = 0.0
+		if to_target.length_squared() > 0.04:
+			return to_target.normalized()
+
+	return Vector3.ZERO
+
+
+func _set_hunting_speed_bonus(active: bool) -> void:
+	if active:
+		var rank: int = get_ability_rank(HeroAbilityProgression.ABILITY_R)
+		var desired: float = (
+			get_kit_base_move_speed() * RangerStats.get_camouflage_hunt_speed_bonus(rank)
+		)
+		if is_equal_approx(_hunting_speed_bonus_applied, desired):
+			return
+		if _hunting_speed_bonus_applied > 0.0:
+			move_speed = maxf(move_speed - _hunting_speed_bonus_applied, 0.1)
+		_hunting_speed_bonus_applied = desired
+		move_speed += _hunting_speed_bonus_applied
+		return
+
+	_clear_hunting_speed_bonus()
+
+
+func _clear_hunting_speed_bonus() -> void:
+	if _hunting_speed_bonus_applied <= 0.0:
+		return
+	move_speed = maxf(move_speed - _hunting_speed_bonus_applied, 0.1)
+	_hunting_speed_bonus_applied = 0.0
+
+
+func _refresh_hunted_target(_force: bool) -> void:
+	var best: Node3D = null
+	var best_priority: int = 99
+	var best_health_ratio: float = 2.0
+	var best_dist_sq: float = INF
+	var radius_sq: float = RangerStats.CAMOUFLAGE_HUNT_RADIUS * RangerStats.CAMOUFLAGE_HUNT_RADIUS
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		_hunted_target = null
+		return
+
+	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(self):
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
+			if not NodeSafety.is_alive_node(node_variant):
+				continue
+			if node_variant is Building:
+				continue
+			if not node_variant is Unit:
+				continue
+			if not CombatTargetValidation.are_hostile(self, node_variant):
+				continue
+
+			var unit: Unit = node_variant as Unit
+			var offset: Vector3 = unit.global_position - global_position
+			offset.y = 0.0
+			var dist_sq: float = offset.length_squared()
+			if dist_sq > radius_sq:
+				continue
+
+			var priority: int = _get_hunt_priority(unit)
+			var health_ratio: float = _get_unit_health_ratio(unit)
+			var better: bool = false
+			if priority < best_priority:
+				better = true
+			elif priority == best_priority:
+				# Heroes: prefer more wounded, then nearer. Others: nearer.
+				if priority == HUNT_PRIORITY_HERO:
+					if health_ratio < best_health_ratio - 0.001:
+						better = true
+					elif is_equal_approx(health_ratio, best_health_ratio) and dist_sq < best_dist_sq:
+						better = true
+				elif dist_sq < best_dist_sq:
+					better = true
+
+			if better:
+				best = unit
+				best_priority = priority
+				best_health_ratio = health_ratio
+				best_dist_sq = dist_sq
+
+	_hunted_target = best
+
+
+func _get_hunt_priority(unit: Unit) -> int:
+	if unit is Hero:
+		return HUNT_PRIORITY_HERO
+	if unit is Worker:
+		return HUNT_PRIORITY_WORKER
+	if unit is MilitaryUnit:
+		return HUNT_PRIORITY_MILITARY
+	return HUNT_PRIORITY_OTHER
+
+
+func _get_unit_health_ratio(unit: Unit) -> float:
+	if unit == null or not is_instance_valid(unit):
+		return 1.0
+	var hc: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
+	if hc != null and hc.max_health > 0:
+		return float(hc.current_health) / float(hc.max_health)
+	return 1.0
+
+
+func _is_valid_hunt_target(target: Variant) -> bool:
+	if not NodeSafety.is_alive_node(target):
+		return false
+	if target is Building:
+		return false
+	if not target is Unit:
+		return false
+	if not CombatTargetValidation.are_hostile(self, target):
+		return false
+	return _horizontal_distance_to(target as Node3D) <= RangerStats.CAMOUFLAGE_HUNT_RADIUS
+
+
+func _sanitize_hunted_target() -> void:
+	if _hunted_target == null:
+		return
+	if not _is_valid_hunt_target(_hunted_target):
+		_hunted_target = null
+
+
+func _clear_hunted_target() -> void:
+	_hunted_target = null
+	_hunt_retarget_timer = 0.0
 
 
 func _tick_camouflage_cooldown(delta: float) -> void:
 	if _camouflage_cooldown_timer <= 0.0:
 		return
 	_camouflage_cooldown_timer = maxf(_camouflage_cooldown_timer - delta, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Hunting visuals (subtle — no screen clutter)
+# ---------------------------------------------------------------------------
+
+
+func _ensure_hunt_visuals() -> void:
+	if _hunt_speed_indicator == null:
+		_hunt_speed_indicator = MeshInstance3D.new()
+		_hunt_speed_indicator.name = "HuntSpeedIndicator"
+		var disc := CylinderMesh.new()
+		disc.top_radius = 0.22
+		disc.bottom_radius = 0.22
+		disc.height = 0.04
+		disc.radial_segments = 12
+		_hunt_speed_indicator.mesh = disc
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = Color(0.35, 0.85, 0.45, 0.55)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.no_depth_test = true
+		_hunt_speed_indicator.set_surface_override_material(0, mat)
+		_hunt_speed_indicator.position = Vector3(0.0, 0.08, 0.0)
+		_hunt_speed_indicator.visible = false
+		add_child(_hunt_speed_indicator)
+
+	if _hunt_trail == null:
+		_hunt_trail = MeshInstance3D.new()
+		_hunt_trail.name = "HuntTrail"
+		_hunt_trail_mesh = BoxMesh.new()
+		_hunt_trail_mesh.size = Vector3(0.06, 0.02, 1.0)
+		_hunt_trail.mesh = _hunt_trail_mesh
+		var trail_mat := StandardMaterial3D.new()
+		trail_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		trail_mat.albedo_color = Color(0.45, 0.75, 0.4, 0.22)
+		trail_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		trail_mat.no_depth_test = true
+		_hunt_trail.set_surface_override_material(0, trail_mat)
+		_hunt_trail.visible = false
+		add_child(_hunt_trail)
+
+
+func _update_hunt_visuals(hunting: bool) -> void:
+	_ensure_hunt_visuals()
+	if _hunt_speed_indicator != null:
+		_hunt_speed_indicator.visible = hunting
+
+	if _hunt_trail == null:
+		return
+
+	if not hunting or not _is_valid_hunt_target(_hunted_target):
+		_hunt_trail.visible = false
+		return
+
+	var to_prey: Vector3 = _hunted_target.global_position - global_position
+	to_prey.y = 0.0
+	var dist: float = to_prey.length()
+	if dist < 0.4:
+		_hunt_trail.visible = false
+		return
+
+	var length: float = clampf(dist * 0.35, 0.6, 2.4)
+	if _hunt_trail_mesh != null:
+		_hunt_trail_mesh.size = Vector3(0.06, 0.02, length)
+
+	var dir: Vector3 = to_prey / dist
+	_hunt_trail.visible = true
+	_hunt_trail.position = Vector3(dir.x * length * 0.5, 0.12, dir.z * length * 0.5)
+	_hunt_trail.look_at(global_position + dir, Vector3.UP)
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +1063,38 @@ func _is_melee_threat_nearby() -> bool:
 	return false
 
 
+func _has_valuable_hunt_prey_nearby() -> bool:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return false
+	var radius: float = RangerStats.CAMOUFLAGE_HUNT_RADIUS
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"heroes"):
+		if not NodeSafety.is_alive_node(node_variant):
+			continue
+		if not node_variant is Hero:
+			continue
+		if not CombatTargetValidation.are_hostile(self, node_variant):
+			continue
+		var hero: Hero = node_variant as Hero
+		if _horizontal_distance_to(hero) > radius:
+			continue
+		if _get_unit_health_ratio(hero) <= WOUNDED_HEALTH_RATIO:
+			return true
+	return false
+
+
+func _ai_should_reposition_while_hunting() -> bool:
+	if not _is_valid_hunt_target(_hunted_target):
+		return false
+	# Reposition toward wounded prey when path is blocked by melee pressure or distance is awkward.
+	if _is_melee_threat_nearby():
+		return true
+	if _hunted_target is Hero and _get_unit_health_ratio(_hunted_target as Unit) <= WOUNDED_HEALTH_RATIO:
+		var dist: float = _horizontal_distance_to(_hunted_target)
+		return dist > attack_range * 0.85 and dist < RangerStats.CAMOUFLAGE_HUNT_RADIUS
+	return false
+
+
 func _resolve_ai_roll_target() -> Vector3:
 	var away: Vector3 = Vector3.ZERO
 	var tree: SceneTree = get_tree()
@@ -812,6 +1117,42 @@ func _resolve_ai_roll_target() -> Vector3:
 		away = global_transform.basis.z
 		away.y = 0.0
 	return global_position + away.normalized() * RangerStats.COMBAT_ROLL_DISTANCE
+
+
+func _resolve_ai_roll_target_while_camouflaged() -> Vector3:
+	# Prefer rolling toward wounded hunt prey; otherwise escape melee.
+	if (
+		_is_valid_hunt_target(_hunted_target)
+		and _hunted_target is Hero
+		and _get_unit_health_ratio(_hunted_target as Unit) <= WOUNDED_HEALTH_RATIO
+		and not _is_melee_threat_nearby()
+	):
+		var toward: Vector3 = _hunted_target.global_position - global_position
+		toward.y = 0.0
+		if toward.length_squared() > 0.001:
+			return global_position + toward.normalized() * RangerStats.COMBAT_ROLL_DISTANCE
+
+	return _resolve_ai_roll_target()
+
+
+func _ai_prefer_hunt_movement() -> void:
+	if not _is_valid_hunt_target(_hunted_target):
+		return
+	if not (_hunted_target is Hero):
+		return
+	if _get_unit_health_ratio(_hunted_target as Unit) > WOUNDED_HEALTH_RATIO:
+		return
+	if _is_rolling:
+		return
+	if _is_holding_position:
+		return
+	if NodeSafety.is_alive_node(_attack_target):
+		return
+
+	var dist: float = _horizontal_distance_to(_hunted_target)
+	if dist <= attack_range * 0.9:
+		return
+	set_movement_target(_hunted_target.global_position)
 
 
 func _resolve_ai_trap_position(retreating: bool) -> Vector3:
@@ -845,9 +1186,19 @@ func _has_hero_in_bolt_range() -> bool:
 	return false
 
 
+func _clear_camouflage_state() -> void:
+	_camouflage_remaining = 0.0
+	_clear_hunting_speed_bonus()
+	_clear_hunted_target()
+	CamouflageBuff.remove(self)
+	if _camouflage_active or is_combat_hidden():
+		_camouflage_active = false
+		StealthService.set_combat_hidden(self, false)
+	_update_hunt_visuals(false)
+
+
 func _exit_tree() -> void:
 	if _is_rolling:
 		_finish_combat_roll()
-	if _camouflage_speed_bonus_applied > 0.0 or _camouflage_active:
-		_apply_camouflage_hidden(false)
+	_clear_camouflage_state()
 	super._exit_tree()

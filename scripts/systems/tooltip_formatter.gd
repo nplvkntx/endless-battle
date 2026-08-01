@@ -82,10 +82,10 @@ const KIT_ABILITY_DESCRIPTIONS: Dictionary = {
 		HeroAbilityProgression.ABILITY_R: "Dashes to a target, dealing damage on arrival.",
 	},
 	HeroCatalog.KIT_RANGER: {
-		HeroAbilityProgression.ABILITY_Q: "Short dash toward the cursor for repositioning. Does not deal damage.",
+		HeroAbilityProgression.ABILITY_Q: "Short dash toward the cursor for repositioning. Does not deal damage. During Camouflage, preserves stealth and extends duration.",
 		HeroAbilityProgression.ABILITY_W: "Places a Bear Trap that roots, damages, and reveals the first enemy that walks over it. Up to 3 charges.",
 		HeroAbilityProgression.ABILITY_E: "Fires a heavy piercing crossbow bolt in a line. Damage is reduced after each enemy pierced.",
-		HeroAbilityProgression.ABILITY_R: "Become camouflaged: enemies cannot auto-target you, and you gain move speed. Ends on basic attacks or abilities (Combat Roll can restore camouflage shortly after).",
+		HeroAbilityProgression.ABILITY_R: "Become camouflaged: enemies cannot auto-target you. Moving toward nearby prey grants hunting move speed. Combat Roll preserves and extends Camouflage. Ends on basic attacks, Bear Trap, or Crossbow Bolt.",
 	},
 }
 
@@ -969,11 +969,16 @@ static func _append_ranger_ability_stat_lines(
 				if hero != null
 				else float(HeroAbilityStats.get_stat(ability_id, HeroAbilityStats.STAT_EFFECT, rank, overrides, kit_id))
 			)
+			var hunt_speed_pct: float = RangerStats.get_camouflage_hunt_speed_bonus(rank) * 100.0
 			lines.append("Duration: %s" % _format_seconds(camouflage_duration))
-			lines.append("Move Speed Bonus: +%s" % _format_number(RangerStats.CAMOUFLAGE_MOVE_SPEED_BONUS))
+			lines.append("Hunting Move Speed: +%d%%" % int(round(hunt_speed_pct)))
+			lines.append("Hunt Radius: %s" % _format_number(RangerStats.CAMOUFLAGE_HUNT_RADIUS))
 			lines.append(
-				"Combat Roll Restore: %s"
-				% _format_seconds(RangerStats.CAMOUFLAGE_ROLL_RESTORE_SECONDS)
+				"Combat Roll Extends: +%s (max %s)"
+				% [
+					_format_seconds(RangerStats.CAMOUFLAGE_ROLL_EXTEND_SECONDS),
+					_format_seconds(RangerStats.get_camouflage_max_extended_duration(rank)),
+				]
 			)
 
 

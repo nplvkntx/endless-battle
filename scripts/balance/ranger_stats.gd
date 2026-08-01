@@ -54,14 +54,23 @@ const CROSSBOW_BOLT_PIERCE_DAMAGE_MULT: float = 0.7
 const CROSSBOW_BOLT_MAX_PIERCES: int = 6
 
 # --- R: Camouflage ---
-## Explicit per-rank durations (12 / 18 / 24) — not the shared ultimate effect curve.
-const CAMOUFLAGE_DURATION_RANK_1: float = 12.0
-const CAMOUFLAGE_DURATION_RANK_2: float = 18.0
-const CAMOUFLAGE_DURATION_RANK_3: float = 24.0
-const CAMOUFLAGE_MOVE_SPEED_BONUS: float = 1.5
+## Explicit per-rank durations (10 / 14 / 18) — not the shared ultimate effect curve.
+const CAMOUFLAGE_DURATION_RANK_1: float = 10.0
+const CAMOUFLAGE_DURATION_RANK_2: float = 14.0
+const CAMOUFLAGE_DURATION_RANK_3: float = 18.0
+## Hunting move-speed bonus while moving toward a valid prey target (fraction of base MS).
+const CAMOUFLAGE_HUNT_SPEED_RANK_1: float = 0.10
+const CAMOUFLAGE_HUNT_SPEED_RANK_2: float = 0.15
+const CAMOUFLAGE_HUNT_SPEED_RANK_3: float = 0.20
+const CAMOUFLAGE_HUNT_RADIUS: float = 16.0
+## Dot-product threshold for "moving toward" (~78° forgiving cone).
+const CAMOUFLAGE_HUNT_ALIGN_DOT: float = 0.20
+const CAMOUFLAGE_HUNT_RETARGET_INTERVAL: float = 0.35
+const CAMOUFLAGE_HUNT_MIN_MOVE_SPEED: float = 0.35
 const CAMOUFLAGE_COOLDOWN: float = 40.0
 const CAMOUFLAGE_MANA_COST: int = 50
-const CAMOUFLAGE_ROLL_RESTORE_SECONDS: float = 3.0
+## Combat Roll during Camouflage extends remaining duration (clamped to max + this).
+const CAMOUFLAGE_ROLL_EXTEND_SECONDS: float = 3.0
 
 # --- Basic attack projectile ---
 const BASIC_ARROW_SPEED: float = 20.0
@@ -76,3 +85,17 @@ static func get_camouflage_duration(rank: int) -> float:
 			return CAMOUFLAGE_DURATION_RANK_3
 		_:
 			return CAMOUFLAGE_DURATION_RANK_1
+
+
+static func get_camouflage_hunt_speed_bonus(rank: int) -> float:
+	match clampi(rank, 1, 3):
+		2:
+			return CAMOUFLAGE_HUNT_SPEED_RANK_2
+		3:
+			return CAMOUFLAGE_HUNT_SPEED_RANK_3
+		_:
+			return CAMOUFLAGE_HUNT_SPEED_RANK_1
+
+
+static func get_camouflage_max_extended_duration(rank: int) -> float:
+	return get_camouflage_duration(rank) + CAMOUFLAGE_ROLL_EXTEND_SECONDS

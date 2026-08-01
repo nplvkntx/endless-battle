@@ -261,7 +261,7 @@ static func get_stat(
 				_multiplier_at(BASIC_RANGE_MULT, rank)
 			)
 		STAT_EFFECT:
-			# Ranger Camouflage uses explicit per-rank durations (12 / 18 / 24).
+			# Ranger Camouflage uses explicit per-rank durations (10 / 14 / 18).
 			if kit_id == HeroCatalog.KIT_RANGER and ability_id == HeroAbilityProgression.ABILITY_R:
 				return RangerStats.get_camouflage_duration(rank)
 			var base_effect: float = float(_resolve_base(kit_id, ability_id, STAT_EFFECT, base_overrides))
@@ -414,10 +414,10 @@ static func _format_ranger_tooltip_lines(
 			)
 		HeroAbilityProgression.ABILITY_R:
 			lines.append(
-				"Camouflage %.1fs | +%.1f move speed"
+				"Camouflage %.1fs | +%d%% hunt speed"
 				% [
 					get_stat(ability_id, STAT_EFFECT, rank, base_overrides, kit_id),
-					RangerStats.CAMOUFLAGE_MOVE_SPEED_BONUS,
+					int(round(RangerStats.get_camouflage_hunt_speed_bonus(rank) * 100.0)),
 				]
 			)
 
