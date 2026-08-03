@@ -152,10 +152,16 @@ func _process(delta: float) -> void:
 
 
 func _publish_perf_status() -> void:
+	var mission_label: String = EnemyArmyCommand.executable_mission_to_label(
+		EnemyArmyCommand.get_executable_mission()
+	)
 	PerfCounters.set_ai_status(
 		get_strategic_phase_name(),
 		EnemyArmyCommand.ArmyMode.keys()[EnemyArmyCommand.get_army_mode()],
-		EnemyUnitMission.mission_to_label(EnemyUnitMission.get_main_army_mission())
+		mission_label
+	)
+	PerfCounters.set_ai_mission_detail(
+		EnemyArmyCommand.get_authoritative_mission_report(get_tree())
 	)
 
 

@@ -1,6 +1,7 @@
 Godot Engine v4.7.stable.official.5b4e0cb0f - https://godotengine.org
 
-selection counts: paladin=100 assassin=100 ranger=100
+[AI PERF] FPS below 30: 26
+[AI PERF] FPS below 30: 6
 AI selected hero: Ranger
 [AIHero] AI selected hero: Ranger
 AI selected hero: Human Paladin

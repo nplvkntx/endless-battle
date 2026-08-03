@@ -385,16 +385,38 @@ func _update_creeping() -> void:
 		return
 
 	if not _army_available_for_creeping(tree, army_center, rally_position):
+		if _is_army_on_offensive_push(tree, army_center, rally_position):
+			_handle_army_in_hostile_territory(tree, creep_army, army_center, rally_position)
 		return
 
 	# Final group validation before selecting or engaging a camp.
 	if not _can_start_group_mission(creep_army):
 		_set_creep_mission(CreepMission.ASSEMBLE_CREEP_SQUAD)
+		EnemyArmyCommand.set_executable_mission(
+			EnemyArmyCommand.ExecutableMission.ASSEMBLE,
+			"creep squad incomplete",
+			null,
+			rally_position,
+			"Rally",
+			"hold",
+			creep_army,
+			false
+		)
 		_hold_army_until_rallied(tree, rally_position, creep_army)
 		return
 
 	if not _squad_safe_to_commit(tree, creep_army):
 		_set_creep_mission(CreepMission.RECOVER_AFTER_CAMP)
+		EnemyArmyCommand.set_executable_mission(
+			EnemyArmyCommand.ExecutableMission.REGROUP,
+			"squad not safe to commit",
+			null,
+			rally_position,
+			"Rally",
+			"hold",
+			creep_army,
+			false
+		)
 		_hold_army_until_rallied(tree, rally_position, creep_army)
 		return
 
@@ -413,9 +435,22 @@ func _update_creeping() -> void:
 				_director.clear_creep_target()
 			# No safe camp: rally and rebuild. Never fall through to player attack.
 			_set_creep_mission(CreepMission.RETURN_TO_BASE)
+			EnemyArmyCommand.set_executable_mission(
+				EnemyArmyCommand.ExecutableMission.REGROUP,
+				"creep objective invalid",
+				null,
+				rally_position,
+				"Rally",
+				"move",
+				creep_army,
+				false
+			)
 			_hold_army_until_rallied(tree, rally_position, creep_army)
 			return
 		_select_camp(camp, army_center if army_center != Vector3.ZERO else rally_position, army_power)
+
+	if not _validate_and_sync_creeping(tree, creep_army, camp, army_center):
+		return
 
 	if _is_player_contesting_camp(tree, camp):
 		_retreat_creep_army(tree, "player contesting camp", true)
@@ -438,6 +473,7 @@ func _update_creeping() -> void:
 			_regroup_creep_army(creep_army)
 			return
 		_set_creep_mission(CreepMission.FIGHT_CAMP)
+		EnemyArmyCommand.note_mission_progress(army_center, true, creep_army.size())
 		_engage_camp_focus_fire(tree, creep_army, camp)
 		return
 
@@ -452,6 +488,8 @@ func _update_creeping() -> void:
 
 	_set_creep_mission(CreepMission.MOVE_TO_CAMP)
 	_log_mission_started_once()
+	_sync_creeping_executable(creep_army, camp, attack_destination, "move to camp")
+	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
 
 	if not _army_moving_logged:
 		_army_moving_logged = true
@@ -798,6 +836,132 @@ func _cancel_creep_mission(_reason: String = "") -> void:
 	_needs_post_camp_regroup = false
 	_army_moving_logged = false
 	_mission_started_logged = false
+	if (
+		EnemyArmyCommand.get_executable_mission()
+		== EnemyArmyCommand.ExecutableMission.CREEPING
+	):
+		EnemyArmyCommand.clear_executable_mission(
+			_reason if not _reason.is_empty() else "creep cancelled"
+		)
+
+
+func _sync_creeping_executable(
+	army: Array,
+	camp: Node3D,
+	destination: Vector3,
+	reason: String
+) -> void:
+	if not NodeSafety.is_alive_node(camp):
+		return
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.CREEPING,
+		reason,
+		camp,
+		destination,
+		_format_camp_name(camp),
+		"attack-move",
+		army,
+		_reserved_camp_id != 0 and camp.get_instance_id() == _reserved_camp_id
+	)
+
+
+func _validate_and_sync_creeping(
+	tree: SceneTree,
+	army: Array,
+	camp: Node3D,
+	army_center: Vector3
+) -> bool:
+	var in_combat: bool = (
+		_is_army_engaging_camp(tree, army, camp)
+		or EnemyArmyCommand.is_enemy_army_under_attack(
+			tree,
+			army,
+			ARMY_UNDER_ATTACK_RANGE
+		)
+	)
+	var has_order: bool = (
+		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.CREEPING
+		or _creep_mission in [CreepMission.MOVE_TO_CAMP, CreepMission.FIGHT_CAMP]
+	)
+	var validation: Dictionary = EnemyArmyCommand.validate_creeping_mission(
+		tree,
+		camp,
+		_reserved_camp_id,
+		army_center,
+		has_order,
+		in_combat
+	)
+	if validation.get("valid", false):
+		_sync_creeping_executable(
+			army,
+			camp,
+			camp.global_position if NodeSafety.is_alive_node(camp) else army_center,
+			"creeping validated"
+		)
+		return true
+
+	var reason: String = String(validation.get("reason", "creep objective invalid"))
+	_clear_active_camp()
+	_set_creep_mission(CreepMission.NONE)
+	EnemyArmyCommand.clear_executable_mission(reason)
+
+	if EnemyArmyCommand.is_army_in_hostile_territory(tree, army_center):
+		_handle_army_in_hostile_territory(
+			tree,
+			army,
+			army_center,
+			EnemyArmyCommand.resolve_enemy_rally_position(tree)
+		)
+		return false
+
+	## Pick a new mission rather than staying falsely CREEPING.
+	_set_creep_mission(CreepMission.SELECT_NEXT_CAMP)
+	return false
+
+
+func _handle_army_in_hostile_territory(
+	tree: SceneTree,
+	army: Array,
+	army_center: Vector3,
+	rally_position: Vector3
+) -> void:
+	_cancel_creep_mission("army reached hostile base")
+
+	if EnemyArmyCommand.handle_hostile_territory_idle(
+		tree,
+		army,
+		army_center,
+		"army reached hostile base"
+	):
+		return
+
+	## Too weak to push — retreat or repath toward a real creep objective.
+	var army_power: int = int(EnemyArmyCommand.estimate_combat_strength(army))
+	var alternate_camp: Node3D = _find_best_creep_camp(
+		tree,
+		rally_position,
+		army_power,
+		army_center
+	)
+	if alternate_camp != null and is_instance_valid(alternate_camp):
+		_select_camp(alternate_camp, army_center, army_power)
+		var destination: Vector3 = _resolve_camp_attack_destination(
+			tree,
+			alternate_camp,
+			army_center
+		)
+		_set_creep_mission(CreepMission.MOVE_TO_CAMP)
+		_sync_creeping_executable(army, alternate_camp, destination, "repath to creep camp")
+		if _combat_controller != null:
+			_combat_controller.issue_immediate_group_move(
+				army,
+				destination,
+				EnemyArmyCommand.ArmyMode.CREEPING,
+				EnemyUnitMission.Mission.CREEP
+			)
+		return
+
+	_retreat_creep_army(tree, "weak army in hostile territory", true)
 
 
 func _sanitize_active_camp(tree: SceneTree) -> void:
@@ -935,6 +1099,16 @@ func _retreat_creep_army(tree: SceneTree, reason: String, log_generic: bool = tr
 	_army_moving_logged = false
 	_needs_post_camp_regroup = true
 	_set_creep_mission(CreepMission.RETURN_TO_BASE)
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.RETREAT,
+		reason if not reason.is_empty() else "creep retreat",
+		null,
+		EnemyArmyCommand.resolve_enemy_rally_position(tree),
+		"Rally",
+		"move",
+		[],
+		false
+	)
 	if log_generic and not reason.is_empty():
 		EnemyAIDebug.log_creep_retreat(reason)
 

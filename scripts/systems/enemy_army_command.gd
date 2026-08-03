@@ -189,8 +189,29 @@ enum StrategicState {
 	RECOVERING,
 }
 
+## Single authoritative army mission for F3 + execution. StrategicPhase alone must never imply CREEPING.
+enum ExecutableMission {
+	NONE,
+	IDLE,
+	CREEPING,
+	ATTACK_PLAYER,
+	LETHAL_PUSH,
+	DEFEND,
+	EMERGENCY_DEFEND,
+	REGROUP,
+	RETREAT,
+	ASSEMBLE,
+}
+
 const STRATEGIC_THREAT_CLEAR_SECONDS := 6.0
 const STRATEGIC_ATTACK_COMMITMENT_SECONDS := 8.0
+const MISSION_PROGRESS_STALL_SECONDS := 6.5
+const MISSION_WATCHDOG_INTERVAL_SECONDS := 1.0
+const MISSION_PROGRESS_DISTANCE_EPSILON := 2.5
+const HOSTILE_TERRITORY_BASE_RANGE := 38.0
+const HOSTILE_TERRITORY_ENGAGE_RANGE := 32.0
+const HOSTILE_TERRITORY_STRENGTH_RATIO := 0.95
+const HOSTILE_TERRITORY_LETHAL_RATIO := 1.25
 
 const ATTACK_WAVE_STAGING_OFFSET := Vector3(8.0, 0.0, 0.0)
 const ATTACK_WAVE_GATHER_PERCENT := 0.75
@@ -295,6 +316,23 @@ static var _attack_wave_min_non_hero_units: int = 0
 static var _attack_wave_ready_to_advance: bool = false
 static var _attack_wave_pending_transition: AttackWaveState = AttackWaveState.NONE
 static var _attack_wave_pending_transition_reason: String = ""
+
+## Authoritative executable army mission (owned here; managers write via set_executable_mission).
+static var _exec_mission: ExecutableMission = ExecutableMission.NONE
+static var _exec_objective_node: Node3D = null
+static var _exec_objective_position: Vector3 = Vector3.ZERO
+static var _exec_objective_name: String = ""
+static var _exec_mission_start_msec: int = 0
+static var _exec_last_progress_msec: int = 0
+static var _exec_last_distance: float = -1.0
+static var _exec_squad_ids: Array[int] = []
+static var _exec_order_label: String = ""
+static var _exec_transition_reason: String = ""
+static var _exec_camp_reserved: bool = false
+static var _exec_watchdog_timer: float = 0.0
+static var _exec_watchdog_refreshed: bool = false
+static var _exec_last_report: String = ""
+static var _allow_hostile_engagement: bool = false
 
 
 static func get_army_mode() -> ArmyMode:
@@ -486,6 +524,7 @@ static func reset_match_state() -> void:
 	_attack_wave_ready_to_advance = false
 	_attack_wave_pending_transition = AttackWaveState.NONE
 	_attack_wave_pending_transition_reason = ""
+	_clear_executable_mission_state("match reset")
 	_perf_diag_timer = 0.0
 	_orders_issued_since_diag = 0
 	_perf_overlay_status_timer = 0.0
@@ -759,7 +798,7 @@ static func with_authorized_orders(callback: Callable) -> void:
 
 
 static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
-	if _orders_authorized or _emergency_defense_active:
+	if _orders_authorized or _emergency_defense_active or _allow_hostile_engagement:
 		return true
 
 	if is_attack_wave_active() and mission == EnemyUnitMission.Mission.CREEP:
@@ -1120,6 +1159,16 @@ static func initiate_group_retreat(tree: SceneTree, reason: String = "") -> bool
 	_fight_start_strength = 0.0
 	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RETREAT, reason)
 	request_strategic_state(StrategicState.RETREATING, reason)
+	set_executable_mission(
+		ExecutableMission.RETREAT,
+		reason if not reason.is_empty() else "retreat",
+		null,
+		destination,
+		"Rally",
+		"move",
+		survivors,
+		false
+	)
 	return true
 
 
@@ -1385,28 +1434,43 @@ static func issue_group_combat_move(
 		return false
 
 	if mission == EnemyUnitMission.Mission.ATTACK:
-		if not allows_offensive_orders():
-			_debug_combat("order blocked: strategic state forbids attack")
-			return false
-		if not can_launch_player_attack(tree):
-			EnemyAIDebug.log_once(
-				"player_attack_blocked",
-				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
-			)
-			return false
-		# Never let a thin wave steal the army from CREEPING during early phases.
-		if get_army_mode() == ArmyMode.CREEPING and not allow_attack_override_creep:
-			EnemyAIDebug.log_once(
-				"player_attack_blocked",
-				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
-			)
-			return false
+		if not _allow_hostile_engagement:
+			if not allows_offensive_orders():
+				_debug_combat("order blocked: strategic state forbids attack")
+				return false
+			if not can_launch_player_attack(tree):
+				EnemyAIDebug.log_once(
+					"player_attack_blocked",
+					"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+				)
+				return false
+			# Never let a thin wave steal the army from CREEPING during early phases.
+			if get_army_mode() == ArmyMode.CREEPING and not allow_attack_override_creep:
+				EnemyAIDebug.log_once(
+					"player_attack_blocked",
+					"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+				)
+				return false
 
 	if not try_claim_army_mode(mode, allow_attack_override_creep):
 		return false
 
 	if mission == EnemyUnitMission.Mission.ATTACK:
 		request_strategic_state(StrategicState.ATTACKING, "group attack move")
+		if _exec_mission not in [
+			ExecutableMission.ATTACK_PLAYER,
+			ExecutableMission.LETHAL_PUSH,
+		]:
+			set_executable_mission(
+				ExecutableMission.ATTACK_PLAYER,
+				"group attack move",
+				null,
+				destination,
+				"AttackObjective",
+				"attack-move",
+				units,
+				false
+			)
 	elif mission == EnemyUnitMission.Mission.CREEP:
 		request_strategic_state(StrategicState.CREEPING, "group creep move")
 	elif mission == EnemyUnitMission.Mission.DEFEND:
@@ -1416,11 +1480,23 @@ static func issue_group_combat_move(
 			else StrategicState.DEFENDING
 		)
 		request_strategic_state(defense_state, "group defense move")
+		if not _emergency_defense_active:
+			set_executable_mission(
+				ExecutableMission.DEFEND,
+				"group defense move",
+				null,
+				destination,
+				"DefendPoint",
+				"attack-move",
+				units,
+				false
+			)
 
 	begin_fight_tracking(units, compute_army_center(units))
 	with_authorized_orders(func() -> void:
 		command_attack_move(units, destination, mission)
 	)
+	note_mission_order("attack-move", destination)
 	return true
 
 
@@ -1451,6 +1527,16 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 	if _emergency_defense_active:
 		_emergency_reason = reason
 		_emergency_threat_position = intercept_position
+		set_executable_mission(
+			ExecutableMission.EMERGENCY_DEFEND,
+			String(reason),
+			null,
+			intercept_position,
+			"EmergencyThreat",
+			"attack-move",
+			[],
+			false
+		)
 		return
 
 	_emergency_defense_active = true
@@ -1461,6 +1547,16 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 		"emergency defense"
 	)
 	request_strategic_state(StrategicState.EMERGENCY_DEFENDING, String(reason))
+	set_executable_mission(
+		ExecutableMission.EMERGENCY_DEFEND,
+		String(reason),
+		null,
+		intercept_position,
+		"EmergencyThreat",
+		"attack-move",
+		[],
+		false
+	)
 	EnemyAIDebug.log_event("Emergency Defense (%s)" % String(reason))
 
 
@@ -2738,7 +2834,11 @@ static func try_claim_army_mode(
 	# ATTACKING must never be claimed while strategic phases own the army.
 	if requested_mode == ArmyMode.ATTACKING:
 		var tree: SceneTree = Engine.get_main_loop() as SceneTree
-		if tree != null and not can_launch_player_attack(tree):
+		if (
+			tree != null
+			and not can_launch_player_attack(tree)
+			and not _allow_hostile_engagement
+		):
 			EnemyAIDebug.log_once(
 				"player_attack_blocked",
 				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
@@ -2759,15 +2859,24 @@ static func try_claim_army_mode(
 				ArmyMode.RETREATING,
 				ArmyMode.DEFENDING,
 				ArmyMode.INTERCEPTING,
+				ArmyMode.ATTACKING,
 			]:
+				if requested_mode == ArmyMode.ATTACKING and not _allow_hostile_engagement:
+					return requested_mode == ArmyMode.ASSEMBLING
 				_set_army_mode(requested_mode, previous_mode)
 				return true
 			return requested_mode == ArmyMode.ASSEMBLING
 		ArmyMode.CREEPING:
-			if requested_mode == ArmyMode.ATTACKING and allow_attack_override_creep:
+			if requested_mode == ArmyMode.ATTACKING and (
+				allow_attack_override_creep or _allow_hostile_engagement
+			):
 				# Strategic early phases own the army — attack waves must not steal it.
 				var tree: SceneTree = Engine.get_main_loop() as SceneTree
-				if tree != null and not can_launch_player_attack(tree):
+				if (
+					tree != null
+					and not can_launch_player_attack(tree)
+					and not _allow_hostile_engagement
+				):
 					return false
 				_set_army_mode(requested_mode, previous_mode)
 				return true
@@ -4937,7 +5046,7 @@ static func command_attack_move(
 	destination: Vector3,
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
 ) -> void:
-	if mission == EnemyUnitMission.Mission.ATTACK:
+	if mission == EnemyUnitMission.Mission.ATTACK and not _allow_hostile_engagement:
 		var tree: SceneTree = Engine.get_main_loop() as SceneTree
 		if tree != null and not can_launch_player_attack(tree):
 			EnemyAIDebug.log_once(
@@ -5273,6 +5382,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 
 static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
+	tick_mission_watchdog(tree, delta)
 	_perf_overlay_status_timer += delta
 	if _perf_overlay_status_timer >= 0.25:
 		_perf_overlay_status_timer = 0.0
@@ -5315,16 +5425,753 @@ static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
 	_orders_issued_since_diag = 0
 
 
+static func get_executable_mission() -> ExecutableMission:
+	return _exec_mission
+
+
+static func get_executable_mission_reason() -> String:
+	return _exec_transition_reason
+
+
+static func get_executable_objective_position() -> Vector3:
+	return _exec_objective_position
+
+
+static func is_creeping_executable_active() -> bool:
+	return _exec_mission == ExecutableMission.CREEPING
+
+
+static func executable_mission_to_label(mission: ExecutableMission) -> String:
+	match mission:
+		ExecutableMission.CREEPING:
+			return "CREEPING"
+		ExecutableMission.ATTACK_PLAYER:
+			return "ATTACK_PLAYER"
+		ExecutableMission.LETHAL_PUSH:
+			return "LETHAL_PUSH"
+		ExecutableMission.DEFEND:
+			return "DEFEND"
+		ExecutableMission.EMERGENCY_DEFEND:
+			return "EMERGENCY_DEFEND"
+		ExecutableMission.REGROUP:
+			return "REGROUP"
+		ExecutableMission.RETREAT:
+			return "RETREAT"
+		ExecutableMission.ASSEMBLE:
+			return "ASSEMBLE"
+		ExecutableMission.IDLE:
+			return "IDLE"
+		_:
+			return "NONE"
+
+
+static func set_executable_mission(
+	mission: ExecutableMission,
+	reason: String,
+	objective_node: Node3D = null,
+	objective_position: Vector3 = Vector3.ZERO,
+	objective_name: String = "",
+	order_label: String = "",
+	squad: Array = [],
+	camp_reserved: bool = false
+) -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	var changed: bool = mission != _exec_mission
+	var objective_changed: bool = false
+	if objective_node != null and is_instance_valid(objective_node):
+		objective_changed = (
+			_exec_objective_node == null
+			or not is_instance_valid(_exec_objective_node)
+			or _exec_objective_node.get_instance_id() != objective_node.get_instance_id()
+		)
+	elif _exec_objective_node != null:
+		objective_changed = true
+
+	_exec_mission = mission
+	_exec_transition_reason = reason
+	_exec_order_label = order_label
+	_exec_camp_reserved = camp_reserved
+	_exec_objective_name = objective_name
+	if objective_node != null and is_instance_valid(objective_node):
+		_exec_objective_node = objective_node
+		if objective_position == Vector3.ZERO and objective_node is Node3D:
+			_exec_objective_position = objective_node.global_position
+		else:
+			_exec_objective_position = objective_position
+	else:
+		_exec_objective_node = null
+		_exec_objective_position = objective_position
+
+	_exec_squad_ids.clear()
+	for unit_variant: Variant in NodeSafety.clean_node_array(squad):
+		if NodeSafety.is_alive_node(unit_variant):
+			_exec_squad_ids.append((unit_variant as Node).get_instance_id())
+
+	if changed or objective_changed:
+		_exec_mission_start_msec = now_msec
+		_exec_last_progress_msec = now_msec
+		_exec_last_distance = -1.0
+		_exec_watchdog_refreshed = false
+		EnemyAIDebug.log_once(
+			"exec_mission",
+			"MISSION: %s | Reason: %s" % [executable_mission_to_label(mission), reason]
+		)
+
+
+static func clear_executable_mission(reason: String = "") -> void:
+	set_executable_mission(
+		ExecutableMission.IDLE,
+		reason if not reason.is_empty() else "cleared",
+		null,
+		Vector3.ZERO,
+		"",
+		"",
+		[],
+		false
+	)
+
+
+static func _clear_executable_mission_state(reason: String) -> void:
+	_exec_mission = ExecutableMission.NONE
+	_exec_objective_node = null
+	_exec_objective_position = Vector3.ZERO
+	_exec_objective_name = ""
+	_exec_mission_start_msec = 0
+	_exec_last_progress_msec = 0
+	_exec_last_distance = -1.0
+	_exec_squad_ids.clear()
+	_exec_order_label = ""
+	_exec_transition_reason = reason
+	_exec_camp_reserved = false
+	_exec_watchdog_timer = 0.0
+	_exec_watchdog_refreshed = false
+	_exec_last_report = ""
+	_allow_hostile_engagement = false
+
+
+static func note_mission_order(order_label: String, destination: Vector3 = Vector3.ZERO) -> void:
+	if not order_label.is_empty():
+		_exec_order_label = order_label
+	if destination != Vector3.ZERO:
+		_exec_objective_position = destination
+	_exec_last_progress_msec = Time.get_ticks_msec()
+
+
+static func note_mission_progress(
+	army_center: Vector3,
+	in_combat: bool = false,
+	units_alive: int = -1
+) -> void:
+	if _exec_mission in [ExecutableMission.NONE, ExecutableMission.IDLE]:
+		return
+
+	var now_msec: int = Time.get_ticks_msec()
+	if in_combat:
+		_exec_last_progress_msec = now_msec
+		_exec_watchdog_refreshed = false
+		return
+
+	if units_alive == 0:
+		return
+
+	if army_center == Vector3.ZERO or _exec_objective_position == Vector3.ZERO:
+		return
+
+	var distance: float = horizontal_distance(army_center, _exec_objective_position)
+	if _exec_last_distance < 0.0:
+		_exec_last_distance = distance
+		_exec_last_progress_msec = now_msec
+		return
+
+	if distance < _exec_last_distance - MISSION_PROGRESS_DISTANCE_EPSILON:
+		_exec_last_distance = distance
+		_exec_last_progress_msec = now_msec
+		_exec_watchdog_refreshed = false
+	elif distance <= _exec_last_distance:
+		_exec_last_distance = distance
+
+
+static func get_seconds_since_mission_progress() -> float:
+	if _exec_last_progress_msec <= 0:
+		return 0.0
+	return float(Time.get_ticks_msec() - _exec_last_progress_msec) / 1000.0
+
+
+static func get_authoritative_mission_report(tree: SceneTree) -> String:
+	_sanitize_executable_objective()
+	var mission_label: String = executable_mission_to_label(_exec_mission)
+	if _exec_mission == ExecutableMission.NONE:
+		mission_label = _derive_display_mission_from_mode()
+
+	var parts: PackedStringArray = PackedStringArray([
+		"MISSION: %s" % mission_label,
+	])
+
+	if not _exec_objective_name.is_empty():
+		if _exec_mission == ExecutableMission.CREEPING:
+			parts.append("Camp: %s" % _exec_objective_name)
+		else:
+			parts.append("Target: %s" % _exec_objective_name)
+
+	var army_center: Vector3 = Vector3.ZERO
+	if tree != null:
+		army_center = compute_army_center(collect_living_combat_units(tree))
+	if army_center != Vector3.ZERO and _exec_objective_position != Vector3.ZERO:
+		parts.append(
+			"Distance: %.1f" % horizontal_distance(army_center, _exec_objective_position)
+		)
+
+	if _exec_mission not in [ExecutableMission.NONE, ExecutableMission.IDLE]:
+		parts.append("Progress: %.1fs" % get_seconds_since_mission_progress())
+
+	if not _exec_order_label.is_empty():
+		parts.append("Order: %s" % _exec_order_label)
+
+	if _exec_mission == ExecutableMission.CREEPING:
+		parts.append("Reserve: %s" % ("yes" if _exec_camp_reserved else "no"))
+
+	if not _exec_transition_reason.is_empty():
+		parts.append("Reason: %s" % _exec_transition_reason)
+
+	var report: String = " | ".join(parts)
+	_exec_last_report = report
+	return report
+
+
+static func _derive_display_mission_from_mode() -> String:
+	match _army_mode:
+		ArmyMode.ATTACKING:
+			return "ATTACK_PLAYER"
+		ArmyMode.DEFENDING:
+			return "EMERGENCY_DEFEND" if _emergency_defense_active else "DEFEND"
+		ArmyMode.INTERCEPTING:
+			return "DEFEND"
+		ArmyMode.RETREATING:
+			return "RETREAT"
+		ArmyMode.REGROUPING:
+			return "REGROUP"
+		ArmyMode.ASSEMBLING:
+			return "ASSEMBLE"
+		ArmyMode.CREEPING:
+			## Never claim CREEPING from mode alone — requires executable confirmation.
+			return "IDLE"
+		_:
+			return "IDLE"
+
+
+static func _sanitize_executable_objective() -> void:
+	if _exec_objective_node != null and not is_instance_valid(_exec_objective_node):
+		_exec_objective_node = null
+		if _exec_mission == ExecutableMission.CREEPING:
+			_exec_camp_reserved = false
+
+
+static func validate_creeping_mission(
+	tree: SceneTree,
+	camp: Node3D,
+	reserved_camp_id: int,
+	army_center: Vector3,
+	has_active_order: bool,
+	in_combat: bool
+) -> Dictionary:
+	if not NodeSafety.is_alive_node(camp):
+		return {"valid": false, "reason": "null or dead camp"}
+
+	if reserved_camp_id == 0 or camp.get_instance_id() != reserved_camp_id:
+		return {"valid": false, "reason": "camp reservation expired"}
+
+	if army_center == Vector3.ZERO:
+		return {"valid": false, "reason": "no army"}
+
+	var player_cc: CommandCenter = find_living_player_command_center(tree)
+	if player_cc != null:
+		var dist_player: float = horizontal_distance(army_center, player_cc.global_position)
+		var dist_camp: float = horizontal_distance(army_center, camp.global_position)
+		if (
+			dist_player <= HOSTILE_TERRITORY_BASE_RANGE
+			and dist_camp > CAMP_ENGAGEMENT_PROXY
+		):
+			return {"valid": false, "reason": "army near player base with no route to camp"}
+
+	if not has_active_order and not in_combat:
+		## Allow brief gaps between reissues; watchdog handles sustained stalls.
+		if get_seconds_since_mission_progress() > MISSION_PROGRESS_STALL_SECONDS * 0.5:
+			return {"valid": false, "reason": "no army order"}
+
+	return {"valid": true, "reason": ""}
+
+
+## Proxy constant kept local so creep manager engagement radius need not be imported.
+const CAMP_ENGAGEMENT_PROXY := 26.0
+
+
+static func is_army_in_hostile_territory(
+	tree: SceneTree,
+	army_center: Vector3,
+	rally_position: Vector3 = Vector3.ZERO
+) -> bool:
+	if army_center == Vector3.ZERO:
+		return false
+
+	var player_cc: CommandCenter = find_living_player_command_center(tree)
+	if player_cc == null:
+		return false
+
+	var dist_player: float = horizontal_distance(army_center, player_cc.global_position)
+	if dist_player <= HOSTILE_TERRITORY_BASE_RANGE:
+		return true
+
+	if rally_position == Vector3.ZERO:
+		rally_position = resolve_enemy_rally_position(tree)
+	if rally_position == Vector3.ZERO:
+		return false
+
+	var dist_rally: float = horizontal_distance(army_center, rally_position)
+	return dist_player + 12.0 < dist_rally
+
+
+static func resolve_hostile_territory_target(
+	tree: SceneTree,
+	from_position: Vector3
+) -> Dictionary:
+	if from_position == Vector3.ZERO:
+		return {}
+
+	## 1) Dangerous nearby military
+	var military: Array = collect_player_military_near(
+		tree,
+		from_position,
+		HOSTILE_TERRITORY_ENGAGE_RANGE
+	)
+	var best_military: Node3D = null
+	var best_military_score: float = -INF
+	for unit_variant: Variant in military:
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Node3D:
+			continue
+		var unit: Node3D = unit_variant as Node3D
+		var score: float = get_unit_type_strength_weight(unit as Node) * 100.0
+		score -= horizontal_distance(from_position, unit.global_position)
+		if unit is Hero:
+			score += 40.0
+		if score > best_military_score:
+			best_military_score = score
+			best_military = unit
+	if best_military != null:
+		var label: String = "PlayerHero" if best_military is Hero else "PlayerMilitary"
+		return {
+			"node": best_military,
+			"position": best_military.global_position,
+			"name": label,
+		}
+
+	## 2) Nearby towers (prefer those within engagement range of the army)
+	var best_tower: Tower = null
+	var best_tower_distance: float = INF
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		BUILDINGS_GROUP
+	):
+		if not NodeSafety.is_alive_node(node_variant) or not node_variant is Tower:
+			continue
+		if not CombatTargetValidation.is_player_selectable_building(node_variant as Node):
+			continue
+		if not _is_living_building(node_variant as Building):
+			continue
+		var tower: Tower = node_variant as Tower
+		var tower_distance: float = horizontal_distance(from_position, tower.global_position)
+		if tower_distance > HOSTILE_TERRITORY_ENGAGE_RANGE:
+			continue
+		if tower_distance < best_tower_distance:
+			best_tower_distance = tower_distance
+			best_tower = tower
+	if best_tower != null:
+		return {
+			"node": best_tower,
+			"position": best_tower.global_position,
+			"name": "Tower",
+		}
+
+	## 3) Main Town Hall / Command Center
+	var command_center: CommandCenter = find_living_player_command_center(tree)
+	if command_center != null:
+		return {
+			"node": command_center,
+			"position": command_center.global_position,
+			"name": "MainCC",
+		}
+
+	## 4) Production buildings
+	var production: Node3D = _find_player_production_building(tree, from_position)
+	if production != null:
+		return {
+			"node": production,
+			"position": production.global_position,
+			"name": production.name,
+		}
+
+	## 5) Workers
+	var worker: Node3D = _find_nearest_living_player_worker(tree, from_position)
+	if worker != null:
+		return {
+			"node": worker,
+			"position": worker.global_position,
+			"name": "Worker",
+		}
+
+	## 6) Any other building
+	var building: Node3D = _find_nearest_living_player_building(tree, from_position)
+	if building != null:
+		return {
+			"node": building,
+			"position": building.global_position,
+			"name": building.name,
+		}
+
+	return {}
+
+
+static func is_army_strong_enough_for_hostile_push(
+	tree: SceneTree,
+	units: Array,
+	army_center: Vector3
+) -> Dictionary:
+	var ai_strength: float = estimate_combat_strength(units)
+	var player_strength: float = get_effective_player_strength_at(
+		tree,
+		army_center,
+		HOSTILE_TERRITORY_ENGAGE_RANGE
+	)
+	var ratio: float = ai_strength / maxf(player_strength, 1.0)
+	var lethal: bool = (
+		ratio >= HOSTILE_TERRITORY_LETHAL_RATIO
+		or EnemyAggression.get_lethal_score() >= 70.0
+		or EnemyAggression.get_confidence() >= EnemyAggression.Confidence.HIGH
+	)
+	return {
+		"allowed": ratio >= HOSTILE_TERRITORY_STRENGTH_RATIO or lethal or player_strength <= 0.0,
+		"lethal": lethal,
+		"ratio": ratio,
+		"ai_strength": ai_strength,
+		"player_strength": player_strength,
+	}
+
+
+static func handle_hostile_territory_idle(
+	tree: SceneTree,
+	units: Array,
+	army_center: Vector3,
+	reason: String = "army in hostile territory"
+) -> bool:
+	units = NodeSafety.clean_node_array(units)
+	units = filter_units_for_field_combat(units, EnemyUnitMission.Mission.ATTACK)
+	if units.is_empty() or army_center == Vector3.ZERO:
+		return false
+
+	if is_defense_blocking_offense() or get_army_mode() == ArmyMode.RETREATING:
+		return false
+
+	var strength: Dictionary = is_army_strong_enough_for_hostile_push(
+		tree,
+		units,
+		army_center
+	)
+	if not strength.get("allowed", false):
+		return false
+
+	var target: Dictionary = resolve_hostile_territory_target(tree, army_center)
+	var destination: Vector3 = target.get("position", Vector3.ZERO)
+	if destination == Vector3.ZERO:
+		var player_cc: CommandCenter = find_living_player_command_center(tree)
+		if player_cc != null:
+			destination = player_cc.global_position
+			target = {"node": player_cc, "position": destination, "name": "MainCC"}
+	if destination == Vector3.ZERO:
+		return false
+
+	var lethal: bool = bool(strength.get("lethal", false))
+	var mission: ExecutableMission = (
+		ExecutableMission.LETHAL_PUSH if lethal else ExecutableMission.ATTACK_PLAYER
+	)
+	var objective_node: Node3D = target.get("node") as Node3D
+	var objective_name: String = String(target.get("name", "HostileTarget"))
+
+	_allow_hostile_engagement = true
+	var issued: bool = false
+	if try_claim_army_mode(ArmyMode.ATTACKING, true):
+		EnemyUnitMission.set_main_army_mission(
+			EnemyUnitMission.Mission.ATTACK,
+			reason
+		)
+		request_strategic_state(StrategicState.ATTACKING, reason)
+		set_executable_mission(
+			mission,
+			reason,
+			objective_node,
+			destination,
+			objective_name,
+			"attack-move",
+			units,
+			false
+		)
+		with_authorized_orders(func() -> void:
+			command_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
+		)
+		note_mission_order("attack-move", destination)
+		begin_fight_tracking(units, army_center)
+		issued = true
+		EnemyAIDebug.log_once(
+			"hostile_territory",
+			"Hostile territory attack -> %s (%s)" % [objective_name, reason]
+		)
+	_allow_hostile_engagement = false
+	return issued
+
+
+static func refresh_stalled_mission_order(tree: SceneTree) -> bool:
+	if _exec_objective_position == Vector3.ZERO:
+		return false
+
+	var units: Array = []
+	if not _exec_squad_ids.is_empty():
+		for unit_id: int in _exec_squad_ids:
+			var node: Object = instance_from_id(unit_id)
+			if NodeSafety.is_alive_node(node):
+				units.append(node)
+	if units.is_empty():
+		units = collect_living_combat_units(tree)
+	units = NodeSafety.clean_node_array(units)
+	if units.is_empty():
+		return false
+
+	var mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
+	var mode: ArmyMode = ArmyMode.ATTACKING
+	match _exec_mission:
+		ExecutableMission.CREEPING:
+			mission = EnemyUnitMission.Mission.CREEP
+			mode = ArmyMode.CREEPING
+		ExecutableMission.DEFEND, ExecutableMission.EMERGENCY_DEFEND:
+			mission = EnemyUnitMission.Mission.DEFEND
+			mode = ArmyMode.DEFENDING
+		ExecutableMission.RETREAT:
+			with_authorized_orders(func() -> void:
+				command_retreat_to(units, _exec_objective_position)
+			)
+			note_mission_order("retreat-refresh", _exec_objective_position)
+			return true
+		ExecutableMission.REGROUP, ExecutableMission.ASSEMBLE:
+			with_authorized_orders(func() -> void:
+				command_hold_at_rally(units, _exec_objective_position)
+			)
+			note_mission_order("hold-refresh", _exec_objective_position)
+			return true
+		ExecutableMission.ATTACK_PLAYER, ExecutableMission.LETHAL_PUSH:
+			_allow_hostile_engagement = true
+		_:
+			return false
+
+	var ok: bool = issue_group_combat_move(
+		tree,
+		units,
+		_exec_objective_position,
+		mission,
+		mode,
+		_allow_hostile_engagement
+	)
+	_allow_hostile_engagement = false
+	if ok:
+		note_mission_order("%s-refresh" % _exec_order_label, _exec_objective_position)
+	return ok
+
+
+static func tick_mission_watchdog(tree: SceneTree, delta: float) -> void:
+	_exec_watchdog_timer += delta
+	if _exec_watchdog_timer < MISSION_WATCHDOG_INTERVAL_SECONDS:
+		return
+	_exec_watchdog_timer = 0.0
+
+	_sanitize_executable_objective()
+	if _exec_mission in [
+		ExecutableMission.NONE,
+		ExecutableMission.IDLE,
+		ExecutableMission.ASSEMBLE,
+		ExecutableMission.REGROUP,
+	]:
+		_maybe_recover_idle_army(tree)
+		return
+
+	if is_defense_blocking_offense() or get_army_mode() == ArmyMode.RETREATING:
+		return
+
+	var units: Array = collect_living_combat_units(tree)
+	units = NodeSafety.clean_node_array(units)
+	var army_center: Vector3 = compute_army_center(units)
+	var in_combat: bool = is_enemy_army_under_attack(
+		tree,
+		units,
+		LOCAL_FIGHT_RADIUS
+	)
+	note_mission_progress(army_center, in_combat, units.size())
+
+	if get_seconds_since_mission_progress() < MISSION_PROGRESS_STALL_SECONDS:
+		return
+
+	## One safe refresh, then cancel and fall back.
+	if not _exec_watchdog_refreshed:
+		_exec_watchdog_refreshed = true
+		if refresh_stalled_mission_order(tree):
+			_exec_last_progress_msec = Time.get_ticks_msec()
+			EnemyAIDebug.log_once(
+				"mission_watchdog",
+				"Mission watchdog refreshed order (%s)" % executable_mission_to_label(_exec_mission)
+			)
+			return
+
+	_resolve_stalled_mission_fallback(tree, units, army_center)
+
+
+static func _resolve_stalled_mission_fallback(
+	tree: SceneTree,
+	units: Array,
+	army_center: Vector3
+) -> void:
+	var stalled_mission: ExecutableMission = _exec_mission
+	var reason: String = "mission stalled (%s)" % executable_mission_to_label(stalled_mission)
+
+	## 1) Emergency defense already owns higher priority elsewhere.
+	if is_emergency_defense_active():
+		return
+
+	## 2) Nearby hostile / hostile territory push
+	if army_center != Vector3.ZERO:
+		if handle_hostile_territory_idle(tree, units, army_center, reason):
+			return
+		var nearby: Array = collect_player_military_near(
+			tree,
+			army_center,
+			HOSTILE_TERRITORY_ENGAGE_RANGE
+		)
+		if not nearby.is_empty():
+			var fight_dest: Vector3 = compute_army_center(nearby)
+			if fight_dest != Vector3.ZERO and handle_hostile_territory_idle(
+				tree,
+				units,
+				army_center,
+				"attack nearby hostile"
+			):
+				return
+
+	## 3) Lethal push if player is weak (phase-gated unless already hostile)
+	if (
+		can_launch_player_attack(tree)
+		and EnemyAggression.get_confidence() >= EnemyAggression.Confidence.HIGH
+	):
+		var objective: Dictionary = resolve_attack_objective(
+			tree,
+			resolve_enemy_rally_position(tree)
+		)
+		var dest: Vector3 = objective.get("position", Vector3.ZERO)
+		if dest != Vector3.ZERO:
+			if issue_group_combat_move(
+				tree,
+				units,
+				dest,
+				EnemyUnitMission.Mission.ATTACK,
+				ArmyMode.ATTACKING,
+				true
+			):
+				set_executable_mission(
+					ExecutableMission.LETHAL_PUSH,
+					reason,
+					objective.get("node") as Node3D,
+					dest,
+					"LethalTarget",
+					"attack-move",
+					units,
+					false
+				)
+				return
+
+	## 4/5/6) Leave creeping / regroup / defend at rally
+	clear_executable_mission(reason)
+	var rally: Vector3 = resolve_enemy_rally_position(tree)
+	if rally != Vector3.ZERO:
+		if try_claim_army_mode(ArmyMode.REGROUPING):
+			set_executable_mission(
+				ExecutableMission.REGROUP,
+				reason,
+				null,
+				rally,
+				"Rally",
+				"move",
+				units,
+				false
+			)
+			with_authorized_orders(func() -> void:
+				command_regroup_at_rally(tree, rally)
+			)
+			EnemyUnitMission.set_main_army_mission(
+				EnemyUnitMission.Mission.RALLY,
+				reason
+			)
+
+
+static func _maybe_recover_idle_army(tree: SceneTree) -> void:
+	if is_defense_blocking_offense():
+		return
+	if is_attack_wave_active():
+		return
+	if get_army_mode() in [
+		ArmyMode.ASSEMBLING,
+		ArmyMode.RETREATING,
+		ArmyMode.DEFENDING,
+		ArmyMode.INTERCEPTING,
+		ArmyMode.ATTACKING,
+	]:
+		return
+
+	var units: Array = collect_living_combat_units(tree)
+	units = NodeSafety.clean_node_array(units)
+	if units.size() < CREEP_MIN_NON_HERO_UNITS:
+		return
+
+	var army_center: Vector3 = compute_army_center(units)
+	if army_center == Vector3.ZERO:
+		return
+
+	## Idle army in hostile territory must never stand still.
+	if is_army_in_hostile_territory(tree, army_center):
+		if handle_hostile_territory_idle(
+			tree,
+			units,
+			army_center,
+			"idle army in hostile territory"
+		):
+			return
+		initiate_group_retreat(tree, "weak idle army in hostile territory")
+		return
+
+	## Idle with nearby player threats → attack-move
+	var nearby: Array = collect_player_military_near(
+		tree,
+		army_center,
+		HOSTILE_TERRITORY_ENGAGE_RANGE
+	)
+	if not nearby.is_empty():
+		handle_hostile_territory_idle(tree, units, army_center, "idle army near hostiles")
+
+
 static func _refresh_perf_overlay_status(_tree: SceneTree) -> void:
 	PerfCounters.set_combat_group_size(
 		NodeSafety.clean_node_array(_main_army_cache).size()
 	)
 	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
+	var report: String = get_authoritative_mission_report(_tree)
 	PerfCounters.set_ai_status(
 		PerfCounters.get_ai_phase(),
 		ArmyMode.keys()[_army_mode],
-		EnemyUnitMission.mission_to_label(EnemyUnitMission.get_main_army_mission())
+		executable_mission_to_label(_exec_mission)
 	)
+	PerfCounters.set_ai_mission_detail(report)
 
 static func _order_units_for_formation(units: Array) -> Array:
 	var eligible: Array = FormationManager.collect_eligible_units(units, true)

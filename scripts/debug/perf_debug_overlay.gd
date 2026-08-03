@@ -126,6 +126,7 @@ func _update_label() -> void:
 		"AI Phase: %s" % PerfCounters.get_ai_phase(),
 		"AI Combat: %s" % PerfCounters.get_ai_combat_state(),
 		"Mission Owner: %s" % PerfCounters.get_ai_mission_owner(),
+		"%s" % PerfCounters.get_ai_mission_detail(),
 		"Combat Group: %d" % PerfCounters.get_combat_group_size(),
 		"Pending AI Orders: %d" % PerfCounters.get_pending_group_orders(),
 		"Orders/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),

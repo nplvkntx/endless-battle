@@ -37,6 +37,7 @@ var _combat_group_size: int = 0
 var _ai_phase_name: String = "-"
 var _ai_combat_state: String = "-"
 var _ai_mission_owner: String = "-"
+var _ai_mission_detail: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -159,6 +160,10 @@ func set_ai_status(phase: String, combat_state: String, mission_owner: String) -
 	_ai_mission_owner = mission_owner if not mission_owner.is_empty() else "-"
 
 
+func set_ai_mission_detail(detail: String) -> void:
+	_ai_mission_detail = detail if not detail.is_empty() else "-"
+
+
 func get_ai_phase() -> String:
 	return _ai_phase_name
 
@@ -169,6 +174,10 @@ func get_ai_combat_state() -> String:
 
 func get_ai_mission_owner() -> String:
 	return _ai_mission_owner
+
+
+func get_ai_mission_detail() -> String:
+	return _ai_mission_detail
 
 
 func sample_fps(delta: float) -> void:
@@ -324,6 +333,7 @@ func reset_all() -> void:
 	_ai_phase_name = "-"
 	_ai_combat_state = "-"
 	_ai_mission_owner = "-"
+	_ai_mission_detail = "-"
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0
