@@ -118,6 +118,8 @@ func _capture_persistent_snapshot() -> Dictionary:
 		and not HeroProgressionStore.has_saved_enemy_progression()
 		and not HeroProgressionStore.has_locked_kit(false)
 		and not HeroProgressionStore.has_locked_kit(true)
+		and not HeroProgressionStore.has_living_hero(false)
+		and not HeroProgressionStore.has_living_hero(true)
 		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
 		and CommandFeedback.get_active_marker_count() == 0
 		and CommandFeedback.get_active_dust_count() == 0

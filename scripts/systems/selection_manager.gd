@@ -51,16 +51,18 @@ func get_multi_selection_ui_info() -> Dictionary:
 	var has_combat: bool = false
 	var category: StringName = &""
 
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
+	for unit_variant: Variant in selected_units:
+		if not _is_commandable_unit(unit_variant):
 			continue
-		if unit is Hero and primary_hero == null:
-			primary_hero = unit as Hero
+		if primary_hero == null:
+			var as_hero: Hero = HeroProgressionStore.as_living_hero(unit_variant)
+			if as_hero != null:
+				primary_hero = as_hero
 		if count <= 1:
 			continue
-		if unit is Worker:
+		if unit_variant is Worker:
 			has_worker = true
-		elif _is_combat_order_unit(unit):
+		elif _is_combat_order_unit(unit_variant):
 			has_combat = true
 		else:
 			category = MULTI_SELECTION_OTHER
@@ -88,7 +90,7 @@ func has_commandable_selected_units() -> bool:
 
 
 func get_primary_ui_hero() -> Hero:
-	return get_multi_selection_ui_info().primary_hero
+	return HeroProgressionStore.as_living_hero(get_multi_selection_ui_info().get("primary_hero"))
 
 
 ## Units + optional building currently selected, for control-group assign/add.
@@ -194,15 +196,17 @@ func count_idle_player_workers() -> int:
 
 
 func _find_player_hero() -> Hero:
+	var registered: Hero = HeroProgressionStore.get_living_hero(false)
+	if registered != null and _is_commandable_unit(registered):
+		return registered
+
 	var tree: SceneTree = get_tree()
 	if tree == null:
 		return null
 
-	for node: Node in tree.get_nodes_in_group(&"heroes"):
-		if not node is Hero:
-			continue
-		var hero: Hero = node as Hero
-		if not NodeSafety.is_alive_node(hero):
+	for node_variant: Variant in tree.get_nodes_in_group(&"heroes"):
+		var hero: Hero = HeroProgressionStore.as_living_hero(node_variant)
+		if hero == null:
 			continue
 		if hero.is_in_group(&"enemies"):
 			continue
@@ -210,14 +214,16 @@ func _find_player_hero() -> Hero:
 			continue
 		if not _is_commandable_unit(hero):
 			continue
+		HeroProgressionStore.register_living_hero(hero)
 		return hero
 
-	for node: Node in tree.get_nodes_in_group(UNIT_GROUP):
-		if not node is Hero:
+	for node_variant: Variant in tree.get_nodes_in_group(UNIT_GROUP):
+		var hero: Hero = HeroProgressionStore.as_living_hero(node_variant)
+		if hero == null:
 			continue
-		var hero: Hero = node as Hero
 		if not _is_commandable_unit(hero):
 			continue
+		HeroProgressionStore.register_living_hero(hero)
 		return hero
 
 	return null
@@ -938,22 +944,33 @@ func _set_selected_units(units: Array[Unit]) -> void:
 
 func _apply_units_selection_diff(next_units: Array[Unit]) -> void:
 	var next_ids: Dictionary = {}
-	for unit: Unit in next_units:
-		next_ids[unit.get_instance_id()] = true
+	for unit_variant: Variant in next_units:
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Unit:
+			continue
+		next_ids[(unit_variant as Object).get_instance_id()] = true
 
 	for index: int in range(selected_units.size() - 1, -1, -1):
-		var unit: Unit = selected_units[index]
+		var unit_variant: Variant = selected_units[index]
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Unit:
+			selected_units.remove_at(index)
+			continue
+		var unit: Unit = unit_variant as Unit
 		if next_ids.has(unit.get_instance_id()):
 			continue
 		_untrack_unit_selection(unit)
 		selected_units.remove_at(index)
 
 	var current_ids: Dictionary = {}
-	for unit: Unit in selected_units:
-		current_ids[unit.get_instance_id()] = true
+	for unit_variant: Variant in selected_units:
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Unit:
+			continue
+		current_ids[(unit_variant as Object).get_instance_id()] = true
 
 	var ordered_units: Array[Unit] = []
-	for unit: Unit in next_units:
+	for unit_variant: Variant in next_units:
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Unit:
+			continue
+		var unit: Unit = unit_variant as Unit
 		ordered_units.append(unit)
 		if current_ids.has(unit.get_instance_id()):
 			continue
@@ -1011,11 +1028,19 @@ func _clear_building_selection_without_signal() -> void:
 
 func _clear_selection_without_signal() -> void:
 	for index: int in range(selected_units.size() - 1, -1, -1):
-		_untrack_unit_selection(selected_units[index])
+		var unit_variant: Variant = selected_units[index]
+		if NodeSafety.is_alive_node(unit_variant) and unit_variant is Unit:
+			_untrack_unit_selection(unit_variant as Unit)
+		else:
+			## Drop freed/stale entries without typed assignment.
+			pass
 	selected_units.clear()
 
 
 func _on_unit_died(unit: Unit) -> void:
+	if unit != null and is_instance_valid(unit) and unit is Hero:
+		HeroProgressionStore.clear_living_hero(unit as Hero)
+
 	if not selected_units.has(unit):
 		return
 
@@ -1025,15 +1050,30 @@ func _on_unit_died(unit: Unit) -> void:
 func _on_selected_unit_tree_exiting(expected_instance_id: int) -> void:
 	_unit_tree_exiting_handlers.erase(expected_instance_id)
 
-	var unit_ref: Variant = instance_from_id(expected_instance_id)
-	if not NodeSafety.is_alive_node(unit_ref) or not unit_ref is Unit:
-		return
+	## Always purge by instance id — the Object may already be invalid.
+	var removed: bool = false
+	for index: int in range(selected_units.size() - 1, -1, -1):
+		var unit_variant: Variant = selected_units[index]
+		if not is_instance_valid(unit_variant):
+			selected_units.remove_at(index)
+			removed = true
+			continue
+		if (unit_variant as Object).get_instance_id() != expected_instance_id:
+			continue
+		if unit_variant is Unit:
+			_untrack_unit_selection(unit_variant as Unit)
+		selected_units.remove_at(index)
+		removed = true
 
-	var unit: Unit = unit_ref as Unit
-	if not selected_units.has(unit):
-		return
+	if _last_clicked_unit != null:
+		if (
+			not is_instance_valid(_last_clicked_unit)
+			or _last_clicked_unit.get_instance_id() == expected_instance_id
+		):
+			_reset_click_tracking()
 
-	_remove_unit_from_selection(unit, true)
+	if removed:
+		selection_changed.emit(selected_units)
 
 
 func _remove_unit_from_selection(unit: Unit, emit_signal: bool) -> void:

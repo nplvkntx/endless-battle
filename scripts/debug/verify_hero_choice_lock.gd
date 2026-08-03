@@ -349,6 +349,7 @@ func _verify_match_reset_clears_lock(failures: PackedStringArray) -> void:
 	_expect(failures, "reset: player lock cleared", not HeroProgressionStore.has_locked_kit(false))
 	_expect(failures, "reset: enemy lock cleared", not HeroProgressionStore.has_locked_kit(true))
 	_expect(failures, "reset: player snapshot cleared", not HeroProgressionStore.has_saved_progression())
+	_expect(failures, "reset: living heroes cleared", not HeroProgressionStore.has_living_hero(false) and not HeroProgressionStore.has_living_hero(true))
 	_expect(
 		failures,
 		"reset: all kits selectable again",

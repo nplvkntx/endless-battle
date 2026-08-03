@@ -38,7 +38,9 @@ func get_active_ability_id() -> StringName:
 
 
 func get_active_hero() -> Hero:
-	return _active_hero if is_targeting() else null
+	if not is_targeting():
+		return null
+	return HeroProgressionStore.as_living_hero(_active_hero)
 
 
 func get_cursor_state() -> CursorState:
@@ -93,10 +95,14 @@ func begin_targeting(hero: Hero, ability_id: StringName) -> bool:
 
 func cancel_targeting() -> void:
 	var had_targeting: bool = is_targeting()
-	var hero: Hero = _active_hero
+	var hero_ref: Variant = _active_hero
 	var ability_id: StringName = _active_ability_id
 	_clear_state()
 	if had_targeting:
+		## Prefer living hero for signal payload; never assign a freed Object into Hero.
+		var hero: Hero = null
+		if NodeSafety.is_alive_node(hero_ref) and hero_ref is Hero:
+			hero = hero_ref as Hero
 		targeting_cancelled.emit(hero, ability_id)
 		targeting_changed.emit()
 
@@ -147,13 +153,22 @@ func on_selection_changed() -> void:
 		cancel_targeting()
 		return
 	if selection.has_method(&"get_primary_ui_hero"):
-		var primary: Hero = selection.call(&"get_primary_ui_hero") as Hero
+		var primary: Hero = HeroProgressionStore.as_living_hero(
+			selection.call(&"get_primary_ui_hero")
+		)
 		if primary != _active_hero:
 			cancel_targeting()
 
 
-func on_hero_died(hero: Hero) -> void:
-	if is_targeting() and hero == _active_hero:
+func on_hero_died(hero: Variant) -> void:
+	var dying: Hero = null
+	if hero != null and is_instance_valid(hero) and hero is Hero:
+		dying = hero as Hero
+	if dying != null:
+		HeroProgressionStore.clear_living_hero(dying)
+	if is_targeting() and (
+		dying == _active_hero or not NodeSafety.is_alive_node(_active_hero)
+	):
 		cancel_targeting()
 
 

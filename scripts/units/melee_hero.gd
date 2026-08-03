@@ -74,11 +74,13 @@ func _ready() -> void:
 		current_mana = max_mana
 		mana_changed.emit(current_mana, max_mana)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
+	HeroProgressionStore.register_living_hero(self)
 	died.connect(_notify_hero_altars_of_death)
 	died.connect(_on_hero_died_cancel_targeting)
 
 
 func _on_hero_died_cancel_targeting(_unit: Unit) -> void:
+	HeroProgressionStore.clear_living_hero(self)
 	if HeroAbilityTargetingController != null:
 		HeroAbilityTargetingController.on_hero_died(self)
 
@@ -275,9 +277,14 @@ func try_ai_cast_abilities(_context: Dictionary) -> void:
 
 
 func _notify_hero_altars_of_death(_unit: Unit) -> void:
-	for node: Node in get_tree().get_nodes_in_group("buildings"):
-		if node is HeroAltar:
-			(node as HeroAltar).hero_altar_state_changed.emit()
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	for node_variant: Variant in tree.get_nodes_in_group("buildings"):
+		if not NodeSafety.is_alive_node(node_variant) or not node_variant is HeroAltar:
+			continue
+		(node_variant as HeroAltar).hero_altar_state_changed.emit()
 
 
 func _apply_level_mana_gain() -> void:
@@ -1027,7 +1034,11 @@ func get_current_health() -> int:
 
 
 func _on_health_depleted() -> void:
+	## Save progression and clear living-hero registry before UI/selection reacts.
 	HeroProgressionStore.save_from_hero(self)
+	HeroProgressionStore.clear_living_hero(self)
+	if HeroAbilityTargetingController != null:
+		HeroAbilityTargetingController.on_hero_died(self)
 	if CombatTargetValidation.is_enemy_faction(self):
 		HeroXpRewards.notify_unit_killed(self)
 		if is_in_group(&"enemy_combat_units"):
@@ -1043,6 +1054,7 @@ func _on_health_depleted() -> void:
 
 
 func _exit_tree() -> void:
+	HeroProgressionStore.clear_living_hero(self)
 	cancel_attack_move()
 	cancel_attack()
 	_on_prepare_for_new_player_order()

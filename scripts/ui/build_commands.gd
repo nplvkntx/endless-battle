@@ -2007,7 +2007,11 @@ func _get_tracked_hero_for_input() -> Hero:
 	if selection_manager.selected_building != null:
 		return null
 
-	return selection_manager.get_primary_ui_hero()
+	var tracked: Hero = HeroProgressionStore.as_living_hero(_tracked_hero)
+	if tracked != null:
+		return tracked
+
+	return HeroProgressionStore.as_living_hero(selection_manager.get_primary_ui_hero())
 
 
 func _set_hero_altar_button_labels() -> void:
@@ -2377,13 +2381,11 @@ func _apply_ability_targeting_highlight(button: Button, ability_id: StringName) 
 	button.modulate = Color(1.25, 1.15, 0.55, 1.0) if is_active else Color.WHITE
 
 
-func _set_tracked_hero(hero: Hero) -> void:
+func _set_tracked_hero(hero_ref: Variant = null) -> void:
 	_disconnect_tracked_hero_signals()
-	if hero != null and is_instance_valid(hero):
-		_tracked_hero = hero
-	else:
-		_tracked_hero = null
-	if _tracked_hero != null and is_instance_valid(_tracked_hero):
+	var hero: Hero = HeroProgressionStore.as_living_hero(hero_ref)
+	_tracked_hero = hero
+	if _tracked_hero != null:
 		if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 			_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_progression_changed)
 		if not _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
@@ -2399,20 +2401,24 @@ func _set_tracked_hero(hero: Hero) -> void:
 
 
 func _disconnect_tracked_hero_signals() -> void:
-	if _tracked_hero == null or not is_instance_valid(_tracked_hero):
+	var tracked_ref: Variant = _tracked_hero
+	if not NodeSafety.is_alive_node(tracked_ref):
+		_tracked_hero = null
 		return
 
-	if _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
-		_tracked_hero.ability_progression_changed.disconnect(_on_tracked_hero_progression_changed)
-	if _tracked_hero.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
-		_tracked_hero.ability_points_changed.disconnect(_on_tracked_hero_progression_changed)
-	if _tracked_hero.level_changed.is_connected(_on_tracked_hero_progression_changed):
-		_tracked_hero.level_changed.disconnect(_on_tracked_hero_progression_changed)
-	var passive: HeroPassiveComponent = _tracked_hero.get_passive_component()
+	var tracked: Hero = tracked_ref as Hero
+	if tracked.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
+		tracked.ability_progression_changed.disconnect(_on_tracked_hero_progression_changed)
+	if tracked.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
+		tracked.ability_points_changed.disconnect(_on_tracked_hero_progression_changed)
+	if tracked.level_changed.is_connected(_on_tracked_hero_progression_changed):
+		tracked.level_changed.disconnect(_on_tracked_hero_progression_changed)
+	var passive: HeroPassiveComponent = tracked.get_passive_component()
 	if passive != null and passive.passive_state_changed.is_connected(
 		_on_tracked_hero_progression_changed
 	):
 		passive.passive_state_changed.disconnect(_on_tracked_hero_progression_changed)
+	_tracked_hero = null
 
 
 func _on_tracked_hero_progression_changed(_unused = null) -> void:
@@ -2789,11 +2795,12 @@ func _on_execute_upgrade_pressed() -> void:
 	_try_learn_ability_from_ui(HeroAbilityProgression.ABILITY_R)
 
 
-func _on_building_selection_changed(building: Building) -> void:
+func _on_building_selection_changed(building_ref: Variant = null) -> void:
 	_disconnect_all_building_tracking()
 
-	if building != null and not is_instance_valid(building):
-		building = null
+	var building: Building = null
+	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+		building = building_ref as Building
 
 	if building is CommandCenter and is_instance_valid(building):
 		_selected_command_center = building as CommandCenter
@@ -2866,6 +2873,7 @@ func _on_building_selection_changed(building: Building) -> void:
 		_tracked_hero_altar = building as HeroAltar
 		_tracked_hero_altar.building_state_changed.connect(_on_hero_altar_state_changed)
 		_tracked_hero_altar.hero_altar_state_changed.connect(_on_hero_altar_state_changed)
+		_set_tracked_hero(null)
 		_update_hero_altar_status()
 	else:
 		_hero_status_label.text = "Hero: Ready to train"
@@ -2997,19 +3005,28 @@ func _on_shop_state_changed(_state: StringName) -> void:
 
 
 func _on_hero_altar_state_changed(_state: Variant = null) -> void:
+	if not is_instance_valid(self) or is_queued_for_deletion():
+		return
+	if _tracked_hero_altar == null or not is_instance_valid(_tracked_hero_altar):
+		return
+	## Never keep a dead hero instance in the command panel.
+	if not NodeSafety.is_alive_node(_tracked_hero):
+		_set_tracked_hero(null)
 	_update_hero_altar_status()
 	_refresh_command_visibility()
 
 
 func _update_hero_altar_status() -> void:
-	if _tracked_hero_altar == null:
+	if _tracked_hero_altar == null or not is_instance_valid(_tracked_hero_altar):
 		return
 
 	var locked_kit: StringName = HeroProgressionStore.get_locked_kit_id(false)
 	var pending_kit: StringName = _tracked_hero_altar.get_pending_training_kit_id(false)
 	var kit_name: String = HeroCatalog.get_display_name(pending_kit)
+	var living_hero: Hero = HeroProgressionStore.get_living_hero(false)
+	var has_living: bool = living_hero != null or _tracked_hero_altar.player_has_hero()
 
-	if _tracked_hero_altar.player_has_hero():
+	if has_living:
 		_hero_status_label.text = "%s: Already active" % kit_name
 	elif _tracked_hero_altar.is_training_hero():
 		_hero_status_label.text = "%s: Training..." % _tracked_hero_altar.get_active_unit_training_name()
@@ -3174,7 +3191,7 @@ func _refresh_command_visibility() -> void:
 
 	if not selected_units.is_empty() and selected_building == null and selected_units.size() > 1:
 		var multi_info: Dictionary = selection_manager.get_multi_selection_ui_info()
-		var primary_hero: Hero = multi_info.primary_hero
+		var primary_hero: Hero = HeroProgressionStore.as_living_hero(multi_info.get("primary_hero"))
 		if primary_hero != null:
 			_apply_hero_command_visibility()
 			_set_tracked_hero(primary_hero)
@@ -3200,7 +3217,10 @@ func _refresh_command_visibility() -> void:
 		return
 	else:
 		single_worker = selected_units.size() == 1 and single_unit is Worker
-		single_hero = selected_units.size() == 1 and single_unit is Hero
+		single_hero = (
+			selected_units.size() == 1
+			and HeroProgressionStore.as_living_hero(single_unit) != null
+		)
 		single_combat_unit = (
 			selected_units.size() == 1
 			and (
@@ -3220,7 +3240,7 @@ func _refresh_command_visibility() -> void:
 			_set_tracked_hero(null)
 		elif single_hero:
 			_apply_hero_command_visibility()
-			_set_tracked_hero(single_unit as Hero)
+			_set_tracked_hero(single_unit)
 		elif single_combat_unit:
 			_apply_combat_command_visibility()
 			_set_tracked_hero(null)

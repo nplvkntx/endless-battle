@@ -148,9 +148,10 @@ static func _notify_all_hero_altars_state_changed() -> void:
 	if tree == null:
 		return
 
-	for node: Node in tree.get_nodes_in_group("buildings"):
-		if node is HeroAltar and is_instance_valid(node):
-			(node as HeroAltar).hero_altar_state_changed.emit()
+	for node_variant: Variant in tree.get_nodes_in_group("buildings"):
+		if not NodeSafety.is_alive_node(node_variant) or not node_variant is HeroAltar:
+			continue
+		(node_variant as HeroAltar).hero_altar_state_changed.emit()
 
 
 func _get_time_seconds() -> float:
@@ -162,8 +163,16 @@ func is_training_hero_for_owner(is_enemy_owned: bool) -> bool:
 
 
 func has_living_owner_hero(is_enemy_owned: bool) -> bool:
+	if HeroProgressionStore.has_living_hero(is_enemy_owned):
+		return true
+
+	## Fallback scan keeps AI/training correct if registry was never registered.
 	if is_enemy_owned:
-		return EnemyArmyCommand.find_living_enemy_hero(get_tree()) != null
+		var enemy_hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+		if enemy_hero != null:
+			HeroProgressionStore.register_living_hero(enemy_hero)
+			return true
+		return false
 
 	return _has_living_player_hero()
 
@@ -344,6 +353,8 @@ func _spawn_hero() -> void:
 	if collision_shape != null:
 		collision_shape.disabled = false
 
+	HeroProgressionStore.register_living_hero(hero)
+
 	if _has_rally_point:
 		hero.set_movement_target(_claim_rally_move_target())
 
@@ -377,26 +388,38 @@ func _spawn_enemy_hero() -> void:
 	if collision_shape != null:
 		collision_shape.disabled = false
 
+	HeroProgressionStore.register_living_hero(hero)
 	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), hero)
 
 
 func _has_living_player_hero() -> bool:
-	for node: Node in get_tree().get_nodes_in_group(HERO_GROUP):
-		if _is_living_player_hero(node):
+	var registered: Hero = HeroProgressionStore.get_living_hero(false)
+	if registered != null:
+		return true
+
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return false
+
+	for node_variant: Variant in tree.get_nodes_in_group(HERO_GROUP):
+		if _is_living_player_hero_variant(node_variant):
+			HeroProgressionStore.register_living_hero(node_variant as Hero)
 			return true
 
-	for node: Node in get_tree().get_nodes_in_group(&"units"):
-		if _is_living_player_hero(node):
+	for node_variant: Variant in tree.get_nodes_in_group(&"units"):
+		if _is_living_player_hero_variant(node_variant):
+			HeroProgressionStore.register_living_hero(node_variant as Hero)
 			return true
 
 	return false
 
 
-func _is_living_player_hero(node: Node) -> bool:
-	if not _is_living_hero_node(node):
+func _is_living_player_hero_variant(node_variant: Variant) -> bool:
+	var hero: Hero = HeroProgressionStore.as_living_hero(node_variant)
+	if hero == null:
 		return false
 
-	return not CombatTargetValidation.is_enemy_faction(node)
+	return not CombatTargetValidation.is_enemy_faction(hero)
 
 
 
@@ -415,19 +438,4 @@ func _on_health_depleted() -> void:
 
 
 func _is_living_hero_node(node: Node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	if node.is_queued_for_deletion():
-		return false
-
-	if not node is Hero:
-		return false
-
-	var health_component: HealthComponent = node.get_node_or_null(
-		"HealthComponent"
-	) as HealthComponent
-	if health_component != null:
-		return health_component.current_health > 0
-
-	return true
+	return HeroProgressionStore.as_living_hero(node) != null

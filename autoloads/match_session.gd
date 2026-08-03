@@ -150,6 +150,10 @@ func _verify_clean_match_state() -> void:
 		failures.append("HeroProgressionStore.player_lock")
 	if HeroProgressionStore.has_locked_kit(true):
 		failures.append("HeroProgressionStore.enemy_lock")
+	if HeroProgressionStore.has_living_hero(false):
+		failures.append("HeroProgressionStore.player_living_hero")
+	if HeroProgressionStore.has_living_hero(true):
+		failures.append("HeroProgressionStore.enemy_living_hero")
 	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.IDLE:
 		failures.append("EnemyArmyCommand.army_mode")
 	if (
