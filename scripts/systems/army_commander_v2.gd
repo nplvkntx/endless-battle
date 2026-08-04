@@ -325,8 +325,9 @@ func _force_regenerate_squad_order(
 	_squad_idle_seconds = 0.0
 
 	var destination: Vector3 = mission.target_position
-	if NodeSafety.is_alive_node(mission.target_object) and mission.target_object is Node3D:
-		destination = (mission.target_object as Node3D).global_position
+	var alive_target: Node3D = mission.get_alive_target_object()
+	if alive_target != null:
+		destination = alive_target.global_position
 	if destination == Vector3.ZERO:
 		destination = director.get_assemble_rally_point()
 	if destination == Vector3.ZERO:
@@ -429,8 +430,7 @@ func _tick_hero_micro() -> void:
 		if mission != null:
 			mission_type_name = mission.get_mission_type_name()
 			mission_destination = mission.target_position
-			if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
-				mission_target = mission.target_object
+			mission_target = mission.get_alive_target_object()
 
 	var creeping: bool = state_name == "CREEP" or mission_type_name == "CREEP"
 	var attacking: bool = state_name == "ATTACK" or mission_type_name == "ATTACK"
@@ -727,9 +727,7 @@ func _execute_creep_mission(
 		_execute_assemble_mission(director, mission, squad)
 		return
 
-	var camp: Node3D = null
-	if mission.target_object != null and mission.target_object is Node3D and is_instance_valid(mission.target_object):
-		camp = mission.target_object as Node3D
+	var camp: Node3D = mission.get_alive_target_object()
 	if camp == null:
 		EnemyArmyCommand.clear_executable_mission("creep camp missing")
 		_execute_assemble_mission(director, mission, squad)
@@ -935,8 +933,9 @@ func _execute_defend_mission(
 		base_anchor = intercept
 
 	var focus: Node3D = null
-	if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
-		focus = mission.target_object
+	var mission_focus: Node3D = mission.get_alive_target_object()
+	if mission_focus != null:
+		focus = mission_focus
 	elif NodeSafety.is_alive_node(_defend_focus_target):
 		focus = _defend_focus_target
 	_defend_focus_target = focus
@@ -1104,9 +1103,7 @@ func _execute_attack_mission(
 	_stage_pending_reinforcements(director)
 
 	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
-	var strategic_target: Node3D = null
-	if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
-		strategic_target = mission.target_object
+	var strategic_target: Node3D = mission.get_alive_target_object()
 	var strategic_destination: Vector3 = mission.target_position
 	if strategic_target != null:
 		strategic_destination = strategic_target.global_position

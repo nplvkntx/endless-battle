@@ -13,6 +13,7 @@ func _ready() -> void:
 	_verify_toggle_default(failures)
 	_verify_mission_payload(failures)
 	_verify_director_states(failures)
+	await _verify_freed_target_same_object_safe(failures)
 	_verify_commander_does_not_choose_strategy(failures)
 	_verify_legacy_gate_helpers(failures)
 	await _verify_army_roster_and_squad(failures)
@@ -151,6 +152,111 @@ func _verify_director_states(failures: PackedStringArray) -> void:
 		var label: String = MilitaryDirectorV2.state_to_string(state)
 		_expect(failures, "state label non-empty for %s" % label, not label.is_empty())
 		_expect(failures, "state label not UNKNOWN for %s" % int(state), label != "UNKNOWN")
+
+	director.queue_free()
+
+
+func _verify_freed_target_same_object_safe(failures: PackedStringArray) -> void:
+	## Guards the runtime boundary error where a freed mission target was passed into
+	## typed `_same_target_object(Node3D, Node3D)`. Variant boundary + sanitize must hold.
+	var director := MilitaryDirectorV2.new()
+	add_child(director)
+	director.reset_match_state()
+	director.set_process(false)
+
+	_expect(failures, "null vs null is same target", director._same_target_object(null, null) == true)
+
+	var target := Node3D.new()
+	target.name = "FreedCompareTarget"
+	add_child(target)
+	var living_id: int = target.get_instance_id()
+	_expect(
+		failures,
+		"living vs living same id",
+		director._same_target_object(target, target) == true
+	)
+	_expect(
+		failures,
+		"living vs null is not same",
+		director._same_target_object(target, null) == false
+	)
+
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"hold target",
+		target.global_position,
+		target,
+		40
+	)
+	_expect(failures, "attack armed before free", director.get_state() == MilitaryDirectorV2.State.ATTACK)
+	_expect(
+		failures,
+		"mission holds living target before free",
+		director.get_mission().get_alive_target_object() == target
+	)
+	_expect(
+		failures,
+		"mission stores target instance id",
+		director.get_mission().get_target_object_id() == living_id
+	)
+
+	## Destroy without tree_exiting clear so `_transition_to` must sanitize first.
+	director._unbind_mission_target_exit()
+	target.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	## Pass the freed local as Variant-typed arg (safe boundary). Must not crash.
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"retarget with freed incoming",
+		Vector3(12, 0, 8),
+		target,
+		40
+	)
+	_expect(
+		failures,
+		"freed incoming rejected as live target",
+		director.get_mission().get_alive_target_object() == null
+	)
+
+	var replaced := Node3D.new()
+	replaced.name = "ReplacementTarget"
+	add_child(replaced)
+	var transitioned: bool = director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"retarget after free",
+		replaced.global_position,
+		replaced,
+		40
+	)
+	_expect(failures, "retarget after free succeeds", transitioned == true)
+	_expect(
+		failures,
+		"mission target is replacement",
+		director.get_mission().get_alive_target_object() == replaced
+	)
+	_expect(
+		failures,
+		"stale instance id not retained as live target id",
+		director.get_mission().get_target_object_id() != living_id
+	)
+
+	## tree_exiting clears immediately without waiting for the next AI tick.
+	replaced.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"tree_exiting cleared mission target",
+		director.get_mission().get_alive_target_object() == null
+	)
+	_expect(
+		failures,
+		"tree_exiting marks target destroyed",
+		director.get_mission().completion_condition
+		== ArmyMissionV2.CompletionCondition.TARGET_DESTROYED
+	)
 
 	director.queue_free()
 

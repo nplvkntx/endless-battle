@@ -28,8 +28,10 @@ enum CompletionCondition {
 
 var mission_type: MissionType = MissionType.NONE
 var target_position: Vector3 = Vector3.ZERO
-## Optional validated target. Cleared automatically when freed.
-var target_object: Node3D = null
+## Optional target stored as Variant so freed refs never bind as Node3D.
+var target_object: Variant = null
+## Stable identity for same-target / history checks without a live Node.
+var target_object_id: int = 0
 var priority: int = 0
 var creation_time_msec: int = 0
 var last_progress_time_msec: int = 0
@@ -45,14 +47,13 @@ var cancellation_reason: String = ""
 func _init(
 	p_mission_type: MissionType = MissionType.NONE,
 	p_target_position: Vector3 = Vector3.ZERO,
-	p_target_object: Node3D = null,
+	p_target_object: Variant = null,
 	p_priority: int = 0,
 	p_transition_reason: String = ""
 ) -> void:
 	var now_msec: int = Time.get_ticks_msec()
 	mission_type = p_mission_type
 	target_position = p_target_position
-	target_object = p_target_object
 	priority = p_priority
 	creation_time_msec = now_msec
 	last_progress_time_msec = now_msec
@@ -61,6 +62,7 @@ func _init(
 	transition_reason = p_transition_reason
 	completion_condition = CompletionCondition.NONE
 	cancellation_reason = ""
+	set_target_object(p_target_object)
 
 
 static func mission_type_to_string(mission_type_value: MissionType) -> String:
@@ -143,21 +145,64 @@ func note_distance_progress(distance: float, epsilon: float = 2.5) -> bool:
 
 
 func has_valid_target_object() -> bool:
-	return target_object != null and is_instance_valid(target_object)
+	var ref: Variant = target_object
+	return ref != null and is_instance_valid(ref)
+
+
+## Assign a live Node3D target. Invalid / freed / non-Node3D values clear the slot.
+func set_target_object(value: Variant) -> void:
+	clear_target_object()
+	if value == null:
+		return
+	if not is_instance_valid(value):
+		return
+	if not (value is Node3D):
+		return
+	target_object = value
+	target_object_id = (value as Object).get_instance_id()
+
+
+func clear_target_object() -> void:
+	target_object = null
+	target_object_id = 0
+
+
+## Returns a live Node3D or null. Never returns a freed reference.
+func get_alive_target_object() -> Node3D:
+	sanitize_target_object()
+	var ref: Variant = target_object
+	if ref != null and is_instance_valid(ref) and ref is Node3D:
+		return ref as Node3D
+	return null
+
+
+func get_target_object_id() -> int:
+	sanitize_target_object()
+	return target_object_id
 
 
 func sanitize_target_object() -> void:
-	if target_object != null and not is_instance_valid(target_object):
-		target_object = null
-		## Freed node objectives leave a stale world point — clear it so watchdogs
-		## and F3 cannot treat a dead target as still valid.
-		target_position = Vector3.ZERO
+	var ref: Variant = target_object
+	if ref == null:
+		target_object_id = 0
+		return
+	if is_instance_valid(ref):
+		if ref is Object:
+			target_object_id = (ref as Object).get_instance_id()
+		return
+	## Freed — clear without binding into a typed Node3D local.
+	target_object = null
+	target_object_id = 0
+	## Freed node objectives leave a stale world point — clear it so watchdogs
+	## and F3 cannot treat a dead target as still valid.
+	target_position = Vector3.ZERO
 
 
 func get_objective_label() -> String:
 	sanitize_target_object()
-	if has_valid_target_object():
-		return String(target_object.name)
+	var alive: Node3D = get_alive_target_object()
+	if alive != null:
+		return String(alive.name)
 	if target_position != Vector3.ZERO:
 		return "(%.0f, %.0f)" % [target_position.x, target_position.z]
 	return "-"
@@ -172,7 +217,7 @@ func duplicate_mission() -> ArmyMissionV2:
 	var copy := ArmyMissionV2.new(
 		mission_type,
 		target_position,
-		target_object if has_valid_target_object() else null,
+		get_alive_target_object(),
 		priority,
 		transition_reason
 	)

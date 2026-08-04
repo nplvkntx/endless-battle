@@ -76,6 +76,8 @@ var _watchdog_distance: float = -1.0
 var _watchdog_active_order: String = "-"
 var _watchdog_last_diag_signature: String = ""
 var _watchdog_objective_valid: bool = true
+## instance_id of the Node whose tree_exiting clears the active mission target.
+var _mission_target_exit_bound_id: int = 0
 
 
 func _ready() -> void:
@@ -125,6 +127,7 @@ func _clear_roster_state() -> void:
 	_state_entered_msec = Time.get_ticks_msec()
 	_post_retreat_attack_cooldown = 0.0
 	_designated_recovery_point = Vector3.ZERO
+	_unbind_mission_target_exit()
 	_reset_watchdog_state("match reset")
 
 
@@ -358,7 +361,7 @@ func request_state(
 	next_state: State,
 	reason: String,
 	target_position: Vector3 = Vector3.ZERO,
-	target_object: Node3D = null,
+	target_object: Variant = null,
 	priority: int = 0
 ) -> bool:
 	if not MilitaryAIConfig.is_v2_enabled():
@@ -370,13 +373,21 @@ func _transition_to(
 	next_state: State,
 	reason: String,
 	target_position: Vector3 = Vector3.ZERO,
-	target_object: Node3D = null,
+	target_object: Variant = null,
 	priority: int = 0
 ) -> bool:
+	## Sanitize before any typed comparison — freed refs must not enter Node3D params.
+	if _mission != null:
+		_mission.sanitize_target_object()
+	var safe_target: Node3D = _sanitize_incoming_target(target_object)
+	var previous_target_ref: Variant = null
+	if _mission != null:
+		previous_target_ref = _mission.target_object
+
 	var previous_state: State = _state
 	var next_mission_type: ArmyMissionV2.MissionType = _state_to_mission_type(next_state)
 	if _state == next_state and _mission != null and _mission.mission_type == next_mission_type:
-		var same_target_object: bool = _same_target_object(_mission.target_object, target_object)
+		var same_target_object: bool = _same_target_object(previous_target_ref, safe_target)
 		var same_target_position: bool = _mission.target_position == target_position
 		var same_priority: bool = _mission.priority == priority
 		if same_target_object and same_target_position and same_priority:
@@ -386,19 +397,20 @@ func _transition_to(
 			return false
 		## Same living objective with a drifted position — update in place so the
 		## watchdog progress clock is not reset every strategic tick.
-		if same_target_object and same_priority and NodeSafety.is_alive_node(target_object):
+		if same_target_object and same_priority and NodeSafety.is_alive_node(safe_target):
 			_mission.target_position = target_position
-			_mission.target_object = target_object
+			_mission.set_target_object(safe_target)
+			_bind_mission_target_exit(safe_target)
 			if reason != _last_transition_reason and not reason.is_empty():
 				_last_transition_reason = reason
 				_mission.transition_reason = reason
 			if next_state == State.CREEP:
-				_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+				_reserved_creep_camp_id = safe_target.get_instance_id()
 			return false
-		if next_state == State.CREEP and not NodeSafety.is_alive_node(target_object):
+		if next_state == State.CREEP and not NodeSafety.is_alive_node(safe_target):
 			return false
 		if next_state == State.CREEP:
-			_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+			_reserved_creep_camp_id = safe_target.get_instance_id()
 		elif previous_state == State.CREEP:
 			_release_creep_reservation()
 			if EnemyArmyCommand.is_creeping_executable_active():
@@ -407,10 +419,11 @@ func _transition_to(
 		_mission = ArmyMissionV2.new(
 			next_mission_type,
 			target_position,
-			target_object,
+			safe_target,
 			priority,
 			_last_transition_reason
 		)
+		_bind_mission_target_exit(safe_target)
 		_watchdog_order_refreshed = false
 		_watchdog_distance = -1.0
 		_log_mission_transition(
@@ -418,7 +431,7 @@ func _transition_to(
 			next_state,
 			_last_transition_reason,
 			target_position,
-			target_object
+			safe_target
 		)
 		_sync_legacy_authority_for_state(next_state, _last_transition_reason)
 		_publish_perf_status()
@@ -462,10 +475,11 @@ func _transition_to(
 	_mission = ArmyMissionV2.new(
 		next_mission_type,
 		target_position,
-		target_object,
+		safe_target,
 		priority,
 		_last_transition_reason
 	)
+	_bind_mission_target_exit(safe_target)
 	if previous_state != next_state:
 		_state_entered_msec = Time.get_ticks_msec()
 		_reset_watchdog_state("entered %s" % state_to_string(next_state))
@@ -473,8 +487,8 @@ func _transition_to(
 		## Objective/target refresh mid-state still counts as a new progress baseline.
 		_watchdog_order_refreshed = false
 		_watchdog_distance = -1.0
-	if next_state == State.CREEP and NodeSafety.is_alive_node(target_object):
-		_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+	if next_state == State.CREEP and NodeSafety.is_alive_node(safe_target):
+		_reserved_creep_camp_id = safe_target.get_instance_id()
 	elif next_state != State.CREEP:
 		_release_creep_reservation()
 
@@ -514,7 +528,7 @@ func _transition_to(
 		next_state,
 		_last_transition_reason,
 		target_position,
-		target_object
+		safe_target
 	)
 	_sync_legacy_authority_for_state(next_state, _last_transition_reason)
 	_publish_perf_status()
@@ -526,7 +540,7 @@ func _log_mission_transition(
 	next_state: State,
 	reason: String,
 	destination: Vector3,
-	target_object: Node3D
+	target_object: Variant
 ) -> void:
 	var dest_text: String = "-"
 	if NodeSafety.is_alive_node(target_object) and target_object is Node3D:
@@ -1478,7 +1492,7 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		rally_point,
 		lethal
 	)
-	var target_node: Node3D = objective.get("node") as Node3D
+	var target_node: Node3D = _sanitize_incoming_target(objective.get("node"))
 	var target_position: Vector3 = objective.get("position", Vector3.ZERO) as Vector3
 	if target_position == Vector3.ZERO and not NodeSafety.is_alive_node(target_node):
 		if _state == State.ATTACK:
@@ -1534,11 +1548,14 @@ func _maybe_exit_attack(tree: SceneTree, rally_point: Vector3, attack_army: Arra
 
 	if _mission != null:
 		_mission.sanitize_target_object()
+		var mission_target_ref: Variant = _mission.target_object
 		if (
-			_mission.target_object != null
-			and not NodeSafety.is_alive_node(_mission.target_object)
+			mission_target_ref != null
+			and not NodeSafety.is_alive_node(mission_target_ref)
 		):
 			## Target destroyed — reassess for a follow-up objective this tick.
+			_mission.clear_target_object()
+			_unbind_mission_target_exit()
 			_mission.completion_condition = ArmyMissionV2.CompletionCondition.TARGET_DESTROYED
 			_mission.note_progress("killing target")
 			return false
@@ -2157,10 +2174,7 @@ func _can_commit_to_creeping(
 func _get_current_creep_camp() -> Node3D:
 	if _mission == null:
 		return null
-	_mission.sanitize_target_object()
-	if _mission.target_object != null and _mission.target_object is Node3D:
-		return _mission.target_object as Node3D
-	return null
+	return _mission.get_alive_target_object()
 
 
 func _is_camp_cleared_or_invalid(
@@ -2381,14 +2395,63 @@ func _release_creep_reservation() -> void:
 	_reserved_creep_camp_id = 0
 
 
-func _same_target_object(a: Node3D, b: Node3D) -> bool:
-	if a == null and b == null:
-		return true
-	if a == null or b == null:
+## Accepts Variant so freed refs never bind into Node3D parameters.
+## Validity is established before any Object cast or identity compare.
+func _same_target_object(a: Variant, b: Variant) -> bool:
+	var a_valid: bool = a != null and is_instance_valid(a)
+	var b_valid: bool = b != null and is_instance_valid(b)
+	if not a_valid and not b_valid:
+		## Same only when both are true null (no objective), not freed leftovers.
+		return a == null and b == null
+	if not a_valid or not b_valid:
 		return false
-	if not is_instance_valid(a) or not is_instance_valid(b):
-		return false
-	return a.get_instance_id() == b.get_instance_id()
+	return (a as Object).get_instance_id() == (b as Object).get_instance_id()
+
+
+## Reject null / freed / non-Node3D before any typed Node3D assignment.
+func _sanitize_incoming_target(value: Variant) -> Node3D:
+	if value == null:
+		return null
+	if not is_instance_valid(value):
+		return null
+	if not (value is Node3D):
+		return null
+	return value as Node3D
+
+
+func _bind_mission_target_exit(target: Node3D) -> void:
+	_unbind_mission_target_exit()
+	if not NodeSafety.is_alive_node(target):
+		return
+	_mission_target_exit_bound_id = target.get_instance_id()
+	if not target.tree_exiting.is_connected(_on_mission_target_tree_exiting):
+		target.tree_exiting.connect(_on_mission_target_tree_exiting)
+
+
+func _unbind_mission_target_exit() -> void:
+	if _mission_target_exit_bound_id == 0:
+		return
+	var bound_id: int = _mission_target_exit_bound_id
+	_mission_target_exit_bound_id = 0
+	var node: Object = instance_from_id(bound_id)
+	if node == null or not is_instance_valid(node) or not (node is Node):
+		return
+	var as_node: Node = node as Node
+	if as_node.tree_exiting.is_connected(_on_mission_target_tree_exiting):
+		as_node.tree_exiting.disconnect(_on_mission_target_tree_exiting)
+
+
+func _on_mission_target_tree_exiting() -> void:
+	## Clear immediately — do not wait for the next AI tick.
+	_mission_target_exit_bound_id = 0
+	if _mission != null:
+		_mission.clear_target_object()
+		_mission.target_position = Vector3.ZERO
+		if _mission.completion_condition == ArmyMissionV2.CompletionCondition.NONE:
+			_mission.completion_condition = ArmyMissionV2.CompletionCondition.TARGET_DESTROYED
+			_mission.note_progress("target exited tree")
+	if _state == State.CREEP:
+		_release_creep_reservation()
 
 
 func _find_primary_enemy_base(tree: SceneTree) -> CommandCenter:
@@ -2678,9 +2741,9 @@ func _publish_perf_status() -> void:
 func _format_destination_label(mission: ArmyMissionV2) -> String:
 	if mission == null:
 		return "-"
-	mission.sanitize_target_object()
-	if NodeSafety.is_alive_node(mission.target_object) and mission.target_object is Node3D:
-		var pos: Vector3 = (mission.target_object as Node3D).global_position
+	var alive_target: Node3D = mission.get_alive_target_object()
+	if alive_target != null:
+		var pos: Vector3 = alive_target.global_position
 		return "(%.0f, %.0f)" % [pos.x, pos.z]
 	if mission.target_position != Vector3.ZERO:
 		return "(%.0f, %.0f)" % [mission.target_position.x, mission.target_position.z]
@@ -2841,9 +2904,9 @@ func _get_watchdog_squad_units() -> Array:
 func _resolve_watchdog_objective_position() -> Vector3:
 	if _mission == null:
 		return Vector3.ZERO
-	_mission.sanitize_target_object()
-	if NodeSafety.is_alive_node(_mission.target_object):
-		return _mission.target_object.global_position
+	var alive_target: Node3D = _mission.get_alive_target_object()
+	if alive_target != null:
+		return alive_target.global_position
 	return _mission.target_position
 
 
@@ -2873,16 +2936,15 @@ func _resolve_active_order_label() -> String:
 func _is_current_objective_valid(tree: SceneTree) -> bool:
 	if _mission == null:
 		return false
-	## Detect freed refs before sanitize clears them — destroyed targets are invalid.
-	var target_freed: bool = (
-		_mission.target_object != null and not is_instance_valid(_mission.target_object)
-	)
+	## Detect freed refs via Variant before any typed Node3D binding.
+	var target_ref: Variant = _mission.target_object
+	var target_freed: bool = target_ref != null and not is_instance_valid(target_ref)
 	_mission.sanitize_target_object()
 	match _state:
 		State.CREEP:
 			if target_freed:
 				return false
-			var camp: Node3D = _mission.target_object
+			var camp: Node3D = _mission.get_alive_target_object()
 			if not NodeSafety.is_alive_node(camp):
 				return false
 			var creep_manager: EnemyCreepManager = _resolve_creep_manager()
@@ -2895,10 +2957,10 @@ func _is_current_objective_valid(tree: SceneTree) -> bool:
 		State.ATTACK:
 			if target_freed:
 				return false
-			if NodeSafety.is_alive_node(_mission.target_object):
+			if NodeSafety.is_alive_node(_mission.get_alive_target_object()):
 				return true
 			## Position-only attacks are allowed, but a freed node objective is not.
-			return _mission.target_object == null and _mission.target_position != Vector3.ZERO
+			return _mission.get_alive_target_object() == null and _mission.target_position != Vector3.ZERO
 		State.DEFEND:
 			var threat: Dictionary = _resolve_v2_defense_threat(tree)
 			return bool(threat.get("threatened", false)) or _defend_clear_timer > 0.0
@@ -2922,13 +2984,14 @@ func _update_watchdog_progress(
 		units,
 		EnemyArmyCommand.LOCAL_FIGHT_RADIUS
 	)
-	if not in_combat and _state == State.CREEP and NodeSafety.is_alive_node(_mission.target_object):
+	var creep_camp: Node3D = _mission.get_alive_target_object()
+	if not in_combat and _state == State.CREEP and NodeSafety.is_alive_node(creep_camp):
 		var creep_manager: EnemyCreepManager = _resolve_creep_manager()
 		if creep_manager != null:
 			in_combat = creep_manager._is_army_engaging_camp(
 				tree,
 				units,
-				_mission.target_object
+				creep_camp
 			)
 	if in_combat and not _watchdog_recent_combat:
 		_mission.note_progress("started combat")
@@ -3061,11 +3124,12 @@ func _resolve_watchdog_fallback(tree: SceneTree, reason: String) -> void:
 			if fight_point == Vector3.ZERO and focus != null:
 				fight_point = focus.global_position
 			if fight_point != Vector3.ZERO:
+				var safe_focus: Node3D = _sanitize_incoming_target(focus)
 				_transition_to(
 					State.ATTACK,
 					"%s → fight nearby" % reason,
 					fight_point,
-					focus,
+					safe_focus,
 					80
 				)
 				_watchdog_status = "fallback ATTACK nearby"
@@ -3136,7 +3200,7 @@ func _resolve_truthful_display(mission: ArmyMissionV2) -> Dictionary:
 
 	## Never claim CREEP without a valid camp/order.
 	if _state == State.CREEP:
-		var camp_ok: bool = mission != null and NodeSafety.is_alive_node(mission.target_object)
+		var camp_ok: bool = mission != null and mission.get_alive_target_object() != null
 		if not camp_ok:
 			state_name = "ASSEMBLE" if _main_squad.get_size() > 0 else "IDLE"
 			mission_name = state_name
@@ -3151,7 +3215,7 @@ func _resolve_truthful_display(mission: ArmyMissionV2) -> Dictionary:
 		var attack_ok: bool = (
 			mission != null
 			and (
-				NodeSafety.is_alive_node(mission.target_object)
+				mission.get_alive_target_object() != null
 				or mission.target_position != Vector3.ZERO
 			)
 		)
