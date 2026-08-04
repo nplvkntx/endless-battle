@@ -333,6 +333,10 @@ static var _exec_watchdog_timer: float = 0.0
 static var _exec_watchdog_refreshed: bool = false
 static var _exec_last_report: String = ""
 static var _allow_hostile_engagement: bool = false
+## Last successfully issued group/unit move order (for V2 idle diagnostics).
+static var _last_issued_order_msec: int = 0
+static var _last_issued_order_label: String = ""
+static var _last_issued_order_destination: Vector3 = Vector3.ZERO
 
 
 static func get_army_mode() -> ArmyMode:
@@ -426,6 +430,15 @@ static func allows_offensive_orders() -> bool:
 
 ## Neutral-camp creeping is allowed while recovering/economy. Player attacks stay gated separately.
 static func allows_creep_orders() -> bool:
+	## V2 owns mission selection — legacy strategic gates must not soft-lock CREEP
+	## after ATTACK/DEFEND left strategic state stuck on a higher-priority label.
+	if MilitaryAIConfig.is_v2_enabled():
+		if _strategic_state == StrategicState.EMERGENCY_DEFENDING:
+			return false
+		if _strategic_state == StrategicState.RETREATING:
+			return false
+		return true
+
 	if is_defense_blocking_offense():
 		return false
 
@@ -443,6 +456,72 @@ static func allows_creep_orders() -> bool:
 		StrategicState.CREEPING,
 		StrategicState.RECOVERING,
 	]
+
+
+## Align legacy army mode + strategic state with a V2 mission so order issuance cannot desync.
+static func prepare_v2_execution(
+	mode: ArmyMode,
+	strategic: StrategicState,
+	reason: String
+) -> bool:
+	if not MilitaryAIConfig.is_v2_enabled():
+		return try_claim_army_mode(mode, true)
+
+	force_set_strategic_state_for_v2(strategic, reason)
+	if _army_mode == mode:
+		return true
+	if try_claim_army_mode(mode, true):
+		return true
+
+	## Hard reclaim: drop a soft-blocking mode (assemble/defend/attack/creep/regroup)
+	## so CREEP/ATTACK can always claim after a director transition.
+	if _army_mode == ArmyMode.RETREATING and mode != ArmyMode.RETREATING:
+		return false
+
+	if _army_mode != ArmyMode.IDLE:
+		var previous_mode: ArmyMode = _army_mode
+		_set_army_mode(ArmyMode.IDLE, previous_mode)
+		_debug_combat(
+			"V2 reclaim: released %s for %s (%s)" % [
+				_army_mode_label(previous_mode),
+				_army_mode_label(mode),
+				reason,
+			]
+		)
+	return try_claim_army_mode(mode, true)
+
+
+## Immediate strategic sync for V2 (bypasses pending/priority soft-locks).
+static func force_set_strategic_state_for_v2(
+	new_state: StrategicState,
+	reason: String
+) -> void:
+	if not MilitaryAIConfig.is_v2_enabled():
+		request_strategic_state(new_state, reason)
+		return
+
+	if new_state == _strategic_state:
+		_has_pending_strategic_transition = false
+		_pending_strategic_reason = ""
+		return
+
+	## Never yank emergency defense into offense.
+	if (
+		_strategic_state == StrategicState.EMERGENCY_DEFENDING
+		and new_state not in [
+			StrategicState.EMERGENCY_DEFENDING,
+			StrategicState.DEFENDING,
+			StrategicState.RETREATING,
+		]
+	):
+		return
+
+	var previous_state: StrategicState = _strategic_state
+	_strategic_state = new_state
+	_strategic_state_msec = Time.get_ticks_msec()
+	_has_pending_strategic_transition = false
+	_pending_strategic_reason = ""
+	_log_strategic_state_change(previous_state, new_state, reason)
 
 
 ## Clear static army ownership between matches. Class-level state otherwise persists in-editor.
@@ -1434,12 +1513,38 @@ static func issue_group_combat_move(
 		_debug_combat("order blocked: retreat cooldown")
 		return false
 
+	## V2: sync legacy authority BEFORE creep/attack gates so stale ATTACKING
+	## strategic state cannot permanently block CREEP execution.
+	if MilitaryAIConfig.is_v2_enabled():
+		var strategic: StrategicState = StrategicState.ECONOMY
+		match mission:
+			EnemyUnitMission.Mission.CREEP:
+				strategic = StrategicState.CREEPING
+			EnemyUnitMission.Mission.ATTACK:
+				strategic = StrategicState.ATTACKING
+			EnemyUnitMission.Mission.DEFEND:
+				strategic = (
+					StrategicState.EMERGENCY_DEFENDING
+					if _emergency_defense_active
+					else StrategicState.DEFENDING
+				)
+			EnemyUnitMission.Mission.RETREAT:
+				strategic = StrategicState.RETREATING
+			_:
+				strategic = _strategic_state
+		if mission in [
+			EnemyUnitMission.Mission.CREEP,
+			EnemyUnitMission.Mission.ATTACK,
+			EnemyUnitMission.Mission.DEFEND,
+		]:
+			prepare_v2_execution(mode, strategic, "v2 group combat move")
+
 	if mission == EnemyUnitMission.Mission.CREEP and not allows_creep_orders():
 		_debug_combat("order blocked: strategic state forbids creep")
 		return false
 
 	if mission == EnemyUnitMission.Mission.ATTACK:
-		if not _allow_hostile_engagement:
+		if not _allow_hostile_engagement and not MilitaryAIConfig.is_v2_enabled():
 			if not allows_offensive_orders():
 				_debug_combat("order blocked: strategic state forbids attack")
 				return false
@@ -1455,6 +1560,14 @@ static func issue_group_combat_move(
 					"player_attack_blocked",
 					"Player attack blocked: %s" % get_player_offense_block_reason(tree)
 				)
+				return false
+		elif not _allow_hostile_engagement and MilitaryAIConfig.is_v2_enabled():
+			## Still respect active retreat cooldown / emergency defend via other gates.
+			if _strategic_state == StrategicState.EMERGENCY_DEFENDING:
+				_debug_combat("order blocked: emergency defending")
+				return false
+			if _strategic_state == StrategicState.RETREATING:
+				_debug_combat("order blocked: retreating")
 				return false
 
 	if not try_claim_army_mode(mode, allow_attack_override_creep):
@@ -2860,6 +2973,16 @@ static func try_claim_army_mode(
 			_set_army_mode(requested_mode, previous_mode)
 			return true
 		ArmyMode.ASSEMBLING:
+			if MilitaryAIConfig.is_v2_enabled() and requested_mode in [
+				ArmyMode.CREEPING,
+				ArmyMode.ATTACKING,
+				ArmyMode.RETREATING,
+				ArmyMode.DEFENDING,
+				ArmyMode.INTERCEPTING,
+				ArmyMode.REGROUPING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
+				return true
 			if requested_mode in [
 				ArmyMode.RETREATING,
 				ArmyMode.DEFENDING,
@@ -2943,6 +3066,16 @@ static func try_claim_army_mode(
 			return false
 		ArmyMode.DEFENDING:
 			if requested_mode == ArmyMode.DEFENDING:
+				return true
+			if MilitaryAIConfig.is_v2_enabled() and requested_mode in [
+				ArmyMode.CREEPING,
+				ArmyMode.ATTACKING,
+				ArmyMode.RETREATING,
+				ArmyMode.REGROUPING,
+				ArmyMode.INTERCEPTING,
+				ArmyMode.ASSEMBLING,
+			]:
+				_set_army_mode(requested_mode, previous_mode)
 				return true
 			if requested_mode in [
 				ArmyMode.RETREATING,
@@ -5052,13 +5185,15 @@ static func command_attack_move(
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
 ) -> void:
 	if mission == EnemyUnitMission.Mission.ATTACK and not _allow_hostile_engagement:
-		var tree: SceneTree = Engine.get_main_loop() as SceneTree
-		if tree != null and not can_launch_player_attack(tree):
-			EnemyAIDebug.log_once(
-				"player_attack_blocked",
-				"Player attack blocked: %s" % get_player_offense_block_reason(tree)
-			)
-			return
+		## V2 owns ATTACK authority — legacy early-phase offense gates must not soft-lock.
+		if not MilitaryAIConfig.is_v2_enabled():
+			var tree: SceneTree = Engine.get_main_loop() as SceneTree
+			if tree != null and not can_launch_player_attack(tree):
+				EnemyAIDebug.log_once(
+					"player_attack_blocked",
+					"Player attack blocked: %s" % get_player_offense_block_reason(tree)
+				)
+				return
 
 	if not _combat_orders_allowed(mission):
 		return
@@ -5556,6 +5691,9 @@ static func _clear_executable_mission_state(reason: String) -> void:
 	_exec_watchdog_refreshed = false
 	_exec_last_report = ""
 	_allow_hostile_engagement = false
+	_last_issued_order_msec = 0
+	_last_issued_order_label = ""
+	_last_issued_order_destination = Vector3.ZERO
 
 
 static func note_mission_order(order_label: String, destination: Vector3 = Vector3.ZERO) -> void:
@@ -5563,7 +5701,40 @@ static func note_mission_order(order_label: String, destination: Vector3 = Vecto
 		_exec_order_label = order_label
 	if destination != Vector3.ZERO:
 		_exec_objective_position = destination
-	_exec_last_progress_msec = Time.get_ticks_msec()
+	var now_msec: int = Time.get_ticks_msec()
+	_exec_last_progress_msec = now_msec
+	_last_issued_order_msec = now_msec
+	_last_issued_order_label = order_label if not order_label.is_empty() else _exec_order_label
+	if destination != Vector3.ZERO:
+		_last_issued_order_destination = destination
+	elif _exec_objective_position != Vector3.ZERO:
+		_last_issued_order_destination = _exec_objective_position
+	_log_issued_order(_last_issued_order_label, _last_issued_order_destination)
+
+
+static func get_seconds_since_last_order() -> float:
+	if _last_issued_order_msec <= 0:
+		return INF
+	return float(Time.get_ticks_msec() - _last_issued_order_msec) / 1000.0
+
+
+static func get_last_issued_order_label() -> String:
+	return _last_issued_order_label if not _last_issued_order_label.is_empty() else "-"
+
+
+static func get_last_issued_order_destination() -> Vector3:
+	return _last_issued_order_destination
+
+
+static func _log_issued_order(order_label: String, destination: Vector3) -> void:
+	var label: String = order_label if not order_label.is_empty() else "order"
+	var dest_text: String = "-"
+	if destination != Vector3.ZERO:
+		dest_text = "(%.1f, %.1f)" % [destination.x, destination.z]
+	EnemyAIDebug.log_once(
+		"ai_order_%s_%s" % [label, dest_text],
+		"[AI Order] %s -> %s" % [label, dest_text]
+	)
 
 
 static func note_mission_progress(

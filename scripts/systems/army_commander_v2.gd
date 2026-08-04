@@ -16,6 +16,8 @@ const ASSEMBLE_COLUMN_SPACING: float = 2.1
 const CREEP_REGROUP_HOLD_SECONDS: float = 2.0
 const CREEP_ORDER_REISSUE_SECONDS: float = 0.35
 const HERO_ROLE_FOLLOW_SPACING: float = 2.4
+## Fraction of living squad members that must lack orders before counting as idle.
+const SQUAD_IDLE_MEMBER_RATIO: float = 0.55
 
 var _director: MilitaryDirectorV2 = null
 var _hero_micro_timer: float = 0.0
@@ -39,6 +41,8 @@ var _attack_chase_start_msec: int = 0
 var _retreat_order_reissue_timer: float = 0.0
 var _retreat_cover_elapsed: float = 0.0
 var _recover_order_reissue_timer: float = 0.0
+var _squad_idle_seconds: float = 0.0
+var _last_force_order_msec: int = 0
 
 
 func _ready() -> void:
@@ -69,6 +73,8 @@ func reset_match_state() -> void:
 	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
 	_retreat_cover_elapsed = 0.0
 	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
+	_squad_idle_seconds = 0.0
+	_last_force_order_msec = 0
 
 
 ## Watchdog asks the commander to re-issue current mission orders once.
@@ -81,6 +87,10 @@ func request_watchdog_order_refresh() -> void:
 	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
 	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
 	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
+
+
+func get_squad_idle_seconds() -> float:
+	return _squad_idle_seconds
 
 
 func _process(delta: float) -> void:
@@ -114,6 +124,7 @@ func _process(delta: float) -> void:
 		_tick_hero_micro()
 
 	_execute_current_mission(delta)
+	_tick_squad_idle_guard(delta)
 	PerfCounters.record_ai_combat_update()
 
 
@@ -152,6 +163,8 @@ func _execute_current_mission(_delta: float) -> void:
 	if squad == null:
 		return
 
+	_sync_execution_authority(director, mission)
+
 	## Foundation: no strategic self-decisions. Execution adapters own order issuance.
 	match director.get_state():
 		MilitaryDirectorV2.State.IDLE:
@@ -174,6 +187,214 @@ func _execute_current_mission(_delta: float) -> void:
 			_execute_attack_mission(director, mission, squad)
 		MilitaryDirectorV2.State.RETREAT:
 			_execute_retreat_mission(director, mission, squad)
+
+
+func _sync_execution_authority(director: MilitaryDirectorV2, mission: ArmyMissionV2) -> void:
+	var reason: String = mission.transition_reason if mission != null else "v2 sync"
+	match director.get_state():
+		MilitaryDirectorV2.State.CREEP:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.CREEPING,
+				EnemyArmyCommand.StrategicState.CREEPING,
+				reason
+			)
+		MilitaryDirectorV2.State.ATTACK:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.ATTACKING,
+				EnemyArmyCommand.StrategicState.ATTACKING,
+				reason
+			)
+		MilitaryDirectorV2.State.DEFEND:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.DEFENDING,
+				EnemyArmyCommand.StrategicState.DEFENDING,
+				reason
+			)
+		MilitaryDirectorV2.State.RETREAT:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.RETREATING,
+				EnemyArmyCommand.StrategicState.RETREATING,
+				reason
+			)
+		MilitaryDirectorV2.State.RECOVER:
+			EnemyArmyCommand.force_set_strategic_state_for_v2(
+				EnemyArmyCommand.StrategicState.RECOVERING,
+				reason
+			)
+		MilitaryDirectorV2.State.ASSEMBLE:
+			EnemyArmyCommand.force_set_strategic_state_for_v2(
+				EnemyArmyCommand.StrategicState.ECONOMY,
+				reason
+			)
+		_:
+			pass
+
+
+func _tick_squad_idle_guard(delta: float) -> void:
+	var director: MilitaryDirectorV2 = _resolve_director()
+	if director == null:
+		_squad_idle_seconds = 0.0
+		return
+
+	var state: MilitaryDirectorV2.State = director.get_state()
+	## Standing still is allowed while assembling, recovering, retreating, or idle.
+	if state in [
+		MilitaryDirectorV2.State.IDLE,
+		MilitaryDirectorV2.State.ASSEMBLE,
+		MilitaryDirectorV2.State.RECOVER,
+		MilitaryDirectorV2.State.RETREAT,
+	]:
+		_squad_idle_seconds = 0.0
+		return
+
+	## Intentional short regroup holds during creep are not combat idle.
+	if state == MilitaryDirectorV2.State.CREEP and _creep_regroup_hold_timer > 0.0:
+		_squad_idle_seconds = 0.0
+		return
+
+	var squad: ArmySquadV2 = _receive_squad_from_director()
+	if squad == null or squad.get_size() <= 0:
+		_squad_idle_seconds = 0.0
+		return
+
+	if _squad_has_meaningful_orders(squad):
+		_squad_idle_seconds = 0.0
+		return
+
+	_squad_idle_seconds += delta
+	if _squad_idle_seconds < MilitaryAIConfig.V2_SQUAD_IDLE_SECONDS:
+		return
+
+	var mission: ArmyMissionV2 = director.get_mission()
+	if mission == null:
+		return
+
+	_force_regenerate_squad_order(director, mission, squad)
+	_squad_idle_seconds = 0.0
+
+
+func _squad_has_meaningful_orders(squad: ArmySquadV2) -> bool:
+	var living: int = 0
+	var ordered: int = 0
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		living += 1
+		if _unit_has_meaningful_order(entry as Node):
+			ordered += 1
+
+	if living <= 0:
+		return true
+	## Ordered if a clear majority still has move / attack-move / combat.
+	return float(ordered) / float(living) >= (1.0 - SQUAD_IDLE_MEMBER_RATIO)
+
+
+func _unit_has_meaningful_order(unit: Node) -> bool:
+	if not NodeSafety.is_alive_node(unit):
+		return false
+
+	if unit is Unit:
+		var unit_ref: Unit = unit as Unit
+		if unit_ref.has_move_target:
+			return true
+
+	if bool(unit.get("_has_attack_move_destination")):
+		return true
+
+	var attack_target: Variant = unit.get("_attack_target")
+	if NodeSafety.is_alive_node(attack_target):
+		return true
+
+	return false
+
+
+func _force_regenerate_squad_order(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	if _last_force_order_msec > 0 and float(now_msec - _last_force_order_msec) / 1000.0 < 0.35:
+		return
+	_last_force_order_msec = now_msec
+
+	## Bust reissue throttles so the next execute path cannot soft-skip.
+	request_watchdog_order_refresh()
+	_squad_idle_seconds = 0.0
+
+	var destination: Vector3 = mission.target_position
+	if NodeSafety.is_alive_node(mission.target_object) and mission.target_object is Node3D:
+		destination = (mission.target_object as Node3D).global_position
+	if destination == Vector3.ZERO:
+		destination = director.get_assemble_rally_point()
+	if destination == Vector3.ZERO:
+		return
+
+	var units: Array = []
+	for entry: Variant in squad.get_members_copy():
+		if NodeSafety.is_alive_node(entry) and EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			units.append(entry)
+	units = NodeSafety.clean_node_array(units)
+	if units.is_empty():
+		return
+
+	_sync_execution_authority(director, mission)
+	var tree: SceneTree = get_tree()
+	var issued: bool = false
+	match director.get_state():
+		MilitaryDirectorV2.State.CREEP:
+			issued = EnemyArmyCommand.issue_group_combat_move(
+				tree,
+				units,
+				destination,
+				EnemyUnitMission.Mission.CREEP,
+				EnemyArmyCommand.ArmyMode.CREEPING
+			)
+			if not issued:
+				_force_attack_move(units, destination, EnemyUnitMission.Mission.CREEP)
+				issued = true
+		MilitaryDirectorV2.State.ATTACK:
+			issued = EnemyArmyCommand.issue_group_combat_move(
+				tree,
+				units,
+				destination,
+				EnemyUnitMission.Mission.ATTACK,
+				EnemyArmyCommand.ArmyMode.ATTACKING,
+				true
+			)
+			if not issued:
+				_force_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
+				issued = true
+		MilitaryDirectorV2.State.DEFEND:
+			_force_attack_move(units, destination, EnemyUnitMission.Mission.DEFEND)
+			issued = true
+		_:
+			return
+
+	if issued:
+		EnemyAIDebug.log_once(
+			"v2_idle_regen",
+			"[AI Idle] regenerated %s order -> (%.1f, %.1f)" % [
+				director.get_state_name(),
+				destination.x,
+				destination.z,
+			]
+		)
+
+
+func _force_attack_move(
+	units: Array,
+	destination: Vector3,
+	mission: EnemyUnitMission.Mission
+) -> void:
+	if units.is_empty() or destination == Vector3.ZERO:
+		return
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_attack_move(units, destination, mission)
+	)
+	EnemyArmyCommand.note_mission_order("attack-move", destination)
 
 
 func _tick_hero_micro() -> void:
@@ -606,8 +827,15 @@ func _execute_creep_mission(
 		EnemyUnitMission.Mission.CREEP,
 		EnemyArmyCommand.ArmyMode.CREEPING
 	):
-		EnemyArmyCommand.clear_executable_mission("creep move blocked")
-		_regroup_creep_army(creep_manager, creep_army, rally_point)
+		## Never leave CREEP with no executable order — force Attack-Move.
+		EnemyArmyCommand.prepare_v2_execution(
+			EnemyArmyCommand.ArmyMode.CREEPING,
+			EnemyArmyCommand.StrategicState.CREEPING,
+			"creep move fallback"
+		)
+		_force_attack_move(creep_army, destination, EnemyUnitMission.Mission.CREEP)
+		EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
+		_creep_order_reissue_timer = 0.0
 		return
 
 	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())

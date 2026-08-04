@@ -121,6 +121,8 @@ const V2_WATCHDOG_NEAR_OBJECTIVE_RADIUS: float = 6.0
 const V2_WATCHDOG_NEARBY_THREAT_RADIUS: float = 32.0
 ## Throttle F3 / console diagnostic churn (never spam identical lines).
 const V2_WATCHDOG_DIAG_INTERVAL_SECONDS: float = 2.0
+## Combat squad with no move / attack-move / fight order regenerates after this.
+const V2_SQUAD_IDLE_SECONDS: float = 2.0
 
 
 static func is_v2_enabled() -> bool:

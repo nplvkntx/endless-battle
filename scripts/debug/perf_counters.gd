@@ -53,6 +53,10 @@ var _military_ai_v2_distance: float = -1.0
 var _military_ai_v2_seconds_since_progress: float = 0.0
 var _military_ai_v2_state_age: float = 0.0
 var _military_ai_v2_watchdog_status: String = "-"
+var _military_ai_v2_destination: String = "-"
+var _military_ai_v2_last_order_time: String = "-"
+var _military_ai_v2_last_mission_change: String = "-"
+var _military_ai_v2_idle_time: float = 0.0
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -302,6 +306,38 @@ func get_military_ai_v2_watchdog_status() -> String:
 	return _military_ai_v2_watchdog_status
 
 
+func set_military_ai_v2_execution_status(
+	destination: String,
+	last_order_time: String,
+	last_mission_change: String,
+	idle_time_seconds: float
+) -> void:
+	_military_ai_v2_destination = destination if not destination.is_empty() else "-"
+	_military_ai_v2_last_order_time = (
+		last_order_time if not last_order_time.is_empty() else "-"
+	)
+	_military_ai_v2_last_mission_change = (
+		last_mission_change if not last_mission_change.is_empty() else "-"
+	)
+	_military_ai_v2_idle_time = maxf(0.0, idle_time_seconds)
+
+
+func get_military_ai_v2_destination() -> String:
+	return _military_ai_v2_destination
+
+
+func get_military_ai_v2_last_order_time() -> String:
+	return _military_ai_v2_last_order_time
+
+
+func get_military_ai_v2_last_mission_change() -> String:
+	return _military_ai_v2_last_mission_change
+
+
+func get_military_ai_v2_idle_time() -> float:
+	return _military_ai_v2_idle_time
+
+
 func sample_fps(delta: float) -> void:
 	var fps: float = float(Engine.get_frames_per_second())
 	_last_fps = fps
@@ -471,6 +507,10 @@ func reset_all() -> void:
 	_military_ai_v2_seconds_since_progress = 0.0
 	_military_ai_v2_state_age = 0.0
 	_military_ai_v2_watchdog_status = "-"
+	_military_ai_v2_destination = "-"
+	_military_ai_v2_last_order_time = "-"
+	_military_ai_v2_last_mission_change = "-"
+	_military_ai_v2_idle_time = 0.0
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0

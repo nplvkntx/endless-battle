@@ -183,6 +183,18 @@ Headless:
 Godot_v4.7-stable_win64.exe --headless --path <project> res://scenes/debug/verify_military_ai_v2.tscn
 ```
 
+### Mission execution integrity (critical)
+
+V2 missions must always produce executable squad orders:
+
+1. `MilitaryDirectorV2` publishes the mission and syncs legacy strategic/army-mode authority on transition.
+2. `ArmyCommanderV2` re-syncs authority every frame, then issues Attack-Move for CREEP / ATTACK / DEFEND travel (retreats use retreat orders).
+3. If `issue_group_combat_move` fails, the commander force-issues Attack-Move — it must never clear the mission and leave the squad idle.
+4. Idle guard: if a combat squad has no meaningful move/attack-move/fight order for `V2_SQUAD_IDLE_SECONDS` (2s), regenerate a valid order immediately.
+5. F3 shows Mission, Destination, Order, Last Order, Last Mission Change, and Idle Time so desync is visible.
+
+Legacy `allows_creep_orders()` / army-mode soft-locks must not block V2 CREEP after ATTACK — `prepare_v2_execution()` clears that gate.
+
 Manual long-match checklist:
 
 - Opening: economy, hero train, unit train, army assembles

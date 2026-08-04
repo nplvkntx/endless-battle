@@ -328,6 +328,10 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "commander has recover executor", commander_text.contains("_execute_recover_mission"))
 		_expect(failures, "commander stages pending reinforcements", commander_text.contains("_stage_pending_reinforcements"))
 		_expect(failures, "commander uses attack-move for regroup", commander_text.contains("command_attack_move"))
+		_expect(failures, "commander has idle guard", commander_text.contains("_tick_squad_idle_guard"))
+		_expect(failures, "commander regenerates idle orders", commander_text.contains("_force_regenerate_squad_order"))
+		_expect(failures, "commander syncs execution authority", commander_text.contains("_sync_execution_authority"))
+		_expect(failures, "commander force attack-move fallback", commander_text.contains("_force_attack_move"))
 		_expect(failures, "commander clamps defend leash", commander_text.contains("_clamp_defend_destination"))
 		_expect(failures, "commander clamps attack chase", commander_text.contains("_clamp_attack_chase_destination"))
 		_expect(failures, "commander splits defend roles", commander_text.contains("_split_defend_roles"))
@@ -1273,6 +1277,10 @@ func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
 		var overlay_text: String = overlay_source.get_as_text()
 		overlay_source.close()
 		_expect(failures, "F3 shows V2 Order", overlay_text.contains("V2 Order"))
+		_expect(failures, "F3 shows V2 Destination", overlay_text.contains("V2 Destination"))
+		_expect(failures, "F3 shows V2 Last Order", overlay_text.contains("V2 Last Order"))
+		_expect(failures, "F3 shows V2 Last Mission Change", overlay_text.contains("V2 Last Mission Change"))
+		_expect(failures, "F3 shows V2 Idle Time", overlay_text.contains("V2 Idle Time"))
 		_expect(failures, "F3 shows V2 Distance", overlay_text.contains("V2 Distance"))
 		_expect(failures, "F3 shows V2 Since Progress", overlay_text.contains("V2 Since Progress"))
 		_expect(failures, "F3 shows V2 State Age", overlay_text.contains("V2 State Age"))
@@ -1281,6 +1289,7 @@ func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "F3 shows V2 Squad Size", overlay_text.contains("V2 Squad Size"))
 		_expect(failures, "F3 shows V2 Objective", overlay_text.contains("V2 Objective"))
 		_expect(failures, "F3 shows V2 State", overlay_text.contains("V2 State"))
+		_expect(failures, "F3 shows V2 Mission", overlay_text.contains("V2 Mission"))
 
 
 func _verify_watchdog_progress_helpers(failures: PackedStringArray) -> void:

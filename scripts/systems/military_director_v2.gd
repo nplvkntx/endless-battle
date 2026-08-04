@@ -413,6 +413,14 @@ func _transition_to(
 		)
 		_watchdog_order_refreshed = false
 		_watchdog_distance = -1.0
+		_log_mission_transition(
+			previous_state,
+			next_state,
+			_last_transition_reason,
+			target_position,
+			target_object
+		)
+		_sync_legacy_authority_for_state(next_state, _last_transition_reason)
 		_publish_perf_status()
 		return true
 
@@ -501,8 +509,84 @@ func _transition_to(
 	if previous_state != next_state and _can_admit_reinforcements():
 		_admit_pending_reinforcements()
 
+	_log_mission_transition(
+		previous_state,
+		next_state,
+		_last_transition_reason,
+		target_position,
+		target_object
+	)
+	_sync_legacy_authority_for_state(next_state, _last_transition_reason)
 	_publish_perf_status()
 	return true
+
+
+func _log_mission_transition(
+	previous_state: State,
+	next_state: State,
+	reason: String,
+	destination: Vector3,
+	target_object: Node3D
+) -> void:
+	var dest_text: String = "-"
+	if NodeSafety.is_alive_node(target_object) and target_object is Node3D:
+		var pos: Vector3 = (target_object as Node3D).global_position
+		dest_text = "(%.1f, %.1f)" % [pos.x, pos.z]
+	elif destination != Vector3.ZERO:
+		dest_text = "(%.1f, %.1f)" % [destination.x, destination.z]
+	EnemyAIDebug.log_once(
+		"v2_mission_%s_%s_%s" % [
+			state_to_string(previous_state),
+			state_to_string(next_state),
+			dest_text,
+		],
+		"[AI Mission] %s -> %s | reason=%s | dest=%s" % [
+			state_to_string(previous_state),
+			state_to_string(next_state),
+			reason if not reason.is_empty() else "unspecified",
+			dest_text,
+		]
+	)
+
+
+func _sync_legacy_authority_for_state(state: State, reason: String) -> void:
+	match state:
+		State.CREEP:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.CREEPING,
+				EnemyArmyCommand.StrategicState.CREEPING,
+				reason
+			)
+		State.ATTACK:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.ATTACKING,
+				EnemyArmyCommand.StrategicState.ATTACKING,
+				reason
+			)
+		State.DEFEND:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.DEFENDING,
+				EnemyArmyCommand.StrategicState.DEFENDING,
+				reason
+			)
+		State.RETREAT:
+			EnemyArmyCommand.prepare_v2_execution(
+				EnemyArmyCommand.ArmyMode.RETREATING,
+				EnemyArmyCommand.StrategicState.RETREATING,
+				reason
+			)
+		State.RECOVER:
+			EnemyArmyCommand.force_set_strategic_state_for_v2(
+				EnemyArmyCommand.StrategicState.RECOVERING,
+				reason
+			)
+		State.ASSEMBLE, State.IDLE:
+			EnemyArmyCommand.force_set_strategic_state_for_v2(
+				EnemyArmyCommand.StrategicState.ECONOMY,
+				reason
+			)
+		_:
+			pass
 
 
 func _begin_attack_tracking(tree: SceneTree) -> void:
@@ -2561,12 +2645,49 @@ func _publish_perf_status() -> void:
 		state_age,
 		_watchdog_status
 	)
+	var destination_text: String = _format_destination_label(mission)
+	var last_order_age: float = EnemyArmyCommand.get_seconds_since_last_order()
+	var last_order_text: String = "-"
+	if last_order_age < INF:
+		last_order_text = "%.1fs ago (%s)" % [
+			last_order_age,
+			EnemyArmyCommand.get_last_issued_order_label(),
+		]
+	var last_mission_change: String = "%.1fs ago (%s)" % [
+		age_seconds,
+		_last_transition_reason if not _last_transition_reason.is_empty() else "-",
+	]
+	var idle_time: float = 0.0
+	var commander: ArmyCommanderV2 = _resolve_commander()
+	if commander != null:
+		idle_time = commander.get_squad_idle_seconds()
+	PerfCounters.set_military_ai_v2_execution_status(
+		destination_text,
+		last_order_text,
+		last_mission_change,
+		idle_time
+	)
 	## Keep legacy AI status fields filled so older overlay lines stay coherent under V2.
 	PerfCounters.set_ai_status(display_state, mission_name, "MilitaryDirectorV2")
 	PerfCounters.set_ai_mission_detail(
 		"V2 %s → %s (%s)" % [display_state, objective, _last_transition_reason]
 	)
 	PerfCounters.set_combat_group_size(_main_squad.get_size())
+
+
+func _format_destination_label(mission: ArmyMissionV2) -> String:
+	if mission == null:
+		return "-"
+	mission.sanitize_target_object()
+	if NodeSafety.is_alive_node(mission.target_object) and mission.target_object is Node3D:
+		var pos: Vector3 = (mission.target_object as Node3D).global_position
+		return "(%.0f, %.0f)" % [pos.x, pos.z]
+	if mission.target_position != Vector3.ZERO:
+		return "(%.0f, %.0f)" % [mission.target_position.x, mission.target_position.z]
+	var order_dest: Vector3 = EnemyArmyCommand.get_last_issued_order_destination()
+	if order_dest != Vector3.ZERO:
+		return "(%.0f, %.0f)" % [order_dest.x, order_dest.z]
+	return "-"
 
 
 func _reset_watchdog_state(status: String = "idle") -> void:
@@ -2668,6 +2789,42 @@ func _publish_watchdog_snapshot_only() -> void:
 	if army_center != Vector3.ZERO and objective_position != Vector3.ZERO:
 		_watchdog_distance = EnemyArmyCommand.horizontal_distance(army_center, objective_position)
 
+	var since_progress: float = 0.0
+	var age_seconds: float = 0.0
+	if _mission != null:
+		since_progress = _mission.get_seconds_since_progress()
+		age_seconds = _mission.get_age_seconds()
+	var state_age: float = _state_commit_elapsed_seconds()
+	if state_age >= INF:
+		state_age = 0.0
+	PerfCounters.set_military_ai_v2_watchdog_status(
+		_watchdog_active_order,
+		_watchdog_distance,
+		since_progress,
+		state_age,
+		_watchdog_status
+	)
+	var idle_time: float = 0.0
+	var commander: ArmyCommanderV2 = _resolve_commander()
+	if commander != null:
+		idle_time = commander.get_squad_idle_seconds()
+	var last_order_age: float = EnemyArmyCommand.get_seconds_since_last_order()
+	var last_order_text: String = "-"
+	if last_order_age < INF:
+		last_order_text = "%.1fs ago (%s)" % [
+			last_order_age,
+			EnemyArmyCommand.get_last_issued_order_label(),
+		]
+	PerfCounters.set_military_ai_v2_execution_status(
+		_format_destination_label(_mission),
+		last_order_text,
+		"%.1fs ago (%s)" % [
+			age_seconds,
+			_last_transition_reason if not _last_transition_reason.is_empty() else "-",
+		],
+		idle_time
+	)
+
 
 func _is_watchdog_mission_active() -> bool:
 	return _state in [State.CREEP, State.ATTACK, State.DEFEND, State.RETREAT]
@@ -2694,19 +2851,21 @@ func _resolve_active_order_label() -> String:
 	var order: String = EnemyArmyCommand.get_executable_order_label()
 	if not order.is_empty():
 		return order
+	var last_issued: String = EnemyArmyCommand.get_last_issued_order_label()
+	if last_issued != "-" and not last_issued.is_empty():
+		var age: float = EnemyArmyCommand.get_seconds_since_last_order()
+		if age < MilitaryAIConfig.V2_SQUAD_IDLE_SECONDS:
+			return last_issued
 	match _state:
-		State.CREEP:
-			return "creep"
-		State.ATTACK:
-			return "attack-move"
-		State.DEFEND:
-			return "defend"
-		State.RETREAT:
-			return "retreat"
 		State.ASSEMBLE:
 			return "rally"
 		State.RECOVER:
 			return "hold"
+		State.RETREAT:
+			return "retreat"
+		State.CREEP, State.ATTACK, State.DEFEND:
+			## Do not claim a combat order exists when none was issued.
+			return "none"
 		_:
 			return "-"
 
