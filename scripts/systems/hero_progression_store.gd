@@ -4,16 +4,16 @@ extends RefCounted
 ## Session-persistent hero progression used when a hero dies and is trained again.
 ## Player and enemy heroes keep separate snapshots so factions cannot overwrite each other.
 ## Also stores the faction-wide hero kit lock for the current match (one hero type per side).
-## Living hero instances are tracked by instance ID (never stored as permanent ObjectRefs).
+## Living hero instances are tracked by EntityHandle / instance ID (never permanent ObjectRefs).
 
 static var _player_snapshot: Dictionary = {}
 static var _enemy_snapshot: Dictionary = {}
 ## Locked kit IDs for the match. Empty StringName means no hero chosen yet.
 static var _player_locked_kit_id: StringName = &""
 static var _enemy_locked_kit_id: StringName = &""
-## Currently living hero instance IDs. 0 means no living hero.
-static var _player_living_hero_id: int = 0
-static var _enemy_living_hero_id: int = 0
+## Currently living hero handles. Empty means no living hero.
+static var _player_living_hero_handle: EntityHandle = EntityHandle.empty()
+static var _enemy_living_hero_handle: EntityHandle = EntityHandle.empty()
 
 
 static func has_saved_progression() -> bool:
@@ -92,11 +92,18 @@ static func register_living_hero(hero: Hero) -> void:
 		return
 
 	var is_enemy: bool = CombatTargetValidation.is_enemy_faction(hero)
-	var hero_id: int = hero.get_instance_id()
+	var handle: EntityHandle = EntityHandle.from_node(hero)
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree != null:
+		var registry: Node = tree.root.get_node_or_null("/root/EntityRegistry")
+		if registry != null and registry.has_method(&"register_entity"):
+			var registered: Variant = registry.call(&"register_entity", hero)
+			if registered is EntityHandle and not (registered as EntityHandle).is_empty():
+				handle = registered as EntityHandle
 	if is_enemy:
-		_enemy_living_hero_id = hero_id
+		_enemy_living_hero_handle = handle
 	else:
-		_player_living_hero_id = hero_id
+		_player_living_hero_handle = handle
 
 	## Living heroes reinforce the match kit lock without waiting for death.
 	var kit_id: StringName = &""
@@ -112,51 +119,60 @@ static func clear_living_hero(hero: Variant = null, is_enemy: bool = false) -> v
 		is_enemy = CombatTargetValidation.is_enemy_faction(hero as Hero)
 		var hero_id: int = (hero as Object).get_instance_id()
 		if is_enemy:
-			if _enemy_living_hero_id == hero_id:
-				_enemy_living_hero_id = 0
+			if _enemy_living_hero_handle != null and _enemy_living_hero_handle.instance_id == hero_id:
+				_enemy_living_hero_handle = EntityHandle.empty()
 		else:
-			if _player_living_hero_id == hero_id:
-				_player_living_hero_id = 0
+			if _player_living_hero_handle != null and _player_living_hero_handle.instance_id == hero_id:
+				_player_living_hero_handle = EntityHandle.empty()
 		return
 
 	if is_enemy:
-		_enemy_living_hero_id = 0
+		_enemy_living_hero_handle = EntityHandle.empty()
 	else:
-		_player_living_hero_id = 0
+		_player_living_hero_handle = EntityHandle.empty()
 
 
 static func has_living_hero(is_enemy: bool) -> bool:
 	return get_living_hero(is_enemy) != null
 
 
-## Safe living-hero lookup. Never returns a freed Object. Clears stale IDs automatically.
-static func get_living_hero(is_enemy: bool) -> Hero:
-	var hero_id: int = _enemy_living_hero_id if is_enemy else _player_living_hero_id
-	if hero_id == 0:
-		return null
-
-	var node_ref: Variant = instance_from_id(hero_id)
-	if not NodeSafety.is_alive_node(node_ref) or not node_ref is Hero:
+static func get_living_hero_handle(is_enemy: bool) -> EntityHandle:
+	var handle: EntityHandle = (
+		_enemy_living_hero_handle if is_enemy else _player_living_hero_handle
+	)
+	if handle == null:
+		return EntityHandle.empty()
+	if handle.resolve() == null:
 		if is_enemy:
-			_enemy_living_hero_id = 0
+			_enemy_living_hero_handle = EntityHandle.empty()
 		else:
-			_player_living_hero_id = 0
+			_player_living_hero_handle = EntityHandle.empty()
+		return EntityHandle.empty()
+	return handle.duplicate_handle()
+
+
+## Safe living-hero lookup. Never returns a freed Object. Clears stale handles automatically.
+static func get_living_hero(is_enemy: bool) -> Hero:
+	var handle: EntityHandle = (
+		_enemy_living_hero_handle if is_enemy else _player_living_hero_handle
+	)
+	if handle == null or handle.is_empty():
 		return null
 
-	var hero: Hero = node_ref as Hero
+	var node: Node = handle.resolve()
+	var hero: Hero = as_living_hero(node)
+	if hero == null:
+		if is_enemy:
+			_enemy_living_hero_handle = EntityHandle.empty()
+		else:
+			_player_living_hero_handle = EntityHandle.empty()
+		return null
+
 	if CombatTargetValidation.is_enemy_faction(hero) != is_enemy:
 		if is_enemy:
-			_enemy_living_hero_id = 0
+			_enemy_living_hero_handle = EntityHandle.empty()
 		else:
-			_player_living_hero_id = 0
-		return null
-
-	var health_component: HealthComponent = hero.get_node_or_null("HealthComponent") as HealthComponent
-	if health_component != null and health_component.current_health <= 0:
-		if is_enemy:
-			_enemy_living_hero_id = 0
-		else:
-			_player_living_hero_id = 0
+			_player_living_hero_handle = EntityHandle.empty()
 		return null
 
 	return hero
@@ -211,5 +227,5 @@ static func clear() -> void:
 	_enemy_snapshot.clear()
 	_player_locked_kit_id = &""
 	_enemy_locked_kit_id = &""
-	_player_living_hero_id = 0
-	_enemy_living_hero_id = 0
+	_player_living_hero_handle = EntityHandle.empty()
+	_enemy_living_hero_handle = EntityHandle.empty()

@@ -73,6 +73,14 @@ var _construction_progress_fill_material: StandardMaterial3D
 var _awaiting_queued_builder: bool = false
 
 
+func _enter_tree() -> void:
+	_register_with_entity_registry()
+
+
+func _exit_tree() -> void:
+	_unregister_with_entity_registry()
+
+
 func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
@@ -86,6 +94,24 @@ func _ready() -> void:
 	_apply_building_data()
 	call_deferred("apply_team_visuals")
 	call_deferred("_setup_damage_visuals")
+	call_deferred("_register_with_entity_registry")
+
+
+func _register_with_entity_registry() -> void:
+	if not is_inside_tree():
+		return
+	var registry: Node = get_tree().root.get_node_or_null("/root/EntityRegistry")
+	if registry != null and registry.has_method(&"register_entity"):
+		registry.call(&"register_entity", self)
+
+
+func _unregister_with_entity_registry() -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var registry: Node = tree.root.get_node_or_null("/root/EntityRegistry")
+	if registry != null and registry.has_method(&"unregister_entity"):
+		registry.call(&"unregister_entity", self)
 
 
 func _apply_default_navigation_obstacle() -> void:
@@ -240,6 +266,7 @@ func destroy_building() -> void:
 	_cleanup_damage_visuals()
 	DeathEffects.play_building_destruction(self)
 	NodeSafety.prepare_node_for_death(self)
+	_unregister_with_entity_registry()
 	destroyed.emit(self)
 
 

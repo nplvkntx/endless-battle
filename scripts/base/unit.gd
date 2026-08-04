@@ -200,15 +200,36 @@ func _ready() -> void:
 	BuffComponent.ensure_on(self)
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
+	call_deferred("_register_with_entity_registry")
+
+
+func _enter_tree() -> void:
+	_register_with_entity_registry()
 
 
 func _exit_tree() -> void:
+	_unregister_with_entity_registry()
 	EnemyUnitMission.clear_unit_mission(self)
 	_clear_order_queue_internal()
 	_active_order = null
 	if _visual_animator != null:
 		_visual_animator.release()
 		_visual_animator = null
+
+
+func _register_with_entity_registry() -> void:
+	var registry: Node = get_tree().root.get_node_or_null("/root/EntityRegistry") if is_inside_tree() else null
+	if registry != null and registry.has_method(&"register_entity"):
+		registry.call(&"register_entity", self)
+
+
+func _unregister_with_entity_registry() -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var registry: Node = tree.root.get_node_or_null("/root/EntityRegistry")
+	if registry != null and registry.has_method(&"unregister_entity"):
+		registry.call(&"unregister_entity", self)
 
 
 ## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
@@ -1657,6 +1678,7 @@ func die() -> void:
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
 	DeathEffects.play_unit_death(self)
 	NodeSafety.prepare_node_for_death(self)
+	_unregister_with_entity_registry()
 	died.emit(self)
 
 

@@ -54,6 +54,7 @@ var _repeat_unit_type: StringName = &""
 var _rally_target_type: RallyTargetType = RallyTargetType.NONE
 var _rally_point: Vector3 = Vector3.ZERO
 var _rally_resource: GatherableResource = null
+var _rally_resource_handle: EntityHandle = EntityHandle.empty()
 var _rally_marker: MeshInstance3D = null
 var _rally_next_slot: int = 0
 
@@ -137,6 +138,7 @@ func _on_health_depleted() -> void:
 	_worker_queue_count = 0
 	_invalidate_tier_upgrade()
 	_rally_resource = null
+	_rally_resource_handle = EntityHandle.empty()
 	_tier2_marker = null
 	_tier3_marker = null
 	_tier_visuals_root = null
@@ -568,6 +570,7 @@ func _cancel_worker_training_at_index(slot_index: int) -> bool:
 func set_rally_point(ground_position: Vector3) -> void:
 	_rally_target_type = RallyTargetType.GROUND
 	_rally_resource = null
+	_rally_resource_handle = EntityHandle.empty()
 	_rally_point = Vector3(ground_position.x, global_position.y + worker_spawn_offset.y, ground_position.z)
 	_rally_next_slot = 0
 	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
@@ -579,6 +582,7 @@ func set_rally_resource(resource: GatherableResource) -> void:
 
 	_rally_target_type = RallyTargetType.RESOURCE
 	_rally_resource = resource
+	_rally_resource_handle = EntityHandle.from_node(resource)
 	_rally_point = Vector3.ZERO
 
 	var marker_position: Vector3 = resource.global_position
@@ -839,8 +843,10 @@ func _apply_worker_rally(worker: Worker) -> void:
 	if worker == null:
 		return
 
+	_rally_resource = _resolve_rally_resource()
 	if _rally_target_type == RallyTargetType.RESOURCE and not _is_valid_rally_resource(_rally_resource):
 		_rally_resource = null
+		_rally_resource_handle = EntityHandle.empty()
 
 	match _rally_target_type:
 		RallyTargetType.GROUND:
@@ -856,13 +862,29 @@ func _claim_ground_rally_target() -> Vector3:
 
 
 func _assign_worker_to_rally_resource(worker: Worker) -> void:
-	if not _is_valid_rally_resource(_rally_resource):
+	var resource: GatherableResource = _resolve_rally_resource()
+	if not _is_valid_rally_resource(resource):
 		return
 
-	if _rally_resource is GoldMine:
-		worker.command_gather_gold_mine(_rally_resource as GoldMine)
-	elif _rally_resource is WoodTree:
-		worker.command_gather_tree(_rally_resource as WoodTree)
+	if resource is GoldMine:
+		worker.command_gather_gold_mine(resource as GoldMine)
+	elif resource is WoodTree:
+		worker.command_gather_tree(resource as WoodTree)
+
+
+func _resolve_rally_resource() -> GatherableResource:
+	if _rally_resource_handle != null and not _rally_resource_handle.is_empty():
+		var node: Node = _rally_resource_handle.resolve_without_registry()
+		if node is GatherableResource and _is_valid_rally_resource(node as GatherableResource):
+			_rally_resource = node as GatherableResource
+			return _rally_resource
+		_rally_resource = null
+		_rally_resource_handle = EntityHandle.empty()
+		return null
+	if _is_valid_rally_resource(_rally_resource):
+		return _rally_resource
+	_rally_resource = null
+	return null
 
 
 func _is_valid_rally_resource(resource: GatherableResource) -> bool:

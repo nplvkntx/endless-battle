@@ -32,6 +32,8 @@ var target_position: Vector3 = Vector3.ZERO
 var target_object: Variant = null
 ## Stable identity for same-target / history checks without a live Node.
 var target_object_id: int = 0
+## Preferred safe target identity for mission objectives.
+var target_handle: EntityHandle = EntityHandle.empty()
 var priority: int = 0
 var creation_time_msec: int = 0
 var last_progress_time_msec: int = 0
@@ -145,8 +147,7 @@ func note_distance_progress(distance: float, epsilon: float = 2.5) -> bool:
 
 
 func has_valid_target_object() -> bool:
-	var ref: Variant = target_object
-	return ref != null and is_instance_valid(ref)
+	return get_alive_target_object() != null
 
 
 ## Assign a live Node3D target. Invalid / freed / non-Node3D values clear the slot.
@@ -160,16 +161,30 @@ func set_target_object(value: Variant) -> void:
 		return
 	target_object = value
 	target_object_id = (value as Object).get_instance_id()
+	target_handle = EntityHandle.from_node(value)
+	if EntityRegistry != null:
+		target_handle = EntityRegistry.make_handle_for(value)
 
 
 func clear_target_object() -> void:
 	target_object = null
 	target_object_id = 0
+	target_handle = EntityHandle.empty()
 
 
 ## Returns a live Node3D or null. Never returns a freed reference.
 func get_alive_target_object() -> Node3D:
 	sanitize_target_object()
+	if target_handle != null and not target_handle.is_empty():
+		var via_handle: Node = target_handle.resolve()
+		if via_handle is Node3D:
+			target_object = via_handle
+			target_object_id = via_handle.get_instance_id()
+			return via_handle as Node3D
+		clear_target_object()
+		target_position = Vector3.ZERO
+		return null
+
 	var ref: Variant = target_object
 	if ref != null and is_instance_valid(ref) and ref is Node3D:
 		return ref as Node3D
@@ -181,18 +196,41 @@ func get_target_object_id() -> int:
 	return target_object_id
 
 
+func get_target_handle() -> EntityHandle:
+	sanitize_target_object()
+	if target_handle == null:
+		return EntityHandle.empty()
+	return target_handle.duplicate_handle()
+
+
 func sanitize_target_object() -> void:
+	if target_handle != null and not target_handle.is_empty():
+		var via_handle: Node = target_handle.resolve()
+		if via_handle is Node3D:
+			target_object = via_handle
+			target_object_id = via_handle.get_instance_id()
+			return
+		## Freed / unregistered objective.
+		target_object = null
+		target_object_id = 0
+		target_handle = EntityHandle.empty()
+		target_position = Vector3.ZERO
+		return
+
 	var ref: Variant = target_object
 	if ref == null:
 		target_object_id = 0
+		target_handle = EntityHandle.empty()
 		return
 	if is_instance_valid(ref):
 		if ref is Object:
 			target_object_id = (ref as Object).get_instance_id()
+			target_handle = EntityHandle.from_node(ref)
 		return
 	## Freed — clear without binding into a typed Node3D local.
 	target_object = null
 	target_object_id = 0
+	target_handle = EntityHandle.empty()
 	## Freed node objectives leave a stale world point — clear it so watchdogs
 	## and F3 cannot treat a dead target as still valid.
 	target_position = Vector3.ZERO

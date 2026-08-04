@@ -50,6 +50,8 @@ var _active_camp: Node3D = null
 var _active_camp_id: int = 0
 var _reserved_camp_id: int = 0
 var _focus_creep: Node3D = null
+var _active_camp_handle: EntityHandle = EntityHandle.empty()
+var _focus_creep_handle: EntityHandle = EntityHandle.empty()
 var _focus_reissue_timer: float = 0.0
 var _regroup_hold_timer: float = 0.0
 var _creep_push_start_power: float = 0.0
@@ -783,6 +785,9 @@ func _select_camp(camp: Node3D, from_position: Vector3, army_power: int = 0) -> 
 		return
 
 	var camp_id: int = camp.get_instance_id()
+	_active_camp_handle = EntityHandle.from_node(camp)
+	if EntityRegistry != null:
+		_active_camp_handle = EntityRegistry.make_handle_for(camp)
 	if camp_id == _active_camp_id:
 		_active_camp = camp
 		_reserved_camp_id = camp_id
@@ -792,6 +797,7 @@ func _select_camp(camp: Node3D, from_position: Vector3, army_power: int = 0) -> 
 	_active_camp_id = camp_id
 	_reserved_camp_id = camp_id
 	_focus_creep = null
+	_focus_creep_handle = EntityHandle.empty()
 	_creep_push_start_power = 0.0
 	_selected_camp_index = get_cleared_early_camp_count() + 1
 	_army_moving_logged = false
@@ -826,6 +832,8 @@ func _clear_active_camp() -> void:
 	_active_camp = null
 	_active_camp_id = 0
 	_focus_creep = null
+	_active_camp_handle = EntityHandle.empty()
+	_focus_creep_handle = EntityHandle.empty()
 	_release_camp_reservation()
 	if _director != null:
 		_director.clear_creep_target()
@@ -971,9 +979,20 @@ func _handle_army_in_hostile_territory(
 
 
 func _sanitize_active_camp(tree: SceneTree) -> void:
+	if _active_camp_handle != null and not _active_camp_handle.is_empty():
+		var resolved: Node = _active_camp_handle.resolve()
+		if resolved is Node3D:
+			_active_camp = resolved as Node3D
+			_active_camp_id = resolved.get_instance_id()
+			_reserved_camp_id = _active_camp_id
+		else:
+			_clear_active_camp()
+			return
+
 	if _active_camp == null:
 		_active_camp_id = 0
 		_reserved_camp_id = 0
+		_active_camp_handle = EntityHandle.empty()
 		return
 
 	if not is_instance_valid(_active_camp):
@@ -987,8 +1006,15 @@ func _sanitize_active_camp(tree: SceneTree) -> void:
 func _engage_camp_focus_fire(tree: SceneTree, army: Array, camp: Node3D) -> void:
 	EnemyAIDebug.log_creeping("Creeping: Engaging camp")
 
+	if _focus_creep_handle != null and not _focus_creep_handle.is_empty():
+		var focus_node: Node = _focus_creep_handle.resolve()
+		_focus_creep = focus_node as Node3D if focus_node is Node3D else null
+		if _focus_creep == null:
+			_focus_creep_handle = EntityHandle.empty()
+
 	if not NodeSafety.is_alive_node(_focus_creep) or not _is_living_creep(_focus_creep):
 		_focus_creep = _pick_focus_creep(tree, camp, army)
+		_focus_creep_handle = EntityHandle.from_node(_focus_creep)
 		_focus_reissue_timer = FOCUS_REISSUE_SECONDS
 
 	## Do not chase leashed creeps far from the camp.
@@ -1001,6 +1027,7 @@ func _engage_camp_focus_fire(tree: SceneTree, army: Array, camp: Node3D) -> void
 		) > CAMP_LEASH_CHASE_RADIUS
 	):
 		_focus_creep = _pick_focus_creep(tree, camp, army)
+		_focus_creep_handle = EntityHandle.from_node(_focus_creep)
 		_focus_reissue_timer = FOCUS_REISSUE_SECONDS
 
 	if not NodeSafety.is_alive_node(_focus_creep):

@@ -26,6 +26,7 @@ extends PanelContainer
 
 var _tracked_health_component: HealthComponent = null
 var _tracked_hero: Hero = null
+var _tracked_hero_handle: EntityHandle = EntityHandle.empty()
 var _tracked_command_center: CommandCenter = null
 var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
@@ -34,6 +35,7 @@ var _tracked_hero_altar: HeroAltar = null
 var _tracked_blacksmith: Blacksmith = null
 var _tracked_academy: Academy = null
 var _tracked_activity_building: Building = null
+var _tracked_activity_handle: EntityHandle = EntityHandle.empty()
 var _is_enemy_inspect: bool = false
 var _activity_refresh_timer: float = 0.0
 const ACTIVITY_REFRESH_INTERVAL := 0.1
@@ -456,6 +458,7 @@ func _configure_enemy_mana_display(hero: Hero) -> void:
 		return
 
 	_tracked_hero = hero
+	_tracked_hero_handle = EntityHandle.from_node(hero)
 	if hero.has_signal("mana_changed") and not hero.mana_changed.is_connected(_on_tracked_mana_changed):
 		hero.mana_changed.connect(_on_tracked_mana_changed)
 	if hero.has_signal("level_changed") and not hero.level_changed.is_connected(
@@ -588,6 +591,7 @@ func _configure_mana_display(unit: Unit) -> void:
 		return
 
 	_tracked_hero = unit as Hero
+	_tracked_hero_handle = EntityHandle.from_node(_tracked_hero)
 	if not _tracked_hero.mana_changed.is_connected(_on_tracked_mana_changed):
 		_tracked_hero.mana_changed.connect(_on_tracked_mana_changed)
 	if not _tracked_hero.level_changed.is_connected(_on_tracked_hero_stats_changed):
@@ -666,6 +670,7 @@ func _clear_mana_tracking() -> void:
 		if _tracked_hero.level_changed.is_connected(_on_tracked_enemy_hero_level_changed):
 			_tracked_hero.level_changed.disconnect(_on_tracked_enemy_hero_level_changed)
 	_tracked_hero = null
+	_tracked_hero_handle = EntityHandle.empty()
 
 
 func _update_health_display(current_health: int, max_health: int) -> void:

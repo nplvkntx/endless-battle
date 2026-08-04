@@ -33,9 +33,11 @@ var _creep_manager: EnemyCreepManager = null
 var _defend_order_reissue_timer: float = 0.0
 var _defend_focus_reissue_timer: float = 0.0
 var _defend_focus_target: Node3D = null
+var _defend_focus_handle: EntityHandle = EntityHandle.empty()
 var _attack_order_reissue_timer: float = 0.0
 var _attack_focus_reissue_timer: float = 0.0
 var _attack_chase_target: Node3D = null
+var _attack_chase_handle: EntityHandle = EntityHandle.empty()
 var _attack_chase_anchor: Vector3 = Vector3.ZERO
 var _attack_chase_start_msec: int = 0
 var _retreat_order_reissue_timer: float = 0.0
@@ -65,9 +67,11 @@ func reset_match_state() -> void:
 	_defend_order_reissue_timer = MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS
 	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
 	_defend_focus_target = null
+	_defend_focus_handle = EntityHandle.empty()
 	_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
 	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
 	_attack_chase_target = null
+	_attack_chase_handle = EntityHandle.empty()
 	_attack_chase_anchor = Vector3.ZERO
 	_attack_chase_start_msec = 0
 	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
@@ -936,9 +940,14 @@ func _execute_defend_mission(
 	var mission_focus: Node3D = mission.get_alive_target_object()
 	if mission_focus != null:
 		focus = mission_focus
+	elif _defend_focus_handle != null and not _defend_focus_handle.is_empty():
+		var via_handle: Node = _defend_focus_handle.resolve()
+		if via_handle is Node3D:
+			focus = via_handle as Node3D
 	elif NodeSafety.is_alive_node(_defend_focus_target):
 		focus = _defend_focus_target
 	_defend_focus_target = focus
+	_defend_focus_handle = EntityHandle.from_node(focus)
 
 	var chase_point: Vector3 = intercept
 	if focus != null:
@@ -1468,6 +1477,11 @@ func _pick_local_attack_focus(
 		return null
 
 	## Prefer the current chase target while it remains nearby and alive.
+	if _attack_chase_handle != null and not _attack_chase_handle.is_empty():
+		var via_handle: Node = _attack_chase_handle.resolve()
+		_attack_chase_target = via_handle as Node3D if via_handle is Node3D else null
+		if _attack_chase_target == null:
+			_attack_chase_handle = EntityHandle.empty()
 	if (
 		NodeSafety.is_alive_node(_attack_chase_target)
 		and candidates.has(_attack_chase_target)
@@ -1524,12 +1538,14 @@ func _begin_attack_chase(target: Node3D, army_center: Vector3) -> void:
 	if _attack_chase_target == target and _attack_chase_start_msec > 0:
 		return
 	_attack_chase_target = target
+	_attack_chase_handle = EntityHandle.from_node(target)
 	_attack_chase_anchor = army_center
 	_attack_chase_start_msec = Time.get_ticks_msec()
 
 
 func _clear_attack_chase() -> void:
 	_attack_chase_target = null
+	_attack_chase_handle = EntityHandle.empty()
 	_attack_chase_anchor = Vector3.ZERO
 	_attack_chase_start_msec = 0
 

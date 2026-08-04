@@ -31,11 +31,37 @@ var selected_building: Building = null
 var inspected_unit: Unit = null
 var inspected_building: Building = null
 var inspected_resource: GatherableResource = null
+## Source-of-truth selection identity. Resolved caches above are refreshed from these.
+var _selected_unit_handles: Array[EntityHandle] = []
+var _selected_building_handle: EntityHandle = EntityHandle.empty()
+var _inspected_unit_handle: EntityHandle = EntityHandle.empty()
+var _inspected_building_handle: EntityHandle = EntityHandle.empty()
 var _unit_tree_exiting_handlers: Dictionary = {}
 var _inspected_building_destroyed_handler: Callable = Callable()
 var _selected_building_destroyed_handler: Callable = Callable()
 var _selection_purge_timer: float = 0.0
 const SELECTION_PURGE_INTERVAL := 0.1
+
+
+## Sole owner of selected-entity handles. UI should query these / resolved getters.
+func get_selected_unit_handles() -> Array[EntityHandle]:
+	_purge_invalid_selected_units()
+	return _selected_unit_handles.duplicate()
+
+
+func get_selected_building_handle() -> EntityHandle:
+	_purge_invalid_selected_building()
+	return _selected_building_handle.duplicate_handle()
+
+
+func get_valid_selected_building() -> Building:
+	_purge_invalid_selected_building()
+	return selected_building
+
+
+func get_valid_selected_units() -> Array[Unit]:
+	_purge_invalid_selected_units()
+	return selected_units.duplicate()
 
 
 func get_multi_unit_selection_category() -> StringName:
@@ -233,7 +259,7 @@ func _find_player_hero() -> Hero:
 var _left_button_down: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _is_dragging: bool = false
-var _last_clicked_unit: Unit = null
+var _last_clicked_unit_handle: EntityHandle = EntityHandle.empty()
 var _last_click_time_msec: int = -1
 
 
@@ -983,6 +1009,15 @@ func _apply_units_selection_diff(next_units: Array[Unit]) -> void:
 		_track_unit_selection(unit)
 
 	selected_units = ordered_units
+	_rebuild_selected_unit_handles()
+
+
+func _rebuild_selected_unit_handles() -> void:
+	_selected_unit_handles.clear()
+	for unit_variant: Variant in selected_units:
+		if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Unit:
+			continue
+		_selected_unit_handles.append(EntityHandle.from_node(unit_variant))
 
 
 func _clear_selection() -> void:
@@ -1007,6 +1042,7 @@ func _set_selected_building(building: Building) -> void:
 		return
 
 	selected_building = building
+	_selected_building_handle = EntityHandle.from_node(building)
 	_connect_selected_building_destroyed(building)
 	if _is_selectable_building(selected_building):
 		_safe_set_building_selected(selected_building, true)
@@ -1029,6 +1065,7 @@ func _clear_building_selection_without_signal() -> void:
 	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
 		_safe_set_building_selected(building_ref, false)
 	selected_building = null
+	_selected_building_handle = EntityHandle.empty()
 
 
 func _clear_selection_without_signal() -> void:
@@ -1040,6 +1077,7 @@ func _clear_selection_without_signal() -> void:
 			## Drop freed/stale entries without typed assignment.
 			pass
 	selected_units.clear()
+	_selected_unit_handles.clear()
 
 
 func _on_unit_died(unit: Unit) -> void:
@@ -1070,22 +1108,26 @@ func _on_selected_unit_tree_exiting(expected_instance_id: int) -> void:
 		selected_units.remove_at(index)
 		removed = true
 
-	if _last_clicked_unit != null:
-		if (
-			not is_instance_valid(_last_clicked_unit)
-			or _last_clicked_unit.get_instance_id() == expected_instance_id
-		):
-			_reset_click_tracking()
+	if _last_clicked_unit_handle.is_empty():
+		pass
+	elif (
+		_last_clicked_unit_handle.instance_id == expected_instance_id
+		or _last_clicked_unit_handle.resolve() == null
+	):
+		_reset_click_tracking()
 
 	if removed:
+		_rebuild_selected_unit_handles()
 		selection_changed.emit(selected_units)
 
 
 func _remove_unit_from_selection(unit: Unit, emit_signal: bool) -> void:
 	_untrack_unit_selection(unit)
 	selected_units.erase(unit)
-	if _last_clicked_unit == unit:
-		_reset_click_tracking()
+	_rebuild_selected_unit_handles()
+	if not _last_clicked_unit_handle.is_empty() and unit != null and is_instance_valid(unit):
+		if _last_clicked_unit_handle.instance_id == unit.get_instance_id():
+			_reset_click_tracking()
 
 	if emit_signal:
 		selection_changed.emit(selected_units)
@@ -1166,6 +1208,7 @@ func _purge_invalid_selected_units() -> void:
 		selected_units.remove_at(index)
 		removed_any = true
 
+	_rebuild_selected_unit_handles()
 	if removed_any:
 		selection_changed.emit(selected_units)
 
@@ -1173,13 +1216,16 @@ func _purge_invalid_selected_units() -> void:
 func _purge_invalid_selected_building() -> void:
 	var building_ref: Variant = selected_building
 	if building_ref == null:
+		_selected_building_handle = EntityHandle.empty()
 		return
 
 	if _is_selectable_building(building_ref):
+		_selected_building_handle = EntityHandle.from_node(building_ref)
 		return
 
 	_disconnect_selected_building_destroyed()
 	selected_building = null
+	_selected_building_handle = EntityHandle.empty()
 	building_selection_changed.emit(null)
 
 
@@ -1194,11 +1240,13 @@ func _purge_invalid_inspection() -> void:
 	if unit_ref != null and not _is_inspectable_unit(unit_ref):
 		_safe_set_unit_inspected(unit_ref, false)
 		inspected_unit = null
+		_inspected_unit_handle = EntityHandle.empty()
 
 	if building_ref != null and not _is_inspectable_building(building_ref):
 		_disconnect_inspected_building_destroyed()
 		_safe_set_building_inspected(building_ref, false)
 		inspected_building = null
+		_inspected_building_handle = EntityHandle.empty()
 
 	if resource_ref != null and not _is_inspectable_resource(resource_ref):
 		inspected_resource = null
@@ -1232,6 +1280,8 @@ func _set_inspected_unit(unit: Unit) -> void:
 		return
 
 	inspected_unit = unit
+	_inspected_unit_handle = EntityHandle.from_node(unit)
+	_inspected_building_handle = EntityHandle.empty()
 	_safe_set_unit_inspected(unit, true)
 	inspection_changed.emit(inspected_unit, null)
 	selection_changed.emit(selected_units)
@@ -1258,6 +1308,8 @@ func _set_inspected_building(building: Building) -> void:
 		return
 
 	inspected_building = building
+	_inspected_building_handle = EntityHandle.from_node(building)
+	_inspected_unit_handle = EntityHandle.empty()
 	_connect_inspected_building_destroyed(building)
 	_safe_set_building_inspected(building, true)
 	inspection_changed.emit(null, inspected_building)
@@ -1311,6 +1363,8 @@ func _clear_inspection_without_signal() -> void:
 	inspected_unit = null
 	inspected_building = null
 	inspected_resource = null
+	_inspected_unit_handle = EntityHandle.empty()
+	_inspected_building_handle = EntityHandle.empty()
 
 
 func _connect_inspected_building_destroyed(building: Building) -> void:
@@ -1346,6 +1400,7 @@ func _disconnect_inspected_building_destroyed() -> void:
 func _on_inspected_building_destroyed(_building: Building) -> void:
 	_inspected_building_destroyed_handler = Callable()
 	inspected_building = null
+	_inspected_building_handle = EntityHandle.empty()
 	inspection_changed.emit(null, null)
 
 
@@ -1382,6 +1437,7 @@ func _disconnect_selected_building_destroyed() -> void:
 func _on_selected_building_destroyed(_building: Building) -> void:
 	_selected_building_destroyed_handler = Callable()
 	selected_building = null
+	_selected_building_handle = EntityHandle.empty()
 	building_selection_changed.emit(null)
 
 
@@ -1565,10 +1621,11 @@ func _find_gatherable_resource_from_collider(node: Node) -> GatherableResource:
 
 
 func _is_double_click(unit: Unit) -> bool:
-	if not _is_selectable_unit(_last_clicked_unit) or _last_click_time_msec < 0:
+	var last_clicked: Unit = _resolve_last_clicked_unit()
+	if not _is_selectable_unit(last_clicked) or _last_click_time_msec < 0:
 		return false
 
-	if not _is_same_unit_type(_last_clicked_unit, unit):
+	if not _is_same_unit_type(last_clicked, unit):
 		return false
 
 	var elapsed_seconds: float = float(Time.get_ticks_msec() - _last_click_time_msec) / 1000.0
@@ -1577,15 +1634,22 @@ func _is_double_click(unit: Unit) -> bool:
 
 func _record_click(unit: Unit) -> void:
 	if is_instance_valid(unit):
-		_last_clicked_unit = unit
+		_last_clicked_unit_handle = EntityHandle.from_node(unit)
 	else:
-		_last_clicked_unit = null
+		_last_clicked_unit_handle = EntityHandle.empty()
 	_last_click_time_msec = Time.get_ticks_msec()
 
 
 func _reset_click_tracking() -> void:
-	_last_clicked_unit = null
+	_last_clicked_unit_handle = EntityHandle.empty()
 	_last_click_time_msec = -1
+
+
+func _resolve_last_clicked_unit() -> Unit:
+	if _last_clicked_unit_handle == null or _last_clicked_unit_handle.is_empty():
+		return null
+	var node: Node = _last_clicked_unit_handle.resolve()
+	return node as Unit if node is Unit else null
 
 
 func _is_same_unit_type(first_unit: Unit, second_unit: Unit) -> bool:
@@ -1712,6 +1776,67 @@ func _find_building_from_collider(node: Node) -> Building:
 func _ready() -> void:
 	add_to_group(ControlGroupManager.SELECTION_MANAGER_GROUP)
 	set_process(true)
+	if EntityRegistry != null and not EntityRegistry.entity_unregistered.is_connected(
+		_on_entity_unregistered
+	):
+		EntityRegistry.entity_unregistered.connect(_on_entity_unregistered)
+
+
+func _on_entity_unregistered(instance_id: int, _category: int, _team_id: int) -> void:
+	if instance_id == 0:
+		return
+
+	var units_changed: bool = false
+	for index: int in range(selected_units.size() - 1, -1, -1):
+		var unit_variant: Variant = selected_units[index]
+		if is_instance_valid(unit_variant) and (unit_variant as Object).get_instance_id() == instance_id:
+			_untrack_unit_selection(unit_variant)
+			selected_units.remove_at(index)
+			units_changed = true
+		elif not is_instance_valid(unit_variant):
+			selected_units.remove_at(index)
+			units_changed = true
+
+	for index: int in range(_selected_unit_handles.size() - 1, -1, -1):
+		var handle: EntityHandle = _selected_unit_handles[index]
+		if handle != null and handle.instance_id == instance_id:
+			_selected_unit_handles.remove_at(index)
+
+	if (
+		_selected_building_handle != null
+		and _selected_building_handle.instance_id == instance_id
+	):
+		_disconnect_selected_building_destroyed()
+		selected_building = null
+		_selected_building_handle = EntityHandle.empty()
+		building_selection_changed.emit(null)
+
+	if (
+		_inspected_unit_handle != null
+		and _inspected_unit_handle.instance_id == instance_id
+	):
+		inspected_unit = null
+		_inspected_unit_handle = EntityHandle.empty()
+		inspection_changed.emit(null, inspected_building)
+
+	if (
+		_inspected_building_handle != null
+		and _inspected_building_handle.instance_id == instance_id
+	):
+		_disconnect_inspected_building_destroyed()
+		inspected_building = null
+		_inspected_building_handle = EntityHandle.empty()
+		inspection_changed.emit(inspected_unit, null)
+
+	if (
+		_last_clicked_unit_handle != null
+		and _last_clicked_unit_handle.instance_id == instance_id
+	):
+		_reset_click_tracking()
+
+	if units_changed:
+		_rebuild_selected_unit_handles()
+		selection_changed.emit(selected_units)
 
 
 func _process(delta: float) -> void:
@@ -1724,13 +1849,13 @@ func _process(delta: float) -> void:
 
 
 func _purge_invalid_last_clicked_unit() -> void:
-	if _last_clicked_unit == null:
+	if _last_clicked_unit_handle == null or _last_clicked_unit_handle.is_empty():
 		return
 
-	if _is_selectable_unit(_last_clicked_unit):
+	if _is_selectable_unit(_resolve_last_clicked_unit()):
 		return
 
-	_last_clicked_unit = null
+	_last_clicked_unit_handle = EntityHandle.empty()
 
 
 func _horizontal_distance_xz(a: Vector3, b: Vector3) -> float:

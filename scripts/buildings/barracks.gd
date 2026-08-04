@@ -39,6 +39,7 @@ const RALLY_SLOT_SPACING: float = 2.0
 
 @export var enable_enemy_auto_production: bool = false
 
+## Production queue stores unit definition IDs only (never spawned Unit instances).
 var _training_queue: Array[StringName] = []
 var _is_training: bool = false
 var _training_session: int = 0

@@ -196,7 +196,15 @@ func _verify_retrain_same_kit_only(failures: PackedStringArray) -> void:
 func _verify_match_reset_clears_living(failures: PackedStringArray) -> void:
 	HeroProgressionStore.clear()
 	HeroProgressionStore.lock_kit(false, HeroCatalog.KIT_RANGER)
-	HeroProgressionStore._player_living_hero_id = 12345
+	HeroProgressionStore._player_living_hero_handle = EntityHandle.from_instance_id(
+		12345,
+		EntityHandle.Category.HERO
+	)
 	HeroProgressionStore.clear()
 	_expect(failures, "reset clears lock", not HeroProgressionStore.has_locked_kit(false))
 	_expect(failures, "reset clears living id", not HeroProgressionStore.has_living_hero(false))
+	_expect(
+		failures,
+		"reset clears living handle",
+		HeroProgressionStore.get_living_hero_handle(false).is_empty()
+	)

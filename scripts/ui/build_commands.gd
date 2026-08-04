@@ -210,6 +210,8 @@ var _selected_stable: Stable = null
 var _selected_artillery_depot: ArtilleryDepot = null
 var _selected_academy: Academy = null
 var _selected_wall_segment: WallSegment = null
+## Selection identity owned via handles; typed fields above are refresh-only resolves.
+var _selected_building_handle: EntityHandle = EntityHandle.empty()
 var _tracked_barracks: Barracks = null
 var _tracked_stable: Stable = null
 var _tracked_artillery_depot: ArtilleryDepot = null
@@ -219,6 +221,8 @@ var _tracked_shop: Shop = null
 var _tracked_wall_segment: WallSegment = null
 var _tracked_hero_altar: HeroAltar = null
 var _tracked_hero: Hero = null
+var _tracked_building_handle: EntityHandle = EntityHandle.empty()
+var _tracked_hero_handle: EntityHandle = EntityHandle.empty()
 var _ui_refresh_timer: float = 0.0
 const UI_REFRESH_INTERVAL := 0.1
 var _auto_training_label: Label = null
@@ -387,6 +391,10 @@ func _ready() -> void:
 
 	selection_manager.selection_changed.connect(_on_selection_changed)
 	selection_manager.building_selection_changed.connect(_on_building_selection_changed)
+	if EntityRegistry != null and not EntityRegistry.entity_unregistered.is_connected(
+		_on_entity_unregistered
+	):
+		EntityRegistry.entity_unregistered.connect(_on_entity_unregistered)
 	_on_building_selection_changed(selection_manager.selected_building)
 	_on_selection_changed(selection_manager.selected_units)
 	if HeroAbilityTargetingController != null:
@@ -2368,53 +2376,97 @@ func _alive_selected_building(building: Variant) -> bool:
 	return NodeSafety.is_alive_node(building)
 
 
+func _on_entity_unregistered(instance_id: int, _category: int, _team_id: int) -> void:
+	if instance_id == 0:
+		return
+	if (
+		_selected_building_handle != null
+		and _selected_building_handle.instance_id == instance_id
+	):
+		_clear_selected_building_caches()
+		_disconnect_all_building_tracking()
+		_refresh_command_visibility()
+	if _tracked_building_handle != null and _tracked_building_handle.instance_id == instance_id:
+		_disconnect_all_building_tracking()
+		_tracked_building_handle = EntityHandle.empty()
+	if _tracked_hero_handle != null and _tracked_hero_handle.instance_id == instance_id:
+		_set_tracked_hero(null)
+
+
+func _clear_selected_building_caches() -> void:
+	_selected_building_handle = EntityHandle.empty()
+	_selected_command_center = null
+	_selected_barracks = null
+	_selected_blacksmith = null
+	_selected_shop = null
+	_selected_hero_altar = null
+	_selected_stable = null
+	_selected_artillery_depot = null
+	_selected_academy = null
+	_selected_wall_segment = null
+
+
+## Resolve typed selection caches from SelectionManager for this refresh only.
+func _sync_selected_building_caches() -> Building:
+	var building: Building = _get_authoritative_selected_building()
+	_selected_building_handle = EntityHandle.from_node(building)
+	_selected_command_center = building as CommandCenter if building is CommandCenter else null
+	_selected_barracks = building as Barracks if building is Barracks else null
+	_selected_blacksmith = building as Blacksmith if building is Blacksmith else null
+	_selected_shop = building as Shop if building is Shop else null
+	_selected_hero_altar = building as HeroAltar if building is HeroAltar else null
+	_selected_stable = building as Stable if building is Stable else null
+	_selected_artillery_depot = building as ArtilleryDepot if building is ArtilleryDepot else null
+	_selected_academy = building as Academy if building is Academy else null
+	_selected_wall_segment = building as WallSegment if building is WallSegment else null
+	return building
+
+
 func _require_selected_barracks() -> Barracks:
-	if not NodeSafety.is_alive_node(_selected_barracks):
-		_selected_barracks = null
-		return null
+	_sync_selected_building_caches()
 	return _selected_barracks
 
 
 func _require_selected_command_center() -> CommandCenter:
-	if not NodeSafety.is_alive_node(_selected_command_center):
-		_selected_command_center = null
-		return null
+	_sync_selected_building_caches()
 	return _selected_command_center
 
 
 func _require_selected_hero_altar() -> HeroAltar:
-	if not NodeSafety.is_alive_node(_selected_hero_altar):
-		_selected_hero_altar = null
-		return null
+	_sync_selected_building_caches()
 	return _selected_hero_altar
 
 
 func _require_selected_stable() -> Stable:
-	if not NodeSafety.is_alive_node(_selected_stable):
-		_selected_stable = null
-		return null
+	_sync_selected_building_caches()
 	return _selected_stable
 
 
 func _require_selected_artillery_depot() -> ArtilleryDepot:
-	if not NodeSafety.is_alive_node(_selected_artillery_depot):
-		_selected_artillery_depot = null
-		return null
+	_sync_selected_building_caches()
 	return _selected_artillery_depot
 
 
 func _require_tracked_barracks() -> Barracks:
-	if not NodeSafety.is_alive_node(_tracked_barracks):
-		_tracked_barracks = null
-		return null
-	return _tracked_barracks
+	var node: Node = (
+		_tracked_building_handle.resolve() if _tracked_building_handle != null else null
+	)
+	if node is Barracks:
+		_tracked_barracks = node as Barracks
+		return _tracked_barracks
+	_tracked_barracks = null
+	return null
 
 
 func _require_tracked_hero_altar() -> HeroAltar:
-	if not NodeSafety.is_alive_node(_tracked_hero_altar):
-		_tracked_hero_altar = null
-		return null
-	return _tracked_hero_altar
+	var node: Node = (
+		_tracked_building_handle.resolve() if _tracked_building_handle != null else null
+	)
+	if node is HeroAltar:
+		_tracked_hero_altar = node as HeroAltar
+		return _tracked_hero_altar
+	_tracked_hero_altar = null
+	return null
 
 
 func _disconnect_all_building_tracking() -> void:
@@ -2427,6 +2479,15 @@ func _disconnect_all_building_tracking() -> void:
 	_disconnect_academy_signals()
 	_disconnect_shop_signals()
 	_disconnect_wall_gate_signals()
+	_tracked_building_handle = EntityHandle.empty()
+	_tracked_barracks = null
+	_tracked_stable = null
+	_tracked_artillery_depot = null
+	_tracked_blacksmith = null
+	_tracked_academy = null
+	_tracked_shop = null
+	_tracked_wall_segment = null
+	_tracked_hero_altar = null
 
 
 func _on_selection_changed(units: Array[Unit]) -> void:
@@ -2456,6 +2517,7 @@ func _set_tracked_hero(hero_ref: Variant = null) -> void:
 	_disconnect_tracked_hero_signals()
 	var hero: Hero = HeroProgressionStore.as_living_hero(hero_ref)
 	_tracked_hero = hero
+	_tracked_hero_handle = EntityHandle.from_node(hero)
 	if _tracked_hero != null:
 		if not _tracked_hero.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 			_tracked_hero.ability_progression_changed.connect(_on_tracked_hero_progression_changed)
@@ -2472,12 +2534,19 @@ func _set_tracked_hero(hero_ref: Variant = null) -> void:
 
 
 func _disconnect_tracked_hero_signals() -> void:
-	var tracked_ref: Variant = _tracked_hero
-	if not NodeSafety.is_alive_node(tracked_ref):
+	var tracked: Hero = null
+	if _tracked_hero_handle != null and not _tracked_hero_handle.is_empty():
+		var node: Node = _tracked_hero_handle.resolve()
+		if node is Hero:
+			tracked = node as Hero
+	elif NodeSafety.is_alive_node(_tracked_hero):
+		tracked = _tracked_hero as Hero
+
+	if tracked == null:
 		_tracked_hero = null
+		_tracked_hero_handle = EntityHandle.empty()
 		return
 
-	var tracked: Hero = tracked_ref as Hero
 	if tracked.ability_progression_changed.is_connected(_on_tracked_hero_progression_changed):
 		tracked.ability_progression_changed.disconnect(_on_tracked_hero_progression_changed)
 	if tracked.ability_points_changed.is_connected(_on_tracked_hero_progression_changed):
@@ -2490,6 +2559,19 @@ func _disconnect_tracked_hero_signals() -> void:
 	):
 		passive.passive_state_changed.disconnect(_on_tracked_hero_progression_changed)
 	_tracked_hero = null
+	_tracked_hero_handle = EntityHandle.empty()
+
+
+func _resolve_tracked_hero() -> Hero:
+	if _tracked_hero_handle != null and not _tracked_hero_handle.is_empty():
+		var via_handle: Hero = HeroProgressionStore.as_living_hero(_tracked_hero_handle.resolve())
+		_tracked_hero = via_handle
+		if via_handle == null:
+			_tracked_hero_handle = EntityHandle.empty()
+		return via_handle
+	var living: Hero = HeroProgressionStore.as_living_hero(_tracked_hero)
+	_tracked_hero = living
+	return living
 
 
 func _on_tracked_hero_progression_changed(_unused = null) -> void:
@@ -2497,6 +2579,7 @@ func _on_tracked_hero_progression_changed(_unused = null) -> void:
 
 
 func _update_hero_abilities_ui() -> void:
+	_tracked_hero = _resolve_tracked_hero()
 	_update_passive_ui()
 	_update_ground_slam_ui()
 	_update_divine_protection_ui()
@@ -2872,6 +2955,8 @@ func _on_building_selection_changed(building_ref: Variant = null) -> void:
 	var building: Building = null
 	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
 		building = building_ref as Building
+	_tracked_building_handle = EntityHandle.from_node(building)
+	_sync_selected_building_caches()
 
 	if building is CommandCenter and is_instance_valid(building):
 		_selected_command_center = building as CommandCenter
@@ -3181,10 +3266,7 @@ func _refresh_command_visibility() -> void:
 		selection_manager.purge_invalid_selection()
 
 	var selected_units: Array[Unit] = selection_manager.selected_units
-	var selected_building_ref: Variant = selection_manager.selected_building
-	var selected_building: Building = null
-	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
-		selected_building = selected_building_ref as Building
+	var selected_building: Building = _sync_selected_building_caches()
 	var nothing_selected: bool = selected_units.is_empty() and selected_building == null
 
 	if nothing_selected:
@@ -3233,18 +3315,22 @@ func _refresh_command_visibility() -> void:
 		and (selected_building as CommandCenter).building_state == Building.STATE_COMPLETED
 	)
 
-	_selected_barracks = selected_building as Barracks if show_barracks_training else null
-	_selected_blacksmith = selected_building as Blacksmith if show_blacksmith_upgrades else null
-	_selected_shop = selected_building as Shop if show_shop_items else null
-	_selected_hero_altar = selected_building as HeroAltar if show_hero_altar_training else null
-	_selected_stable = selected_building as Stable if show_stable_commands else null
-	_selected_artillery_depot = (
-		selected_building as ArtilleryDepot if show_artillery_depot_commands else null
-	)
-	_selected_academy = selected_building as Academy if show_academy_commands else null
-	_selected_wall_segment = (
-		selected_building as WallSegment if show_wall_gate_commands else null
-	)
+	if not show_barracks_training:
+		_selected_barracks = null
+	if not show_blacksmith_upgrades:
+		_selected_blacksmith = null
+	if not show_shop_items:
+		_selected_shop = null
+	if not show_hero_altar_training:
+		_selected_hero_altar = null
+	if not show_stable_commands:
+		_selected_stable = null
+	if not show_artillery_depot_commands:
+		_selected_artillery_depot = null
+	if not show_academy_commands:
+		_selected_academy = null
+	if not show_wall_gate_commands:
+		_selected_wall_segment = null
 
 	# Keep CC tracking while an unfinished Town Hall stays selected so completion can refresh UI.
 	if selected_building is CommandCenter and is_instance_valid(selected_building):

@@ -11,9 +11,35 @@ var _respawn_timer: float = -1.0
 var _waiting_to_respawn: bool = false
 
 
+func _enter_tree() -> void:
+	_register_with_entity_registry()
+
+
+func _exit_tree() -> void:
+	_unregister_with_entity_registry()
+
+
 func _ready() -> void:
 	add_to_group(&"creep_camps")
 	_capture_spawn_configs()
+	_register_with_entity_registry()
+
+
+func _register_with_entity_registry() -> void:
+	if not is_inside_tree():
+		return
+	var registry: Node = get_tree().root.get_node_or_null("/root/EntityRegistry")
+	if registry != null and registry.has_method(&"register_entity"):
+		registry.call(&"register_entity", self)
+
+
+func _unregister_with_entity_registry() -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var registry: Node = tree.root.get_node_or_null("/root/EntityRegistry")
+	if registry != null and registry.has_method(&"unregister_entity"):
+		registry.call(&"unregister_entity", self)
 
 
 func _process(delta: float) -> void:

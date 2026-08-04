@@ -53,6 +53,7 @@ const AI_HERO_POOL: Array[StringName] = [
 var _tactical_state: TacticalState = TacticalState.FOLLOW_ARMY
 var _combo: RefCounted = null
 var _focus_target_id: int = 0
+var _focus_target_handle: EntityHandle = EntityHandle.empty()
 var _focus_acquired_at: float = 0.0
 var _last_micro_move_at: float = -999.0
 var _last_trap_positions: Array[Vector3] = []
@@ -70,6 +71,7 @@ func reset_match_state() -> void:
 	_tactical_state = TacticalState.FOLLOW_ARMY
 	_combo = null
 	_focus_target_id = 0
+	_focus_target_handle = EntityHandle.empty()
 	_focus_acquired_at = 0.0
 	_last_micro_move_at = -999.0
 	_last_trap_positions.clear()
@@ -495,7 +497,7 @@ func _should_abort_combo(situation: Dictionary) -> bool:
 
 
 func _resolve_focus_target(hero: Hero, situation: Dictionary, now: float) -> Node3D:
-	var sticky: Node3D = _get_node_by_id(_focus_target_id)
+	var sticky: Node3D = _resolve_focus_node()
 	if (
 		NodeSafety.is_alive_node(sticky)
 		and CombatTargetValidation.is_attack_target_for_attacker(hero, sticky)
@@ -511,18 +513,38 @@ func _resolve_focus_target(hero: Hero, situation: Dictionary, now: float) -> Nod
 			if _target_priority_score(hero, upgrade, situation) + 25.0 < _target_priority_score(
 				hero, sticky, situation
 			):
-				_focus_target_id = upgrade.get_instance_id()
-				_focus_acquired_at = now
+				_set_focus_target(upgrade, now)
 				return upgrade
 			return sticky
 
 	var chosen: Node3D = _find_priority_target(hero, situation, false)
 	if NodeSafety.is_alive_node(chosen):
-		_focus_target_id = chosen.get_instance_id()
-		_focus_acquired_at = now
+		_set_focus_target(chosen, now)
 	else:
-		_focus_target_id = 0
+		_clear_focus_target()
 	return chosen
+
+
+func _set_focus_target(target: Node3D, now: float) -> void:
+	_focus_target_handle = EntityHandle.from_node(target)
+	_focus_target_id = target.get_instance_id() if NodeSafety.is_alive_node(target) else 0
+	_focus_acquired_at = now
+
+
+func _clear_focus_target() -> void:
+	_focus_target_id = 0
+	_focus_target_handle = EntityHandle.empty()
+
+
+func _resolve_focus_node() -> Node3D:
+	if _focus_target_handle != null and not _focus_target_handle.is_empty():
+		var via_handle: Node = _focus_target_handle.resolve()
+		if via_handle is Node3D:
+			_focus_target_id = via_handle.get_instance_id()
+			return via_handle as Node3D
+		_clear_focus_target()
+		return null
+	return _get_node_by_id(_focus_target_id)
 
 
 ## Lower score = higher priority (matches CombatTargetValidation style).
@@ -1423,8 +1445,14 @@ func _count_allied_military_near(hero: Hero, radius: float) -> int:
 func _get_node_by_id(instance_id: int) -> Node3D:
 	if instance_id == 0:
 		return null
+	if EntityRegistry != null:
+		var via_registry: Node = EntityRegistry.resolve_id(instance_id)
+		if via_registry is Node3D:
+			return via_registry as Node3D
 	var node: Object = instance_from_id(instance_id)
 	if node == null or not is_instance_valid(node) or not node is Node3D:
+		return null
+	if node is Node and not (node as Node).is_inside_tree():
 		return null
 	return node as Node3D
 
