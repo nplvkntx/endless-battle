@@ -34,6 +34,8 @@ var _defend_order_reissue_timer: float = 0.0
 var _defend_focus_reissue_timer: float = 0.0
 var _defend_focus_target: Node3D = null
 var _defend_focus_handle: EntityHandle = EntityHandle.empty()
+## squad_id -> {destination, focus_id, msec} for defense order dedup.
+var _last_defend_order_by_squad: Dictionary = {}
 var _attack_order_reissue_timer: float = 0.0
 var _attack_focus_reissue_timer: float = 0.0
 var _attack_chase_target: Node3D = null
@@ -68,6 +70,7 @@ func reset_match_state() -> void:
 	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
 	_defend_focus_target = null
 	_defend_focus_handle = EntityHandle.empty()
+	_last_defend_order_by_squad.clear()
 	_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
 	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
 	_attack_chase_target = null
@@ -373,7 +376,14 @@ func _force_regenerate_squad_order(
 				_force_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
 				issued = true
 		MilitaryDirectorV2.State.DEFEND:
-			_force_attack_move(units, destination, EnemyUnitMission.Mission.DEFEND)
+			## Never dump the whole army onto one point during idle recovery.
+			_issue_defend_squad_orders(
+				squad,
+				director.get_assemble_rally_point(),
+				destination,
+				alive_target,
+				false
+			)
 			issued = true
 		_:
 			return
@@ -917,6 +927,7 @@ func _execute_defend_mission(
 	if tree == null:
 		return
 
+	squad.ensure_tactical_squads()
 	var defense_army: Array = _collect_defend_army(squad)
 	if defense_army.is_empty():
 		return
@@ -975,27 +986,74 @@ func _execute_defend_mission(
 		false
 	)
 
-	## Role-aware Attack-Move keeps the squad returning together without endless chase.
+	## Role-aware Attack-Move by stable tactical squad — never dump 70 units on one point.
 	if _defend_order_reissue_timer >= MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS:
 		_defend_order_reissue_timer = 0.0
+		_issue_defend_squad_orders(
+			squad,
+			base_anchor,
+			leashed_point,
+			focus,
+			beyond_leash
+		)
+		EnemyArmyCommand.note_mission_progress(
+			EnemyArmyCommand.compute_army_center(defense_army),
+			false,
+			defense_army.size()
+		)
+
+	## Connect attacks on the priority target, but never past the leash.
+	## Only active (non-reserve) squads focus-fire to avoid order storms.
+	if (
+		not beyond_leash
+		and focus != null
+		and _defend_focus_reissue_timer >= MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
+	):
+		_defend_focus_reissue_timer = 0.0
+		var focus_units: Array = _collect_active_defend_focus_units(squad)
+		if not focus_units.is_empty():
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_focus_attack(
+					focus_units,
+					focus,
+					EnemyUnitMission.Mission.DEFEND
+				)
+			)
+			mission.note_progress("started combat")
+			EnemyArmyCommand.note_mission_progress(
+				EnemyArmyCommand.compute_army_center(defense_army),
+				true,
+				defense_army.size()
+			)
+
+
+func _issue_defend_squad_orders(
+	squad: ArmySquadV2,
+	base_anchor: Vector3,
+	leashed_point: Vector3,
+	focus: Node3D,
+	beyond_leash: bool
+) -> void:
+	var forward: Vector3 = leashed_point - base_anchor
+	forward.y = 0.0
+	if forward.length_squared() < 0.01:
+		forward = Vector3(0.0, 0.0, 1.0)
+	else:
+		forward = forward.normalized()
+	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
+
+	var tactical: Array = squad.get_tactical_squads_copy()
+	if tactical.is_empty():
+		## Fallback: role split of the whole army (pre-partition edge case).
 		var melee_units: Array = []
 		var ranged_units: Array = []
-		_split_defend_roles(squad, defense_army, melee_units, ranged_units)
-
-		var forward: Vector3 = leashed_point - base_anchor
-		forward.y = 0.0
-		if forward.length_squared() < 0.01:
-			forward = Vector3(0.0, 0.0, 1.0)
-		else:
-			forward = forward.normalized()
-
+		_split_defend_roles(squad, _collect_defend_army(squad), melee_units, ranged_units)
 		var melee_destination: Vector3 = (
 			leashed_point + forward * MilitaryAIConfig.V2_DEFEND_MELEE_INTERCEPT_OFFSET
 		)
 		var ranged_destination: Vector3 = (
 			leashed_point - forward * MilitaryAIConfig.V2_DEFEND_RANGED_STANDOFF
 		)
-
 		EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
 		EnemyArmyCommand.with_authorized_orders(func() -> void:
 			if not melee_units.is_empty():
@@ -1011,33 +1069,176 @@ func _execute_defend_mission(
 					EnemyUnitMission.Mission.DEFEND
 				)
 		)
-		## Order reissue alone is not meaningful progress — watchdog tracks distance/combat.
-		EnemyArmyCommand.note_mission_progress(
-			EnemyArmyCommand.compute_army_center(defense_army),
-			false,
-			defense_army.size()
-		)
+		return
 
-	## Connect attacks on the priority target, but never past the leash.
-	if (
-		not beyond_leash
-		and focus != null
-		and _defend_focus_reissue_timer >= MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
-	):
-		_defend_focus_reissue_timer = 0.0
+	## Sort so frontline / hero escort engage first; reserves last.
+	tactical.sort_custom(func(a: Variant, b: Variant) -> bool:
+		return _defend_squad_priority(a) < _defend_squad_priority(b)
+	)
+
+	var active_cap: int = MilitaryAIConfig.V2_DEFEND_ACTIVE_SQUAD_CAP
+	var active_issued: int = 0
+	var reserve_index: int = 0
+	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
+
+	for entry: Variant in tactical:
+		if not entry is Dictionary:
+			continue
+		var squad_data: Dictionary = entry
+		var squad_id: int = int(squad_data.get("id", 0))
+		var role: int = int(squad_data.get("role", 0))
+		var members: Array = NodeSafety.clean_node_array(squad_data.get("members", []))
+		if members.is_empty():
+			continue
+
+		var is_reserve: bool = (
+			role == int(ArmySquadV2.TacticalRole.RESERVE)
+			or active_issued >= active_cap
+		)
+		var destination: Vector3 = _compute_defend_hold_position(
+			role,
+			base_anchor,
+			leashed_point,
+			forward,
+			right,
+			reserve_index,
+			is_reserve
+		)
+		if is_reserve:
+			reserve_index += 1
+		else:
+			active_issued += 1
+
+		squad.set_tactical_hold_position(squad_id, destination)
+
+		## Skip equivalent Attack-Move refreshes for this tactical squad.
+		if _is_equivalent_defend_order(squad_id, destination, focus):
+			continue
+
+		## Reserves hold intercept posts; only leave when a nearby hostile exists.
+		if is_reserve and not beyond_leash:
+			var reserve_should_engage: bool = (
+				focus != null
+				and EnemyArmyCommand.horizontal_distance(destination, focus.global_position) <= 16.0
+			)
+			if not reserve_should_engage:
+				EnemyArmyCommand.with_authorized_orders(func() -> void:
+					EnemyArmyCommand.command_hold_at_rally(
+						members,
+						destination,
+						EnemyUnitMission.Mission.DEFEND
+					)
+				)
+				_record_defend_order(squad_id, destination, focus)
+				continue
+
 		EnemyArmyCommand.with_authorized_orders(func() -> void:
-			EnemyArmyCommand.command_focus_attack(
-				defense_army,
-				focus,
+			EnemyArmyCommand.command_attack_move(
+				members,
+				destination,
 				EnemyUnitMission.Mission.DEFEND
 			)
 		)
-		mission.note_progress("started combat")
-		EnemyArmyCommand.note_mission_progress(
-			EnemyArmyCommand.compute_army_center(defense_army),
-			true,
-			defense_army.size()
+		_record_defend_order(squad_id, destination, focus)
+
+
+func _defend_squad_priority(entry: Variant) -> int:
+	if not entry is Dictionary:
+		return 99
+	match int((entry as Dictionary).get("role", 0)):
+		int(ArmySquadV2.TacticalRole.FRONTLINE):
+			return 0
+		int(ArmySquadV2.TacticalRole.HERO_ESCORT):
+			return 1
+		int(ArmySquadV2.TacticalRole.RANGED_SUPPORT):
+			return 2
+		int(ArmySquadV2.TacticalRole.SIEGE):
+			return 3
+		_:
+			return 4
+
+
+func _compute_defend_hold_position(
+	role: int,
+	base_anchor: Vector3,
+	leashed_point: Vector3,
+	forward: Vector3,
+	right: Vector3,
+	reserve_index: int,
+	is_reserve: bool
+) -> Vector3:
+	if is_reserve or role == int(ArmySquadV2.TacticalRole.RESERVE):
+		var side: float = 1.0 if (reserve_index % 2) == 0 else -1.0
+		var depth: float = float(reserve_index / 2) * 4.0
+		return (
+			base_anchor
+			+ forward * (MilitaryAIConfig.V2_DEFEND_RESERVE_OFFSET - depth)
+			+ right * side * (MilitaryAIConfig.V2_DEFEND_RESERVE_OFFSET * 0.65)
 		)
+	match role:
+		int(ArmySquadV2.TacticalRole.FRONTLINE), int(ArmySquadV2.TacticalRole.HERO_ESCORT):
+			return leashed_point + forward * MilitaryAIConfig.V2_DEFEND_MELEE_INTERCEPT_OFFSET
+		int(ArmySquadV2.TacticalRole.RANGED_SUPPORT):
+			return leashed_point - forward * MilitaryAIConfig.V2_DEFEND_RANGED_STANDOFF
+		int(ArmySquadV2.TacticalRole.SIEGE):
+			return leashed_point - forward * MilitaryAIConfig.V2_DEFEND_SIEGE_STANDOFF
+		_:
+			return leashed_point
+
+
+func _is_equivalent_defend_order(
+	squad_id: int,
+	destination: Vector3,
+	focus: Node3D
+) -> bool:
+	if not _last_defend_order_by_squad.has(squad_id):
+		return false
+	var prev: Dictionary = _last_defend_order_by_squad[squad_id]
+	var age_sec: float = float(Time.get_ticks_msec() - int(prev.get("msec", 0))) / 1000.0
+	if age_sec < MilitaryAIConfig.V2_DEFEND_ORDER_MIN_AGE_SECONDS:
+		return true
+	var prev_dest: Vector3 = prev.get("destination", Vector3.ZERO)
+	if (
+		EnemyArmyCommand.horizontal_distance(prev_dest, destination)
+		> MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE
+	):
+		return false
+	var prev_focus_id: int = int(prev.get("focus_id", 0))
+	var focus_id: int = focus.get_instance_id() if NodeSafety.is_alive_node(focus) else 0
+	return prev_focus_id == focus_id
+
+
+func _record_defend_order(squad_id: int, destination: Vector3, focus: Node3D) -> void:
+	_last_defend_order_by_squad[squad_id] = {
+		"destination": destination,
+		"focus_id": focus.get_instance_id() if NodeSafety.is_alive_node(focus) else 0,
+		"msec": Time.get_ticks_msec(),
+	}
+
+
+func _collect_active_defend_focus_units(squad: ArmySquadV2) -> Array:
+	var units: Array = []
+	var active_cap: int = MilitaryAIConfig.V2_DEFEND_ACTIVE_SQUAD_CAP
+	var active_count: int = 0
+	var tactical: Array = squad.get_tactical_squads_copy()
+	tactical.sort_custom(func(a: Variant, b: Variant) -> bool:
+		return _defend_squad_priority(a) < _defend_squad_priority(b)
+	)
+	for entry: Variant in tactical:
+		if not entry is Dictionary:
+			continue
+		var role: int = int((entry as Dictionary).get("role", 0))
+		if role == int(ArmySquadV2.TacticalRole.RESERVE):
+			continue
+		if active_count >= active_cap:
+			break
+		active_count += 1
+		for member: Variant in (entry as Dictionary).get("members", []):
+			if NodeSafety.is_alive_node(member) and EnemyArmyCommand.is_living_combat_unit(member as Node):
+				units.append(member)
+	if units.is_empty():
+		return _collect_defend_army(squad)
+	return NodeSafety.clean_node_array(units)
 
 
 func _collect_defend_army(squad: ArmySquadV2) -> Array:

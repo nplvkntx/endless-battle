@@ -161,6 +161,12 @@ var _tower_lane_bindings: Dictionary = {} ## instance_id -> lane
 var _cc_worker_queue_connected: bool = false
 var _building_scan_frame: int = -1
 var _cached_enemy_buildings: Array = []
+var _cached_worker_count: int = -1
+var _cached_worker_count_frame: int = -1
+var _cached_military_count: int = -1
+var _cached_military_count_frame: int = -1
+var _last_production_fingerprint: String = ""
+var _production_skip_stale_ticks: int = 0
 var _expansion_target_mine: GoldMine = null
 var _expansion_placement_cooldown_until: float = -1.0
 var _expansion_order_active: bool = false
@@ -242,11 +248,36 @@ func _on_build_tick() -> void:
 		_tick_active = false
 		return
 
+	## Stagger production away from strategic fast ticks (odd process frames).
+	if (Engine.get_process_frames() % 2) == 0:
+		var defer_timer: SceneTreeTimer = get_tree().create_timer(0.05)
+		defer_timer.timeout.connect(_on_build_tick, CONNECT_ONE_SHOT)
+		return
+
+	var fingerprint: String = _build_production_fingerprint()
+	if fingerprint == _last_production_fingerprint and _production_skip_stale_ticks < 2:
+		_production_skip_stale_ticks += 1
+		_schedule_tick()
+		return
+
+	_production_skip_stale_ticks = 0
+	_last_production_fingerprint = fingerprint
 	var start_usec: int = PerfCounters.begin_section()
 	_run_build_order()
 	PerfCounters.end_section("Production update", start_usec)
 	PerfCounters.record_ai_decision_update()
 	_schedule_tick()
+
+
+func _build_production_fingerprint() -> String:
+	return "%d|%d|%d|%d|%d|%d" % [
+		_count_enemy_workers(),
+		_count_living_military_units(),
+		_cached_enemy_buildings.size(),
+		int(EnemyResourceManager.gold),
+		int(EnemyResourceManager.wood),
+		int(EnemyArmyCommand.get_strategic_state()),
+	]
 
 
 func _run_build_order() -> void:
@@ -3294,7 +3325,12 @@ func _get_desired_army_size() -> int:
 
 
 func _count_living_military_units() -> int:
-	return EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()).size()
+	var frame: int = Engine.get_process_frames()
+	if frame == _cached_military_count_frame and _cached_military_count >= 0:
+		return _cached_military_count
+	_cached_military_count_frame = frame
+	_cached_military_count = EnemyArmyCommand.collect_living_non_hero_combat_units(get_tree()).size()
+	return _cached_military_count
 
 
 func _count_pending_military_units() -> int:
@@ -4128,11 +4164,15 @@ func _is_building_type_in_progress(building_type: StringName) -> bool:
 
 
 func _count_enemy_workers() -> int:
+	var frame: int = Engine.get_process_frames()
+	if frame == _cached_worker_count_frame and _cached_worker_count >= 0:
+		return _cached_worker_count
 	var count: int = 0
 	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
 		if node is Worker and is_instance_valid(node) and not node.is_queued_for_deletion():
 			count += 1
-
+	_cached_worker_count_frame = frame
+	_cached_worker_count = count
 	return count
 
 

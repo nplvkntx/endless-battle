@@ -22,6 +22,7 @@ func _ready() -> void:
 	_verify_defend_config_and_source(failures)
 	_verify_defend_priority_order(failures)
 	_verify_defend_leash_helper(failures)
+	_verify_defense_storm_guards(failures)
 	_verify_attack_config_and_source(failures)
 	_verify_attack_priority_order(failures)
 	_verify_attack_chase_leash_helper(failures)
@@ -502,6 +503,96 @@ func _verify_defend_config_and_source(failures: PackedStringArray) -> void:
 			"defense ignores buildings while military threatens",
 			combat_text.contains("Never prioritize buildings")
 		)
+
+
+func _verify_defense_storm_guards(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"defend order reissue slowed for large armies",
+		MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS >= 1.0
+	)
+	_expect(
+		failures,
+		"defend dest equivalence configured",
+		MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE == 2.0
+	)
+	_expect(
+		failures,
+		"tactical squad size band configured",
+		MilitaryAIConfig.V2_TACTICAL_SQUAD_MIN_SIZE == 10
+		and MilitaryAIConfig.V2_TACTICAL_SQUAD_MAX_SIZE == 15
+	)
+	_expect(
+		failures,
+		"active defend squad cap configured",
+		MilitaryAIConfig.V2_DEFEND_ACTIVE_SQUAD_CAP == 3
+	)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "storm director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "soft defend update exists", text.contains("_soft_update_defend_mission"))
+		_expect(failures, "sticky defend focus exists", text.contains("V2_DEFEND_FOCUS_STICKY_RADIUS"))
+		_expect(failures, "watchdog notes active combat", text.contains("active combat"))
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "storm commander source readable", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(failures, "commander issues defend by squad", commander_text.contains("_issue_defend_squad_orders"))
+		_expect(failures, "commander dedups defend orders", commander_text.contains("_is_equivalent_defend_order"))
+		_expect(failures, "commander computes hold positions", commander_text.contains("_compute_defend_hold_position"))
+
+	var squad_source := FileAccess.open("res://scripts/systems/army_squad_v2.gd", FileAccess.READ)
+	_expect(failures, "squad source readable", squad_source != null)
+	if squad_source != null:
+		var squad_text: String = squad_source.get_as_text()
+		squad_source.close()
+		_expect(failures, "tactical squads API exists", squad_text.contains("ensure_tactical_squads"))
+		_expect(failures, "tactical roles include reserve", squad_text.contains("RESERVE"))
+		_expect(failures, "tactical roles include siege", squad_text.contains("SIEGE"))
+		_expect(failures, "tactical roles include hero escort", squad_text.contains("HERO_ESCORT"))
+
+	## Partition stability: many members become multiple 10–15 squads without reshuffle thrash.
+	var squad := ArmySquadV2.new()
+	for i: int in 70:
+		## Use lightweight placeholder nodes so membership APIs can be exercised.
+		var placeholder := Node.new()
+		placeholder.name = "storm_unit_%d" % i
+		add_child(placeholder)
+		var role: ArmySquadV2.UnitRole = ArmySquadV2.UnitRole.FRONTLINE
+		match i % 5:
+			1:
+				role = ArmySquadV2.UnitRole.RANGED
+			2:
+				role = ArmySquadV2.UnitRole.SIEGE
+			3:
+				role = ArmySquadV2.UnitRole.CAVALRY
+			4:
+				role = ArmySquadV2.UnitRole.MELEE_GUARD
+		## try_add_member rejects non-combat types via early type checks; inject via internals.
+		squad.members.append(placeholder)
+		squad.role_by_id[placeholder.get_instance_id()] = role
+	squad.ensure_tactical_squads()
+	_expect(failures, "70 members produce multiple tactical squads", squad.tactical_squads.size() >= 5)
+	var oversized: int = 0
+	for entry: Variant in squad.tactical_squads:
+		if entry is Dictionary and (entry as Dictionary).get("members", []).size() > MilitaryAIConfig.V2_TACTICAL_SQUAD_MAX_SIZE:
+			oversized += 1
+	_expect(failures, "no tactical squad exceeds max size", oversized == 0)
+	var first_ids: Dictionary = squad.unit_to_tactical_squad.duplicate()
+	squad.ensure_tactical_squads()
+	_expect(
+		failures,
+		"tactical membership stays stable across refresh",
+		first_ids == squad.unit_to_tactical_squad
+	)
+	for child: Node in get_children():
+		if child.name.begins_with("storm_unit_"):
+			child.queue_free()
 
 
 func _verify_defend_priority_order(failures: PackedStringArray) -> void:

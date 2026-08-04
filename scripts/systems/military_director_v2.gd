@@ -388,12 +388,27 @@ func _transition_to(
 	var next_mission_type: ArmyMissionV2.MissionType = _state_to_mission_type(next_state)
 	if _state == next_state and _mission != null and _mission.mission_type == next_mission_type:
 		var same_target_object: bool = _same_target_object(previous_target_ref, safe_target)
-		var same_target_position: bool = _mission.target_position == target_position
+		var dest_delta: float = EnemyArmyCommand.horizontal_distance(
+			_mission.target_position,
+			target_position
+		)
+		var position_tolerance: float = (
+			MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE
+			if next_state == State.DEFEND
+			else 0.01
+		)
+		var same_target_position: bool = (
+			_mission.target_position == target_position
+			or dest_delta <= position_tolerance
+		)
 		var same_priority: bool = _mission.priority == priority
 		if same_target_object and same_target_position and same_priority:
 			if reason != _last_transition_reason and not reason.is_empty():
 				_last_transition_reason = reason
 				_mission.transition_reason = reason
+			## Keep defend intercept gently tracking without rebuilding the mission.
+			if next_state == State.DEFEND and dest_delta > 0.01:
+				_mission.target_position = target_position
 			return false
 		## Same living objective with a drifted position — update in place so the
 		## watchdog progress clock is not reset every strategic tick.
@@ -406,6 +421,21 @@ func _transition_to(
 				_mission.transition_reason = reason
 			if next_state == State.CREEP:
 				_reserved_creep_camp_id = safe_target.get_instance_id()
+			return false
+		## DEFEND with no living focus (or null↔null) and small destination drift:
+		## never emit DEFEND -> DEFEND or reset the watchdog.
+		if (
+			next_state == State.DEFEND
+			and same_priority
+			and dest_delta <= MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE * 4.0
+		):
+			_mission.target_position = target_position
+			if NodeSafety.is_alive_node(safe_target):
+				_mission.set_target_object(safe_target)
+				_bind_mission_target_exit(safe_target)
+			if reason != _last_transition_reason and not reason.is_empty():
+				_last_transition_reason = reason
+				_mission.transition_reason = reason
 			return false
 		if next_state == State.CREEP and not NodeSafety.is_alive_node(safe_target):
 			return false
@@ -906,16 +936,19 @@ func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 			_pre_defend_state = _state
 			EnemyArmyCommand.prepare_defense_recall(tree)
 			EnemyArmyCommand.activate_emergency_defense(threat)
+			_defend_active = true
+			_transition_to(
+				State.DEFEND,
+				reason_text,
+				intercept,
+				focus,
+				100
+			)
 		else:
+			## Already defending — refresh threat data without restarting the mission.
 			EnemyArmyCommand.update_emergency_defense_threat(threat)
-		_defend_active = true
-		_transition_to(
-			State.DEFEND,
-			reason_text,
-			intercept,
-			focus,
-			100
-		)
+			_defend_active = true
+			_soft_update_defend_mission(intercept, focus, reason_text, threat)
 		return true
 
 	if _state != State.DEFEND and not _defend_active:
@@ -932,6 +965,62 @@ func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 
 	_exit_defend_after_clear(tree, rally_point)
 	return true
+
+
+## Update defend objective in place when the strategic state is already DEFEND.
+## Full transitions (and log spam / watchdog resets) only occur on meaningful change.
+func _soft_update_defend_mission(
+	intercept: Vector3,
+	focus: Node3D,
+	reason_text: String,
+	_threat: Dictionary
+) -> void:
+	if _mission == null or _mission.mission_type != ArmyMissionV2.MissionType.DEFEND:
+		_transition_to(State.DEFEND, reason_text, intercept, focus, 100)
+		return
+
+	var previous_focus: Node3D = _mission.get_alive_target_object()
+	var same_focus: bool = _same_target_object(previous_focus, focus)
+	## Sticky focus: keep the living defended target unless it left the leash.
+	if (
+		not same_focus
+		and NodeSafety.is_alive_node(previous_focus)
+		and previous_focus is Node3D
+	):
+		var prev_dist: float = EnemyArmyCommand.horizontal_distance(
+			intercept if intercept != Vector3.ZERO else _mission.target_position,
+			(previous_focus as Node3D).global_position
+		)
+		if prev_dist <= MilitaryAIConfig.V2_DEFEND_FOCUS_STICKY_RADIUS:
+			focus = previous_focus as Node3D
+			same_focus = true
+			reason_text = _format_defend_reason(_defend_reason, focus)
+
+	var dest_delta: float = EnemyArmyCommand.horizontal_distance(
+		_mission.target_position,
+		intercept
+	)
+
+	## Protected structure / threat identity — only force a restart when focus flips
+	## to a different living node or destination jumps far from the current intercept.
+	var needs_hard_transition: bool = (
+		(not same_focus and NodeSafety.is_alive_node(focus) and NodeSafety.is_alive_node(previous_focus))
+		or dest_delta > MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE * 4.0
+	)
+	if needs_hard_transition:
+		_transition_to(State.DEFEND, reason_text, intercept, focus, 100)
+		return
+
+	## Soft hold: update intercept / focus / reason without clearing orders or watchdog.
+	if dest_delta > MilitaryAIConfig.V2_DEFEND_DEST_EQUIVALENCE:
+		_mission.target_position = intercept
+	if NodeSafety.is_alive_node(focus):
+		_mission.set_target_object(focus)
+		_bind_mission_target_exit(focus)
+	if not reason_text.is_empty() and reason_text != _last_transition_reason:
+		_last_transition_reason = reason_text
+		_mission.transition_reason = reason_text
+	_publish_perf_status()
 
 
 func _resolve_v2_defense_threat(tree: SceneTree) -> Dictionary:
@@ -959,6 +1048,19 @@ func _pick_defend_focus_target(
 	var search_origin: Vector3 = intercept if intercept != Vector3.ZERO else rally_point
 	if search_origin == Vector3.ZERO:
 		return null
+
+	## Prefer keeping the current living focus to avoid DEFEND objective thrash.
+	var sticky: Node3D = null
+	if _mission != null and _mission.mission_type == ArmyMissionV2.MissionType.DEFEND:
+		sticky = _mission.get_alive_target_object()
+	if (
+		NodeSafety.is_alive_node(sticky)
+		and sticky is Node3D
+		and not (sticky is Building)
+		and EnemyArmyCommand.horizontal_distance(search_origin, sticky.global_position)
+			<= MilitaryAIConfig.V2_DEFEND_FOCUS_STICKY_RADIUS
+	):
+		return sticky
 
 	var candidates: Array = EnemyArmyCommand.collect_player_military_near(
 		tree,
@@ -2995,6 +3097,10 @@ func _update_watchdog_progress(
 			)
 	if in_combat and not _watchdog_recent_combat:
 		_mission.note_progress("started combat")
+		_watchdog_order_refreshed = false
+	elif in_combat:
+		## Continuous fighting is real progress — never stall-refresh mid-combat.
+		_mission.note_progress("active combat")
 		_watchdog_order_refreshed = false
 	_watchdog_recent_combat = in_combat
 	if in_combat:

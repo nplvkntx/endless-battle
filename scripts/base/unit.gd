@@ -37,18 +37,21 @@ const UNSTUCK_CANCEL_AFTER_STAGES := 3
 const MOVE_DEST_TOLERANCE := 1.0
 const MOVE_DEST_NEAR_SKIP := 0.35
 const PLAYER_DEST_NEAR_SKIP := 0.25
-const REPATH_COOLDOWN_NORMAL_SECONDS := 0.85
-const REPATH_COOLDOWN_FORMATION_SECONDS := 1.15
-const REPATH_COOLDOWN_CHASE_SECONDS := 1.0
-const REPATH_COOLDOWN_URGENT_SECONDS := 0.4
-const REPATH_COOLDOWN_STUCK_SECONDS := 0.9
-const REPATH_STAGGER_OFFSET_SECONDS := 0.1
+const REPATH_COOLDOWN_NORMAL_SECONDS := 1.0
+const REPATH_COOLDOWN_FORMATION_SECONDS := 2.0
+const REPATH_COOLDOWN_CHASE_SECONDS := 1.35
+const REPATH_COOLDOWN_URGENT_SECONDS := 0.55
+const REPATH_COOLDOWN_STUCK_SECONDS := 1.0
+const REPATH_STAGGER_OFFSET_SECONDS := 0.14
 const PATH_VALIDITY_CHECK_INTERVAL := 0.7
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
+## AI armies use a slower staggered acquire cadence to cut search storms.
+const ENEMY_COMBAT_TARGET_SCAN_INTERVAL := 1.35
+const ENEMY_COMBAT_TARGET_SCAN_JITTER := 0.55
 const COMBAT_TARGET_VALIDATE_INTERVAL := 0.12
 const VISUAL_FACING_TURN_SPEED := 8.0
 const VISUAL_FACING_VELOCITY_THRESHOLD_SQ := 0.09
@@ -767,6 +770,15 @@ func request_movement_target(
 	_last_requested_destination = next_target
 	var now_msec: int = Time.get_ticks_msec()
 
+	## Fighting / in-range units must not repath for soft formation refreshes.
+	if (
+		urgency != RepathUrgency.PLAYER_ORDER
+		and urgency != RepathUrgency.STUCK_RECOVERY
+		and urgency != RepathUrgency.URGENT
+		and _should_skip_repath_while_engaged()
+	):
+		return false
+
 	var distance_to_new: float = Vector3(
 		global_position.x - next_target.x,
 		0.0,
@@ -920,15 +932,44 @@ func _can_request_repath(
 	return elapsed_sec >= cooldown
 
 
+## Soft AI formation refreshes must not yank units that are already fighting.
+func _should_skip_repath_while_engaged() -> bool:
+	if not CombatTargetValidation.is_enemy_faction(self):
+		return false
+	if _crowd_yield_seconds > 0.0:
+		return true
+	if not ("_attack_target" in self):
+		return false
+	var attack_target: Variant = get("_attack_target")
+	if not NodeSafety.is_alive_node(attack_target) or not attack_target is Node3D:
+		return false
+	if has_method("_is_in_attack_range") and bool(call("_is_in_attack_range", attack_target)):
+		return true
+	if "_has_active_attack_order" in self and bool(get("_has_active_attack_order")):
+		return true
+	return false
+
+
 ## Returns true when a throttled combat target scan is due (auto-attack, engage, retarget).
 func tick_combat_target_scan_timer(
-	delta: float, interval: float = COMBAT_TARGET_SCAN_INTERVAL
+	delta: float, interval: float = -1.0
 ) -> bool:
 	_combat_target_scan_timer -= delta
 	if _combat_target_scan_timer > 0.0:
 		return false
 
-	_combat_target_scan_timer = interval + randf() * COMBAT_TARGET_SCAN_JITTER
+	var scan_interval: float = interval
+	var scan_jitter: float = COMBAT_TARGET_SCAN_JITTER
+	if scan_interval < 0.0:
+		if CombatTargetValidation.is_enemy_faction(self):
+			scan_interval = ENEMY_COMBAT_TARGET_SCAN_INTERVAL
+			scan_jitter = ENEMY_COMBAT_TARGET_SCAN_JITTER
+		else:
+			scan_interval = COMBAT_TARGET_SCAN_INTERVAL
+	## Stagger AI searches across buckets so large armies do not scan together.
+	if CombatTargetValidation.is_enemy_faction(self):
+		scan_interval += float(abs(get_instance_id()) % 7) * 0.08
+	_combat_target_scan_timer = scan_interval + randf() * scan_jitter
 	return true
 
 

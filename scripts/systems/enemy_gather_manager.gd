@@ -26,6 +26,8 @@ const GOLD_MINE_NEAR_CC_DISTANCE: float = 22.0
 const MAX_GOLD_MINE_TRANSFERS_PER_REBALANCE: int = 2
 const NAV_READY_MAX_FRAMES: int = 60
 const DEBUG_AI_WORKER_GATHER: bool = false
+const WORKER_REASSIGN_LOG_COOLDOWN_SECONDS: float = 4.0
+const WORKER_REASSIGN_SAME_JOB_COOLDOWN_SECONDS: float = 6.0
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gold_mine_path: NodePath
@@ -36,6 +38,9 @@ var _starting_gold_mine: GoldMine = null
 var _cached_active_gold_mines: Array[GoldMine] = []
 var _cached_active_gold_mines_frame: int = -1
 var _director: EnemyStrategicDirector = null
+var _last_worker_reassign_log_msec: int = 0
+## worker_instance_id -> {resource_id, msec}
+var _last_worker_reassign_by_id: Dictionary = {}
 
 
 func _ready() -> void:
@@ -519,21 +524,63 @@ func _recover_workers_needing_attention() -> void:
 
 
 func _force_recover_worker(worker: Worker, prefer_gold: bool) -> bool:
+	if not NodeSafety.is_alive_node(worker):
+		return false
+	if not worker.needs_enemy_worker_recovery():
+		return false
+	if worker.get_enemy_recovery_cooldown() > 0.0:
+		return false
+	if not worker.can_enemy_economy_force_reassign():
+		return false
+
+	var desired_resource: StringName = &"gold" if prefer_gold else &"wood"
+	var current_resource: StringName = worker.get_assigned_gather_resource_id()
+	var worker_id: int = worker.get_instance_id()
+	if _last_worker_reassign_by_id.has(worker_id):
+		var prev: Dictionary = _last_worker_reassign_by_id[worker_id]
+		var age_sec: float = float(Time.get_ticks_msec() - int(prev.get("msec", 0))) / 1000.0
+		if (
+			age_sec < WORKER_REASSIGN_SAME_JOB_COOLDOWN_SECONDS
+			and StringName(prev.get("resource_id", &"")) == desired_resource
+			and current_resource == desired_resource
+		):
+			return false
+
+	## Already gathering the intended resource with a living order — do not reissue.
+	if current_resource == desired_resource and not worker.is_enemy_gather_fallback_idle():
+		if not worker.needs_gather_target_reassignment():
+			return false
+
 	if not worker.prepare_for_enemy_economy_reassign(""):
 		return false
 
 	if not assign_gather_job(worker, prefer_gold, true):
 		return false
 
-	match worker.get_assigned_gather_resource_id():
+	var assigned: StringName = worker.get_assigned_gather_resource_id()
+	_last_worker_reassign_by_id[worker_id] = {
+		"resource_id": assigned,
+		"msec": Time.get_ticks_msec(),
+	}
+	_log_worker_reassign(assigned)
+	return true
+
+
+func _log_worker_reassign(assigned: StringName) -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	if (
+		now_msec - _last_worker_reassign_log_msec
+		< int(WORKER_REASSIGN_LOG_COOLDOWN_SECONDS * 1000.0)
+	):
+		return
+	_last_worker_reassign_log_msec = now_msec
+	match assigned:
 		&"gold":
 			print("AI WORKER: reassigned idle worker to gold")
 		&"wood":
 			print("AI WORKER: reassigned idle worker to wood")
 		_:
 			print("AI WORKER: reassigned idle worker to economy")
-
-	return true
 
 
 func _scan_fallback_idle_enemy_workers() -> void:

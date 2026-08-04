@@ -22,12 +22,13 @@ const BUILD_COMMITMENT_SECONDS: float = 12.0
 const SHOP_COMMITMENT_SECONDS: float = 8.0
 const ORDER_REISSUE_MIN_SECONDS: float = 1.0
 const ORDER_FORMATION_REISSUE_SECONDS: float = 1.4
-const ORDER_URGENT_REISSUE_SECONDS: float = 0.45
+## DEFEND / RETREAT still urgent, but not so tight that large armies thrash orders.
+const ORDER_URGENT_REISSUE_SECONDS: float = 1.0
 const ORDER_STUCK_REFRESH_SECONDS: float = 1.75
-const ORDER_MOVE_THRESHOLD: float = 3.0
+const ORDER_MOVE_THRESHOLD: float = 2.0
 const ORDER_NEAR_DESTINATION_SKIP: float = 1.5
-const ORDER_UNIT_DEST_TOLERANCE: float = 1.5
-const ORDER_STAGGER_OFFSET_SECONDS: float = 0.09
+const ORDER_UNIT_DEST_TOLERANCE: float = 2.0
+const ORDER_STAGGER_OFFSET_SECONDS: float = 0.12
 
 ## Lower number = higher priority. DEFEND > RETREAT > ATTACK > CREEP > RALLY > IDLE.
 const PRIORITY_DEFEND: int = 1

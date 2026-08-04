@@ -58,14 +58,26 @@ const V2_ASSEMBLE_ATTACK_MOVE_DISTANCE: float = 6.0
 ## V2 DEFEND behavior tuning.
 const V2_DEFEND_LEASH_RADIUS: float = 42.0
 const V2_DEFEND_THREAT_CLEAR_SECONDS: float = 5.0
-const V2_DEFEND_ORDER_REISSUE_SECONDS: float = 0.45
-const V2_DEFEND_FOCUS_REISSUE_SECONDS: float = 0.75
+## Longer reissue stops Attack-Move / focus storms on large defense armies.
+const V2_DEFEND_ORDER_REISSUE_SECONDS: float = 1.25
+const V2_DEFEND_FOCUS_REISSUE_SECONDS: float = 1.50
 const V2_DEFEND_THREAT_SEARCH_RANGE: float = 34.0
 const V2_DEFEND_MELEE_INTERCEPT_OFFSET: float = 2.5
 const V2_DEFEND_RANGED_STANDOFF: float = 7.0
+const V2_DEFEND_SIEGE_STANDOFF: float = 12.0
+const V2_DEFEND_RESERVE_OFFSET: float = 14.0
 const V2_DEFEND_DAMAGED_HP_RATIO: float = 0.70
 const V2_DEFEND_SCATTER_RADIUS: float = 18.0
 const V2_DEFEND_SCATTER_COHESION_RATIO: float = 0.60
+## Soft-hold DEFEND when destination / focus drift is within these tolerances.
+const V2_DEFEND_DEST_EQUIVALENCE: float = 2.0
+const V2_DEFEND_ORDER_MIN_AGE_SECONDS: float = 1.0
+const V2_DEFEND_FOCUS_STICKY_RADIUS: float = 28.0
+
+## Stable tactical squads (partition of the main army; not rebuilt every tick).
+const V2_TACTICAL_SQUAD_MIN_SIZE: int = 10
+const V2_TACTICAL_SQUAD_MAX_SIZE: int = 15
+const V2_DEFEND_ACTIVE_SQUAD_CAP: int = 3
 
 ## V2 ATTACK behavior tuning.
 const V2_ATTACK_ORDER_REISSUE_SECONDS: float = 0.45

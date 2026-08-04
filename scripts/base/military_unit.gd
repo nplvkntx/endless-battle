@@ -563,6 +563,15 @@ func _try_retarget_higher_priority_during_attack() -> void:
 		return
 	if _committed_attack_order:
 		return
+	## AI keeps a valid in-range target unless a significantly better threat appears.
+	if (
+		CombatTargetValidation.is_enemy_faction(self)
+		and _is_in_attack_range(_attack_target)
+		and CombatTargetValidation.is_valid_combat_target(_attack_target)
+	):
+		## Only re-evaluate on a slower cadence than acquire scans.
+		if not should_run_staggered_update(5):
+			return
 
 	var search_range: float = get_acquisition_range()
 	if _has_attack_move_destination:
@@ -595,6 +604,9 @@ func _try_retarget_higher_priority_during_attack() -> void:
 		candidate_priority = CombatTargetValidation.get_enemy_attack_target_priority(
 			self, candidate, candidate_distance
 		)
+		## Require a clear priority upgrade before abandoning a valid AI target.
+		if candidate_priority >= current_priority:
+			return
 	else:
 		current_priority = CombatTargetValidation.get_auto_acquire_target_priority(
 			self, _attack_target, current_distance

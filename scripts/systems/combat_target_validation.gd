@@ -77,6 +77,10 @@ static var _attack_slot_ring_basis_by_target: Dictionary = {}
 static var _group_cache_frame: int = -1
 static var _group_cache_tree_id: int = -1
 static var _cached_group_nodes: Dictionary = {}
+## Shared nearby-threat results for AI squads: bucket_key -> {target, msec, origin}.
+static var _shared_enemy_target_cache: Dictionary = {}
+const SHARED_ENEMY_TARGET_CACHE_TTL_MSEC: int = 450
+const SHARED_ENEMY_TARGET_BUCKET_SIZE: float = 8.0
 
 
 ## Clear attack-slot and group caches so instance IDs cannot leak across matches.
@@ -87,6 +91,7 @@ static func reset_match_state() -> void:
 	_group_cache_frame = -1
 	_group_cache_tree_id = -1
 	_cached_group_nodes.clear()
+	_shared_enemy_target_cache.clear()
 
 
 static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> Array:
@@ -779,6 +784,11 @@ static func _is_attacking_enemy_town_hall(tree: SceneTree, target: Node3D) -> bo
 static func _find_best_enemy_faction_attack_target(
 	attacker: Node3D, search_range: float
 ) -> Node3D:
+	## Prefer a fresh shared nearby result so 70 units do not each full-scan.
+	var shared: Node3D = _try_get_shared_enemy_target(attacker, search_range)
+	if shared != null:
+		return shared
+
 	PerfCounters.record_enemy_target_search()
 	var best_target: Node3D = null
 	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
@@ -817,7 +827,56 @@ static func _find_best_enemy_faction_attack_target(
 				best_distance = distance
 				best_target = target
 
+	if best_target != null:
+		_store_shared_enemy_target(attacker, best_target)
 	return best_target
+
+
+static func _shared_enemy_target_bucket_key(origin: Vector3) -> String:
+	var bx: int = int(floor(origin.x / SHARED_ENEMY_TARGET_BUCKET_SIZE))
+	var bz: int = int(floor(origin.z / SHARED_ENEMY_TARGET_BUCKET_SIZE))
+	return "%d:%d" % [bx, bz]
+
+
+static func _try_get_shared_enemy_target(attacker: Node3D, search_range: float) -> Node3D:
+	if attacker == null:
+		return null
+	var key: String = _shared_enemy_target_bucket_key(attacker.global_position)
+	if not _shared_enemy_target_cache.has(key):
+		return null
+	var entry: Dictionary = _shared_enemy_target_cache[key]
+	var age: int = Time.get_ticks_msec() - int(entry.get("msec", 0))
+	if age > SHARED_ENEMY_TARGET_CACHE_TTL_MSEC:
+		_shared_enemy_target_cache.erase(key)
+		return null
+	var cached: Variant = entry.get("target")
+	if not NodeSafety.is_alive_node(cached) or not cached is Node3D:
+		_shared_enemy_target_cache.erase(key)
+		return null
+	var target: Node3D = cached as Node3D
+	if not is_attack_target_for_attacker(attacker, target):
+		return null
+	if StealthService.is_combat_hidden(target):
+		return null
+	var distance: float = get_horizontal_attack_distance(attacker, target)
+	if distance > search_range:
+		return null
+	return target
+
+
+static func _store_shared_enemy_target(attacker: Node3D, target: Node3D) -> void:
+	if attacker == null or not NodeSafety.is_alive_node(target):
+		return
+	var key: String = _shared_enemy_target_bucket_key(attacker.global_position)
+	_shared_enemy_target_cache[key] = {
+		"target": target,
+		"msec": Time.get_ticks_msec(),
+		"origin": attacker.global_position,
+	}
+	## Bound cache size so long matches cannot leak entries.
+	if _shared_enemy_target_cache.size() > 64:
+		var keys: Array = _shared_enemy_target_cache.keys()
+		_shared_enemy_target_cache.erase(keys[0])
 
 
 static func _find_closest_hostile_attack_target_in_range(

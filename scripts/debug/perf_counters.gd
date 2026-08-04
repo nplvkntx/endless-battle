@@ -22,9 +22,10 @@ const WARN_ORDERS_PER_SEC := 40.0
 const WARN_REPATHS_PER_SEC := 60.0
 const WARN_TARGET_SEARCHES_PER_SEC := 80.0
 const SECTION_WARN_USEC := 12000
-const ORDER_BUDGET_WARN_COOLDOWN_SECONDS := 2.0
-const EXCESSIVE_RATE_WARN_COOLDOWN_SECONDS := 3.0
-const DUPLICATE_GROUP_ORDER_WARN_COOLDOWN_SECONDS := 8.0
+const ORDER_BUDGET_WARN_COOLDOWN_SECONDS := 4.0
+const EXCESSIVE_RATE_WARN_COOLDOWN_SECONDS := 5.0
+const DUPLICATE_GROUP_ORDER_WARN_COOLDOWN_SECONDS := 12.0
+const SECTION_WARN_COOLDOWN_SECONDS := 4.0
 
 var _window_elapsed: float = 0.0
 var _counts: Dictionary = {}
@@ -66,6 +67,8 @@ var _recent_low_fps: float = 0.0
 var _last_order_budget_warn_msec: int = 0
 var _last_duplicate_group_order_warn_msec: int = 0
 var _last_excessive_warn_msec: Dictionary = {}
+var _peak_rates: Dictionary = {}
+var _last_section_warn_msec: Dictionary = {}
 var verbose_ai_logging: bool = false
 
 
@@ -390,7 +393,9 @@ func advance_rate_window(delta: float) -> void:
 
 	var elapsed: float = _window_elapsed
 	for key: StringName in _counts.keys():
-		_rates[key] = float(_counts[key]) / elapsed
+		var rate: float = float(_counts[key]) / elapsed
+		_rates[key] = rate
+		_peak_rates[key] = maxf(float(_peak_rates.get(key, 0.0)), rate)
 
 	_maybe_warn_excessive_rates()
 	_counts.clear()
@@ -399,6 +404,10 @@ func advance_rate_window(delta: float) -> void:
 
 func get_rate(key: StringName) -> float:
 	return float(_rates.get(key, 0.0))
+
+
+func get_peak_rate(key: StringName) -> float:
+	return float(_peak_rates.get(key, 0.0))
 
 
 func begin_section() -> int:
@@ -410,6 +419,12 @@ func end_section(section_name: String, start_usec: int, scanned_units: int = -1)
 	var elapsed_ms: float = float(elapsed_usec) / 1000.0
 	if elapsed_usec < SECTION_WARN_USEC:
 		return elapsed_ms
+
+	var now_msec: int = Time.get_ticks_msec()
+	var last_msec: int = int(_last_section_warn_msec.get(section_name, 0))
+	if now_msec - last_msec < int(SECTION_WARN_COOLDOWN_SECONDS * 1000.0):
+		return elapsed_ms
+	_last_section_warn_msec[section_name] = now_msec
 
 	print("[AI PERF] %s took %.1f ms" % [section_name, elapsed_ms])
 	if scanned_units >= 0:
@@ -423,7 +438,15 @@ func warn_order_budget_reached(budget: int) -> void:
 		return
 
 	_last_order_budget_warn_msec = now_msec
-	print("[AI PERF] Order budget reached: %d" % budget)
+	print(
+		"[AI PERF] Order budget reached: %d | pending=%d | orders/sec=%.0f peak=%.0f"
+		% [
+			budget,
+			_pending_group_orders,
+			get_rate(KEY_AI_ORDERS),
+			get_peak_rate(KEY_AI_ORDERS),
+		]
+	)
 
 
 func warn_duplicate_group_order() -> void:
@@ -441,7 +464,11 @@ func warn_duplicate_group_order() -> void:
 
 func _maybe_warn_excessive_rates() -> void:
 	if get_fps() > 0.0 and get_fps() < WARN_FPS_THRESHOLD:
-		_warn_rate_once(&"low_fps", 0.0, "FPS below 30: %.0f" % get_fps())
+		_warn_rate_once(
+			&"low_fps",
+			0.0,
+			"FPS below 30: %.0f (recent low %.0f)" % [get_fps(), get_recent_low_fps()]
+		)
 	_warn_rate_once(KEY_AI_ORDERS, WARN_ORDERS_PER_SEC, "Excessive orders")
 	_warn_rate_once(KEY_REPATH_REQUESTS, WARN_REPATHS_PER_SEC, "Excessive repaths")
 	_warn_rate_once(KEY_TARGET_SEARCHES, WARN_TARGET_SEARCHES_PER_SEC, "Excessive target searches")
@@ -461,7 +488,10 @@ func _warn_rate_once(key: StringName, threshold: float, label: String) -> void:
 	if threshold <= 0.0:
 		print("[AI PERF] %s" % label)
 	else:
-		print("[AI PERF] %s: %.0f/sec" % [label, rate])
+		print(
+			"[AI PERF] %s: %.0f/sec (peak %.0f/sec)"
+			% [label, rate, get_peak_rate(key)]
+		)
 
 
 func collect_warnings() -> PackedStringArray:
@@ -483,6 +513,8 @@ func reset_all() -> void:
 	_window_elapsed = 0.0
 	_counts.clear()
 	_rates.clear()
+	_peak_rates.clear()
+	_last_section_warn_msec.clear()
 	_active_projectiles = 0
 	_orders_this_frame = 0
 	_orders_frame_id = -1

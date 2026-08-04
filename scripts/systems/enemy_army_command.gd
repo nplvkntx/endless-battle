@@ -111,8 +111,10 @@ const FORMATION_CACHE_DEST_THRESHOLD := 3.0
 const FORMATION_SLOT_SKIP_DISTANCE := 1.5
 ## Keep formation slots for the life of an order — do not reshuffle every AI tick.
 const FORMATION_CACHE_REFRESH_SECONDS := 90.0
-const GROUP_ORDER_DEST_TOLERANCE := 4.5
+const GROUP_ORDER_DEST_TOLERANCE := 2.0
 const GROUP_ORDER_SIGNATURE_TTL_SECONDS := 5.0
+const GROUP_ORDER_MIN_REFRESH_SECONDS := 1.0
+const PENDING_ORDER_DEST_BUCKET := 2.0
 const DEFENSE_THREAT_CACHE_SECONDS := 0.35
 const ATTACK_OBJECTIVE_STUCK_SECONDS := 3.0
 const ATTACK_OBJECTIVE_NEAR_DISTANCE := 22.0
@@ -5265,6 +5267,18 @@ static func _issue_spaced_group_orders(
 		PerfCounters.warn_duplicate_group_order()
 		return
 
+	## Fresh Attack-Move younger than 1s must not be refreshed for soft formation drift.
+	if (
+		use_attack_move
+		and not _active_group_order_signature.is_empty()
+		and int(mission) == _active_group_order_mission
+		and horizontal_distance(center, _active_group_order_dest) <= GROUP_ORDER_DEST_TOLERANCE
+	):
+		var age_sec: float = float(Time.get_ticks_msec() - _active_group_order_msec) / 1000.0
+		if age_sec < GROUP_ORDER_MIN_REFRESH_SECONDS:
+			PerfCounters.warn_duplicate_group_order()
+			return
+
 	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
 		ordered_units,
 		center,
@@ -5297,6 +5311,8 @@ static func _issue_spaced_group_orders(
 			"target": target,
 			"use_attack_move": use_attack_move,
 			"mission": mission,
+			"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
+			"priority": _mission_order_priority(mission),
 		})
 
 	if pending_orders.is_empty():
@@ -5307,11 +5323,67 @@ static func _issue_spaced_group_orders(
 
 	_record_group_order_signature(ordered_units, center, mission, use_attack_move)
 	var had_pending: bool = not _pending_group_orders.is_empty()
-	_pending_group_orders.append_array(pending_orders)
-	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
+	_enqueue_pending_group_orders(pending_orders)
 	# Never recurse into batch processing while a batch is already draining.
 	if not had_pending and not _issuing_group_order_batch:
 		tick_group_order_batch(null)
+
+
+static func _build_pending_order_dedupe_key(
+	unit: Variant,
+	mission: EnemyUnitMission.Mission,
+	destination: Vector3
+) -> String:
+	var unit_id: int = 0
+	if NodeSafety.is_alive_node(unit):
+		unit_id = (unit as Node).get_instance_id()
+	var bx: int = int(floor(destination.x / PENDING_ORDER_DEST_BUCKET))
+	var bz: int = int(floor(destination.z / PENDING_ORDER_DEST_BUCKET))
+	return "%d|%d|%d|%d" % [unit_id, int(mission), bx, bz]
+
+
+static func _mission_order_priority(mission: EnemyUnitMission.Mission) -> int:
+	## Lower = drained first. Emergency defend/retreat before formation refreshes.
+	match mission:
+		EnemyUnitMission.Mission.DEFEND:
+			return 0
+		EnemyUnitMission.Mission.RETREAT:
+			return 1
+		EnemyUnitMission.Mission.ATTACK:
+			return 2
+		EnemyUnitMission.Mission.CREEP:
+			return 3
+		_:
+			return 4
+
+
+static func _enqueue_pending_group_orders(new_orders: Array) -> void:
+	if new_orders.is_empty():
+		return
+	var existing_keys: Dictionary = {}
+	for entry: Variant in _pending_group_orders:
+		if entry is Dictionary:
+			var key: String = str((entry as Dictionary).get("dedupe_key", ""))
+			if not key.is_empty():
+				existing_keys[key] = true
+
+	for entry: Variant in new_orders:
+		if not entry is Dictionary:
+			continue
+		var order: Dictionary = entry
+		var key: String = str(order.get("dedupe_key", ""))
+		if not key.is_empty() and existing_keys.has(key):
+			continue
+		if not key.is_empty():
+			existing_keys[key] = true
+		_pending_group_orders.append(order)
+
+	_pending_group_orders.sort_custom(func(a: Variant, b: Variant) -> bool:
+		var pa: int = int((a as Dictionary).get("priority", 99)) if a is Dictionary else 99
+		var pb: int = int((b as Dictionary).get("priority", 99)) if b is Dictionary else 99
+		return pa < pb
+	)
+	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
 
 
 static func _build_group_order_signature(

@@ -135,7 +135,9 @@ func _process(delta: float) -> void:
 	if _recent_loss_timer > 0.0:
 		_recent_loss_timer = maxf(0.0, _recent_loss_timer - delta)
 
-	if _fast_timer >= FAST_TICK_SECONDS:
+	## Stagger strategic fast ticks onto even frames so production can use odd frames.
+	var frame: int = Engine.get_process_frames()
+	if _fast_timer >= FAST_TICK_SECONDS and (frame % 2) == 0:
 		_fast_timer = 0.0
 		var start_usec: int = PerfCounters.begin_section()
 		_evaluate_fast()

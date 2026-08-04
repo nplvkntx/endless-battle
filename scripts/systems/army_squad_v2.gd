@@ -14,6 +14,15 @@ enum UnitRole {
 	HERO,
 }
 
+## Stable combat partitions of the main army (≈10–15 units). Not reshuffled every tick.
+enum TacticalRole {
+	FRONTLINE,
+	RANGED_SUPPORT,
+	RESERVE,
+	SIEGE,
+	HERO_ESCORT,
+}
+
 ## Stable ordered membership (validated living nodes only).
 var members: Array = []
 ## instance_id -> UnitRole. Assigned once on join; not reshuffled in combat.
@@ -29,6 +38,11 @@ var ranged_count: int = 0
 var siege_count: int = 0
 var hero_present: bool = false
 var role_counts: Dictionary = {}
+## Tactical squad payloads: {id, role, members, hold_position}.
+var tactical_squads: Array = []
+## instance_id -> tactical squad id (stable across updates).
+var unit_to_tactical_squad: Dictionary = {}
+var _next_tactical_squad_id: int = 1
 
 
 func clear() -> void:
@@ -44,6 +58,9 @@ func clear() -> void:
 	siege_count = 0
 	hero_present = false
 	role_counts.clear()
+	tactical_squads.clear()
+	unit_to_tactical_squad.clear()
+	_next_tactical_squad_id = 1
 
 
 func get_size() -> int:
@@ -271,6 +288,149 @@ func recompute_metrics() -> void:
 		center = position_sum / float(position_count)
 
 	_select_leader()
+	ensure_tactical_squads()
+
+
+## Keep existing tactical membership stable; only assign new / orphaned units.
+func ensure_tactical_squads() -> void:
+	var living_ids: Dictionary = {}
+	for entry: Variant in members:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		living_ids[(entry as Node).get_instance_id()] = entry as Node
+
+	## Drop dead units from tactical maps without reshuffling survivors.
+	var stale_ids: Array = []
+	for unit_id: Variant in unit_to_tactical_squad.keys():
+		if not living_ids.has(int(unit_id)):
+			stale_ids.append(int(unit_id))
+	for stale_id: int in stale_ids:
+		unit_to_tactical_squad.erase(stale_id)
+
+	for squad_entry: Variant in tactical_squads:
+		if not squad_entry is Dictionary:
+			continue
+		var squad: Dictionary = squad_entry
+		var kept_members: Array = []
+		for member_variant: Variant in squad.get("members", []):
+			if not NodeSafety.is_alive_node(member_variant):
+				continue
+			var member_id: int = (member_variant as Node).get_instance_id()
+			if living_ids.has(member_id):
+				kept_members.append(member_variant)
+				unit_to_tactical_squad[member_id] = int(squad.get("id", 0))
+		squad["members"] = kept_members
+
+	## Remove empty squads (keep ids stable for surviving ones).
+	var non_empty: Array = []
+	for squad_entry: Variant in tactical_squads:
+		if squad_entry is Dictionary and not (squad_entry as Dictionary).get("members", []).is_empty():
+			non_empty.append(squad_entry)
+	tactical_squads = non_empty
+
+	## Assign unassigned living members into role-matching underfilled squads.
+	for unit_id: Variant in living_ids.keys():
+		var id_i: int = int(unit_id)
+		if unit_to_tactical_squad.has(id_i):
+			continue
+		var unit: Node = living_ids[id_i]
+		_assign_unit_to_tactical_squad(unit)
+
+
+func _assign_unit_to_tactical_squad(unit: Node) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+	var unit_id: int = unit.get_instance_id()
+	if unit_to_tactical_squad.has(unit_id):
+		return
+
+	var tactical_role: TacticalRole = _unit_role_to_tactical(get_role(unit))
+	var max_size: int = MilitaryAIConfig.V2_TACTICAL_SQUAD_MAX_SIZE
+
+	## Prefer an existing underfilled matching-role squad.
+	for squad_entry: Variant in tactical_squads:
+		if not squad_entry is Dictionary:
+			continue
+		var squad: Dictionary = squad_entry
+		if int(squad.get("role", -1)) != int(tactical_role):
+			continue
+		var squad_members: Array = squad.get("members", [])
+		if squad_members.size() >= max_size:
+			continue
+		squad_members.append(unit)
+		squad["members"] = squad_members
+		unit_to_tactical_squad[unit_id] = int(squad.get("id", 0))
+		return
+
+	## Open a new squad for this role.
+	var new_id: int = _next_tactical_squad_id
+	_next_tactical_squad_id += 1
+	tactical_squads.append({
+		"id": new_id,
+		"role": tactical_role,
+		"members": [unit],
+		"hold_position": Vector3.ZERO,
+	})
+	unit_to_tactical_squad[unit_id] = new_id
+
+
+static func _unit_role_to_tactical(role: UnitRole) -> TacticalRole:
+	match role:
+		UnitRole.RANGED:
+			return TacticalRole.RANGED_SUPPORT
+		UnitRole.SIEGE:
+			return TacticalRole.SIEGE
+		UnitRole.HERO:
+			return TacticalRole.HERO_ESCORT
+		UnitRole.CAVALRY:
+			## Cavalry fills reserve / reaction duty when not needed on the line.
+			return TacticalRole.RESERVE
+		_:
+			return TacticalRole.FRONTLINE
+
+
+func get_tactical_squads_copy() -> Array:
+	return tactical_squads.duplicate(true)
+
+
+func get_tactical_squad_members(squad_id: int) -> Array:
+	for squad_entry: Variant in tactical_squads:
+		if not squad_entry is Dictionary:
+			continue
+		if int((squad_entry as Dictionary).get("id", -1)) == squad_id:
+			return NodeSafety.clean_node_array((squad_entry as Dictionary).get("members", []))
+	return []
+
+
+func get_tactical_squad_id_for_unit(unit: Variant) -> int:
+	if not NodeSafety.is_alive_node(unit):
+		return 0
+	return int(unit_to_tactical_squad.get((unit as Node).get_instance_id(), 0))
+
+
+func set_tactical_hold_position(squad_id: int, position: Vector3) -> void:
+	for squad_entry: Variant in tactical_squads:
+		if not squad_entry is Dictionary:
+			continue
+		if int((squad_entry as Dictionary).get("id", -1)) == squad_id:
+			(squad_entry as Dictionary)["hold_position"] = position
+			return
+
+
+static func tactical_role_to_string(role: TacticalRole) -> String:
+	match role:
+		TacticalRole.FRONTLINE:
+			return "frontline"
+		TacticalRole.RANGED_SUPPORT:
+			return "ranged"
+		TacticalRole.RESERVE:
+			return "reserve"
+		TacticalRole.SIEGE:
+			return "siege"
+		TacticalRole.HERO_ESCORT:
+			return "hero_escort"
+		_:
+			return "unknown"
 
 
 func _select_leader() -> void:
