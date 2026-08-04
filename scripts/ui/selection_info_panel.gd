@@ -713,6 +713,15 @@ func _configure_activity_tracking(building: Building) -> void:
 	if _tracked_activity_building == null:
 		return
 
+	if _tracked_activity_building.has_signal("destroyed"):
+		if not _tracked_activity_building.destroyed.is_connected(_on_activity_building_destroyed):
+			_tracked_activity_building.destroyed.connect(_on_activity_building_destroyed)
+	if not _tracked_activity_building.tree_exiting.is_connected(_on_activity_building_tree_exiting):
+		_tracked_activity_building.tree_exiting.connect(
+			_on_activity_building_tree_exiting,
+			CONNECT_ONE_SHOT
+		)
+
 	if _tracked_activity_building.has_signal("construction_progress_changed"):
 		_tracked_activity_building.construction_progress_changed.connect(_on_activity_state_changed)
 
@@ -744,6 +753,15 @@ func _disconnect_activity_building_signals() -> void:
 	if _tracked_activity_building == null or not is_instance_valid(_tracked_activity_building):
 		_tracked_activity_building = null
 		return
+
+	if (
+		_tracked_activity_building.has_signal("destroyed")
+		and _tracked_activity_building.destroyed.is_connected(_on_activity_building_destroyed)
+	):
+		_tracked_activity_building.destroyed.disconnect(_on_activity_building_destroyed)
+
+	if _tracked_activity_building.tree_exiting.is_connected(_on_activity_building_tree_exiting):
+		_tracked_activity_building.tree_exiting.disconnect(_on_activity_building_tree_exiting)
 
 	if (
 		_tracked_activity_building.has_signal("construction_progress_changed")
@@ -780,6 +798,16 @@ func _disconnect_activity_building_signals() -> void:
 			command_center.tier_state_changed.disconnect(_on_activity_state_changed)
 
 	_tracked_activity_building = null
+
+
+func _on_activity_building_destroyed(_building: Building = null) -> void:
+	_disconnect_activity_building_signals()
+	_hide_activity_progress_bar()
+
+
+func _on_activity_building_tree_exiting() -> void:
+	_disconnect_activity_building_signals()
+	_hide_activity_progress_bar()
 
 
 func _on_activity_state_changed(_progress: float = 0.0) -> void:

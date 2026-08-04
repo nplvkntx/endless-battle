@@ -34,6 +34,7 @@ var _camouflage_remaining: float = 0.0
 var _camouflage_active: bool = false
 var _hunting_speed_bonus_applied: float = 0.0
 var _hunted_target: Node3D = null
+var _hunt_target_tree_exiting_handler: Callable = Callable()
 var _hunt_retarget_timer: float = 0.0
 
 var _roll_squash_tween: Tween
@@ -888,7 +889,7 @@ func _refresh_hunted_target(_force: bool) -> void:
 	var radius_sq: float = RangerStats.CAMOUFLAGE_HUNT_RADIUS * RangerStats.CAMOUFLAGE_HUNT_RADIUS
 	var tree: SceneTree = get_tree()
 	if tree == null:
-		_hunted_target = null
+		_clear_hunted_target()
 		return
 
 	for group_name: StringName in CombatTargetValidation.get_hostile_search_groups(self):
@@ -930,7 +931,7 @@ func _refresh_hunted_target(_force: bool) -> void:
 				best_health_ratio = health_ratio
 				best_dist_sq = dist_sq
 
-	_hunted_target = best
+	_set_hunted_target(best)
 
 
 func _get_hunt_priority(unit: Unit) -> int:
@@ -968,10 +969,58 @@ func _sanitize_hunted_target() -> void:
 	if _hunted_target == null:
 		return
 	if not _is_valid_hunt_target(_hunted_target):
-		_hunted_target = null
+		_clear_hunted_target()
+
+
+func _set_hunted_target(target: Node3D) -> void:
+	var safe_target: Node3D = NodeSafety.safe_node(target) as Node3D
+	if safe_target == _hunted_target:
+		return
+
+	_clear_hunt_target_lifetime_watch()
+	_hunted_target = safe_target
+	if _hunted_target == null:
+		return
+	_watch_hunt_target_lifetime(_hunted_target)
+
+
+func _watch_hunt_target_lifetime(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	_hunt_target_tree_exiting_handler = _on_hunt_target_tree_exiting.bind(target.get_instance_id())
+	if not target.tree_exiting.is_connected(_hunt_target_tree_exiting_handler):
+		target.tree_exiting.connect(_hunt_target_tree_exiting_handler, CONNECT_ONE_SHOT)
+
+
+func _clear_hunt_target_lifetime_watch() -> void:
+	if not _hunt_target_tree_exiting_handler.is_valid():
+		_hunt_target_tree_exiting_handler = Callable()
+		return
+
+	var target_ref: Variant = _hunted_target
+	if (
+		target_ref != null
+		and is_instance_valid(target_ref)
+		and target_ref is Node
+		and (target_ref as Node).tree_exiting.is_connected(_hunt_target_tree_exiting_handler)
+	):
+		(target_ref as Node).tree_exiting.disconnect(_hunt_target_tree_exiting_handler)
+
+	_hunt_target_tree_exiting_handler = Callable()
+
+
+func _on_hunt_target_tree_exiting(expected_instance_id: int) -> void:
+	_hunt_target_tree_exiting_handler = Callable()
+	var target_ref: Variant = _hunted_target
+	if target_ref != null and is_instance_valid(target_ref):
+		if int(target_ref.get_instance_id()) != expected_instance_id:
+			return
+	_hunted_target = null
+	_hunt_retarget_timer = 0.0
 
 
 func _clear_hunted_target() -> void:
+	_clear_hunt_target_lifetime_watch()
 	_hunted_target = null
 	_hunt_retarget_timer = 0.0
 

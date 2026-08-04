@@ -3,31 +3,33 @@ extends RefCounted
 
 ## Coordinates multiple workers building a drag-placed wall line.
 ## Workers claim nearby unfinished segments and continue until the job is done.
+## Segment/worker caches are untyped Arrays so freed nodes never enter typed binds.
 
-var _segments: Array[Building] = []
-var _workers: Array[Worker] = []
+var _segments: Array = []
+var _workers: Array = []
 var _segment_claims: Dictionary = {}
 
 
-func _init(segments: Array[Building], workers: Array[Worker]) -> void:
-	for segment: Building in segments:
-		if _is_unfinished_segment(segment):
-			_segments.append(segment)
+func _init(segments: Array, workers: Array) -> void:
+	for segment_ref: Variant in segments:
+		if _is_unfinished_segment(segment_ref):
+			_segments.append(segment_ref)
 
-	for worker: Worker in workers:
-		if NodeSafety.is_alive_node(worker):
-			_workers.append(worker)
+	for worker_ref: Variant in workers:
+		if NodeSafety.is_alive_node(worker_ref) and worker_ref is Worker:
+			_workers.append(worker_ref)
 
 
 func start() -> void:
 	_prune_invalid_segments()
 	_prune_stale_claims()
 
-	for worker: Worker in _workers.duplicate():
-		if not NodeSafety.is_alive_node(worker):
-			_workers.erase(worker)
+	for worker_ref: Variant in _workers.duplicate():
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+			_workers.erase(worker_ref)
 			continue
 
+		var worker: Worker = worker_ref as Worker
 		worker.assign_wall_build_job(self)
 		_assign_worker_to_segment(worker)
 
@@ -68,11 +70,12 @@ func on_worker_left(worker: Worker) -> void:
 		_cleanup()
 		return
 
-	for remaining_worker: Worker in _workers.duplicate():
-		if not NodeSafety.is_alive_node(remaining_worker):
-			_workers.erase(remaining_worker)
+	for worker_ref: Variant in _workers.duplicate():
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+			_workers.erase(worker_ref)
 			continue
 
+		var remaining_worker: Worker = worker_ref as Worker
 		if remaining_worker.is_available_for_construction_assignment():
 			_assign_worker_to_segment(remaining_worker)
 
@@ -102,13 +105,17 @@ func _pick_segment_for_worker(worker: Worker) -> Building:
 
 
 func _find_nearest_segment(worker: Worker, skip_claimed_by_others: bool) -> Building:
+	if not NodeSafety.is_alive_node(worker):
+		return null
+
 	var best_segment: Building = null
 	var best_distance_sq: float = INF
 
-	for segment: Building in _segments:
-		if not _is_unfinished_segment(segment):
+	for segment_ref: Variant in _segments:
+		if not _is_unfinished_segment(segment_ref):
 			continue
 
+		var segment: Building = segment_ref as Building
 		if skip_claimed_by_others and _is_segment_claimed_by_other(segment, worker):
 			continue
 
@@ -126,7 +133,12 @@ func _is_segment_claimed_by_other(segment: Building, worker: Worker) -> bool:
 	if not _segment_claims.has(segment):
 		return false
 
-	var claimer: Worker = _segment_claims[segment] as Worker
+	var claimer_ref: Variant = _segment_claims.get(segment)
+	if not NodeSafety.is_alive_node(claimer_ref) or not claimer_ref is Worker:
+		_segment_claims.erase(segment)
+		return false
+
+	var claimer: Worker = claimer_ref as Worker
 	if claimer == worker:
 		return false
 
@@ -151,14 +163,19 @@ func _release_claims_for_worker(worker: Worker) -> void:
 			_segment_claims.erase(segment)
 
 
-func _is_active_job_worker(worker: Worker) -> bool:
-	return NodeSafety.is_alive_node(worker) and worker.get_wall_build_job() == self
+func _is_active_job_worker(worker: Variant) -> bool:
+	return (
+		NodeSafety.is_alive_node(worker)
+		and worker is Worker
+		and (worker as Worker).get_wall_build_job() == self
+	)
 
 
-func _is_unfinished_segment(segment: Building) -> bool:
+func _is_unfinished_segment(segment: Variant) -> bool:
 	return (
 		NodeSafety.is_alive_node(segment)
-		and segment.is_being_constructed()
+		and segment is Building
+		and (segment as Building).is_being_constructed()
 	)
 
 
@@ -168,12 +185,12 @@ func _has_unfinished_segments() -> bool:
 
 
 func _prune_invalid_segments() -> void:
-	var remaining_segments: Array[Building] = []
-	for segment: Building in _segments:
-		if _is_unfinished_segment(segment):
-			remaining_segments.append(segment)
-		elif _segment_claims.has(segment):
-			_segment_claims.erase(segment)
+	var remaining_segments: Array = []
+	for segment_ref: Variant in _segments:
+		if _is_unfinished_segment(segment_ref):
+			remaining_segments.append(segment_ref)
+		elif _segment_claims.has(segment_ref):
+			_segment_claims.erase(segment_ref)
 
 	_segments = remaining_segments
 	NodeSafety.clean_node_dict_keys(_segment_claims)
@@ -181,12 +198,12 @@ func _prune_invalid_segments() -> void:
 
 func _prune_stale_claims() -> void:
 	for segment: Variant in _segment_claims.keys():
-		var claimer: Worker = _segment_claims.get(segment) as Worker
-		if not _is_active_job_worker(claimer):
+		var claimer_ref: Variant = _segment_claims.get(segment)
+		if not _is_active_job_worker(claimer_ref):
 			_segment_claims.erase(segment)
 			continue
 
-		if not _is_unfinished_segment(segment as Building):
+		if not _is_unfinished_segment(segment):
 			_segment_claims.erase(segment)
 
 
@@ -207,9 +224,9 @@ func _finish_worker(worker: Worker) -> void:
 
 
 func _cleanup() -> void:
-	for worker: Worker in _workers.duplicate():
-		if NodeSafety.is_alive_node(worker):
-			worker.clear_wall_build_job_assignment()
+	for worker_ref: Variant in _workers.duplicate():
+		if NodeSafety.is_alive_node(worker_ref) and worker_ref is Worker:
+			(worker_ref as Worker).clear_wall_build_job_assignment()
 
 	_workers.clear()
 	_segments.clear()

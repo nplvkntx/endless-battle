@@ -134,7 +134,10 @@ func _rebalance_gather_workers() -> void:
 	var wood_workers: Array[Worker] = []
 	var unassigned_workers: Array[Worker] = []
 
-	for worker: Worker in gather_pool:
+	for worker_ref: Variant in gather_pool:
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+			continue
+		var worker: Worker = worker_ref as Worker
 		match worker.get_assigned_gather_resource_id():
 			&"gold":
 				gold_workers.append(worker)
@@ -153,7 +156,10 @@ func _rebalance_gather_workers() -> void:
 	wood_workers.clear()
 	unassigned_workers.clear()
 
-	for worker: Worker in gather_pool:
+	for worker_ref: Variant in gather_pool:
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+			continue
+		var worker: Worker = worker_ref as Worker
 		match worker.get_assigned_gather_resource_id():
 			&"gold":
 				gold_workers.append(worker)
@@ -812,9 +818,10 @@ func _is_enemy_training_military_or_hero() -> bool:
 func _collect_gather_pool(command_center_position: Vector3) -> Array[Worker]:
 	var gather_pool: Array[Worker] = []
 
-	for worker: Worker in NodeSafety.clean_node_array(_find_enemy_workers(command_center_position)):
-		if not NodeSafety.is_alive_node(worker):
+	for worker_ref: Variant in NodeSafety.clean_node_array(_find_enemy_workers(command_center_position)):
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
 			continue
+		var worker: Worker = worker_ref as Worker
 		if worker.is_on_construction_trip():
 			continue
 		gather_pool.append(worker)
@@ -823,7 +830,10 @@ func _collect_gather_pool(command_center_position: Vector3) -> Array[Worker]:
 
 
 func _pick_worker_to_reassign(workers: Array[Worker]) -> Worker:
-	for worker: Worker in workers:
+	for worker_ref: Variant in workers:
+		if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+			continue
+		var worker: Worker = worker_ref as Worker
 		if not _is_idle_gather_worker(worker):
 			continue
 		if _can_reassign_worker(worker):

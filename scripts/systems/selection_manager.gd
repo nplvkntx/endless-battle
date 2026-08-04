@@ -83,8 +83,8 @@ func get_multi_selection_ui_info() -> Dictionary:
 
 func has_commandable_selected_units() -> bool:
 	_purge_invalid_selected_units()
-	for unit: Unit in selected_units:
-		if _is_commandable_unit(unit):
+	for unit_ref: Variant in selected_units:
+		if _is_commandable_unit(unit_ref):
 			return true
 	return false
 
@@ -97,9 +97,9 @@ func get_primary_ui_hero() -> Hero:
 func get_control_group_members() -> Array:
 	_purge_invalid_selection()
 	var members: Array = []
-	for unit: Unit in selected_units:
-		if _is_commandable_unit(unit):
-			members.append(unit)
+	for unit_ref: Variant in selected_units:
+		if _is_commandable_unit(unit_ref):
+			members.append(unit_ref)
 	if _is_selectable_building(selected_building):
 		members.append(selected_building)
 	return members
@@ -133,9 +133,10 @@ func focus_camera_on_current_selection() -> void:
 
 	_purge_invalid_selection()
 	var positions: Array[Vector3] = []
-	for unit: Unit in selected_units:
-		if _is_selectable_unit(unit):
-			positions.append(unit.global_position)
+	for unit_ref: Variant in selected_units:
+		if not _is_selectable_unit(unit_ref):
+			continue
+		positions.append((unit_ref as Unit).global_position)
 	if _is_selectable_building(selected_building):
 		positions.append(selected_building.global_position)
 
@@ -610,9 +611,10 @@ func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 	InputManager.disarm_all_command_modes()
 	_purge_invalid_selected_units()
 	var military_units: Array[Unit] = []
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
+	for unit_ref: Variant in selected_units:
+		if not _is_commandable_unit(unit_ref):
 			continue
+		var unit: Unit = unit_ref as Unit
 		if _is_combat_order_unit(unit):
 			military_units.append(unit)
 
@@ -760,9 +762,10 @@ func _dispatch_construction_command(building: Building, queued: bool = false) ->
 	InputManager.disarm_all_command_modes()
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
+	for unit_ref: Variant in selected_units:
+		if not _is_commandable_unit(unit_ref):
 			continue
+		var unit: Unit = unit_ref as Unit
 		if unit is Worker:
 			unit.issue_order(UnitOrder.build(building), queued)
 			dispatched_to_worker = true
@@ -787,18 +790,20 @@ func _dispatch_wall_chain_construction_command(clicked_segment: WallSegment, que
 	_purge_invalid_selected_units()
 
 	var workers: Array[Worker] = []
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
+	for unit_ref: Variant in selected_units:
+		if not _is_commandable_unit(unit_ref):
 			continue
-		if unit is Worker:
-			workers.append(unit as Worker)
+		if unit_ref is Worker:
+			workers.append(unit_ref as Worker)
 
 	if workers.is_empty():
 		return
 
 	if queued:
-		for worker: Worker in workers:
-			worker.issue_order(UnitOrder.build(segments[0]), true)
+		for worker_ref: Variant in workers:
+			if not NodeSafety.is_alive_node(worker_ref) or not worker_ref is Worker:
+				continue
+			(worker_ref as Worker).issue_order(UnitOrder.build(segments[0]), true)
 	else:
 		var wall_job := WallBuildJob.new(segments, workers)
 		wall_job.start()
@@ -828,11 +833,11 @@ func _play_construction_target_feedback(building: Building) -> void:
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine, queued: bool = false) -> void:
 	_purge_invalid_selected_units()
 	var dispatched_to_worker := false
-	for unit: Unit in selected_units:
-		if not _is_commandable_unit(unit):
+	for unit_ref: Variant in selected_units:
+		if not _is_commandable_unit(unit_ref):
 			continue
-		if unit is Worker:
-			unit.issue_order(UnitOrder.gather(gold_mine), queued)
+		if unit_ref is Worker:
+			(unit_ref as Worker).issue_order(UnitOrder.gather(gold_mine), queued)
 			dispatched_to_worker = true
 	if dispatched_to_worker:
 		_play_gather_target_feedback(gold_mine)
@@ -1395,9 +1400,10 @@ func _is_selectable_unit(candidate: Variant) -> bool:
 
 func _get_commandable_selected_units() -> Array[Unit]:
 	var commandable_units: Array[Unit] = []
-	for unit: Unit in NodeSafety.clean_node_array(selected_units):
-		if _is_commandable_unit(unit):
-			commandable_units.append(unit as Unit)
+	for unit_ref: Variant in NodeSafety.clean_node_array(selected_units):
+		if not _is_commandable_unit(unit_ref):
+			continue
+		commandable_units.append(unit_ref as Unit)
 	return commandable_units
 
 

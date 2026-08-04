@@ -1093,10 +1093,10 @@ func _refresh_town_center_upgrade_slot() -> void:
 
 
 func _refresh_hero_altar_production_slot() -> void:
-	if _hero_altar_slot == null or _selected_hero_altar == null:
+	var hero_altar: HeroAltar = _require_selected_hero_altar()
+	if _hero_altar_slot == null or hero_altar == null:
 		return
 
-	var hero_altar: HeroAltar = _selected_hero_altar
 	var queue_count: int = 1 if hero_altar.is_training_hero() else 0
 	_hero_altar_slot.set_queue_count(queue_count)
 	_hero_altar_slot.set_infinite_enabled(false)
@@ -1186,65 +1186,75 @@ func _handle_production_left_click(train_id: StringName, event: InputEventMouseB
 	var queue_amount: int = 5 if event.shift_pressed else 1
 
 	if train_id == Barracks.TRAIN_ID_SPEARMAN:
-		if _selected_barracks == null:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_barracks.try_train_spearman()
+			barracks.try_train_spearman()
 	elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
-		if _selected_barracks == null:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_barracks.try_train_swordsman()
+			barracks.try_train_swordsman()
 	elif train_id == Barracks.TRAIN_ID_ARCHER:
-		if _selected_barracks == null:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_barracks.try_train_archer()
+			barracks.try_train_archer()
 	elif train_id == CommandCenter.TRAIN_ID_WORKER:
-		if _selected_command_center == null:
+		var command_center: CommandCenter = _require_selected_command_center()
+		if command_center == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_command_center.try_train_worker()
+			command_center.try_train_worker()
 	elif train_id == CommandCenter.UPGRADE_ID_TIER:
-		if _selected_command_center == null or not is_instance_valid(_selected_command_center):
+		var command_center: CommandCenter = _require_selected_command_center()
+		if command_center == null:
 			return
 
-		_selected_command_center.try_upgrade_tier()
+		command_center.try_upgrade_tier()
 	elif train_id == &"hero":
-		if _selected_hero_altar == null:
+		var hero_altar: HeroAltar = _require_selected_hero_altar()
+		if hero_altar == null:
 			return
 
-		var kit_id: StringName = _selected_hero_altar.get_pending_training_kit_id(false)
-		_selected_hero_altar.set_selected_kit(kit_id)
-		_selected_hero_altar.try_train_hero()
+		var kit_id: StringName = hero_altar.get_pending_training_kit_id(false)
+		hero_altar.set_selected_kit(kit_id)
+		hero_altar.try_train_hero()
 	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
-		if _selected_stable == null:
+		var stable: Stable = _require_selected_stable()
+		if stable == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_stable.try_train_heavy_cavalry()
+			stable.try_train_heavy_cavalry()
 	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
-		if _selected_stable == null:
+		var stable: Stable = _require_selected_stable()
+		if stable == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_stable.try_train_light_cavalry()
+			stable.try_train_light_cavalry()
 	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
-		if _selected_stable == null:
+		var stable: Stable = _require_selected_stable()
+		if stable == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_stable.try_train_cavalry_archer()
+			stable.try_train_cavalry_archer()
 	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON:
-		if _selected_artillery_depot == null:
+		var depot: ArtilleryDepot = _require_selected_artillery_depot()
+		if depot == null:
 			return
 
 		for _unused: int in queue_amount:
-			_selected_artillery_depot.try_train_cannon()
+			depot.try_train_cannon()
 	else:
 		return
 
@@ -1266,49 +1276,76 @@ func _handle_production_right_click(train_id: StringName, event: InputEventMouse
 
 
 func _handle_production_toggle_repeat(train_id: StringName) -> void:
-	if train_id == Barracks.TRAIN_ID_SPEARMAN and _selected_barracks != null:
-		_selected_barracks.try_train_spearman_with_repeat(true)
-	elif train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
-		_selected_barracks.try_train_swordsman_with_repeat(true)
-	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
-		_selected_barracks.try_train_archer_with_repeat(true)
-	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
-		_selected_command_center.try_train_worker_with_repeat(true)
-	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY and _selected_stable != null:
-		_selected_stable.try_train_heavy_cavalry_with_repeat(true)
-	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY and _selected_stable != null:
-		_selected_stable.try_train_light_cavalry_with_repeat(true)
-	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
-		_selected_stable.try_train_cavalry_archer_with_repeat(true)
-	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON and _selected_artillery_depot != null:
-		_selected_artillery_depot.try_train_cannon_with_repeat(true)
+	if train_id == Barracks.TRAIN_ID_SPEARMAN:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null:
+			barracks.try_train_spearman_with_repeat(true)
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null:
+			barracks.try_train_swordsman_with_repeat(true)
+	elif train_id == Barracks.TRAIN_ID_ARCHER:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null:
+			barracks.try_train_archer_with_repeat(true)
+	elif train_id == CommandCenter.TRAIN_ID_WORKER:
+		var command_center: CommandCenter = _require_selected_command_center()
+		if command_center != null:
+			command_center.try_train_worker_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
+		var stable: Stable = _require_selected_stable()
+		if stable != null:
+			stable.try_train_heavy_cavalry_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
+		var stable: Stable = _require_selected_stable()
+		if stable != null:
+			stable.try_train_light_cavalry_with_repeat(true)
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
+		var stable: Stable = _require_selected_stable()
+		if stable != null:
+			stable.try_train_cavalry_archer_with_repeat(true)
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+		var depot: ArtilleryDepot = _require_selected_artillery_depot()
+		if depot != null:
+			depot.try_train_cannon_with_repeat(true)
 
 
 func _disable_production_repeat(train_id: StringName) -> void:
-	if train_id == Barracks.TRAIN_ID_SPEARMAN and _selected_barracks != null:
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
-			_selected_barracks.set_repeat_training(false)
-	elif train_id == Barracks.TRAIN_ID_SWORDSMAN and _selected_barracks != null:
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
-			_selected_barracks.set_repeat_training(false)
-	elif train_id == Barracks.TRAIN_ID_ARCHER and _selected_barracks != null:
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
-			_selected_barracks.set_repeat_training(false)
-	elif train_id == CommandCenter.TRAIN_ID_WORKER and _selected_command_center != null:
-		if _selected_command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER):
-			_selected_command_center.set_repeat_training(false)
-	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY and _selected_stable != null:
-		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY):
-			_selected_stable.set_repeat_training(false)
-	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY and _selected_stable != null:
-		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY):
-			_selected_stable.set_repeat_training(false)
-	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER and _selected_stable != null:
-		if _selected_stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER):
-			_selected_stable.set_repeat_training(false)
-	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON and _selected_artillery_depot != null:
-		if _selected_artillery_depot.is_repeat_training_enabled(ArtilleryDepot.TRAIN_ID_CANNON):
-			_selected_artillery_depot.set_repeat_training(false)
+	if train_id == Barracks.TRAIN_ID_SPEARMAN:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null and barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
+			barracks.set_repeat_training(false)
+	elif train_id == Barracks.TRAIN_ID_SWORDSMAN:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null and barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
+			barracks.set_repeat_training(false)
+	elif train_id == Barracks.TRAIN_ID_ARCHER:
+		var barracks: Barracks = _require_selected_barracks()
+		if barracks != null and barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
+			barracks.set_repeat_training(false)
+	elif train_id == CommandCenter.TRAIN_ID_WORKER:
+		var command_center: CommandCenter = _require_selected_command_center()
+		if (
+			command_center != null
+			and command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER)
+		):
+			command_center.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_HEAVY_CAVALRY:
+		var stable: Stable = _require_selected_stable()
+		if stable != null and stable.is_repeat_training_enabled(Stable.TRAIN_ID_HEAVY_CAVALRY):
+			stable.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_LIGHT_CAVALRY:
+		var stable: Stable = _require_selected_stable()
+		if stable != null and stable.is_repeat_training_enabled(Stable.TRAIN_ID_LIGHT_CAVALRY):
+			stable.set_repeat_training(false)
+	elif train_id == Stable.TRAIN_ID_CAVALRY_ARCHER:
+		var stable: Stable = _require_selected_stable()
+		if stable != null and stable.is_repeat_training_enabled(Stable.TRAIN_ID_CAVALRY_ARCHER):
+			stable.set_repeat_training(false)
+	elif train_id == ArtilleryDepot.TRAIN_ID_CANNON:
+		var depot: ArtilleryDepot = _require_selected_artillery_depot()
+		if depot != null and depot.is_repeat_training_enabled(ArtilleryDepot.TRAIN_ID_CANNON):
+			depot.set_repeat_training(false)
 
 
 func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
@@ -2116,11 +2153,12 @@ func _create_queue_row(reference_label: Label) -> HBoxContainer:
 
 
 func _rebuild_worker_queue_slots() -> void:
-	if _worker_queue_row == null or _selected_command_center == null:
+	var command_center: CommandCenter = _require_selected_command_center()
+	if _worker_queue_row == null or command_center == null:
 		return
 
-	var queue_count: int = _selected_command_center.get_worker_queue_count()
-	var in_progress: bool = _selected_command_center.is_training_worker()
+	var queue_count: int = command_center.get_worker_queue_count()
+	var in_progress: bool = command_center.is_training_worker()
 	_rebuild_queue_slots(
 		_worker_queue_row,
 		queue_count,
@@ -2139,13 +2177,14 @@ func _rebuild_archer_queue_slots() -> void:
 
 
 func _rebuild_barracks_queue_slots() -> void:
-	if _swordsman_queue_row == null or _tracked_barracks == null:
+	var barracks: Barracks = _require_tracked_barracks()
+	if _swordsman_queue_row == null or barracks == null:
 		return
 
 	_clear_queue_row(_archer_queue_row)
 
-	var queue: Array[StringName] = _tracked_barracks.get_training_queue()
-	var in_progress: bool = _tracked_barracks.has_active_unit_training()
+	var queue: Array[StringName] = barracks.get_training_queue()
+	var in_progress: bool = barracks.has_active_unit_training()
 
 	for child: Node in _swordsman_queue_row.get_children():
 		child.queue_free()
@@ -2169,13 +2208,14 @@ func _rebuild_barracks_queue_slots() -> void:
 
 
 func _rebuild_hero_queue_slots() -> void:
-	if _hero_queue_row == null or _tracked_hero_altar == null:
+	var hero_altar: HeroAltar = _require_tracked_hero_altar()
+	if _hero_queue_row == null or hero_altar == null:
 		return
 
 	for child: Node in _hero_queue_row.get_children():
 		child.queue_free()
 
-	var is_training: bool = _tracked_hero_altar.is_training_hero()
+	var is_training: bool = hero_altar.is_training_hero()
 	_hero_queue_row.visible = is_training
 
 	if not is_training:
@@ -2263,10 +2303,11 @@ func _on_queue_slot_gui_input(slot: Control, event: InputEvent, train_id: String
 
 func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bool:
 	if train_id == CommandCenter.TRAIN_ID_WORKER:
-		if _selected_command_center == null:
+		var command_center: CommandCenter = _require_selected_command_center()
+		if command_center == null:
 			return false
 
-		return _selected_command_center.cancel_worker_training_at(slot_index)
+		return command_center.cancel_worker_training_at(slot_index)
 
 	if train_id == Barracks.TRAIN_ID_SPEARMAN or train_id == Barracks.TRAIN_ID_SWORDSMAN or train_id == Barracks.TRAIN_ID_ARCHER:
 		var barracks: Barracks = _get_barracks_for_queue_cancel()
@@ -2276,22 +2317,21 @@ func _try_cancel_production_at_slot(train_id: StringName, slot_index: int) -> bo
 		return barracks.cancel_training_at(slot_index)
 
 	if train_id == &"hero":
-		if _selected_hero_altar == null or slot_index != 0:
+		var hero_altar: HeroAltar = _require_selected_hero_altar()
+		if hero_altar == null or slot_index != 0:
 			return false
 
-		return _selected_hero_altar.cancel_hero_training()
+		return hero_altar.cancel_hero_training()
 
 	return false
 
 
 func _get_barracks_for_queue_cancel() -> Barracks:
-	if _selected_barracks != null and is_instance_valid(_selected_barracks):
-		return _selected_barracks
+	var selected: Barracks = _require_selected_barracks()
+	if selected != null:
+		return selected
 
-	if _tracked_barracks != null and is_instance_valid(_tracked_barracks):
-		return _tracked_barracks
-
-	return null
+	return _require_tracked_barracks()
 
 
 func _get_authoritative_selected_building() -> Building:
@@ -2310,18 +2350,71 @@ func _get_authoritative_selected_building() -> Building:
 
 
 func _is_active_selected_building(building: Building) -> bool:
-	if building == null or not is_instance_valid(building):
+	if not NodeSafety.is_alive_node(building):
 		return false
 
 	return _get_authoritative_selected_building() == building
 
 
 func _is_active_command_center(command_center: CommandCenter) -> bool:
-	if command_center == null or not is_instance_valid(command_center):
+	if not NodeSafety.is_alive_node(command_center):
 		return false
 
 	var selected_building: Building = _get_authoritative_selected_building()
 	return selected_building is CommandCenter and selected_building == command_center
+
+
+func _alive_selected_building(building: Variant) -> bool:
+	return NodeSafety.is_alive_node(building)
+
+
+func _require_selected_barracks() -> Barracks:
+	if not NodeSafety.is_alive_node(_selected_barracks):
+		_selected_barracks = null
+		return null
+	return _selected_barracks
+
+
+func _require_selected_command_center() -> CommandCenter:
+	if not NodeSafety.is_alive_node(_selected_command_center):
+		_selected_command_center = null
+		return null
+	return _selected_command_center
+
+
+func _require_selected_hero_altar() -> HeroAltar:
+	if not NodeSafety.is_alive_node(_selected_hero_altar):
+		_selected_hero_altar = null
+		return null
+	return _selected_hero_altar
+
+
+func _require_selected_stable() -> Stable:
+	if not NodeSafety.is_alive_node(_selected_stable):
+		_selected_stable = null
+		return null
+	return _selected_stable
+
+
+func _require_selected_artillery_depot() -> ArtilleryDepot:
+	if not NodeSafety.is_alive_node(_selected_artillery_depot):
+		_selected_artillery_depot = null
+		return null
+	return _selected_artillery_depot
+
+
+func _require_tracked_barracks() -> Barracks:
+	if not NodeSafety.is_alive_node(_tracked_barracks):
+		_tracked_barracks = null
+		return null
+	return _tracked_barracks
+
+
+func _require_tracked_hero_altar() -> HeroAltar:
+	if not NodeSafety.is_alive_node(_tracked_hero_altar):
+		_tracked_hero_altar = null
+		return null
+	return _tracked_hero_altar
 
 
 func _disconnect_all_building_tracking() -> void:
@@ -3162,7 +3255,14 @@ func _refresh_command_visibility() -> void:
 	var multi_worker_selection: bool = false
 	var multi_combat_selection: bool = false
 	var multi_hero_selection: bool = false
-	var single_unit: Unit = selected_units[0] if not selected_units.is_empty() else null
+	var single_unit: Unit = null
+	if not selected_units.is_empty():
+		var unit_ref: Variant = null
+		for candidate: Variant in selected_units:
+			unit_ref = candidate
+			break
+		if NodeSafety.is_alive_node(unit_ref) and unit_ref is Unit:
+			single_unit = unit_ref as Unit
 	var single_worker: bool = false
 	var single_hero: bool = false
 	var single_combat_unit: bool = false
@@ -4324,73 +4424,80 @@ func _on_build_command_center_pressed() -> void:
 
 
 func _on_train_worker_pressed() -> void:
-	if _selected_command_center == null:
+	var command_center: CommandCenter = _require_selected_command_center()
+	if command_center == null:
 		return
 
-	_selected_command_center.try_train_worker_with_repeat(Input.is_key_pressed(KEY_CTRL))
+	command_center.try_train_worker_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_town_center_button_labels()
 	_update_auto_training_label()
 	_rebuild_worker_queue_slots()
 
 
 func _on_train_spearman_pressed() -> void:
-	if _selected_barracks == null:
+	var barracks: Barracks = _require_selected_barracks()
+	if barracks == null:
 		return
 
-	_selected_barracks.try_train_spearman_with_repeat(Input.is_key_pressed(KEY_CTRL))
+	barracks.try_train_spearman_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_barracks_button_labels()
 	_update_auto_training_label()
 	_rebuild_swordsman_queue_slots()
 
 
 func _on_train_swordsman_pressed() -> void:
-	if _selected_barracks == null:
+	var barracks: Barracks = _require_selected_barracks()
+	if barracks == null:
 		return
 
-	_selected_barracks.try_train_swordsman_with_repeat(Input.is_key_pressed(KEY_CTRL))
+	barracks.try_train_swordsman_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_barracks_button_labels()
 	_update_auto_training_label()
 	_rebuild_swordsman_queue_slots()
 
 
 func _on_train_archer_pressed() -> void:
-	if _selected_barracks == null:
+	var barracks: Barracks = _require_selected_barracks()
+	if barracks == null:
 		return
 
-	_selected_barracks.try_train_archer_with_repeat(Input.is_key_pressed(KEY_CTRL))
+	barracks.try_train_archer_with_repeat(Input.is_key_pressed(KEY_CTRL))
 	_update_barracks_button_labels()
 	_update_auto_training_label()
 	_rebuild_archer_queue_slots()
 
 
 func _on_train_hero_pressed() -> void:
-	if _selected_hero_altar == null:
+	var hero_altar: HeroAltar = _require_selected_hero_altar()
+	if hero_altar == null:
 		return
 	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_PALADIN):
 		return
 
-	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
-	_selected_hero_altar.try_train_hero()
+	hero_altar.set_selected_kit(HeroCatalog.KIT_PALADIN)
+	hero_altar.try_train_hero()
 
 
 func _on_train_assassin_pressed() -> void:
-	if _selected_hero_altar == null:
+	var hero_altar: HeroAltar = _require_selected_hero_altar()
+	if hero_altar == null:
 		return
 	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_SHADOW_ASSASSIN):
 		return
 
-	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_SHADOW_ASSASSIN)
-	_selected_hero_altar.try_train_hero()
+	hero_altar.set_selected_kit(HeroCatalog.KIT_SHADOW_ASSASSIN)
+	hero_altar.try_train_hero()
 
 
 func _on_train_ranger_pressed() -> void:
-	if _selected_hero_altar == null:
+	var hero_altar: HeroAltar = _require_selected_hero_altar()
+	if hero_altar == null:
 		return
 	if not HeroProgressionStore.can_select_kit(false, HeroCatalog.KIT_RANGER):
 		return
 
-	_selected_hero_altar.set_selected_kit(HeroCatalog.KIT_RANGER)
-	_selected_hero_altar.try_train_hero()
+	hero_altar.set_selected_kit(HeroCatalog.KIT_RANGER)
+	hero_altar.try_train_hero()
 
 
 func _setup_command_tooltips() -> void:

@@ -497,11 +497,13 @@ func _get_selected_workers() -> Array[Worker]:
 	if selection_manager == null:
 		return workers
 
-	for unit: Unit in selection_manager.selected_units:
-		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
+	for unit_ref: Variant in selection_manager.selected_units:
+		if not NodeSafety.is_alive_node(unit_ref) or not unit_ref is Worker:
 			continue
-		if unit is Worker:
-			workers.append(unit as Worker)
+		workers.append(unit_ref as Worker)
 
 	return workers
 
@@ -530,14 +532,17 @@ func _can_use_worker_build_hotkeys() -> bool:
 	if selection_manager.selected_building != null:
 		return false
 
-	var selected_units: Array[Unit] = selection_manager.selected_units
+	if selection_manager.has_method("purge_invalid_selection"):
+		selection_manager.purge_invalid_selection()
+
+	var selected_units: Array = selection_manager.selected_units
 	if selected_units.is_empty():
 		return false
 
-	for unit: Unit in selected_units:
-		if not is_instance_valid(unit) or unit.is_queued_for_deletion():
+	for unit_ref: Variant in selected_units:
+		if not NodeSafety.is_alive_node(unit_ref):
 			continue
-		if not unit is Worker:
+		if not unit_ref is Worker:
 			return false
 
 	return true

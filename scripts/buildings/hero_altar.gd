@@ -426,15 +426,29 @@ func _is_living_player_hero_variant(node_variant: Variant) -> bool:
 
 func _on_health_depleted() -> void:
 	_hero_training_session += 1
+	if _is_training and not _training_for_enemy:
+		ResourceManager.add_gold(TRAIN_GOLD_COST)
+		ResourceManager.release_food_used(TRAIN_FOOD_COST)
+	elif _is_training and _training_for_enemy:
+		EnemyResourceManager.add_gold(TRAIN_GOLD_COST)
+		EnemyResourceManager.release_food_used(TRAIN_FOOD_COST)
 	_is_training = false
 	_training_for_enemy = false
 
-	if _rally_marker != null and is_instance_valid(_rally_marker):
-		_rally_marker.queue_free()
-		_rally_marker = null
+	_clear_rally_marker()
 
 	destroy_building()
 	queue_free()
+
+
+func _clear_rally_marker() -> void:
+	if _rally_marker != null and is_instance_valid(_rally_marker):
+		_rally_marker.queue_free()
+	_rally_marker = null
+
+
+func _exit_tree() -> void:
+	_clear_rally_marker()
 
 
 func _is_living_hero_node(node: Node) -> bool:

@@ -345,6 +345,7 @@ func _on_health_depleted() -> void:
 	_training_session += 1
 	_is_training = false
 	_current_training_id = &""
+	_refund_all_queued_training()
 	_training_queue.clear()
 
 	if _rally_marker != null and is_instance_valid(_rally_marker):
@@ -860,6 +861,11 @@ func _refund_training_cost(train_id: StringName) -> void:
 	else:
 		EnemyResourceManager.add_gold(gold_cost)
 		EnemyResourceManager.release_food_used(food_cost)
+
+
+func _refund_all_queued_training() -> void:
+	for train_id: StringName in _training_queue:
+		_refund_training_cost(train_id)
 
 
 func _emit_queue_changed() -> void:

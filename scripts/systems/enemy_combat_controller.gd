@@ -71,12 +71,12 @@ func _update_combat_control(delta: float) -> void:
 	_update_opening_phase(tree)
 
 	if EnemyArmyCommand.check_destroyed_army_regroup(tree, elapsed):
-		if _active_player_creep_contest_camp != null:
+		if NodeSafety.is_alive_node(_active_player_creep_contest_camp):
 			EnemyArmyCommand.record_creep_contest_cooldown(
 				_active_player_creep_contest_camp,
 				"army destroyed"
 			)
-			_active_player_creep_contest_camp = null
+		_active_player_creep_contest_camp = null
 	EnemyArmyCommand.tick_reinforcement_pool(tree, elapsed)
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
@@ -104,12 +104,12 @@ func _update_combat_control(delta: float) -> void:
 			if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.ATTACKING:
 				return
 		if EnemyArmyCommand.should_retreat_from_fight(tree):
-			if _active_player_creep_contest_camp != null:
+			if NodeSafety.is_alive_node(_active_player_creep_contest_camp):
 				EnemyArmyCommand.record_creep_contest_cooldown(
 					_active_player_creep_contest_camp,
 					"retreat from contest"
 				)
-				_active_player_creep_contest_camp = null
+			_active_player_creep_contest_camp = null
 			if army_mode == EnemyArmyCommand.ArmyMode.CREEPING:
 				_log_creeping_retreat(tree)
 			EnemyArmyCommand.initiate_group_retreat(tree, "fight unfavorable")
@@ -321,6 +321,13 @@ func _maintain_regrouping(tree: SceneTree) -> void:
 
 
 func _process_assembly(tree: SceneTree, delta: float) -> void:
+	_assembly_units = NodeSafety.clean_node_array(_assembly_units)
+	if _assembly_units.is_empty():
+		EnemyArmyCommand.finish_assembly(_assembly_target_mode)
+		_assembly_destination = Vector3.ZERO
+		_assembly_use_attack_move = true
+		return
+
 	if not EnemyArmyCommand.is_assembly_ready(tree, delta):
 		var assembled: Array = EnemyArmyCommand.filter_units_near_rally(
 			_assembly_units,
@@ -676,7 +683,7 @@ func _try_contest_player_creep(
 
 	units = contest_eval.get("units", units)
 	var destination: Vector3 = camp.global_position
-	_active_player_creep_contest_camp = camp
+	_active_player_creep_contest_camp = NodeSafety.safe_node(camp) as Node3D
 	EnemyArmyCommand.debug_combat_log(
 		"creep contest approved: %d units vs player strength %.1f"
 		% [units.size(), float(evaluation.get("player_strength", 0.0))]

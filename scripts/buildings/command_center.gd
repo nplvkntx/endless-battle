@@ -131,8 +131,10 @@ func _ensure_dropoff_registration() -> void:
 
 func _on_health_depleted() -> void:
 	_repeat_enabled = false
+	_refund_all_queued_worker_training()
 	_invalidate_training_session()
 	_is_training = false
+	_worker_queue_count = 0
 	_invalidate_tier_upgrade()
 	_rally_resource = null
 	_tier2_marker = null
@@ -767,6 +769,16 @@ func _invalidate_training_session() -> void:
 func _refund_worker_training_cost() -> void:
 	ResourceManager.add_gold(TRAIN_GOLD_COST)
 	ResourceManager.release_food_used(TRAIN_FOOD_COST)
+
+
+func _refund_all_queued_worker_training() -> void:
+	var refund_count: int = _worker_queue_count
+	for _unused: int in refund_count:
+		if is_in_group(&"enemy_command_center"):
+			EnemyResourceManager.add_gold(TRAIN_GOLD_COST)
+			EnemyResourceManager.release_food_used(TRAIN_FOOD_COST)
+		else:
+			_refund_worker_training_cost()
 
 
 func _spawn_worker() -> void:
