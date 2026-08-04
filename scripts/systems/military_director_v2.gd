@@ -6,8 +6,9 @@ extends Node
 ## Owns the authoritative army roster and main-squad membership.
 ## Does not issue unit orders — ArmyCommanderV2 executes the mission.
 ##
-## Foundation + roster task: stays IDLE strategically. Advanced creep/attack/defend
-## behavior is not migrated yet. Squad membership still refreshes while V2 is enabled.
+## DEFEND overrides CREEP / ATTACK / ASSEMBLE / RECOVER for emergency base defense.
+## After a clear, the director reassesses via RECOVER or ASSEMBLE and never resumes
+## a stale creep/attack reservation automatically.
 
 enum State {
 	IDLE,
@@ -20,6 +21,9 @@ enum State {
 }
 
 const TICK_SECONDS: float = 1.0
+const V2_CREEP_PLAYER_THREAT_RADIUS: float = 28.0
+const V2_CREEP_PLAYER_THREAT_STRENGTH_RATIO: float = 1.10
+const V2_CREEP_MEDIUM_POWER_THRESHOLD: int = 170
 
 var _state: State = State.IDLE
 var _mission: ArmyMissionV2 = null
@@ -38,6 +42,12 @@ var _main_squad: ArmySquadV2 = ArmySquadV2.new()
 var _lifecycle_bound: Dictionary = {}
 var _assemble_rally_point: Vector3 = Vector3.ZERO
 var _assemble_rally_base_id: int = 0
+var _reserved_creep_camp_id: int = 0
+var _cleared_creep_camp_ids: Dictionary = {}
+var _defend_clear_timer: float = 0.0
+var _defend_active: bool = false
+var _defend_reason: StringName = &""
+var _pre_defend_state: State = State.IDLE
 
 
 func _ready() -> void:
@@ -71,6 +81,12 @@ func _clear_roster_state() -> void:
 	_lifecycle_bound.clear()
 	_assemble_rally_point = Vector3.ZERO
 	_assemble_rally_base_id = 0
+	_reserved_creep_camp_id = 0
+	_cleared_creep_camp_ids.clear()
+	_defend_clear_timer = 0.0
+	_defend_active = false
+	_defend_reason = &""
+	_pre_defend_state = State.IDLE
 
 
 func _process(delta: float) -> void:
@@ -104,21 +120,11 @@ func _evaluate_strategy() -> void:
 		_transition_to(State.IDLE, "awaiting safe rally point")
 		return
 
-	var defend_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
-	if defend_threat.get("threatened", false):
-		var intercept: Vector3 = defend_threat.get("intercept_position", rally_point) as Vector3
-		_transition_to(State.DEFEND, "emergency base defense", intercept, null, 100)
+	## DEFEND always wins over CREEP / ATTACK / ASSEMBLE / RECOVER.
+	if _evaluate_defend_strategy(tree, rally_point):
 		return
 
-	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
-	var has_safe_camp: bool = (
-		creep_manager != null
-		and _main_squad.hero_present
-		and get_military_unit_count() >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
-		and creep_manager.has_safe_creep_camp_available()
-	)
-	if has_safe_camp:
-		_transition_to(State.CREEP, "creep-ready squad assembled", rally_point)
+	if _evaluate_creep_strategy(tree, rally_point):
 		return
 
 	_transition_to(State.ASSEMBLE, "gathering squad at base", rally_point)
@@ -224,6 +230,22 @@ func get_assemble_forward_hint() -> Vector3:
 	return forward.normalized()
 
 
+func get_reserved_creep_camp_id() -> int:
+	return _reserved_creep_camp_id
+
+
+func has_reserved_creep_camp() -> bool:
+	return _reserved_creep_camp_id != 0
+
+
+func get_defend_reason() -> StringName:
+	return _defend_reason
+
+
+func is_defend_active() -> bool:
+	return _defend_active
+
+
 ## Strategic API for future behavior / tests. Commander must not call this for self-decisions.
 func request_state(
 	next_state: State,
@@ -245,24 +267,64 @@ func _transition_to(
 	priority: int = 0
 ) -> bool:
 	var previous_state: State = _state
-	if _state == next_state and _mission != null and _mission.mission_type == _state_to_mission_type(next_state):
-		if reason != _last_transition_reason and not reason.is_empty():
-			_last_transition_reason = reason
-			_mission.transition_reason = reason
-		return false
+	var next_mission_type: ArmyMissionV2.MissionType = _state_to_mission_type(next_state)
+	if _state == next_state and _mission != null and _mission.mission_type == next_mission_type:
+		var same_target_object: bool = _same_target_object(_mission.target_object, target_object)
+		var same_target_position: bool = _mission.target_position == target_position
+		var same_priority: bool = _mission.priority == priority
+		if same_target_object and same_target_position and same_priority:
+			if reason != _last_transition_reason and not reason.is_empty():
+				_last_transition_reason = reason
+				_mission.transition_reason = reason
+			return false
+		if next_state == State.CREEP and not NodeSafety.is_alive_node(target_object):
+			return false
+		if next_state == State.CREEP:
+			_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+		elif previous_state == State.CREEP:
+			_release_creep_reservation()
+			if EnemyArmyCommand.is_creeping_executable_active():
+				EnemyArmyCommand.clear_executable_mission("creep state updated")
+		_last_transition_reason = reason if not reason.is_empty() else "unspecified"
+		_mission = ArmyMissionV2.new(
+			next_mission_type,
+			target_position,
+			target_object,
+			priority,
+			_last_transition_reason
+		)
+		_publish_perf_status()
+		return true
 
 	if _mission != null and _state != next_state:
 		_mission.mark_cancelled("superseded: %s" % reason)
 
+	if previous_state == State.CREEP and next_state != State.CREEP:
+		_release_creep_reservation()
+		if EnemyArmyCommand.is_creeping_executable_active():
+			EnemyArmyCommand.clear_executable_mission("creep state ended")
+
+	if previous_state == State.DEFEND and next_state != State.DEFEND:
+		_deactivate_v2_defend("left defend: %s" % reason)
+
 	_state = next_state
 	_last_transition_reason = reason if not reason.is_empty() else "unspecified"
 	_mission = ArmyMissionV2.new(
-		_state_to_mission_type(next_state),
+		next_mission_type,
 		target_position,
 		target_object,
 		priority,
 		_last_transition_reason
 	)
+	if next_state == State.CREEP and NodeSafety.is_alive_node(target_object):
+		_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+	elif next_state != State.CREEP:
+		_release_creep_reservation()
+
+	if next_state == State.DEFEND:
+		_defend_active = true
+	elif previous_state == State.DEFEND:
+		_defend_active = false
 
 	## Safe admission window: join reinforcements on state transitions into idle/assemble/recover.
 	if previous_state != next_state and _can_admit_reinforcements():
@@ -510,6 +572,508 @@ func _resolve_creep_manager() -> EnemyCreepManager:
 	if get_parent() == null:
 		return null
 	return get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+
+
+func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
+	var threat: Dictionary = _resolve_v2_defense_threat(tree)
+	if threat.get("threatened", false):
+		_defend_clear_timer = 0.0
+		var intercept: Vector3 = EnemyArmyCommand.resolve_defense_intercept_position(
+			tree,
+			threat,
+			rally_point
+		)
+		if intercept == Vector3.ZERO:
+			intercept = rally_point
+		var focus: Node3D = _pick_defend_focus_target(tree, intercept, rally_point)
+		var reason_name: StringName = threat.get("reason", &"base") as StringName
+		_defend_reason = reason_name
+		var reason_text: String = _format_defend_reason(reason_name, focus)
+		if _state != State.DEFEND:
+			_pre_defend_state = _state
+			EnemyArmyCommand.prepare_defense_recall(tree)
+			EnemyArmyCommand.activate_emergency_defense(threat)
+		else:
+			EnemyArmyCommand.update_emergency_defense_threat(threat)
+		_defend_active = true
+		_transition_to(
+			State.DEFEND,
+			reason_text,
+			intercept,
+			focus,
+			100
+		)
+		if _mission != null:
+			_mission.note_progress()
+		return true
+
+	if _state != State.DEFEND and not _defend_active:
+		return false
+
+	_defend_clear_timer += TICK_SECONDS
+	if _defend_clear_timer < MilitaryAIConfig.V2_DEFEND_THREAT_CLEAR_SECONDS:
+		## Hold DEFEND while the clear window ticks; keep F3 reason visible.
+		if _mission != null and _mission.mission_type == ArmyMissionV2.MissionType.DEFEND:
+			_mission.transition_reason = "holding clear: %s" % String(_defend_reason)
+			_last_transition_reason = _mission.transition_reason
+			_publish_perf_status()
+		return true
+
+	_exit_defend_after_clear(tree, rally_point)
+	return true
+
+
+func _resolve_v2_defense_threat(tree: SceneTree) -> Dictionary:
+	var emergency: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
+	if emergency.get("threatened", false):
+		return emergency
+
+	## Workers being killed / harassed near base are an emergency for V2 even when
+	## the shared emergency evaluator only flags workers attacking buildings.
+	var standard: Dictionary = EnemyArmyCommand.evaluate_defense_threat(tree)
+	if not standard.get("threatened", false):
+		return {"threatened": false}
+
+	var reason: StringName = standard.get("reason", &"") as StringName
+	if reason == &"workers" or reason == &"buildings" or reason == &"base":
+		return standard
+	return {"threatened": false}
+
+
+func _pick_defend_focus_target(
+	tree: SceneTree,
+	intercept: Vector3,
+	rally_point: Vector3
+) -> Node3D:
+	var search_origin: Vector3 = intercept if intercept != Vector3.ZERO else rally_point
+	if search_origin == Vector3.ZERO:
+		return null
+
+	var candidates: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		search_origin,
+		MilitaryAIConfig.V2_DEFEND_THREAT_SEARCH_RANGE
+	)
+	## Always consider whoever is actively hitting the Town Hall, even if slightly farther.
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is CommandCenter or not NodeSafety.is_alive_node(node):
+			continue
+		var attacker: Node = CombatKillTracker.get_attacker(node)
+		if (
+			NodeSafety.is_alive_node(attacker)
+			and attacker is Node3D
+			and not CombatTargetValidation.is_enemy_faction(attacker)
+			and EnemyArmyCommand.is_combat_unit(attacker)
+		):
+			if not candidates.has(attacker):
+				candidates.append(attacker)
+
+	var best: Node3D = null
+	var best_priority: int = CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_INVALID
+	var best_distance: float = INF
+	var probe: Node3D = _find_primary_enemy_base(tree)
+	if probe == null and not _main_squad.get_members_copy().is_empty():
+		var first: Variant = _main_squad.get_members_copy()[0]
+		if first is Node3D:
+			probe = first as Node3D
+	if probe == null:
+		return null
+
+	for entry: Variant in candidates:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var candidate: Node3D = entry as Node3D
+		if candidate is Building:
+			continue
+		var distance: float = EnemyArmyCommand.horizontal_distance(search_origin, candidate.global_position)
+		var priority: int = CombatTargetValidation.get_enemy_defense_target_priority(
+			probe,
+			candidate,
+			distance
+		)
+		if priority >= CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_INVALID:
+			continue
+		if priority < best_priority or (priority == best_priority and distance < best_distance):
+			best_priority = priority
+			best_distance = distance
+			best = candidate
+	return best
+
+
+func _format_defend_reason(reason: StringName, focus: Node3D) -> String:
+	var label: String = String(reason)
+	if label.is_empty():
+		label = "base"
+	if NodeSafety.is_alive_node(focus):
+		return "defend %s → %s" % [label, focus.name]
+	return "defend %s" % label
+
+
+func _exit_defend_after_clear(tree: SceneTree, rally_point: Vector3) -> void:
+	if _mission != null and _mission.mission_type == ArmyMissionV2.MissionType.DEFEND:
+		_mission.completion_condition = ArmyMissionV2.CompletionCondition.THREAT_CLEARED
+
+	_deactivate_v2_defend("threat cleared")
+	_defend_clear_timer = 0.0
+	_defend_reason = &""
+
+	## Never resume a stale creep/attack reservation — reassess from a safe state.
+	_release_creep_reservation()
+	if EnemyArmyCommand.is_creeping_executable_active():
+		EnemyArmyCommand.clear_executable_mission("defense cleared")
+	EnemyArmyCommand.clear_executable_mission("defense cleared")
+
+	if EnemyArmyCommand.get_army_mode() in [
+		EnemyArmyCommand.ArmyMode.DEFENDING,
+		EnemyArmyCommand.ArmyMode.INTERCEPTING,
+	]:
+		EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
+			EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.INTERCEPTING)
+
+	if _is_main_squad_damaged():
+		_transition_to(State.RECOVER, "defense cleared, recovering damage", rally_point)
+		return
+	if _is_main_squad_scattered(rally_point):
+		_transition_to(State.ASSEMBLE, "defense cleared, reassembling scattered squad", rally_point)
+		return
+	_transition_to(State.ASSEMBLE, "defense cleared, reassess strategy", rally_point)
+
+
+func _deactivate_v2_defend(_reason: String) -> void:
+	if EnemyArmyCommand.is_emergency_defense_active():
+		EnemyArmyCommand.deactivate_emergency_defense()
+	_defend_active = false
+
+
+func _is_main_squad_damaged() -> bool:
+	var living: int = 0
+	var damaged: int = 0
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		living += 1
+		if EnemyArmyCommand.get_health_ratio(entry as Node) < MilitaryAIConfig.V2_DEFEND_DAMAGED_HP_RATIO:
+			damaged += 1
+	if living <= 0:
+		return false
+	return float(damaged) / float(living) >= 0.35
+
+
+func _is_main_squad_scattered(rally_point: Vector3) -> bool:
+	var units: Array = []
+	for entry: Variant in _main_squad.get_members_copy():
+		if NodeSafety.is_alive_node(entry) and entry is Node3D:
+			units.append(entry)
+	units = NodeSafety.clean_node_array(units)
+	if units.size() < 3:
+		return false
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	if center == Vector3.ZERO:
+		center = rally_point
+	if center == Vector3.ZERO:
+		return false
+	var near_count: int = EnemyArmyCommand.filter_units_near_rally(
+		units,
+		center,
+		MilitaryAIConfig.V2_DEFEND_SCATTER_RADIUS
+	).size()
+	return float(near_count) / float(units.size()) < MilitaryAIConfig.V2_DEFEND_SCATTER_COHESION_RATIO
+
+
+func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if creep_manager == null:
+		if _state == State.CREEP:
+			_transition_to(State.ASSEMBLE, "creep manager unavailable", rally_point)
+			return true
+		return false
+
+	var creep_army: Array = _get_creep_squad_units()
+	if not _can_commit_to_creeping(tree, creep_army, creep_manager):
+		if _state == State.CREEP:
+			_transition_to(State.ASSEMBLE, "creep squad unavailable", rally_point)
+			return true
+		return false
+
+	var current_camp: Node3D = _get_current_creep_camp()
+	if _is_camp_cleared_or_invalid(tree, current_camp, creep_manager):
+		if current_camp != null and is_instance_valid(current_camp):
+			_cleared_creep_camp_ids[current_camp.get_instance_id()] = true
+		current_camp = null
+		_release_creep_reservation()
+
+	var origin: Vector3 = _main_squad.center
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.compute_army_center(creep_army)
+	if origin == Vector3.ZERO:
+		origin = rally_point
+
+	if not _is_valid_creep_camp(tree, current_camp, creep_manager, creep_army, origin, rally_point):
+		current_camp = _select_best_creep_camp(tree, creep_manager, creep_army, origin, rally_point)
+
+	if current_camp == null:
+		if _state == State.CREEP:
+			_transition_to(State.ASSEMBLE, "no worthwhile camps remain", rally_point)
+			return true
+		return false
+
+	var score: float = _score_creep_camp(
+		tree,
+		creep_manager,
+		current_camp,
+		creep_army,
+		origin,
+		rally_point
+	)
+	var reason: String = "creep %s" % creep_manager._format_camp_name(current_camp)
+	_transition_to(
+		State.CREEP,
+		reason,
+		current_camp.global_position,
+		current_camp,
+		int(round(score))
+	)
+	return true
+
+
+func _get_creep_squad_units() -> Array:
+	var units: Array = []
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		if not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		units.append(entry)
+	return NodeSafety.clean_node_array(units)
+
+
+func _can_commit_to_creeping(
+	tree: SceneTree,
+	creep_army: Array,
+	creep_manager: EnemyCreepManager
+) -> bool:
+	if not _main_squad.hero_present:
+		return false
+	if get_military_unit_count() < MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS:
+		return false
+	if creep_army.is_empty():
+		return false
+	if EnemyAggression.should_suspend_creeping():
+		return false
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		return false
+	if not EnemyArmyCommand.allows_creep_orders():
+		return false
+	if not creep_manager._squad_safe_to_commit(tree, creep_army):
+		return false
+	return true
+
+
+func _get_current_creep_camp() -> Node3D:
+	if _mission == null:
+		return null
+	_mission.sanitize_target_object()
+	if _mission.target_object != null and _mission.target_object is Node3D:
+		return _mission.target_object as Node3D
+	return null
+
+
+func _is_camp_cleared_or_invalid(
+	tree: SceneTree,
+	camp: Node3D,
+	creep_manager: EnemyCreepManager
+) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return true
+	if creep_manager._is_camp_cleared(tree, camp):
+		return true
+	return false
+
+
+func _is_valid_creep_camp(
+	tree: SceneTree,
+	camp: Node3D,
+	creep_manager: EnemyCreepManager,
+	creep_army: Array,
+	origin: Vector3,
+	rally_point: Vector3
+) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return false
+	if _cleared_creep_camp_ids.has(camp.get_instance_id()):
+		return false
+	if creep_manager._is_camp_cleared(tree, camp):
+		return false
+	if creep_manager._is_player_contesting_camp(tree, camp):
+		return false
+	if not creep_manager._is_enemy_side_camp(camp, rally_point, tree):
+		return false
+	if not _is_creep_camp_reachable(origin, camp.global_position):
+		return false
+	return _score_creep_camp(tree, creep_manager, camp, creep_army, origin, rally_point) > -INF
+
+
+func _select_best_creep_camp(
+	tree: SceneTree,
+	creep_manager: EnemyCreepManager,
+	creep_army: Array,
+	origin: Vector3,
+	rally_point: Vector3
+) -> Node3D:
+	var best_camp: Node3D = null
+	var best_score: float = -INF
+	for camp: Node3D in creep_manager._collect_creep_camps(tree):
+		var score: float = _score_creep_camp(
+			tree,
+			creep_manager,
+			camp,
+			creep_army,
+			origin,
+			rally_point
+		)
+		if score > best_score:
+			best_score = score
+			best_camp = camp
+	return best_camp
+
+
+func _score_creep_camp(
+	tree: SceneTree,
+	creep_manager: EnemyCreepManager,
+	camp: Node3D,
+	creep_army: Array,
+	origin: Vector3,
+	rally_point: Vector3
+) -> float:
+	if camp == null or not is_instance_valid(camp):
+		return -INF
+	if _cleared_creep_camp_ids.has(camp.get_instance_id()):
+		return -INF
+	if not creep_manager._is_enemy_side_camp(camp, rally_point, tree):
+		return -INF
+	if creep_manager._is_camp_cleared(tree, camp):
+		return -INF
+	if creep_manager._is_player_contesting_camp(tree, camp):
+		return -INF
+	if not _is_creep_camp_reachable(origin, camp.global_position):
+		return -INF
+
+	var distance: float = EnemyArmyCommand.horizontal_distance(origin, camp.global_position)
+	if distance > EnemyCreepManager.CREEP_SEARCH_RANGE:
+		return -INF
+
+	var camp_power: int = creep_manager._estimate_camp_power(camp)
+	if camp_power <= 0:
+		return -INF
+
+	var hero: Hero = _find_creep_hero(creep_army)
+	var hero_hp: float = 1.0
+	var hero_mana: float = 1.0
+	var hero_level: int = 1
+	if hero != null:
+		hero_hp = EnemyArmyCommand.get_health_ratio(hero)
+		hero_mana = float(hero.current_mana) / float(maxi(hero.max_mana, 1))
+		hero_level = hero.level
+
+	var army_power: float = maxf(EnemyArmyCommand.estimate_combat_strength(creep_army), 1.0)
+	var safety_ratio: float = army_power / maxf(float(camp_power), 1.0)
+	var strong_camp: bool = camp_power >= EnemyCreepManager.STRONG_CAMP_POWER_THRESHOLD
+	if strong_camp and hero_level < 3:
+		return -INF
+	var required_ratio: float = (
+		EnemyCreepManager.STRONG_CAMP_POWER_MARGIN if strong_camp else EnemyCreepManager.CAMP_POWER_MARGIN
+	)
+	if army_power < float(camp_power) * required_ratio:
+		return -INF
+
+	var player_near: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		camp.global_position,
+		V2_CREEP_PLAYER_THREAT_RADIUS
+	)
+	var player_power: float = EnemyArmyCommand.estimate_combat_strength(player_near)
+	if player_power > army_power * V2_CREEP_PLAYER_THREAT_STRENGTH_RATIO:
+		return -INF
+
+	var reward_value: float = _estimate_camp_reward_value(camp)
+	var preference_bonus: float = 0.0
+	if camp_power < V2_CREEP_MEDIUM_POWER_THRESHOLD:
+		preference_bonus = 120.0
+	elif strong_camp:
+		preference_bonus = 15.0 + maxf(safety_ratio - 1.35, 0.0) * 35.0
+	else:
+		preference_bonus = 70.0 if distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.65 else 35.0
+
+	return (
+		preference_bonus
+		+ reward_value * 1.4
+		+ safety_ratio * 85.0
+		+ hero_hp * 25.0
+		+ hero_mana * 10.0
+		- distance * 2.4
+		- float(camp_power) * 0.09
+		- player_power * 0.18
+	)
+
+
+func _estimate_camp_reward_value(camp: Node3D) -> float:
+	if camp == null or not is_instance_valid(camp):
+		return 0.0
+	var xp_total: int = 0
+	var gold_total: int = 0
+	for child_variant: Variant in camp.get_children():
+		if child_variant == null or not is_instance_valid(child_variant) or not child_variant is Node:
+			continue
+		var child: Node = child_variant as Node
+		if not CombatTargetValidation.is_neutral_creep(child):
+			continue
+		xp_total += HeroXpRewards.get_xp_amount_for_victim(child)
+		gold_total += HeroXpRewards.get_gold_amount_for_victim(child)
+	return float(xp_total) + float(gold_total) * 1.35
+
+
+func _find_creep_hero(creep_army: Array) -> Hero:
+	for entry: Variant in creep_army:
+		if entry is Hero and NodeSafety.is_alive_node(entry):
+			return entry as Hero
+	return null
+
+
+func _is_creep_camp_reachable(from_position: Vector3, to_position: Vector3) -> bool:
+	if from_position == Vector3.ZERO or to_position == Vector3.ZERO:
+		return false
+	var tree: SceneTree = get_tree()
+	if tree == null or not tree.current_scene is Node3D:
+		return true
+	var world: World3D = (tree.current_scene as Node3D).get_world_3d()
+	if world == null:
+		return true
+	var nav_map: RID = world.navigation_map
+	if not nav_map.is_valid() or not NavigationServer3D.map_is_active(nav_map):
+		return true
+	var start: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, from_position)
+	var target: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, to_position)
+	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, start, target, true)
+	if path.is_empty():
+		return false
+	return EnemyArmyCommand.horizontal_distance(path[path.size() - 1], target) <= 4.0
+
+
+func _release_creep_reservation() -> void:
+	_reserved_creep_camp_id = 0
+
+
+func _same_target_object(a: Node3D, b: Node3D) -> bool:
+	if a == null and b == null:
+		return true
+	if a == null or b == null:
+		return false
+	if not is_instance_valid(a) or not is_instance_valid(b):
+		return false
+	return a.get_instance_id() == b.get_instance_id()
 
 
 func _find_primary_enemy_base(tree: SceneTree) -> CommandCenter:

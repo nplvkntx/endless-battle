@@ -12,6 +12,8 @@ const HERO_MICRO_INTERVAL_SECONDS: float = 1.0
 const HERO_EXECUTE_SEARCH_RANGE: float = 14.0
 const ASSEMBLE_ROW_SPACING: float = 2.35
 const ASSEMBLE_COLUMN_SPACING: float = 2.1
+const CREEP_REGROUP_HOLD_SECONDS: float = 2.0
+const CREEP_ORDER_REISSUE_SECONDS: float = 0.35
 
 var _director: MilitaryDirectorV2 = null
 var _hero_micro_timer: float = 0.0
@@ -20,11 +22,19 @@ var _active_squad: ArmySquadV2 = null
 var _assemble_anchor: Vector3 = Vector3.ZERO
 var _assemble_role_slots: Dictionary = {}
 var _assemble_next_slot_by_role: Dictionary = {}
+var _creep_focus_reissue_timer: float = 0.0
+var _creep_regroup_hold_timer: float = 0.0
+var _creep_order_reissue_timer: float = 0.0
+var _creep_manager: EnemyCreepManager = null
+var _defend_order_reissue_timer: float = 0.0
+var _defend_focus_reissue_timer: float = 0.0
+var _defend_focus_target: Node3D = null
 
 
 func _ready() -> void:
 	_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
 	_hero_micro_timer = HERO_MICRO_INTERVAL_SECONDS * 0.4
+	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	set_process(MilitaryAIConfig.is_v2_enabled())
 
 
@@ -34,6 +44,13 @@ func reset_match_state() -> void:
 	_assemble_anchor = Vector3.ZERO
 	_assemble_role_slots.clear()
 	_assemble_next_slot_by_role.clear()
+	_creep_focus_reissue_timer = EnemyCreepManager.FOCUS_REISSUE_SECONDS
+	_creep_regroup_hold_timer = 0.0
+	_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
+	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	_defend_order_reissue_timer = MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS
+	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
+	_defend_focus_target = null
 
 
 func _process(delta: float) -> void:
@@ -46,6 +63,12 @@ func _process(delta: float) -> void:
 	EnemyArmyCommand.tick_group_order_batch(get_tree())
 	EnemyArmyCommand.tick_perf_diagnostics(get_tree(), delta)
 	EnemyArmyCommand.tick_retreat_cooldown(delta)
+	_creep_focus_reissue_timer += delta
+	_creep_order_reissue_timer += delta
+	_defend_order_reissue_timer += delta
+	_defend_focus_reissue_timer += delta
+	if _creep_regroup_hold_timer > 0.0:
+		_creep_regroup_hold_timer = maxf(0.0, _creep_regroup_hold_timer - delta)
 
 	_hero_micro_timer += delta
 	if _hero_micro_timer >= HERO_MICRO_INTERVAL_SECONDS:
@@ -91,17 +114,17 @@ func _execute_current_mission(_delta: float) -> void:
 	if squad == null:
 		return
 
-	## Foundation: no strategic self-decisions and no advanced order issuance yet.
+	## Foundation: no strategic self-decisions. Execution adapters own order issuance.
 	match director.get_state():
 		MilitaryDirectorV2.State.IDLE, MilitaryDirectorV2.State.RECOVER:
 			pass
 		MilitaryDirectorV2.State.ASSEMBLE:
 			_execute_assemble_mission(director, mission, squad)
 		MilitaryDirectorV2.State.CREEP:
-			## Creep handoff is strategic only for now; keep the squad settled until the
-			## dedicated V2 creep executor lands instead of scattering the army.
-			_execute_assemble_mission(director, mission, squad)
-		MilitaryDirectorV2.State.ATTACK, MilitaryDirectorV2.State.DEFEND, MilitaryDirectorV2.State.RETREAT:
+			_execute_creep_mission(director, mission, squad)
+		MilitaryDirectorV2.State.DEFEND:
+			_execute_defend_mission(director, mission, squad)
+		MilitaryDirectorV2.State.ATTACK, MilitaryDirectorV2.State.RETREAT:
 			## Reserved for future execution adapters. Commander still must not choose these.
 			pass
 
@@ -337,6 +360,377 @@ func _should_use_attack_move_for_assemble(unit: Node3D, distance_to_slot: float)
 	if role == ArmySquadV2.UnitRole.SIEGE:
 		return false
 	return distance_to_slot > MilitaryAIConfig.V2_ASSEMBLE_ATTACK_MOVE_DISTANCE
+
+
+func _resolve_creep_manager() -> EnemyCreepManager:
+	if _creep_manager == null:
+		_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	return _creep_manager
+
+
+func _execute_creep_mission(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if creep_manager == null:
+		EnemyArmyCommand.clear_executable_mission("creep manager unavailable")
+		_execute_assemble_mission(director, mission, squad)
+		return
+
+	var camp: Node3D = null
+	if mission.target_object != null and mission.target_object is Node3D and is_instance_valid(mission.target_object):
+		camp = mission.target_object as Node3D
+	if camp == null:
+		EnemyArmyCommand.clear_executable_mission("creep camp missing")
+		_execute_assemble_mission(director, mission, squad)
+		return
+
+	var creep_army: Array = _collect_creep_army(squad)
+	if not _is_creep_army_ready(creep_army):
+		EnemyArmyCommand.clear_executable_mission("creep squad incomplete")
+		_execute_assemble_mission(director, mission, squad)
+		return
+
+	var tree: SceneTree = get_tree()
+	var rally_point: Vector3 = director.get_assemble_rally_point()
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(creep_army)
+	if army_center == Vector3.ZERO:
+		EnemyArmyCommand.clear_executable_mission("creep squad has no center")
+		_execute_assemble_mission(director, mission, squad)
+		return
+
+	if _creep_regroup_hold_timer > 0.0 or creep_manager._needs_army_regroup(creep_army):
+		EnemyArmyCommand.clear_executable_mission("creep regroup")
+		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+			_regroup_creep_army(creep_manager, creep_army, rally_point)
+		mission.note_progress()
+		return
+
+	if creep_manager._is_camp_cleared(tree, camp):
+		EnemyArmyCommand.clear_executable_mission("creep camp cleared")
+		_hold_creep_squad(creep_army, army_center)
+		_creep_regroup_hold_timer = CREEP_REGROUP_HOLD_SECONDS
+		mission.note_progress()
+		return
+
+	if creep_manager._is_player_contesting_camp(tree, camp):
+		EnemyArmyCommand.clear_executable_mission("player contesting camp")
+		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+			_regroup_creep_army(creep_manager, creep_army, rally_point)
+		return
+
+	if creep_manager._should_retreat_from_creeping(tree, creep_army):
+		EnemyArmyCommand.clear_executable_mission("creep retreat")
+		return
+
+	if not creep_manager._squad_safe_to_commit(tree, creep_army):
+		EnemyArmyCommand.clear_executable_mission("creep squad not safe")
+		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+			_regroup_creep_army(creep_manager, creep_army, rally_point)
+		return
+
+	var engaging: bool = creep_manager._is_army_engaging_camp(tree, creep_army, camp)
+	var validation: Dictionary = EnemyArmyCommand.validate_creeping_mission(
+		tree,
+		camp,
+		director.get_reserved_creep_camp_id(),
+		army_center,
+		true,
+		engaging
+	)
+	if not validation.get("valid", false):
+		EnemyArmyCommand.clear_executable_mission(String(validation.get("reason", "creep invalid")))
+		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+			_regroup_creep_army(creep_manager, creep_army, rally_point)
+		return
+
+	var destination: Vector3 = creep_manager._resolve_camp_attack_destination(tree, camp, army_center)
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.CREEPING,
+		"v2 creep execute",
+		camp,
+		destination,
+		creep_manager._format_camp_name(camp),
+		"attack-move",
+		creep_army,
+		director.has_reserved_creep_camp()
+	)
+
+	if engaging:
+		if not creep_manager._is_squad_cohesive_for_engage(creep_army, camp):
+			if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+				_regroup_creep_army(creep_manager, creep_army, rally_point)
+			return
+		EnemyArmyCommand.note_mission_progress(army_center, true, creep_army.size())
+		mission.note_progress()
+		_execute_creep_focus_fire(creep_manager, tree, creep_army, camp)
+		return
+
+	if _creep_order_reissue_timer < CREEP_ORDER_REISSUE_SECONDS:
+		EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
+		return
+
+	if not EnemyArmyCommand.issue_group_combat_move(
+		tree,
+		creep_army,
+		destination,
+		EnemyUnitMission.Mission.CREEP,
+		EnemyArmyCommand.ArmyMode.CREEPING
+	):
+		EnemyArmyCommand.clear_executable_mission("creep move blocked")
+		_regroup_creep_army(creep_manager, creep_army, rally_point)
+		return
+
+	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
+	mission.note_progress()
+	_creep_order_reissue_timer = 0.0
+
+
+func _collect_creep_army(squad: ArmySquadV2) -> Array:
+	var units: Array = []
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		if not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		units.append(entry)
+	return NodeSafety.clean_node_array(units)
+
+
+func _is_creep_army_ready(creep_army: Array) -> bool:
+	var non_hero_count: int = 0
+	var has_hero: bool = false
+	for entry: Variant in creep_army:
+		if entry is Hero:
+			has_hero = true
+			continue
+		if EnemyArmyCommand.is_non_hero_combat_unit(entry as Node):
+			non_hero_count += 1
+	return has_hero and non_hero_count >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
+
+
+func _regroup_creep_army(
+	creep_manager: EnemyCreepManager,
+	creep_army: Array,
+	rally_point: Vector3
+) -> void:
+	_creep_regroup_hold_timer = CREEP_REGROUP_HOLD_SECONDS
+	_creep_order_reissue_timer = 0.0
+	if rally_point != Vector3.ZERO:
+		creep_manager._hold_army_until_rallied(get_tree(), rally_point, creep_army)
+		return
+	creep_manager._regroup_creep_army(creep_army)
+
+
+func _hold_creep_squad(creep_army: Array, hold_point: Vector3) -> void:
+	if hold_point == Vector3.ZERO:
+		return
+	_creep_order_reissue_timer = 0.0
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			creep_army,
+			hold_point,
+			EnemyUnitMission.Mission.CREEP
+		)
+	)
+
+
+func _execute_creep_focus_fire(
+	creep_manager: EnemyCreepManager,
+	tree: SceneTree,
+	creep_army: Array,
+	camp: Node3D
+) -> void:
+	if _creep_focus_reissue_timer < EnemyCreepManager.FOCUS_REISSUE_SECONDS:
+		return
+	_creep_focus_reissue_timer = 0.0
+	creep_manager._engage_camp_focus_fire(tree, creep_army, camp)
+
+
+func _execute_defend_mission(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var defense_army: Array = _collect_defend_army(squad)
+	if defense_army.is_empty():
+		return
+
+	var rally_point: Vector3 = director.get_assemble_rally_point()
+	var intercept: Vector3 = mission.target_position
+	if intercept == Vector3.ZERO:
+		intercept = EnemyArmyCommand.get_emergency_defense_objective()
+	if intercept == Vector3.ZERO:
+		intercept = rally_point
+	if intercept == Vector3.ZERO:
+		return
+
+	var base_anchor: Vector3 = rally_point
+	if base_anchor == Vector3.ZERO:
+		base_anchor = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if base_anchor == Vector3.ZERO:
+		base_anchor = intercept
+
+	var focus: Node3D = null
+	if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
+		focus = mission.target_object
+	elif NodeSafety.is_alive_node(_defend_focus_target):
+		focus = _defend_focus_target
+	_defend_focus_target = focus
+
+	var chase_point: Vector3 = intercept
+	if focus != null:
+		chase_point = focus.global_position
+
+	## Configurable leash: never chase forever beyond the defense radius.
+	var leashed_point: Vector3 = _clamp_defend_destination(base_anchor, chase_point)
+	var beyond_leash: bool = (
+		EnemyArmyCommand.horizontal_distance(base_anchor, chase_point)
+		> MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS
+	)
+
+	EnemyArmyCommand.set_executable_mission(
+		(
+			EnemyArmyCommand.ExecutableMission.EMERGENCY_DEFEND
+			if EnemyArmyCommand.is_emergency_defense_active()
+			else EnemyArmyCommand.ExecutableMission.DEFEND
+		),
+		mission.transition_reason,
+		focus,
+		leashed_point,
+		_defend_objective_label(focus, mission),
+		"attack-move",
+		defense_army,
+		false
+	)
+
+	## Role-aware Attack-Move keeps the squad returning together without endless chase.
+	if _defend_order_reissue_timer >= MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS:
+		_defend_order_reissue_timer = 0.0
+		var melee_units: Array = []
+		var ranged_units: Array = []
+		_split_defend_roles(squad, defense_army, melee_units, ranged_units)
+
+		var forward: Vector3 = leashed_point - base_anchor
+		forward.y = 0.0
+		if forward.length_squared() < 0.01:
+			forward = Vector3(0.0, 0.0, 1.0)
+		else:
+			forward = forward.normalized()
+
+		var melee_destination: Vector3 = (
+			leashed_point + forward * MilitaryAIConfig.V2_DEFEND_MELEE_INTERCEPT_OFFSET
+		)
+		var ranged_destination: Vector3 = (
+			leashed_point - forward * MilitaryAIConfig.V2_DEFEND_RANGED_STANDOFF
+		)
+
+		EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			if not melee_units.is_empty():
+				EnemyArmyCommand.command_attack_move(
+					melee_units,
+					melee_destination,
+					EnemyUnitMission.Mission.DEFEND
+				)
+			if not ranged_units.is_empty():
+				EnemyArmyCommand.command_attack_move(
+					ranged_units,
+					ranged_destination,
+					EnemyUnitMission.Mission.DEFEND
+				)
+		)
+		mission.note_progress()
+		EnemyArmyCommand.note_mission_progress(
+			EnemyArmyCommand.compute_army_center(defense_army),
+			false,
+			defense_army.size()
+		)
+
+	## Connect attacks on the priority target, but never past the leash.
+	if (
+		not beyond_leash
+		and focus != null
+		and _defend_focus_reissue_timer >= MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
+	):
+		_defend_focus_reissue_timer = 0.0
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_focus_attack(
+				defense_army,
+				focus,
+				EnemyUnitMission.Mission.DEFEND
+			)
+		)
+		mission.note_progress()
+		EnemyArmyCommand.note_mission_progress(
+			EnemyArmyCommand.compute_army_center(defense_army),
+			true,
+			defense_army.size()
+		)
+
+
+func _collect_defend_army(squad: ArmySquadV2) -> Array:
+	var units: Array = []
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		units.append(entry)
+	return NodeSafety.clean_node_array(units)
+
+
+func _split_defend_roles(
+	squad: ArmySquadV2,
+	defense_army: Array,
+	melee_units: Array,
+	ranged_units: Array
+) -> void:
+	for entry: Variant in defense_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var unit: Node3D = entry as Node3D
+		var role: ArmySquadV2.UnitRole = squad.get_role(unit)
+		if role == ArmySquadV2.UnitRole.RANGED or role == ArmySquadV2.UnitRole.SIEGE:
+			ranged_units.append(unit)
+			continue
+		if role == ArmySquadV2.UnitRole.HERO:
+			var hero_role: UnitFormationRole.Role = UnitFormationRole.get_role(unit)
+			if UnitFormationRole.is_ranged_role(hero_role) or UnitFormationRole.is_siege_role(hero_role):
+				ranged_units.append(unit)
+			else:
+				melee_units.append(unit)
+			continue
+		melee_units.append(unit)
+
+
+func _clamp_defend_destination(base_anchor: Vector3, chase_point: Vector3) -> Vector3:
+	if base_anchor == Vector3.ZERO:
+		return chase_point
+	if chase_point == Vector3.ZERO:
+		return base_anchor
+	var offset: Vector3 = chase_point - base_anchor
+	offset.y = 0.0
+	var distance: float = offset.length()
+	if distance <= MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS or distance <= 0.01:
+		return chase_point
+	return base_anchor + offset.normalized() * MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS
+
+
+func _defend_objective_label(focus: Node3D, mission: ArmyMissionV2) -> String:
+	if NodeSafety.is_alive_node(focus):
+		return String(focus.name)
+	if mission != null and not mission.transition_reason.is_empty():
+		return mission.transition_reason
+	return "DefendPoint"
 
 
 func debug_get_assemble_slot_positions(rally_point: Vector3) -> Dictionary:

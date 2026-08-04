@@ -19,9 +19,15 @@ const ENEMY_ATTACK_PRIORITY_LOW_VALUE_BUILDING := 8
 const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 9
 const ENEMY_ATTACK_PRIORITY_INVALID := 99
 
-const ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY := 1
+## Lower number = higher priority while defending the AI base.
+const ENEMY_DEFENSE_PRIORITY_TOWN_HALL_ATTACKER := 1
 const ENEMY_DEFENSE_PRIORITY_HERO := 2
-const ENEMY_DEFENSE_PRIORITY_ATTACKING_WORKER := 3
+const ENEMY_DEFENSE_PRIORITY_SIEGE := 3
+const ENEMY_DEFENSE_PRIORITY_RANGED := 4
+const ENEMY_DEFENSE_PRIORITY_MILITARY := 5
+const ENEMY_DEFENSE_PRIORITY_ATTACKING_WORKER := 6
+## Kept for older call sites / overlays that still name the generic military bucket.
+const ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY := ENEMY_DEFENSE_PRIORITY_MILITARY
 const ENEMY_DEFENSE_PRIORITY_INVALID := 99
 
 const BUILDINGS_GROUP := &"buildings"
@@ -605,16 +611,51 @@ static func get_enemy_defense_target_priority(
 	if not is_attack_target_for_attacker(attacker, target):
 		return ENEMY_DEFENSE_PRIORITY_INVALID
 
-	if target is Spearman or target is Swordsman or target is Archer or target is HeavyCavalry or target is LightCavalry or target is CavalryArcher or target is Cannon:
-		return ENEMY_DEFENSE_PRIORITY_ATTACKING_MILITARY
+	## Never prioritize buildings while hostile military is the live threat.
+	if target is Building:
+		return ENEMY_DEFENSE_PRIORITY_INVALID
+
+	if _is_attacking_enemy_town_hall(attacker.get_tree(), target):
+		return ENEMY_DEFENSE_PRIORITY_TOWN_HALL_ATTACKER
 
 	if target is Hero:
 		return ENEMY_DEFENSE_PRIORITY_HERO
+
+	if target is Cannon or UnitFormationRole.is_siege_role(UnitFormationRole.get_role(target)):
+		return ENEMY_DEFENSE_PRIORITY_SIEGE
+
+	if (
+		target is Archer
+		or target is CavalryArcher
+		or UnitFormationRole.is_ranged_role(UnitFormationRole.get_role(target))
+	):
+		return ENEMY_DEFENSE_PRIORITY_RANGED
+
+	if (
+		target is Spearman
+		or target is Swordsman
+		or target is HeavyCavalry
+		or target is LightCavalry
+		or EnemyArmyCommand.is_combat_unit(target)
+	):
+		return ENEMY_DEFENSE_PRIORITY_MILITARY
 
 	if target is Worker and _is_worker_attacking_enemy_buildings(attacker.get_tree(), target):
 		return ENEMY_DEFENSE_PRIORITY_ATTACKING_WORKER
 
 	return ENEMY_DEFENSE_PRIORITY_INVALID
+
+
+static func _is_attacking_enemy_town_hall(tree: SceneTree, target: Node3D) -> bool:
+	if tree == null or not NodeSafety.is_alive_node(target):
+		return false
+	for node: Node in tree.get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not node is CommandCenter or not NodeSafety.is_alive_node(node):
+			continue
+		var attacker: Node = CombatKillTracker.get_attacker(node)
+		if attacker != null and is_instance_valid(attacker) and attacker == target:
+			return true
+	return false
 
 
 static func _find_best_enemy_faction_attack_target(

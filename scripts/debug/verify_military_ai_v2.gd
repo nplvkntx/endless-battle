@@ -18,6 +18,9 @@ func _ready() -> void:
 	await _verify_army_roster_and_squad(failures)
 	_verify_assemble_config_and_source(failures)
 	await _verify_assemble_slot_stability(failures)
+	_verify_defend_config_and_source(failures)
+	_verify_defend_priority_order(failures)
+	_verify_defend_leash_helper(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -207,8 +210,20 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		director_source.close()
 		_expect(failures, "director has assemble rally helper", text.contains("get_assemble_rally_point"))
 		_expect(failures, "director exposes assemble forward hint", text.contains("get_assemble_forward_hint"))
-		_expect(failures, "director transitions to CREEP", text.contains("_transition_to(State.CREEP"))
-		_expect(failures, "director transitions to DEFEND", text.contains("_transition_to(State.DEFEND"))
+		_expect(
+			failures,
+			"director evaluates creep strategy",
+			text.contains("_evaluate_creep_strategy")
+		)
+		_expect(
+			failures,
+			"director owns creep reservation",
+			text.contains("get_reserved_creep_camp_id")
+		)
+		_expect(failures, "director transitions to DEFEND", text.contains("State.DEFEND,"))
+		_expect(failures, "director evaluates defend strategy", text.contains("_evaluate_defend_strategy"))
+		_expect(failures, "director exits defend after clear", text.contains("_exit_defend_after_clear"))
+		_expect(failures, "director does not resume stale camp", text.contains("defense cleared, reassess"))
 		_expect(failures, "director checks construction reservations", text.contains("ConstructionReservations.overlaps_reserved_footprint"))
 		_expect(failures, "director checks construction points", text.contains("get_construction_points"))
 		_expect(failures, "director checks enemy workers", text.contains("_collect_enemy_workers"))
@@ -221,10 +236,128 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		var commander_text: String = commander_source.get_as_text()
 		commander_source.close()
 		_expect(failures, "commander has assemble executor", commander_text.contains("_execute_assemble_mission"))
+		_expect(failures, "commander has creep executor", commander_text.contains("_execute_creep_mission"))
+		_expect(failures, "commander has defend executor", commander_text.contains("_execute_defend_mission"))
 		_expect(failures, "commander uses attack-move for regroup", commander_text.contains("command_attack_move"))
+		_expect(failures, "commander clamps defend leash", commander_text.contains("_clamp_defend_destination"))
+		_expect(failures, "commander splits defend roles", commander_text.contains("_split_defend_roles"))
 		_expect(failures, "commander settles assembled units", commander_text.contains("_settle_unit"))
 		_expect(failures, "commander keeps stable slots", commander_text.contains("_assemble_role_slots"))
 		_expect(failures, "commander uses forward hint", commander_text.contains("get_assemble_forward_hint"))
+
+
+func _verify_defend_config_and_source(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"defend leash configurable",
+		MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS == 42.0
+	)
+	_expect(
+		failures,
+		"defend clear seconds configurable",
+		MilitaryAIConfig.V2_DEFEND_THREAT_CLEAR_SECONDS == 5.0
+	)
+	_expect(
+		failures,
+		"defend ranged standoff configurable",
+		MilitaryAIConfig.V2_DEFEND_RANGED_STANDOFF == 7.0
+	)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "defend director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "defend overrides other states", text.contains("DEFEND always wins"))
+		_expect(failures, "defend triggers on emergency threat", text.contains("evaluate_emergency_defense_threat"))
+		_expect(failures, "defend triggers on worker threat", text.contains("evaluate_defense_threat"))
+		_expect(failures, "defend activates emergency recall", text.contains("activate_emergency_defense"))
+		_expect(failures, "defend exits to recover when damaged", text.contains("State.RECOVER"))
+		_expect(failures, "defend picks focus target", text.contains("_pick_defend_focus_target"))
+		_expect(failures, "defend formats F3 reason", text.contains("_format_defend_reason"))
+
+	var combat_source := FileAccess.open("res://scripts/systems/combat_target_validation.gd", FileAccess.READ)
+	_expect(failures, "combat priority source readable", combat_source != null)
+	if combat_source != null:
+		var combat_text: String = combat_source.get_as_text()
+		combat_source.close()
+		_expect(
+			failures,
+			"defense priority town hall attacker",
+			combat_text.contains("ENEMY_DEFENSE_PRIORITY_TOWN_HALL_ATTACKER")
+		)
+		_expect(
+			failures,
+			"defense priority siege",
+			combat_text.contains("ENEMY_DEFENSE_PRIORITY_SIEGE")
+		)
+		_expect(
+			failures,
+			"defense priority ranged",
+			combat_text.contains("ENEMY_DEFENSE_PRIORITY_RANGED")
+		)
+		_expect(
+			failures,
+			"defense ignores buildings while military threatens",
+			combat_text.contains("Never prioritize buildings")
+		)
+
+
+func _verify_defend_priority_order(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"town hall attackers outrank heroes",
+		CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_TOWN_HALL_ATTACKER
+		< CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_HERO
+	)
+	_expect(
+		failures,
+		"heroes outrank siege",
+		CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_HERO
+		< CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_SIEGE
+	)
+	_expect(
+		failures,
+		"siege outranks ranged",
+		CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_SIEGE
+		< CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_RANGED
+	)
+	_expect(
+		failures,
+		"ranged outranks other military",
+		CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_RANGED
+		< CombatTargetValidation.ENEMY_DEFENSE_PRIORITY_MILITARY
+	)
+
+
+func _verify_defend_leash_helper(failures: PackedStringArray) -> void:
+	var commander := ArmyCommanderV2.new()
+	add_child(commander)
+	commander.reset_match_state()
+
+	var base := Vector3(5.0, 0.0, 5.0)
+	var inside := Vector3(15.0, 0.0, 5.0)
+	var far := Vector3(125.0, 0.0, 5.0)
+	var clamped: Vector3 = commander._clamp_defend_destination(base, far)
+	_expect(
+		failures,
+		"leash leaves near threats unchanged",
+		commander._clamp_defend_destination(base, inside) == inside
+	)
+	_expect(
+		failures,
+		"leash clamps far chase",
+		is_equal_approx(
+			EnemyArmyCommand.horizontal_distance(base, clamped),
+			MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS
+		)
+	)
+	_expect(
+		failures,
+		"leash points toward original chase",
+		clamped.x > base.x
+	)
+	commander.queue_free()
 
 
 func _verify_assemble_slot_stability(failures: PackedStringArray) -> void:
