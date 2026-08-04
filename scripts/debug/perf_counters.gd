@@ -44,6 +44,10 @@ var _military_ai_v2_mission: String = "-"
 var _military_ai_v2_objective: String = "-"
 var _military_ai_v2_mission_age: float = 0.0
 var _military_ai_v2_transition_reason: String = "-"
+var _military_ai_v2_squad_size: int = 0
+var _military_ai_v2_hero_present: bool = false
+var _military_ai_v2_role_counts: String = "-"
+var _military_ai_v2_army_strength: float = 0.0
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -229,6 +233,34 @@ func get_military_ai_v2_transition_reason() -> String:
 	return _military_ai_v2_transition_reason
 
 
+func set_military_ai_v2_squad_status(
+	squad_size: int,
+	hero_present: bool,
+	role_counts: String,
+	estimated_army_strength: float
+) -> void:
+	_military_ai_v2_squad_size = maxi(0, squad_size)
+	_military_ai_v2_hero_present = hero_present
+	_military_ai_v2_role_counts = role_counts if not role_counts.is_empty() else "-"
+	_military_ai_v2_army_strength = maxf(0.0, estimated_army_strength)
+
+
+func get_military_ai_v2_squad_size() -> int:
+	return _military_ai_v2_squad_size
+
+
+func get_military_ai_v2_hero_present() -> bool:
+	return _military_ai_v2_hero_present
+
+
+func get_military_ai_v2_role_counts() -> String:
+	return _military_ai_v2_role_counts
+
+
+func get_military_ai_v2_army_strength() -> float:
+	return _military_ai_v2_army_strength
+
+
 func sample_fps(delta: float) -> void:
 	var fps: float = float(Engine.get_frames_per_second())
 	_last_fps = fps
@@ -389,6 +421,10 @@ func reset_all() -> void:
 	_military_ai_v2_objective = "-"
 	_military_ai_v2_mission_age = 0.0
 	_military_ai_v2_transition_reason = "-"
+	_military_ai_v2_squad_size = 0
+	_military_ai_v2_hero_present = false
+	_military_ai_v2_role_counts = "-"
+	_military_ai_v2_army_strength = 0.0
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0
