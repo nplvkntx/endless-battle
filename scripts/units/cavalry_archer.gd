@@ -36,6 +36,8 @@ var _has_attack_move_destination: bool = false
 
 
 func _ready() -> void:
+	damage_type = DamageService.DamageType.PIERCE
+	armor_type = DamageService.ArmorType.MEDIUM
 	super._ready()
 	_cache_base_stats()
 	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)
@@ -402,7 +404,10 @@ func _stop_and_attack(delta: float) -> void:
 		return
 
 	_fire_arrow()
-	_attack_cooldown_timer = attack_cooldown
+	_attack_cooldown_timer = UnitStats.get_final_attack_cooldown(
+		attack_cooldown,
+		float(HeroItemService.get_nearby_ally_aura_bonuses(self).get("attack_speed", 0.0))
+	)
 
 
 func _should_reposition_for_preferred_range() -> bool:
@@ -488,7 +493,10 @@ func _on_stable_upgrade_applied(upgrade_id: StringName) -> void:
 
 
 func _compute_incoming_damage(amount: float) -> int:
-	return DamageService.compute_armored_damage(amount, armor)
+	var total_armor: float = float(armor) + float(
+		HeroItemService.get_nearby_ally_aura_bonuses(self).get("armor", 0.0)
+	)
+	return DamageService.compute_armored_damage(amount, int(round(total_armor)))
 
 
 func take_damage(amount: float, attacker = null) -> void:

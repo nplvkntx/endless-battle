@@ -2,8 +2,7 @@ class_name DamageArmorMatrix
 extends RefCounted
 
 ## Damage-type × armor-type multipliers for combat.
-## Temporary identity table (all 1.0) — live combat numbers stay unchanged.
-## Rebalance values here later; do not scatter type multipliers elsewhere.
+## Rebalance values here only; do not scatter type multipliers elsewhere.
 ##
 ## Row order matches DamageService.DamageType:
 ##   PHYSICAL, PIERCE, MAGIC, SIEGE, TRUE
@@ -12,11 +11,11 @@ extends RefCounted
 
 const MULTIPLIERS: Array[Array] = [
 	# LIGHT  MEDIUM  HEAVY  HERO  BUILDING
-	[1.0, 1.0, 1.0, 1.0, 1.0], # PHYSICAL
-	[1.0, 1.0, 1.0, 1.0, 1.0], # PIERCE
-	[1.0, 1.0, 1.0, 1.0, 1.0], # MAGIC
-	[1.0, 1.0, 1.0, 1.0, 1.0], # SIEGE
-	[1.0, 1.0, 1.0, 1.0, 1.0], # TRUE
+	[1.00, 1.00, 0.90, 0.90, 0.70], # PHYSICAL
+	[1.25, 1.00, 0.75, 0.80, 0.50], # PIERCE
+	[1.00, 1.10, 1.20, 0.85, 0.50], # MAGIC
+	[0.60, 0.60, 0.75, 0.50, 1.50], # SIEGE
+	[1.00, 1.00, 1.00, 1.00, 1.00], # TRUE (ignores armor after matrix)
 ]
 
 

@@ -48,13 +48,17 @@ func _verify_class_hierarchy(failures: PackedStringArray) -> void:
 	_expect(failures, "archer is MilitaryUnit", archer is MilitaryUnit)
 	_expect(failures, "light cavalry is MilitaryUnit", cavalry is MilitaryUnit)
 	_expect(failures, "swordsman supports combat orders", swordsman.supports_combat_orders())
-	_expect(failures, "swordsman default damage", swordsman.attack_damage == 10)
-	_expect(failures, "spearman default damage", spearman.attack_damage == 6)
-	_expect(failures, "spearman default range", is_equal_approx(spearman.attack_range, 2.4))
-	_expect(failures, "archer default range", is_equal_approx(archer.attack_range, 8.0))
-	_expect(failures, "archer ignores armor intake", archer._compute_incoming_damage(5.0) == 5)
-	_expect(failures, "light cavalry default damage", cavalry.attack_damage == 8)
-	_expect(failures, "light cavalry default cooldown", is_equal_approx(cavalry.attack_cooldown, 0.9))
+	_expect(failures, "swordsman default damage", swordsman.attack_damage == UnitStats.SWORDSMAN_ATTACK_DAMAGE)
+	_expect(failures, "spearman default damage", spearman.attack_damage == UnitStats.SPEARMAN_ATTACK_DAMAGE)
+	_expect(failures, "spearman default range", is_equal_approx(spearman.attack_range, UnitStats.SPEARMAN_ATTACK_RANGE))
+	_expect(failures, "archer default range", is_equal_approx(archer.attack_range, UnitStats.ARCHER_ATTACK_RANGE))
+	_expect(
+		failures,
+		"archer uses armor pipeline",
+		archer._compute_incoming_damage(5.0) == DamageService.compute_armored_damage(5.0, archer.armor)
+	)
+	_expect(failures, "light cavalry default damage", cavalry.attack_damage == UnitStats.LIGHT_CAVALRY_ATTACK_DAMAGE)
+	_expect(failures, "light cavalry default cooldown", is_equal_approx(cavalry.attack_cooldown, UnitStats.LIGHT_CAVALRY_ATTACK_COOLDOWN))
 
 	swordsman.free()
 	spearman.free()

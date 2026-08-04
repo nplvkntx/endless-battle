@@ -14,6 +14,8 @@ func _init() -> void:
 	attack_range = UnitStats.LIGHT_CAVALRY_ATTACK_RANGE
 	attack_cooldown = UnitStats.LIGHT_CAVALRY_ATTACK_COOLDOWN
 	armor = UnitStats.LIGHT_CAVALRY_ARMOR
+	damage_type = DamageService.DamageType.PHYSICAL
+	armor_type = DamageService.ArmorType.MEDIUM
 
 
 func _ready() -> void:

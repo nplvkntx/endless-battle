@@ -322,14 +322,7 @@ static func format_inventory_item(item: HeroItemDefinition) -> String:
 	if item == null:
 		return "Empty inventory slot"
 
-	var lines: PackedStringArray = PackedStringArray()
-	lines.append(item.display_name)
-
-	var effect: String = _get_shop_item_effect_text(item)
-	if not effect.is_empty():
-		lines.append(effect)
-
-	lines.append("Sell: %dG" % item.get_sell_value())
+	var lines: PackedStringArray = _format_item_detail_lines(item)
 	lines.append("Right-click to sell")
 	return "\n".join(lines)
 
@@ -339,18 +332,115 @@ static func format_shop_item(item_id: StringName, blocked_reason: String = "") -
 	if item == null:
 		return ""
 
-	var lines: PackedStringArray = PackedStringArray()
-	lines.append(item.display_name)
-	lines.append("Gold: %d" % item.gold_cost)
-
-	var effect: String = _get_shop_item_effect_text(item)
-	if not effect.is_empty():
-		lines.append(effect)
-
+	var lines: PackedStringArray = _format_item_detail_lines(item)
 	if not blocked_reason.is_empty():
 		lines.append(blocked_reason)
 
 	return "\n".join(lines)
+
+
+static func _format_item_detail_lines(item: HeroItemDefinition) -> PackedStringArray:
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append(item.display_name)
+	lines.append(item.get_tier_label())
+	lines.append("Cost: %dG" % item.gold_cost)
+	lines.append("Sell: %dG" % item.get_sell_value())
+
+	var stats_text: String = item.tooltip_stats
+	if stats_text.is_empty():
+		stats_text = _get_shop_item_effect_text(item)
+	if not stats_text.is_empty():
+		lines.append("Stats:")
+		_append_multiline(lines, stats_text)
+
+	if not item.tooltip_passive.is_empty():
+		lines.append("Passive:")
+		_append_multiline(lines, item.tooltip_passive)
+
+	if not item.tooltip_aura.is_empty():
+		lines.append("Aura:")
+		_append_multiline(lines, item.tooltip_aura)
+
+	if item.has_active():
+		lines.append("Active:")
+		var active_lines: PackedStringArray = _get_item_active_lines(item)
+		for active_line: String in active_lines:
+			lines.append(active_line)
+
+	if item.has_recipe():
+		_append_recipe_tree_lines(lines, item)
+	elif item.get_total_gold_cost() > 0:
+		lines.append("Full Total Cost: %dG" % item.get_total_gold_cost())
+
+	if not item.tooltip_unique_rules.is_empty():
+		lines.append("Unique Rules:")
+		_append_multiline(lines, item.tooltip_unique_rules)
+
+	return lines
+
+
+static func _append_multiline(lines: PackedStringArray, text: String) -> void:
+	for line: String in text.split("\n"):
+		if not line.is_empty():
+			lines.append(line)
+
+
+static func _get_item_active_lines(item: HeroItemDefinition) -> PackedStringArray:
+	var lines: PackedStringArray = PackedStringArray()
+	var cooldown: float = item.get_active_cooldown()
+	if cooldown > 0.0:
+		lines.append("Cooldown: %s" % _format_seconds(cooldown))
+	if item.active_mana_cost > 0:
+		lines.append("Mana: %d" % item.active_mana_cost)
+	if item.uses_charges():
+		lines.append("Charges: %d" % item.get_max_charges())
+	if lines.is_empty():
+		lines.append("Usable active item.")
+	return lines
+
+
+static func _append_recipe_tree_lines(lines: PackedStringArray, item: HeroItemDefinition) -> void:
+	lines.append("Required Components:")
+	for component_id: StringName in item.recipe_component_ids:
+		var component: HeroItemDefinition = HeroItemCatalog.get_definition(component_id)
+		if component == null:
+			lines.append("- %s" % String(component_id))
+			continue
+		lines.append("- %s (%dG)" % [component.display_name, component.gold_cost])
+		if component.has_recipe():
+			_append_nested_recipe_lines(lines, component, "  ")
+
+	var combine_cost: int = item.get_recipe_gold_cost()
+	lines.append("Combine Cost: %dG" % combine_cost)
+	lines.append("Full Total Cost: %dG" % item.get_total_gold_cost())
+
+	lines.append("Build Tree:")
+	lines.append("%s (%dG)" % [item.display_name, item.get_total_gold_cost()])
+	for component_id: StringName in item.recipe_component_ids:
+		var component: HeroItemDefinition = HeroItemCatalog.get_definition(component_id)
+		if component == null:
+			lines.append("  + %s" % String(component_id))
+			continue
+		lines.append("  + %s (%dG)" % [component.display_name, component.gold_cost])
+		if component.has_recipe():
+			_append_nested_recipe_lines(lines, component, "    ")
+	lines.append("  + Combine %dG" % combine_cost)
+
+
+static func _append_nested_recipe_lines(
+	lines: PackedStringArray,
+	item: HeroItemDefinition,
+	indent: String
+) -> void:
+	for component_id: StringName in item.recipe_component_ids:
+		var component: HeroItemDefinition = HeroItemCatalog.get_definition(component_id)
+		if component == null:
+			lines.append("%s- %s" % [indent, String(component_id)])
+			continue
+		lines.append("%s- %s (%dG)" % [indent, component.display_name, component.gold_cost])
+		if component.has_recipe():
+			_append_nested_recipe_lines(lines, component, indent + "  ")
+	lines.append("%s- Combine %dG" % [indent, item.get_recipe_gold_cost()])
 
 
 static func format_passive(hero: Hero) -> String:
@@ -502,25 +592,7 @@ static func get_placement_costs(placement_id: StringName) -> Dictionary:
 
 
 static func get_placement_build_time(placement_id: StringName, worker_count: int = 1) -> float:
-	if placement_id == _BUILD_MANAGER.PLACEMENT_SHOP:
-		if worker_count >= 3:
-			return _BUILD_MANAGER.SHOP_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
-		if worker_count == 2:
-			return _BUILD_MANAGER.SHOP_CONSTRUCTION_DURATION_TWO_WORKERS
-		return _BUILD_MANAGER.SHOP_CONSTRUCTION_DURATION_ONE_WORKER
-
-	if placement_id == _BUILD_MANAGER.PLACEMENT_WALL_SEGMENT:
-		if worker_count >= 3:
-			return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
-		if worker_count == 2:
-			return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_TWO_WORKERS
-		return _BUILD_MANAGER.WALL_SEGMENT_CONSTRUCTION_DURATION_ONE_WORKER
-
-	if worker_count >= 3:
-		return _BUILD_MANAGER.CONSTRUCTION_DURATION_THREE_PLUS_WORKERS
-	if worker_count == 2:
-		return _BUILD_MANAGER.CONSTRUCTION_DURATION_TWO_WORKERS
-	return _BUILD_MANAGER.CONSTRUCTION_DURATION_ONE_WORKER
+	return BuildingStats.get_construction_seconds(placement_id, worker_count)
 
 
 static func get_build_blocked_reason(placement_id: StringName) -> String:
@@ -996,12 +1068,22 @@ static func _get_shop_item_effect_text(item: HeroItemDefinition) -> String:
 		lines.append("+%d Max Health" % item.bonus_max_health)
 	if item.heal_on_purchase > 0:
 		lines.append("+%d Health on Purchase" % item.heal_on_purchase)
+	if item.bonus_armor > 0.0:
+		lines.append("+%s Armor" % _format_number(item.bonus_armor))
 	if item.bonus_move_speed > 0.0:
-		lines.append("+%d Move Speed" % int(item.bonus_move_speed))
+		lines.append("+%s Move Speed" % _format_number(item.bonus_move_speed))
+	if item.bonus_attack_speed > 0.0:
+		lines.append("+%d%% Attack Speed" % int(round(item.bonus_attack_speed * 100.0)))
+	if item.bonus_crit_chance > 0.0:
+		lines.append("+%d%% Critical Strike Chance" % int(round(item.bonus_crit_chance * 100.0)))
+	if item.bonus_lifesteal > 0.0:
+		lines.append("+%d%% Lifesteal" % int(round(item.bonus_lifesteal * 100.0)))
 	if item.bonus_max_mana > 0:
 		lines.append("+%d Max Mana" % item.bonus_max_mana)
 	if item.restore_mana_on_purchase > 0:
 		lines.append("+%d Mana on Purchase" % item.restore_mana_on_purchase)
+	if item.bonus_mana_regen > 0.0:
+		lines.append("+%s Mana Regen" % _format_number(item.bonus_mana_regen))
 	if item.bonus_ability_power > 0:
 		lines.append("+%d Ability Power" % item.bonus_ability_power)
 	if item.bonus_cooldown_reduction > 0.0:

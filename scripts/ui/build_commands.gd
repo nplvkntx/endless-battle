@@ -185,29 +185,8 @@ var _train_ranger_button: Button = null
 @onready var _shop_status_label: Label = (
 	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopStatusLabel
 )
-@onready var _long_sword_info_label: Label = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn/LongSwordInfoLabel
-)
-@onready var _long_sword_button: Button = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/LongSwordColumn/LongSwordButton
-)
-@onready var _ruby_crystal_info_label: Label = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn/RubyCrystalInfoLabel
-)
-@onready var _ruby_crystal_button: Button = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/RubyCrystalColumn/RubyCrystalButton
-)
-@onready var _boots_info_label: Label = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn/BootsInfoLabel
-)
-@onready var _boots_button: Button = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/BootsColumn/BootsButton
-)
-@onready var _wizard_orb_info_label: Label = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn/WizardOrbInfoLabel
-)
-@onready var _wizard_orb_button: Button = (
-	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopItemsRow/WizardOrbColumn/WizardOrbButton
+@onready var _shop_items_list: VBoxContainer = (
+	$MarginContainer/HBoxContainer/RightPanel/ShopPanel/ShopScroll/ShopItemsList
 )
 @onready var _wall_gate_panel: HBoxContainer = (
 	$MarginContainer/HBoxContainer/RightPanel/WallGatePanel
@@ -263,9 +242,16 @@ var _blacksmith_upgrade_buttons: Array[Button] = []
 var _blacksmith_upgrade_info_labels: Array[Label] = []
 var _blacksmith_upgrade_ids: Array[StringName] = []
 var _shop_item_buttons: Array[Button] = []
-var _shop_item_info_labels: Array[Label] = []
 var _shop_item_ids: Array[StringName] = []
 var _shop_item_button_handlers: Array[Callable] = []
+var _shop_ui_built: bool = false
+
+const _SHOP_TIER_LABELS: Dictionary = {
+	HeroItemDefinition.Tier.TIER_1: "Tier 1 Components",
+	HeroItemDefinition.Tier.TIER_2: "Tier 2 Completed Items",
+	HeroItemDefinition.Tier.TIER_3: "Tier 3 Legendary Items",
+}
+const _SHOP_BUTTON_SIZE := Vector2(48, 36)
 var _blacksmith_upgrade_button_handlers: Array[Callable] = []
 var _academy_upgrade_ids: Array[StringName] = []
 var _academy_upgrade_info_labels: Array[Label] = []
@@ -1595,23 +1581,69 @@ func _update_academy_upgrade_ui() -> void:
 
 
 func _setup_shop_item_controls() -> void:
-	_shop_item_ids = HeroItemCatalog.SHOP_ITEM_ORDER.duplicate()
-	_shop_item_info_labels = [
-		_long_sword_info_label,
-		_ruby_crystal_info_label,
-		_boots_info_label,
-		_wizard_orb_info_label,
-	]
-	_shop_item_buttons = [
-		_long_sword_button,
-		_ruby_crystal_button,
-		_boots_button,
-		_wizard_orb_button,
-	]
+	_build_shop_item_ui()
 	_update_shop_item_ui()
 
 
+func _build_shop_item_ui() -> void:
+	if _shop_ui_built or _shop_items_list == null:
+		return
+
+	_shop_ui_built = true
+	_shop_item_ids.clear()
+	_shop_item_buttons.clear()
+	_shop_item_button_handlers.clear()
+
+	for child: Node in _shop_items_list.get_children():
+		child.queue_free()
+
+	var tiers: Array[HeroItemDefinition.Tier] = [
+		HeroItemDefinition.Tier.TIER_1,
+		HeroItemDefinition.Tier.TIER_2,
+		HeroItemDefinition.Tier.TIER_3,
+	]
+	for tier: HeroItemDefinition.Tier in tiers:
+		var definitions: Array[HeroItemDefinition] = HeroItemCatalog.get_shop_definitions_by_tier(tier)
+		if definitions.is_empty():
+			continue
+
+		var section := VBoxContainer.new()
+		section.add_theme_constant_override("separation", 2)
+		_shop_items_list.add_child(section)
+
+		var header := Label.new()
+		header.text = String(_SHOP_TIER_LABELS.get(tier, "Items"))
+		header.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		header.add_theme_font_size_override("font_size", 9)
+		header.add_theme_color_override("font_color", Color(0.9, 0.82, 0.55, 1))
+		section.add_child(header)
+
+		var flow := HFlowContainer.new()
+		flow.add_theme_constant_override("h_separation", 3)
+		flow.add_theme_constant_override("v_separation", 3)
+		section.add_child(flow)
+
+		for definition: HeroItemDefinition in definitions:
+			var button := _create_shop_item_button(definition)
+			flow.add_child(button)
+			_shop_item_ids.append(definition.item_id)
+			_shop_item_buttons.append(button)
+
+
+func _create_shop_item_button(definition: HeroItemDefinition) -> Button:
+	var button := Button.new()
+	button.custom_minimum_size = _SHOP_BUTTON_SIZE
+	button.add_theme_font_size_override("font_size", 7)
+	button.clip_text = true
+	button.icon = HeroItemIcons.get_icon_texture(definition.item_id)
+	button.expand_icon = true
+	button.text = "%dG" % definition.gold_cost
+	button.tooltip_text = ""
+	return button
+
+
 func _connect_shop_item_buttons() -> void:
+	_build_shop_item_ui()
 	for index: int in _shop_item_buttons.size():
 		var button: Button = _shop_item_buttons[index]
 		if button == null:
@@ -1636,6 +1668,8 @@ func _on_shop_item_button_pressed(item_id: StringName) -> void:
 
 
 func _update_shop_item_ui() -> void:
+	_build_shop_item_ui()
+
 	if _selected_shop == null or not is_instance_valid(_selected_shop):
 		_selected_shop = null
 		_shop_status_label.visible = false
@@ -1654,39 +1688,14 @@ func _update_shop_item_ui() -> void:
 
 		var item_id: StringName = _shop_item_ids[index]
 		var item: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
-		var info_label: Label = _shop_item_info_labels[index]
 		var button: Button = _shop_item_buttons[index]
-		if item == null or info_label == null or button == null:
+		if item == null or button == null:
 			continue
 
-		info_label.text = "%s\n%s" % [item.display_name, _get_shop_item_effect_label(item)]
 		button.icon = HeroItemIcons.get_icon_texture(item_id)
 		button.expand_icon = true
-		button.text = "%s\n%dG" % [HeroItemCatalog.get_hotkey_label(item_id), item.gold_cost]
+		button.text = "%dG" % item.gold_cost
 		button.disabled = not HeroItemService.can_purchase_from_shop(_selected_shop, item_id)
-
-
-func _get_shop_item_effect_label(item: HeroItemDefinition) -> String:
-	var parts: PackedStringArray = PackedStringArray()
-
-	if item.bonus_attack_damage > 0:
-		parts.append("+%d AD" % item.bonus_attack_damage)
-	if item.bonus_max_health > 0:
-		parts.append("+%d HP" % item.bonus_max_health)
-	if item.bonus_move_speed > 0.0:
-		parts.append("+%d MS" % int(item.bonus_move_speed))
-	if item.bonus_max_mana > 0:
-		parts.append("+%d Mana" % item.bonus_max_mana)
-	if item.bonus_ability_power > 0:
-		parts.append("+%d AP" % item.bonus_ability_power)
-	if item.bonus_cooldown_reduction > 0.0:
-		parts.append("+%d%% CDR" % int(round(item.bonus_cooldown_reduction * 100.0)))
-	if item.bonus_mana_cost_reduction > 0.0:
-		parts.append("+%d%% MCR" % int(round(item.bonus_mana_cost_reduction * 100.0)))
-	if item.bonus_spell_radius > 0.0:
-		parts.append("+%s Radius" % TooltipFormatter._format_number(item.bonus_spell_radius))
-
-	return ", ".join(parts)
 
 
 func _connect_blacksmith_upgrade_buttons() -> void:
@@ -1887,40 +1896,9 @@ func _ability_id_from_cast_method(generic_method: StringName) -> StringName:
 			return &""
 
 
-func _try_handle_shop_item_hotkey(key_event: InputEventKey) -> bool:
-	if _selected_shop == null or not is_instance_valid(_selected_shop):
-		_selected_shop = null
-		return false
-
-	if not _selected_shop.can_sell_items():
-		return false
-
-	var item_id: StringName = &""
-	var shop_items: Array[StringName] = HeroItemCatalog.SHOP_ITEM_ORDER
-	match key_event.keycode:
-		KEY_Q:
-			if shop_items.size() > 0:
-				item_id = shop_items[0]
-		KEY_W:
-			if shop_items.size() > 1:
-				item_id = shop_items[1]
-		KEY_E:
-			if shop_items.size() > 2:
-				item_id = shop_items[2]
-		KEY_R:
-			if shop_items.size() > 3:
-				item_id = shop_items[3]
-		_:
-			return false
-
-	if item_id.is_empty():
-		return false
-
-	if _selected_shop.try_purchase_item(item_id):
-		_update_shop_item_ui()
-
-	get_viewport().set_input_as_handled()
-	return true
+func _try_handle_shop_item_hotkey(_key_event: InputEventKey) -> bool:
+	# Expanded tiered shop has no fixed hotkeys.
+	return false
 
 
 func _try_handle_blacksmith_upgrade_hotkey(key_event: InputEventKey) -> bool:

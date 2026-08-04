@@ -140,11 +140,19 @@ func _apply_hit() -> void:
 
 	var hit_target: Node3D = _target as Node3D
 	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(_attacker)
+	var damage_amount: float = _damage
+	var options := {DamageService.OPT_IS_BASIC_ATTACK: true}
+
+	if safe_attacker is MeleeHero:
+		var hero: MeleeHero = safe_attacker as MeleeHero
+		damage_amount = hero.get_basic_attack_damage_amount(hit_target)
+		options = hero.build_basic_attack_damage_options(hit_target)
+
 	if not DamageService.apply_damage(
 		hit_target,
-		_damage,
+		damage_amount,
 		safe_attacker,
-		{DamageService.OPT_IS_BASIC_ATTACK: true}
+		options
 	):
 		return
 
@@ -152,6 +160,9 @@ func _apply_hit() -> void:
 	if not _impact_played:
 		_impact_played = true
 		ImpactEffects.play_unit_impact(hit_target.global_position)
+
+	if NodeSafety.is_alive_node(safe_attacker) and safe_attacker is MeleeHero:
+		(safe_attacker as MeleeHero).apply_item_cleave_after_hit(hit_target)
 
 	if NodeSafety.is_alive_node(safe_attacker) and safe_attacker.has_method(&"_on_basic_attack_landed"):
 		safe_attacker.call(&"_on_basic_attack_landed", hit_target)

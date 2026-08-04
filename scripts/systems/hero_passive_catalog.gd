@@ -12,7 +12,7 @@ const ASSASSIN_SCRIPT := "res://scripts/passives/assassin_passive.gd"
 const RANGER_SCRIPT := "res://scripts/passives/ranger_passive.gd"
 
 const HOLY_RECOVERY_DESCRIPTION := (
-	"After not taking or dealing damage for 5 seconds, regenerate 2% of maximum HP per second. "
+	"After not taking or dealing damage for 5 seconds, regenerate 1.5% of maximum HP per second. "
 	+ "Entering combat immediately stops the regeneration."
 )
 
@@ -23,7 +23,7 @@ const ASSASSIN_DESCRIPTION := (
 
 const HUNTERS_PRECISION_DESCRIPTION := (
 	"Every 3rd consecutive basic attack against the same target deals bonus Physical Damage "
-	+ "equal to 10% of that target's Maximum Health. Does not work on Buildings. "
+	+ "equal to 8% of that target's Maximum Health (capped). Does not work on Buildings. "
 	+ "Switching targets resets the counter."
 )
 

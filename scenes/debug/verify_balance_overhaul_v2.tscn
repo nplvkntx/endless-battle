@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/debug/verify_balance_overhaul_v2_scene.gd" id="1_script"]
+
+[node name="VerifyBalanceOverhaulV2" type="Node"]
+script = ExtResource("1_script")

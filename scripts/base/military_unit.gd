@@ -576,7 +576,10 @@ func _stop_and_attack(delta: float) -> void:
 		_finish_attack_target_lost()
 		return
 
-	_attack_cooldown_timer = attack_cooldown
+	_attack_cooldown_timer = UnitStats.get_final_attack_cooldown(
+		attack_cooldown,
+		_get_ally_aura_attack_speed_bonus()
+	)
 
 
 func _should_reposition_for_preferred_range() -> bool:
@@ -624,7 +627,16 @@ func _deliver_attack() -> bool:
 
 ## Override when incoming damage ignores armor (e.g. archer).
 func _compute_incoming_damage(amount: float) -> int:
-	return DamageService.compute_armored_damage(amount, armor)
+	var total_armor: float = float(armor) + _get_ally_aura_armor_bonus()
+	return DamageService.compute_armored_damage(amount, int(round(total_armor)))
+
+
+func _get_ally_aura_armor_bonus() -> float:
+	return float(HeroItemService.get_nearby_ally_aura_bonuses(self).get("armor", 0.0))
+
+
+func _get_ally_aura_attack_speed_bonus() -> float:
+	return float(HeroItemService.get_nearby_ally_aura_bonuses(self).get("attack_speed", 0.0))
 
 
 func take_damage(amount: float, attacker = null) -> void:

@@ -246,16 +246,34 @@ static func get_stat(
 
 	match stat:
 		STAT_DAMAGE, STAT_BONUS_DAMAGE:
+			# Assassin Dash uses explicit per-rank damage (50 / 65 / 80).
+			if (
+				kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN
+				and ability_id == HeroAbilityProgression.ABILITY_R
+				and stat == STAT_DAMAGE
+			):
+				return ShadowAssassinStats.get_dash_damage(rank)
 			return _scale_int(
 				_resolve_base(kit_id, ability_id, stat, base_overrides),
 				_multiplier_for(kit_id, ability_id, BASIC_DAMAGE_MULT, ULTIMATE_DAMAGE_MULT, rank)
 			)
 		STAT_SPLASH:
+			# Assassin Smoke uses explicit per-rank radius.
+			if (
+				kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN
+				and ability_id == HeroAbilityProgression.ABILITY_W
+			):
+				return ShadowAssassinStats.get_smoke_radius(rank)
 			return _scale_float(
 				float(_resolve_base(kit_id, ability_id, STAT_SPLASH, base_overrides)),
 				_multiplier_at(BASIC_SPLASH_MULT, rank)
 			)
 		STAT_RANGE:
+			if (
+				kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN
+				and ability_id == HeroAbilityProgression.ABILITY_R
+			):
+				return ShadowAssassinStats.get_dash_range(rank)
 			return _scale_float(
 				float(_resolve_base(kit_id, ability_id, STAT_RANGE, base_overrides)),
 				_multiplier_at(BASIC_RANGE_MULT, rank)
@@ -264,6 +282,24 @@ static func get_stat(
 			# Ranger Camouflage uses explicit per-rank durations (10 / 14 / 18).
 			if kit_id == HeroCatalog.KIT_RANGER and ability_id == HeroAbilityProgression.ABILITY_R:
 				return RangerStats.get_camouflage_duration(rank)
+			# Assassin Axe Mark duration stays 5s at all ranks.
+			if (
+				kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN
+				and ability_id == HeroAbilityProgression.ABILITY_Q
+			):
+				return ShadowAssassinStats.AXE_MARK_DURATION
+			# Assassin Smoke uses explicit per-rank duration.
+			if (
+				kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN
+				and ability_id == HeroAbilityProgression.ABILITY_W
+			):
+				return ShadowAssassinStats.get_smoke_duration(rank)
+			# Ranger Bear Trap root uses explicit per-rank duration.
+			if (
+				kit_id == HeroCatalog.KIT_RANGER
+				and ability_id == HeroAbilityProgression.ABILITY_W
+			):
+				return RangerStats.get_bear_trap_root_duration(rank)
 			var base_effect: float = float(_resolve_base(kit_id, ability_id, STAT_EFFECT, base_overrides))
 			var effect_mult: float = _multiplier_for(
 				kit_id, ability_id, BASIC_EFFECT_MULT, ULTIMATE_EFFECT_MULT, rank

@@ -19,7 +19,7 @@ const MIN_ABILITY_POINT_LEVEL: int = HeroStats.MIN_ABILITY_POINT_LEVEL
 const MAX_ABILITY_POINT_LEVEL: int = HeroStats.MAX_ABILITY_POINT_LEVEL
 const HEALTH_PER_LEVEL: int = HeroStats.HEALTH_PER_LEVEL
 const MANA_PER_LEVEL: int = HeroStats.MANA_PER_LEVEL
-const ATTACK_DAMAGE_PER_LEVEL: int = HeroStats.ATTACK_DAMAGE_PER_LEVEL
+const ATTACK_DAMAGE_PER_LEVEL: float = HeroStats.ATTACK_DAMAGE_PER_LEVEL
 const BASE_MAX_HEALTH: int = HeroStats.MAX_HEALTH
 const INVENTORY_SLOT_COUNT: int = HeroStats.INVENTORY_SLOT_COUNT
 const MAX_COOLDOWN_REDUCTION: float = HeroStats.MAX_COOLDOWN_REDUCTION
@@ -34,6 +34,13 @@ var item_ability_power: int = 0
 var item_cooldown_reduction: float = 0.0
 var item_mana_cost_reduction: float = 0.0
 var item_spell_radius_bonus: float = 0.0
+var item_bonus_armor: float = 0.0
+var item_bonus_attack_speed: float = 0.0
+var item_bonus_crit_chance: float = 0.0
+var item_bonus_lifesteal: float = 0.0
+var item_bonus_mana_regen: float = 0.0
+## Highest unique boot move-speed currently applied to move_speed.
+var item_unique_move_speed: float = 0.0
 var ability_points: int = 0
 var ability_progression: HeroAbilityProgression = HeroAbilityProgression.new()
 var inventory: Array = []
@@ -446,6 +453,8 @@ func resolve_ability_scaling_stat(scaling_stat: int, target: Node = null) -> flo
 		HeroAbilityStats.ScalingStat.MAXIMUM_HEALTH:
 			return float(_get_maximum_health())
 		HeroAbilityStats.ScalingStat.ARMOR:
+			if has_method(&"get_total_armor"):
+				return float(call(&"get_total_armor"))
 			return float(get("armor")) if "armor" in self else 0.0
 		HeroAbilityStats.ScalingStat.TARGET_HEALTH:
 			return float(_get_target_current_health(target))
@@ -599,8 +608,7 @@ func _apply_level_stat_gains() -> void:
 	_apply_level_health_gain()
 	_apply_level_mana_gain()
 	_apply_level_attack_damage_gain()
-	if level > MAX_ABILITY_POINT_LEVEL:
-		_apply_level_move_speed_gain()
+	_apply_level_move_speed_gain()
 
 
 func _apply_level_health_gain() -> void:
@@ -748,6 +756,12 @@ func _reset_item_spell_stats() -> void:
 	item_cooldown_reduction = 0.0
 	item_mana_cost_reduction = 0.0
 	item_spell_radius_bonus = 0.0
+	item_bonus_armor = 0.0
+	item_bonus_attack_speed = 0.0
+	item_bonus_crit_chance = 0.0
+	item_bonus_lifesteal = 0.0
+	item_bonus_mana_regen = 0.0
+	item_unique_move_speed = 0.0
 
 
 ## Loads hero-specific runtime state from hero_data when the data pipeline is available.

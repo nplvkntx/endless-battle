@@ -17,7 +17,7 @@ const STABLE_UPGRADE_BASE_WOOD: int = 75
 const STABLE_UPGRADE_GOLD_PER_LEVEL: int = 100
 const STABLE_UPGRADE_WOOD_PER_LEVEL: int = 50
 const STABLE_RESEARCH_SECONDS: float = 5.0
-const CAVALRY_ATTACK_DAMAGE_PER_LEVEL: int = 3
+const CAVALRY_ATTACK_DAMAGE_PER_LEVEL: int = 2
 const CAVALRY_DEFENSE_ARMOR_PER_LEVEL: int = 1
 
 ## Academy one-shot research costs / times.

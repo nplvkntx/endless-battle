@@ -6,11 +6,16 @@ extends MilitaryUnit
 var _base_attack_damage: int = -1
 
 
+var _base_armor: int = -1
+
+
 func _init() -> void:
 	attack_damage = UnitStats.SWORDSMAN_ATTACK_DAMAGE
 	attack_range = UnitStats.SWORDSMAN_ATTACK_RANGE
 	attack_cooldown = UnitStats.SWORDSMAN_ATTACK_COOLDOWN
 	armor = UnitStats.SWORDSMAN_ARMOR
+	damage_type = DamageService.DamageType.PHYSICAL
+	armor_type = DamageService.ArmorType.MEDIUM
 
 
 func _ready() -> void:
@@ -54,7 +59,9 @@ func apply_blacksmith_upgrades() -> void:
 	var attack_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_SWORDSMAN_ATTACK)
 	var armor_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_SWORDSMAN_ARMOR)
 	attack_damage = _base_attack_damage + attack_level * UnitStats.SWORDSMAN_ATTACK_DAMAGE_PER_UPGRADE_LEVEL
-	armor = armor_level
+	if _base_armor < 0:
+		_base_armor = UnitStats.SWORDSMAN_ARMOR
+	armor = _base_armor + armor_level
 
 
 func _get_blacksmith_upgrade_level(upgrade_id: StringName) -> int:
@@ -67,6 +74,8 @@ func _get_blacksmith_upgrade_level(upgrade_id: StringName) -> int:
 func _cache_base_stats() -> void:
 	if _base_attack_damage < 0:
 		_base_attack_damage = attack_damage
+	if _base_armor < 0:
+		_base_armor = armor
 
 
 func _try_apply_blacksmith_upgrades() -> void:

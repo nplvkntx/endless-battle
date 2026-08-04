@@ -62,9 +62,9 @@ func _on_disabled() -> void:
 
 
 func _format_tooltip_extra() -> String:
-	return "Out of combat: %.0fs\nRegen: %d%% max HP / sec" % [
+	return "Out of combat: %.0fs\nRegen: %.1f%% max HP / sec" % [
 		HeroPassiveStats.HOLY_RECOVERY_OUT_OF_COMBAT_SECONDS,
-		int(round(HeroPassiveStats.HOLY_RECOVERY_REGEN_PERCENT_PER_SECOND * 100.0)),
+		HeroPassiveStats.HOLY_RECOVERY_REGEN_PERCENT_PER_SECOND * 100.0,
 	]
 
 

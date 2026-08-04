@@ -107,6 +107,7 @@ var _enemy_last_recovery_log: String = ""
 
 
 func _ready() -> void:
+	armor_type = DamageService.ArmorType.LIGHT
 	super._ready()
 	_hide_worker_weapon_visual()
 	_health_bar_fill_material = HealthBarDisplay.duplicate_mesh_material(_health_bar_fill)

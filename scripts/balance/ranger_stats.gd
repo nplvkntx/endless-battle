@@ -2,27 +2,33 @@ class_name RangerStats
 extends RefCounted
 
 ## Canonical Ranger combat, growth, and ability base numbers.
-## Change ranger balance in this file only. Power target ≈ Human Paladin / Shadow Assassin.
+## Change ranger balance in this file only.
 ## Fragile ranged ADC: high sustained DPS, excellent kiting, dies if caught.
 
 # --- Base combat / mobility (level 1) ---
-const MAX_HEALTH: int = 160
+const MAX_HEALTH: int = 170
 const MOVE_SPEED: float = 5.8
-const ATTACK_DAMAGE: int = 22
+const ATTACK_DAMAGE: float = 22.0
 const ATTACK_RANGE: float = 8.0
-const ATTACK_COOLDOWN: float = 0.9
-const MAX_MANA: int = 100
+const ATTACK_COOLDOWN: float = 0.95
+const ARMOR: float = 0.0
+const MAX_MANA: int = 110
 const MANA_REGEN_RATE: float = 5.0
 
-# --- Growth (glassier HP, stronger AD curve than melee kits) ---
+# --- Growth (per level after level 1) ---
 const HEALTH_PER_LEVEL: int = 18
-const MANA_PER_LEVEL: int = 10
-const ATTACK_DAMAGE_PER_LEVEL: int = 3
+const MANA_PER_LEVEL: int = 11
+const ATTACK_DAMAGE_PER_LEVEL: float = 1.5
+const ARMOR_PER_LEVEL: float = 0.03
+const ATTACK_SPEED_PER_LEVEL: float = 0.025
+const MOVE_SPEED_PER_LEVEL: float = 0.005
 
 # --- Passive: Hunter's Precision ---
 ## Every Nth consecutive basic attack vs the same non-building target.
 const HUNTERS_PRECISION_HIT_COUNT: int = 3
-const HUNTERS_PRECISION_MAX_HEALTH_RATIO: float = 0.10
+const HUNTERS_PRECISION_MAX_HEALTH_RATIO: float = 0.08
+const HUNTERS_PRECISION_DAMAGE_CAP_BASE: int = 60
+const HUNTERS_PRECISION_DAMAGE_CAP_PER_LEVEL: int = 5
 
 # --- Q: Combat Roll ---
 const COMBAT_ROLL_DISTANCE: float = 5.0
@@ -36,6 +42,7 @@ const BEAR_TRAP_MAX_CHARGES: int = 3
 const BEAR_TRAP_RECHARGE_SECONDS: float = 14.0
 const BEAR_TRAP_DAMAGE: int = 18
 const BEAR_TRAP_ROOT_DURATION: float = 2.0
+const BEAR_TRAP_ROOT_DURATION_PER_RANK: Array[float] = [2.0, 2.3, 2.6, 2.9, 3.2]
 const BEAR_TRAP_LIFETIME: float = 45.0
 const BEAR_TRAP_TRIGGER_RADIUS: float = 0.85
 const BEAR_TRAP_MANA_COST: int = 20
@@ -75,6 +82,15 @@ const CAMOUFLAGE_ROLL_EXTEND_SECONDS: float = 3.0
 # --- Basic attack projectile ---
 const BASIC_ARROW_SPEED: float = 20.0
 const BASIC_ARROW_SPAWN_HEIGHT: float = 0.55
+
+
+static func get_bear_trap_root_duration(rank: int) -> float:
+	var index: int = clampi(rank, 1, BEAR_TRAP_ROOT_DURATION_PER_RANK.size()) - 1
+	return BEAR_TRAP_ROOT_DURATION_PER_RANK[index]
+
+
+static func get_hunters_precision_damage_cap(hero_level: int) -> int:
+	return HUNTERS_PRECISION_DAMAGE_CAP_BASE + HUNTERS_PRECISION_DAMAGE_CAP_PER_LEVEL * maxi(1, hero_level)
 
 
 static func get_camouflage_duration(rank: int) -> float:

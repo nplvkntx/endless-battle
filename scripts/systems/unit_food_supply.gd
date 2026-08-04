@@ -10,10 +10,16 @@ static func get_cost(unit: Node) -> int:
 
 	if unit is Worker:
 		return UnitStats.WORKER_FOOD_COST
-	if unit is Spearman or unit is Swordsman or unit is Archer:
+	if unit is Spearman:
+		return UnitStats.SPEARMAN_FOOD_COST
+	if unit is Swordsman:
 		return UnitStats.SWORDSMAN_FOOD_COST
-	if unit is LightCavalry or unit is CavalryArcher:
+	if unit is Archer:
+		return UnitStats.ARCHER_FOOD_COST
+	if unit is LightCavalry:
 		return UnitStats.LIGHT_CAVALRY_FOOD_COST
+	if unit is CavalryArcher:
+		return UnitStats.CAVALRY_ARCHER_FOOD_COST
 	if unit is HeavyCavalry:
 		return UnitStats.HEAVY_CAVALRY_FOOD_COST
 	if unit is Cannon:

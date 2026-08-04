@@ -1,9 +1,7 @@
 class_name HeroItemService
 extends RefCounted
 
-## Applies hero item purchases and range checks for completed shops.
-## Purchase range / sell refund — edit ItemStats only.
-## Framework helpers for recipes, actives, uniques, and neutrals are no-ops until data exists.
+## Applies hero item purchases, combines, and combat bonus helpers.
 
 const SHOP_PURCHASE_RANGE_PIXELS: float = ItemStats.SHOP_PURCHASE_RANGE_PIXELS
 const SHOP_PURCHASE_RANGE_WORLD_FALLBACK: float = ItemStats.SHOP_PURCHASE_RANGE_WORLD_FALLBACK
@@ -31,18 +29,16 @@ static func try_purchase_from_shop(shop: Shop, item_id: StringName) -> bool:
 		_show_feedback(MSG_NO_NEARBY_HERO, shop)
 		return false
 
-	if not _try_pay_for_item(shop, item.gold_cost):
-		_show_feedback(MSG_NOT_ENOUGH_GOLD, shop)
+	var purchased: bool = false
+	if item.has_recipe() and _hero_owns_all_recipe_components(hero, item):
+		purchased = _purchase_completed_from_components(shop, hero, item)
+	else:
+		purchased = _purchase_into_empty_slot(shop, hero, item)
+
+	if not purchased:
 		return false
 
-	var slot_index: int = hero.find_first_empty_inventory_slot()
-	if slot_index < 0:
-		_show_feedback(MSG_INVENTORY_FULL, shop)
-		return false
-
-	hero.set_item_at_slot(slot_index, item)
-	apply_item_to_hero(hero, item, true)
-	_sync_item_runtime(hero)
+	_try_auto_combine_craftable(hero)
 	return true
 
 
@@ -56,6 +52,12 @@ static func get_purchase_failure_reason(shop: Shop, item: HeroItemDefinition) ->
 	var hero: Hero = find_closest_shop_hero(shop)
 	if hero == null:
 		return MSG_NO_NEARBY_HERO
+
+	if item.has_recipe() and _hero_owns_all_recipe_components(hero, item):
+		var recipe_cost: int = item.get_recipe_gold_cost()
+		if not _can_afford_item(shop, recipe_cost):
+			return MSG_NOT_ENOUGH_GOLD
+		return ""
 
 	if hero.is_inventory_full():
 		return MSG_INVENTORY_FULL
@@ -125,15 +127,18 @@ static func apply_item_to_hero(
 		return
 
 	if item.bonus_attack_damage != 0 and "attack_damage" in hero:
-		hero.set("attack_damage", int(hero.get("attack_damage")) + item.bonus_attack_damage)
+		hero.set("attack_damage", float(hero.get("attack_damage")) + float(item.bonus_attack_damage))
 
-	if item.bonus_move_speed != 0.0:
+	if item.bonus_move_speed != 0.0 and not item.is_unique_move_speed:
 		hero.move_speed += item.bonus_move_speed
 
 	_apply_spell_stat_bonus(hero, item)
-
+	_apply_combat_stat_bonus(hero, item)
 	_apply_health_bonus(hero, item, grant_immediate_bonuses)
 	_apply_mana_bonus(hero, item, grant_immediate_bonuses)
+
+	if item.is_unique_move_speed:
+		_recompute_unique_move_speed(hero)
 
 
 static func can_modify_player_inventory(hero: Hero) -> bool:
@@ -187,16 +192,19 @@ static func remove_item_from_hero(hero: Hero, item: HeroItemDefinition) -> void:
 	if item.bonus_attack_damage != 0 and "attack_damage" in hero:
 		hero.set(
 			"attack_damage",
-			maxi(0, int(hero.get("attack_damage")) - item.bonus_attack_damage)
+			maxf(0.0, float(hero.get("attack_damage")) - float(item.bonus_attack_damage))
 		)
 
-	if item.bonus_move_speed != 0.0:
+	if item.bonus_move_speed != 0.0 and not item.is_unique_move_speed:
 		hero.move_speed = maxf(0.0, hero.move_speed - item.bonus_move_speed)
 
 	_remove_spell_stat_bonus(hero, item)
-
+	_remove_combat_stat_bonus(hero, item)
 	_remove_health_bonus(hero, item)
 	_remove_mana_bonus(hero, item)
+
+	if item.is_unique_move_speed:
+		_recompute_unique_move_speed(hero)
 
 
 static func restore_inventory_items(hero: Hero) -> void:
@@ -243,39 +251,51 @@ static func get_combine_failure_reason(hero: Hero, item: HeroItemDefinition) -> 
 	if not item.has_recipe():
 		return MSG_RECIPE_UNAVAILABLE
 
-	var remaining: Dictionary = {}
-	for component_id: StringName in item.recipe_component_ids:
-		remaining[component_id] = int(remaining.get(component_id, 0)) + 1
-
-	for slot_index: int in hero.get_inventory_slot_count():
-		var owned = hero.get_item_at_slot(slot_index)
-		if not owned is HeroItemDefinition:
-			continue
-		var owned_id: StringName = (owned as HeroItemDefinition).item_id
-		if remaining.has(owned_id) and int(remaining[owned_id]) > 0:
-			remaining[owned_id] = int(remaining[owned_id]) - 1
-
-	for component_id: Variant in remaining.keys():
-		if int(remaining[component_id]) > 0:
-			return MSG_RECIPE_UNAVAILABLE
+	if not _hero_owns_all_recipe_components(hero, item):
+		return MSG_RECIPE_UNAVAILABLE
 
 	var gold_cost: int = item.get_recipe_gold_cost()
-	if (
-		gold_cost > 0
-		and TeamVisuals.resolve_team(hero, hero.team_id) == TeamVisuals.PLAYER_TEAM_ID
-		and ResourceManager.gold < gold_cost
-	):
+	if gold_cost > 0 and not _can_afford_for_hero(hero, gold_cost):
 		return MSG_NOT_ENOUGH_GOLD
 
 	return ""
 
 
-## Combine is framework-only for now — returns false until recipes are authored.
-static func try_combine_item(_hero: Hero, item_id: StringName) -> bool:
+static func try_combine_item(hero: Hero, item_id: StringName) -> bool:
 	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
 	if definition == null or not definition.has_recipe():
 		return false
-	return false
+
+	var failure_reason: String = get_combine_failure_reason(hero, definition)
+	if not failure_reason.is_empty():
+		return false
+
+	var component_slots: Array[int] = _find_recipe_component_slots(hero, definition)
+	if component_slots.size() != definition.recipe_component_ids.size():
+		return false
+
+	var recipe_cost: int = definition.get_recipe_gold_cost()
+	if not _try_pay_for_hero(hero, recipe_cost):
+		return false
+
+	var preferred_slot: int = component_slots[0]
+	for slot_index: int in component_slots:
+		preferred_slot = mini(preferred_slot, slot_index)
+		var owned = hero.get_item_at_slot(slot_index)
+		if owned is HeroItemDefinition:
+			remove_item_from_hero(hero, owned as HeroItemDefinition)
+		hero.clear_item_at_slot(slot_index)
+
+	var place_slot: int = preferred_slot
+	if hero.get_item_at_slot(place_slot) != null:
+		place_slot = hero.find_first_empty_inventory_slot()
+	if place_slot < 0:
+		return false
+
+	hero.set_item_at_slot(place_slot, definition)
+	apply_item_to_hero(hero, definition, true)
+	_sync_item_runtime(hero)
+	return true
 
 
 static func can_use_active(hero: Hero, slot_index: int) -> bool:
@@ -305,6 +325,352 @@ static func try_use_active(hero: Hero, slot_index: int) -> bool:
 
 static func get_item_runtime(hero: Hero) -> HeroItemRuntime:
 	return HeroItemRuntime.find_on(hero)
+
+
+static func get_total_crit_chance(hero: Hero) -> float:
+	if hero == null:
+		return 0.0
+	return maxf(0.0, hero.item_bonus_crit_chance)
+
+
+static func get_total_lifesteal(hero: Hero) -> float:
+	if hero == null:
+		return 0.0
+
+	var total: float = maxf(0.0, hero.item_bonus_lifesteal)
+	if not hero_has_unique_passive(hero, ItemStats.UNIQUE_BLOODLORD_LOW_HP_LIFESTEAL):
+		return total
+
+	var health: HealthComponent = hero.get_node_or_null("HealthComponent") as HealthComponent
+	if health == null or health.max_health <= 0:
+		return total
+
+	var hp_ratio: float = float(health.current_health) / float(health.max_health)
+	if hp_ratio >= ItemStats.BLOODLORD_LOW_HP_THRESHOLD:
+		return total
+
+	var extra: float = ItemStats.BLOODLORD_EXTRA_LIFESTEAL
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if definition.get_unique_passive_id() != ItemStats.UNIQUE_BLOODLORD_LOW_HP_LIFESTEAL:
+			continue
+		if definition.low_hp_extra_lifesteal > extra:
+			extra = definition.low_hp_extra_lifesteal
+
+	return total + extra
+
+
+static func get_best_cleave(hero: Hero) -> Dictionary:
+	var best := {"ratio": 0.0, "radius": 0.0}
+	if hero == null:
+		return best
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if definition.cleave_ratio > float(best["ratio"]):
+			best["ratio"] = definition.cleave_ratio
+			best["radius"] = definition.cleave_radius
+
+	return best
+
+
+static func get_best_execute_bonus(hero: Hero) -> float:
+	var best: float = 0.0
+	if hero == null:
+		return best
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if definition.execute_bonus_ratio > best:
+			best = definition.execute_bonus_ratio
+
+	return best
+
+
+static func get_aura_bonuses_for_unit(hero_carrier: Hero, ally_unit: Node) -> Dictionary:
+	var result := {"armor": 0.0, "attack_speed": 0.0}
+	if (
+		hero_carrier == null
+		or ally_unit == null
+		or not is_instance_valid(hero_carrier)
+		or not is_instance_valid(ally_unit)
+		or not ally_unit is Node3D
+	):
+		return result
+
+	# Hero receives only direct item stats — not its own aura.
+	if ally_unit == hero_carrier or ally_unit is Hero:
+		return result
+	if not _is_normal_military_unit(ally_unit):
+		return result
+
+	var best_by_unique: Dictionary = {}
+	var non_unique: Array[Dictionary] = []
+
+	for slot_index: int in hero_carrier.get_inventory_slot_count():
+		var item = hero_carrier.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if definition.aura_armor_bonus <= 0.0 and definition.aura_attack_speed_bonus <= 0.0:
+			continue
+
+		var radius: float = definition.aura_radius
+		if radius <= 0.0:
+			radius = ItemStats.DEFAULT_AURA_RADIUS
+
+		var entry := {
+			"armor": definition.aura_armor_bonus,
+			"attack_speed": definition.aura_attack_speed_bonus,
+			"radius": radius,
+			"magnitude": definition.aura_armor_bonus + definition.aura_attack_speed_bonus,
+		}
+		var unique_id: StringName = definition.get_unique_passive_id()
+		if unique_id == &"":
+			non_unique.append(entry)
+			continue
+
+		if not best_by_unique.has(unique_id):
+			best_by_unique[unique_id] = entry
+			continue
+
+		var previous: Dictionary = best_by_unique[unique_id] as Dictionary
+		if float(entry["magnitude"]) > float(previous["magnitude"]):
+			best_by_unique[unique_id] = entry
+
+	var ally_position: Vector3 = (ally_unit as Node3D).global_position
+	var carrier_position: Vector3 = hero_carrier.global_position
+
+	for unique_id: Variant in best_by_unique.keys():
+		var entry: Dictionary = best_by_unique[unique_id] as Dictionary
+		if _is_within_horizontal_radius(carrier_position, ally_position, float(entry["radius"])):
+			result["armor"] = float(result["armor"]) + float(entry["armor"])
+			result["attack_speed"] = float(result["attack_speed"]) + float(entry["attack_speed"])
+
+	for entry: Dictionary in non_unique:
+		if _is_within_horizontal_radius(carrier_position, ally_position, float(entry["radius"])):
+			result["armor"] = float(result["armor"]) + float(entry["armor"])
+			result["attack_speed"] = float(result["attack_speed"]) + float(entry["attack_speed"])
+
+	return result
+
+
+static func hero_has_fortress_heart_regen(hero: Hero) -> bool:
+	if hero == null:
+		return false
+	if hero_has_unique_passive(hero, ItemStats.UNIQUE_FORTRESS_HEART_REGEN):
+		return true
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if item is HeroItemDefinition and (item as HeroItemDefinition).has_out_of_combat_regen:
+			return true
+	return false
+
+
+static func get_nearby_ally_aura_bonuses(ally_unit: Node) -> Dictionary:
+	var result := {"armor": 0.0, "attack_speed": 0.0}
+	if ally_unit == null or not is_instance_valid(ally_unit) or not ally_unit is Node3D:
+		return result
+	if not _is_normal_military_unit(ally_unit):
+		return result
+
+	var tree: SceneTree = ally_unit.get_tree()
+	if tree == null:
+		return result
+
+	var ally_team: int = TeamVisuals.resolve_team(ally_unit, 0)
+
+	for node: Node in tree.get_nodes_in_group(&"heroes"):
+		if not node is Hero or not NodeSafety.is_alive_node(node):
+			continue
+		var hero: Hero = node as Hero
+		if TeamVisuals.resolve_team(hero, hero.team_id) != ally_team:
+			continue
+		var bonuses: Dictionary = get_aura_bonuses_for_unit(hero, ally_unit)
+		result["armor"] = maxf(float(result["armor"]), float(bonuses.get("armor", 0.0)))
+		result["attack_speed"] = maxf(
+			float(result["attack_speed"]), float(bonuses.get("attack_speed", 0.0))
+		)
+
+	return result
+
+
+static func _is_normal_military_unit(unit: Node) -> bool:
+	if unit == null or unit is Hero or unit is Worker or unit is Building:
+		return false
+	return (
+		unit is MilitaryUnit
+		or unit is LightCavalry
+		or unit is CavalryArcher
+		or unit is HeavyCavalry
+		or unit is Cannon
+	)
+
+
+static func _purchase_into_empty_slot(shop: Shop, hero: Hero, item: HeroItemDefinition) -> bool:
+	if not _try_pay_for_item(shop, item.gold_cost):
+		_show_feedback(MSG_NOT_ENOUGH_GOLD, shop)
+		return false
+
+	var slot_index: int = hero.find_first_empty_inventory_slot()
+	if slot_index < 0:
+		_show_feedback(MSG_INVENTORY_FULL, shop)
+		return false
+
+	hero.set_item_at_slot(slot_index, item)
+	apply_item_to_hero(hero, item, true)
+	_sync_item_runtime(hero)
+	return true
+
+
+static func _purchase_completed_from_components(
+	shop: Shop,
+	hero: Hero,
+	item: HeroItemDefinition
+) -> bool:
+	var component_slots: Array[int] = _find_recipe_component_slots(hero, item)
+	if component_slots.size() != item.recipe_component_ids.size():
+		_show_feedback(MSG_RECIPE_UNAVAILABLE, shop)
+		return false
+
+	var recipe_cost: int = item.get_recipe_gold_cost()
+	if not _try_pay_for_item(shop, recipe_cost):
+		_show_feedback(MSG_NOT_ENOUGH_GOLD, shop)
+		return false
+
+	var preferred_slot: int = component_slots[0]
+	for slot_index: int in component_slots:
+		preferred_slot = mini(preferred_slot, slot_index)
+		var owned = hero.get_item_at_slot(slot_index)
+		if owned is HeroItemDefinition:
+			remove_item_from_hero(hero, owned as HeroItemDefinition)
+		hero.clear_item_at_slot(slot_index)
+
+	var place_slot: int = preferred_slot
+	if hero.get_item_at_slot(place_slot) != null:
+		place_slot = hero.find_first_empty_inventory_slot()
+	if place_slot < 0:
+		_show_feedback(MSG_INVENTORY_FULL, shop)
+		return false
+
+	hero.set_item_at_slot(place_slot, item)
+	apply_item_to_hero(hero, item, true)
+	_sync_item_runtime(hero)
+	return true
+
+
+static func _try_auto_combine_craftable(hero: Hero) -> void:
+	if hero == null:
+		return
+
+	for _attempt: int in 12:
+		var combined_any: bool = false
+		for tier: HeroItemDefinition.Tier in [
+			HeroItemDefinition.Tier.TIER_3,
+			HeroItemDefinition.Tier.TIER_2,
+		]:
+			for definition: HeroItemDefinition in HeroItemCatalog.get_definitions_by_tier(tier):
+				if definition == null or not definition.has_recipe():
+					continue
+				if try_combine_item(hero, definition.item_id):
+					combined_any = true
+					break
+			if combined_any:
+				break
+		if not combined_any:
+			return
+
+
+static func _hero_owns_all_recipe_components(hero: Hero, item: HeroItemDefinition) -> bool:
+	if hero == null or item == null or not item.has_recipe():
+		return false
+
+	var remaining: Dictionary = {}
+	for component_id: StringName in item.recipe_component_ids:
+		remaining[component_id] = int(remaining.get(component_id, 0)) + 1
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var owned = hero.get_item_at_slot(slot_index)
+		if not owned is HeroItemDefinition:
+			continue
+		var owned_id: StringName = (owned as HeroItemDefinition).item_id
+		if remaining.has(owned_id) and int(remaining[owned_id]) > 0:
+			remaining[owned_id] = int(remaining[owned_id]) - 1
+
+	for component_id: Variant in remaining.keys():
+		if int(remaining[component_id]) > 0:
+			return false
+	return true
+
+
+static func _find_recipe_component_slots(hero: Hero, item: HeroItemDefinition) -> Array[int]:
+	var slots: Array[int] = []
+	if hero == null or item == null:
+		return slots
+
+	var remaining: Dictionary = {}
+	for component_id: StringName in item.recipe_component_ids:
+		remaining[component_id] = int(remaining.get(component_id, 0)) + 1
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var owned = hero.get_item_at_slot(slot_index)
+		if not owned is HeroItemDefinition:
+			continue
+		var owned_id: StringName = (owned as HeroItemDefinition).item_id
+		if remaining.has(owned_id) and int(remaining[owned_id]) > 0:
+			remaining[owned_id] = int(remaining[owned_id]) - 1
+			slots.append(slot_index)
+
+	for component_id: Variant in remaining.keys():
+		if int(remaining[component_id]) > 0:
+			return []
+
+	return slots
+
+
+static func _recompute_unique_move_speed(hero: Hero) -> void:
+	if hero == null:
+		return
+
+	var best_unique_ms: float = 0.0
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var definition: HeroItemDefinition = item as HeroItemDefinition
+		if not definition.is_unique_move_speed:
+			continue
+		if definition.bonus_move_speed > best_unique_ms:
+			best_unique_ms = definition.bonus_move_speed
+
+	var previous: float = hero.item_unique_move_speed
+	if is_equal_approx(previous, best_unique_ms):
+		return
+
+	hero.move_speed = maxf(0.0, hero.move_speed - previous + best_unique_ms)
+	hero.item_unique_move_speed = best_unique_ms
+
+
+static func _is_within_horizontal_radius(
+	from_position: Vector3,
+	to_position: Vector3,
+	radius: float
+) -> bool:
+	if radius < 0.0:
+		return false
+	var offset: Vector3 = to_position - from_position
+	offset.y = 0.0
+	return offset.length_squared() <= radius * radius
 
 
 static func _sync_item_runtime(hero: Hero) -> void:
@@ -369,6 +735,8 @@ static func _get_horizontal_world_distance(node_a: Node3D, node_b: Node3D) -> fl
 
 
 static func _can_afford_item(shop: Shop, gold_cost: int) -> bool:
+	if gold_cost <= 0:
+		return true
 	if TeamVisuals.resolve_team(shop, shop.team_id) == TeamVisuals.PLAYER_TEAM_ID:
 		return ResourceManager.gold >= gold_cost
 
@@ -376,9 +744,27 @@ static func _can_afford_item(shop: Shop, gold_cost: int) -> bool:
 
 
 static func _try_pay_for_item(shop: Shop, gold_cost: int) -> bool:
+	if gold_cost <= 0:
+		return true
 	if TeamVisuals.resolve_team(shop, shop.team_id) == TeamVisuals.PLAYER_TEAM_ID:
 		return ResourceManager.try_spend_gold(gold_cost)
 
+	return EnemyResourceManager.try_spend(gold_cost, 0)
+
+
+static func _can_afford_for_hero(hero: Hero, gold_cost: int) -> bool:
+	if gold_cost <= 0:
+		return true
+	if TeamVisuals.resolve_team(hero, hero.team_id) == TeamVisuals.PLAYER_TEAM_ID:
+		return ResourceManager.gold >= gold_cost
+	return EnemyResourceManager.gold >= gold_cost
+
+
+static func _try_pay_for_hero(hero: Hero, gold_cost: int) -> bool:
+	if gold_cost <= 0:
+		return true
+	if TeamVisuals.resolve_team(hero, hero.team_id) == TeamVisuals.PLAYER_TEAM_ID:
+		return ResourceManager.try_spend_gold(gold_cost)
 	return EnemyResourceManager.try_spend(gold_cost, 0)
 
 
@@ -414,6 +800,32 @@ static func _remove_spell_stat_bonus(hero: Hero, item: HeroItemDefinition) -> vo
 		hero.item_spell_radius_bonus = maxf(
 			0.0, hero.item_spell_radius_bonus - item.bonus_spell_radius
 		)
+
+
+static func _apply_combat_stat_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_armor != 0.0:
+		hero.item_bonus_armor += item.bonus_armor
+	if item.bonus_attack_speed != 0.0:
+		hero.item_bonus_attack_speed += item.bonus_attack_speed
+	if item.bonus_crit_chance != 0.0:
+		hero.item_bonus_crit_chance += item.bonus_crit_chance
+	if item.bonus_lifesteal != 0.0:
+		hero.item_bonus_lifesteal += item.bonus_lifesteal
+	if item.bonus_mana_regen != 0.0:
+		hero.item_bonus_mana_regen += item.bonus_mana_regen
+
+
+static func _remove_combat_stat_bonus(hero: Hero, item: HeroItemDefinition) -> void:
+	if item.bonus_armor != 0.0:
+		hero.item_bonus_armor = maxf(0.0, hero.item_bonus_armor - item.bonus_armor)
+	if item.bonus_attack_speed != 0.0:
+		hero.item_bonus_attack_speed = maxf(0.0, hero.item_bonus_attack_speed - item.bonus_attack_speed)
+	if item.bonus_crit_chance != 0.0:
+		hero.item_bonus_crit_chance = maxf(0.0, hero.item_bonus_crit_chance - item.bonus_crit_chance)
+	if item.bonus_lifesteal != 0.0:
+		hero.item_bonus_lifesteal = maxf(0.0, hero.item_bonus_lifesteal - item.bonus_lifesteal)
+	if item.bonus_mana_regen != 0.0:
+		hero.item_bonus_mana_regen = maxf(0.0, hero.item_bonus_mana_regen - item.bonus_mana_regen)
 
 
 static func _apply_health_bonus(

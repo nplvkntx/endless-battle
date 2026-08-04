@@ -3,10 +3,12 @@ extends Hero
 
 ## Shared melee combat, movement, and orders for hero units (Paladin and future kits).
 
-@export var attack_damage: int = HeroStats.ATTACK_DAMAGE
+@export var attack_damage: float = HeroStats.ATTACK_DAMAGE
 @export var attack_range: float = HeroStats.ATTACK_RANGE
 @export var attack_cooldown: float = HeroStats.ATTACK_COOLDOWN
 @export var mana_regen_rate: float = HeroStats.MANA_REGEN_RATE
+@export var armor: float = HeroStats.ARMOR
+@export var base_attack_cooldown: float = HeroStats.ATTACK_COOLDOWN
 
 const HEALTH_BAR_WIDTH := 1.4
 const HEALTH_BAR_HUE_GREEN := 0.333333
@@ -51,6 +53,9 @@ var _attack_windup_timer: float = 0.0
 var _move_to_cast_ability_id: StringName = &""
 var _move_to_cast_target: Node3D = null
 var _has_move_to_cast: bool = false
+## Seconds since match start-ish; negative means never hit by a unit/hero.
+var _last_unit_combat_damage_time: float = -99999.0
+var _fortress_regen_accumulator: float = 0.0
 
 
 func _ready() -> void:
@@ -93,7 +98,7 @@ func get_display_name() -> String:
 	return "Hero"
 
 
-func get_kit_base_attack_damage() -> int:
+func get_kit_base_attack_damage() -> float:
 	return HeroStats.ATTACK_DAMAGE
 
 
@@ -109,7 +114,23 @@ func get_kit_base_max_health() -> int:
 	return HeroStats.MAX_HEALTH
 
 
-func get_kit_attack_damage_per_level() -> int:
+func get_kit_base_armor() -> float:
+	return HeroStats.ARMOR
+
+
+func get_kit_armor_per_level() -> float:
+	return HeroStats.ARMOR_PER_LEVEL
+
+
+func get_kit_attack_speed_per_level() -> float:
+	return HeroStats.ATTACK_SPEED_PER_LEVEL
+
+
+func get_kit_move_speed_per_level() -> float:
+	return HeroStats.MOVE_SPEED_PER_LEVEL
+
+
+func get_kit_attack_damage_per_level() -> float:
 	return ATTACK_DAMAGE_PER_LEVEL
 
 
@@ -119,6 +140,136 @@ func get_kit_health_per_level() -> int:
 
 func get_kit_mana_per_level() -> int:
 	return MANA_PER_LEVEL
+
+
+func get_total_armor() -> float:
+	return armor + item_bonus_armor
+
+
+func get_total_bonus_attack_speed() -> float:
+	var level_bonus: float = float(maxi(0, level - 1)) * get_kit_attack_speed_per_level()
+	return level_bonus + item_bonus_attack_speed
+
+
+func get_basic_attack_damage_amount(target: Node3D) -> float:
+	var amount: float = float(attack_damage)
+	var execute_bonus: float = HeroItemService.get_best_execute_bonus(self)
+	if execute_bonus <= 0.0 or target == null:
+		return amount
+
+	var health: HealthComponent = DamageService.resolve_health_component(target)
+	if health == null or health.max_health <= 0:
+		return amount
+
+	var hp_ratio: float = float(health.current_health) / float(health.max_health)
+	if hp_ratio < ItemStats.EXECUTE_HP_THRESHOLD:
+		amount *= 1.0 + execute_bonus
+	return amount
+
+
+func build_basic_attack_damage_options(target: Node3D) -> Dictionary:
+	var options := {
+		DamageService.OPT_IS_BASIC_ATTACK: true,
+		DamageService.OPT_CAN_CRIT: true,
+		DamageService.OPT_CRIT_CHANCE: HeroItemService.get_total_crit_chance(self),
+		DamageService.OPT_CRIT_MULTIPLIER: ItemStats.CRITICAL_DAMAGE_MULTIPLIER,
+	}
+
+	if target != null and not target is Building:
+		var lifesteal: float = HeroItemService.get_total_lifesteal(self)
+		if lifesteal > 0.0:
+			options[DamageService.OPT_CAN_LIFESTEAL] = true
+			options[DamageService.OPT_LIFESTEAL_PERCENT] = lifesteal
+
+	return options
+
+
+func apply_item_cleave_after_hit(primary_target: Node3D) -> void:
+	var cleave: Dictionary = HeroItemService.get_best_cleave(self)
+	var ratio: float = float(cleave.get("ratio", 0.0))
+	var radius: float = float(cleave.get("radius", 0.0))
+	if ratio <= 0.0 or radius <= 0.0:
+		return
+
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var cleave_damage: float = float(attack_damage) * ratio
+	if cleave_damage <= 0.0:
+		return
+
+	var origin: Vector3 = global_position
+	if primary_target != null and is_instance_valid(primary_target):
+		origin = primary_target.global_position
+
+	var radius_sq: float = radius * radius
+	var options := {
+		DamageService.OPT_IS_BASIC_ATTACK: true,
+		DamageService.OPT_DAMAGE_TYPE: DamageService.DamageType.PHYSICAL,
+		DamageService.OPT_NO_ITEM_PROCS: true,
+	}
+
+	for node: Node in tree.get_nodes_in_group("units"):
+		if node == self or node == primary_target:
+			continue
+		if not node is Node3D or node is Building:
+			continue
+		if not CombatTargetValidation.is_valid_combat_target(node):
+			continue
+		if not CombatTargetValidation.are_hostile(self, node):
+			continue
+
+		var other: Node3D = node as Node3D
+		var offset: Vector3 = other.global_position - origin
+		offset.y = 0.0
+		if offset.length_squared() > radius_sq:
+			continue
+
+		DamageService.apply_damage(other, cleave_damage, self, options)
+
+
+func _compute_incoming_damage(amount: float) -> int:
+	return DamageService.compute_armored_damage(amount, int(round(get_total_armor())))
+
+
+func _on_combat_damage_received(result: Dictionary) -> void:
+	var attacker = result.get(DamageService.RESULT_ATTACKER)
+	if attacker == null or not is_instance_valid(attacker):
+		return
+	# Only unit/hero attackers put Fortress Heart into combat.
+	if attacker is Unit:
+		_last_unit_combat_damage_time = Time.get_ticks_msec() * 0.001
+		_fortress_regen_accumulator = 0.0
+
+
+func _tick_item_passives(delta: float) -> void:
+	if not HeroItemService.hero_has_fortress_heart_regen(self):
+		_fortress_regen_accumulator = 0.0
+		return
+	if _health_component == null or _health_component.current_health <= 0:
+		return
+	if _health_component.current_health >= _health_component.max_health:
+		_fortress_regen_accumulator = 0.0
+		return
+
+	var now: float = Time.get_ticks_msec() * 0.001
+	if now - _last_unit_combat_damage_time < ItemStats.FORTRESS_HEART_OUT_OF_COMBAT_SECONDS:
+		_fortress_regen_accumulator = 0.0
+		return
+
+	_fortress_regen_accumulator += (
+		float(_health_component.max_health)
+		* ItemStats.FORTRESS_HEART_REGEN_PERCENT_PER_SECOND
+		* delta
+	)
+	if _fortress_regen_accumulator < 1.0:
+		return
+
+	var heal_amount: int = int(_fortress_regen_accumulator)
+	_fortress_regen_accumulator -= float(heal_amount)
+	if heal_amount > 0:
+		_health_component.heal(heal_amount)
 
 
 func _tick_hero_abilities(_delta: float) -> void:
@@ -296,22 +447,28 @@ func _apply_level_mana_gain() -> void:
 
 func _apply_level_attack_damage_gain() -> void:
 	attack_damage += get_kit_attack_damage_per_level()
+	armor += get_kit_armor_per_level()
 
 
 func _apply_level_move_speed_gain() -> void:
-	move_speed += MOVE_SPEED_PER_LEVEL_AFTER_18
+	move_speed += get_kit_move_speed_per_level()
 
 
 func _apply_accumulated_level_combat_stats(levels_gained: int) -> void:
-	attack_damage = get_kit_base_attack_damage() + levels_gained * get_kit_attack_damage_per_level()
+	attack_damage = get_kit_base_attack_damage() + float(levels_gained) * get_kit_attack_damage_per_level()
+	armor = get_kit_base_armor() + float(levels_gained) * get_kit_armor_per_level()
 	max_mana = get_kit_base_max_mana() + levels_gained * get_kit_mana_per_level()
 	current_mana = max_mana
 	mana_changed.emit(current_mana, max_mana)
 
 
 func _apply_accumulated_level_move_speed_bonus() -> void:
-	var levels_after_18: int = maxi(0, level - MAX_ABILITY_POINT_LEVEL)
-	move_speed = get_kit_base_move_speed() + float(levels_after_18) * MOVE_SPEED_PER_LEVEL_AFTER_18
+	var levels_gained: int = maxi(0, level - 1)
+	move_speed = (
+		get_kit_base_move_speed()
+		+ float(levels_gained) * get_kit_move_speed_per_level()
+		+ item_unique_move_speed
+	)
 
 
 func _on_progression_restored() -> void:
@@ -698,10 +855,11 @@ func _tick_mana_regen(delta: float) -> void:
 		_mana_regen_accumulator = 0.0
 		return
 
-	if mana_regen_rate <= 0.0:
+	var regen_rate: float = mana_regen_rate + item_bonus_mana_regen
+	if regen_rate <= 0.0:
 		return
 
-	_mana_regen_accumulator += mana_regen_rate * delta
+	_mana_regen_accumulator += regen_rate * delta
 	if _mana_regen_accumulator < 1.0:
 		return
 
@@ -726,6 +884,7 @@ func _physics_process(delta: float) -> void:
 	_ability_consumed_physics_frame = false
 	_tick_hero_abilities(delta)
 	_tick_mana_regen(delta)
+	_tick_item_passives(delta)
 
 	if _ability_consumed_physics_frame:
 		return
@@ -897,7 +1056,10 @@ func _complete_basic_attack_strike() -> void:
 		_finish_attack_target_lost()
 		return
 
-	_attack_cooldown_timer = attack_cooldown
+	_attack_cooldown_timer = UnitStats.get_final_attack_cooldown(
+		attack_cooldown,
+		get_total_bonus_attack_speed()
+	)
 
 	if strike_target == null or not is_instance_valid(strike_target):
 		_finish_attack_target_lost()
@@ -911,14 +1073,17 @@ func _complete_basic_attack_strike() -> void:
 
 ## Override in ranged kits to fire projectiles instead of melee DamageService hits.
 func _deliver_basic_attack_hit(strike_target: Node3D) -> bool:
+	var damage_amount: float = get_basic_attack_damage_amount(strike_target)
+	var options: Dictionary = build_basic_attack_damage_options(strike_target)
 	if not DamageService.apply_damage(
 		strike_target,
-		float(attack_damage),
+		damage_amount,
 		self,
-		{DamageService.OPT_IS_BASIC_ATTACK: true}
+		options
 	):
 		return false
 	MeleeHitSound.play_at(self, strike_target.global_position)
+	apply_item_cleave_after_hit(strike_target)
 	return true
 
 

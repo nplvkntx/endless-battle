@@ -93,10 +93,14 @@ func _get_bonus_damage(target: Node) -> int:
 	var health: HealthComponent = DamageService.resolve_health_component(target)
 	if health == null or health.max_health <= 0:
 		return 0
-	return maxi(
-		1,
-		int(round(float(health.max_health) * RangerStats.HUNTERS_PRECISION_MAX_HEALTH_RATIO))
+	var raw: int = int(
+		round(float(health.max_health) * RangerStats.HUNTERS_PRECISION_MAX_HEALTH_RATIO)
 	)
+	var hero_level: int = 1
+	if host != null and is_instance_valid(host) and "level" in host:
+		hero_level = int(host.get("level"))
+	var cap: int = RangerStats.get_hunters_precision_damage_cap(hero_level)
+	return clampi(raw, 1, cap)
 
 
 func _reset_chain() -> void:

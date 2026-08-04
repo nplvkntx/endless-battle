@@ -36,6 +36,7 @@ func _ready() -> void:
 	attack_cooldown = ShadowAssassinStats.ATTACK_COOLDOWN
 	mana_regen_rate = ShadowAssassinStats.MANA_REGEN_RATE
 	max_mana = ShadowAssassinStats.MAX_MANA
+	armor = ShadowAssassinStats.ARMOR
 
 	super._ready()
 
@@ -48,7 +49,7 @@ func get_display_name() -> String:
 	return "Shadow Assassin"
 
 
-func get_kit_base_attack_damage() -> int:
+func get_kit_base_attack_damage() -> float:
 	return ShadowAssassinStats.ATTACK_DAMAGE
 
 
@@ -64,7 +65,7 @@ func get_kit_base_max_health() -> int:
 	return ShadowAssassinStats.MAX_HEALTH
 
 
-func get_kit_attack_damage_per_level() -> int:
+func get_kit_attack_damage_per_level() -> float:
 	return ShadowAssassinStats.ATTACK_DAMAGE_PER_LEVEL
 
 
@@ -74,6 +75,22 @@ func get_kit_health_per_level() -> int:
 
 func get_kit_mana_per_level() -> int:
 	return ShadowAssassinStats.MANA_PER_LEVEL
+
+
+func get_kit_base_armor() -> float:
+	return ShadowAssassinStats.ARMOR
+
+
+func get_kit_armor_per_level() -> float:
+	return ShadowAssassinStats.ARMOR_PER_LEVEL
+
+
+func get_kit_attack_speed_per_level() -> float:
+	return ShadowAssassinStats.ATTACK_SPEED_PER_LEVEL
+
+
+func get_kit_move_speed_per_level() -> float:
+	return ShadowAssassinStats.MOVE_SPEED_PER_LEVEL
 
 
 func _should_show_ability_feedback() -> bool:

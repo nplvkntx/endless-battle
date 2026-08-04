@@ -122,7 +122,7 @@ const CANNON_TRAIN_FOOD_COST: int = UnitStats.CANNON_FOOD_COST
 const CONSTRUCTION_DURATION: float = BuildingStats.ENEMY_CONSTRUCTION_DURATION
 const FARM_MAX_HEALTH: int = BuildingStats.FARM_MAX_HEALTH
 const HERO_ALTAR_MAX_HEALTH: int = BuildingStats.HERO_ALTAR_MAX_HEALTH
-const STABLE_MAX_HEALTH: int = BuildingStats.ENEMY_STABLE_MAX_HEALTH
+const STABLE_MAX_HEALTH: int = BuildingStats.STABLE_MAX_HEALTH
 const COMMAND_CENTER_MAX_HEALTH: int = BuildingStats.COMMAND_CENTER_MAX_HEALTH
 const TOWER_MAX_HEALTH: int = BuildingStats.TOWER_MAX_HEALTH
 const MAX_PARALLEL_CONSTRUCTIONS: int = 3
@@ -1630,12 +1630,18 @@ func _try_sustain_shop_purchases() -> void:
 		return
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
-	if hero == null or hero.is_inventory_full():
-		if hero != null and EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.SHOP:
-			EnemyUnitMission.sync_hero_to_main_army(hero, true)
+	if hero == null:
 		return
 
 	if not HeroItemService.is_hero_in_shop_range(shop, hero):
+		# Combine does not require shop range — finish craftable recipes while full.
+		if hero.is_inventory_full() and _try_combine_preferred_recipes(hero):
+			_shop_purchase_cooldown_ticks = SHOP_PURCHASE_COOLDOWN_TICKS
+			return
+		if hero.is_inventory_full():
+			if EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.SHOP:
+				EnemyUnitMission.sync_hero_to_main_army(hero, true)
+			return
 		if _should_send_hero_to_shop(hero):
 			_command_hero_to_shop(hero, shop)
 		return
@@ -1653,16 +1659,217 @@ func _try_buy_next_useful_shop_item(shop: Shop) -> bool:
 	if hero == null:
 		return false
 
-	for item_id: StringName in HeroItemCatalog.SHOP_ITEM_ORDER:
-		if _hero_already_owns_item(hero, item_id):
-			continue
+	var kit_id: StringName = hero.get_hero_kit_id()
+	var is_behind: bool = _is_hero_item_shopping_behind(hero)
+	var is_ahead: bool = _is_hero_item_shopping_ahead(hero)
+	var goals: Array[StringName] = AIItemPreferences.get_ordered_goals(kit_id, is_behind, is_ahead)
 
-		if not HeroItemService.can_purchase_from_shop(shop, item_id):
-			continue
+	if _try_combine_preferred_recipes(hero, goals):
+		return true
 
-		return shop.try_purchase_item(item_id)
+	# Purchasing a completed preferred item auto-combines when all components are owned.
+	for goal_id: StringName in goals:
+		if _hero_already_owns_item(hero, goal_id) or AIItemPreferences.should_skip_goal(hero, goal_id):
+			continue
+		if not HeroItemService.can_purchase_from_shop(shop, goal_id):
+			continue
+		var goal_def: HeroItemDefinition = HeroItemCatalog.get_definition(goal_id)
+		if goal_def == null or not goal_def.has_recipe():
+			continue
+		if not HeroItemService.can_combine_item(hero, goal_id):
+			continue
+		if _should_skip_unique_boots_purchase(hero, goal_id):
+			continue
+		return shop.try_purchase_item(goal_id)
+
+	var focus_goal: StringName = _get_highest_unfinished_goal(hero, goals)
+	if focus_goal == &"":
+		return false
+
+	var next_component: StringName = _find_next_missing_component(hero, focus_goal)
+	if next_component == &"":
+		return false
+	if _should_skip_unique_boots_purchase(hero, next_component):
+		return false
+	if hero.is_inventory_full():
+		return false
+	if not HeroItemService.can_purchase_from_shop(shop, next_component):
+		return false
+
+	return shop.try_purchase_item(next_component)
+
+
+func _try_combine_preferred_recipes(
+	hero: Hero,
+	goals: Array[StringName] = []
+) -> bool:
+	if hero == null:
+		return false
+
+	var kit_id: StringName = hero.get_hero_kit_id()
+	if goals.is_empty():
+		goals = AIItemPreferences.get_ordered_goals(
+			kit_id,
+			_is_hero_item_shopping_behind(hero),
+			_is_hero_item_shopping_ahead(hero)
+		)
+
+	var recipe_ids: Array[StringName] = _collect_preferred_recipe_ids(hero, goals)
+	recipe_ids.sort_custom(func(a: StringName, b: StringName) -> bool:
+		var def_a: HeroItemDefinition = HeroItemCatalog.get_definition(a)
+		var def_b: HeroItemDefinition = HeroItemCatalog.get_definition(b)
+		var tier_a: int = int(def_a.tier) if def_a != null else 0
+		var tier_b: int = int(def_b.tier) if def_b != null else 0
+		return tier_a > tier_b
+	)
+
+	for item_id: StringName in recipe_ids:
+		if _should_skip_unique_boots_purchase(hero, item_id):
+			continue
+		if HeroItemService.can_combine_item(hero, item_id):
+			if HeroItemService.try_combine_item(hero, item_id):
+				return true
 
 	return false
+
+
+func _collect_preferred_recipe_ids(
+	hero: Hero,
+	goals: Array[StringName]
+) -> Array[StringName]:
+	var recipe_ids: Array[StringName] = []
+	for goal_id: StringName in goals:
+		if _hero_already_owns_item(hero, goal_id) or AIItemPreferences.should_skip_goal(hero, goal_id):
+			continue
+		_append_recipe_tree_ids(goal_id, recipe_ids)
+	return recipe_ids
+
+
+func _append_recipe_tree_ids(item_id: StringName, out_ids: Array[StringName]) -> void:
+	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+	if definition == null or not definition.has_recipe():
+		return
+
+	if not out_ids.has(item_id):
+		out_ids.append(item_id)
+
+	for component_id: StringName in definition.recipe_component_ids:
+		_append_recipe_tree_ids(component_id, out_ids)
+
+
+func _get_highest_unfinished_goal(hero: Hero, goals: Array[StringName]) -> StringName:
+	for goal_id: StringName in goals:
+		if _hero_already_owns_item(hero, goal_id):
+			continue
+		if AIItemPreferences.should_skip_goal(hero, goal_id):
+			continue
+		return goal_id
+	return &""
+
+
+func _find_next_missing_component(hero: Hero, item_id: StringName) -> StringName:
+	var owned_counts: Dictionary = _collect_owned_item_counts(hero)
+	var missing: Array[StringName] = []
+	_collect_missing_components(item_id, owned_counts, missing)
+	if missing.is_empty():
+		return &""
+	return missing[0]
+
+
+func _collect_owned_item_counts(hero: Hero) -> Dictionary:
+	var counts: Dictionary = {}
+	if hero == null:
+		return counts
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if not item is HeroItemDefinition:
+			continue
+		var owned_id: StringName = (item as HeroItemDefinition).item_id
+		counts[owned_id] = int(counts.get(owned_id, 0)) + 1
+	return counts
+
+
+func _collect_missing_components(
+	item_id: StringName,
+	owned_counts: Dictionary,
+	out_missing: Array[StringName]
+) -> void:
+	if int(owned_counts.get(item_id, 0)) > 0:
+		owned_counts[item_id] = int(owned_counts[item_id]) - 1
+		return
+
+	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+	if definition == null:
+		return
+
+	if not definition.has_recipe():
+		out_missing.append(item_id)
+		return
+
+	for component_id: StringName in definition.recipe_component_ids:
+		_collect_missing_components(component_id, owned_counts, out_missing)
+
+
+func _should_skip_unique_boots_purchase(hero: Hero, item_id: StringName) -> bool:
+	if not AIItemPreferences.is_unique_move_speed_item(item_id):
+		return false
+	if not _hero_owns_any_unique_move_speed(hero):
+		return false
+
+	# Allow upgrading an owned boots item into a higher unique-MS recipe.
+	var definition: HeroItemDefinition = HeroItemCatalog.get_definition(item_id)
+	if definition == null or not definition.has_recipe():
+		return true
+
+	for component_id: StringName in definition.recipe_component_ids:
+		var component: HeroItemDefinition = HeroItemCatalog.get_definition(component_id)
+		if component != null and component.is_unique_move_speed and _hero_already_owns_item(hero, component_id):
+			return false
+
+	return true
+
+
+func _hero_owns_any_unique_move_speed(hero: Hero) -> bool:
+	if hero == null:
+		return false
+
+	for slot_index: int in hero.get_inventory_slot_count():
+		var item = hero.get_item_at_slot(slot_index)
+		if item is HeroItemDefinition and (item as HeroItemDefinition).is_unique_move_speed:
+			return true
+	return false
+
+
+func _is_hero_item_shopping_behind(hero: Hero) -> bool:
+	if hero == null:
+		return false
+
+	if EnemyArmyCommand.get_health_ratio(hero) <= AIItemPreferences.BEHIND_HERO_HP_RATIO:
+		return true
+
+	var strength_ratio: float = _get_army_strength_ratio_vs_player()
+	return strength_ratio >= 0.0 and strength_ratio < AIItemPreferences.BEHIND_ARMY_STRENGTH_RATIO
+
+
+func _is_hero_item_shopping_ahead(hero: Hero) -> bool:
+	if hero == null or _is_hero_item_shopping_behind(hero):
+		return false
+
+	var strength_ratio: float = _get_army_strength_ratio_vs_player()
+	return strength_ratio >= AIItemPreferences.AHEAD_ARMY_STRENGTH_RATIO
+
+
+func _get_army_strength_ratio_vs_player() -> float:
+	var tree: SceneTree = get_tree()
+	var ai_power: int = EnemyArmyCommand.estimate_military_power(
+		EnemyArmyCommand.collect_living_combat_units(tree)
+	)
+	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	var player_power: int = EnemyArmyCommand.estimate_known_player_army_strength(tree, rally_position)
+	if player_power <= 0:
+		return 1.0
+	return float(ai_power) / float(maxi(player_power, 1))
 
 
 func _hero_already_owns_item(hero: Hero, item_id: StringName) -> bool:
@@ -1987,7 +2194,8 @@ func _try_place_tower(emergency_only: bool = false) -> bool:
 	building.set_construction_cost(TOWER_GOLD_COST, TOWER_WOOD_COST, true)
 	building.start_under_construction()
 	building.setup_construction(
-		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
+		BuildingStats.get_construction_seconds(PLACEMENT_TOWER, 1)
+		/ UpgradeManager.get_construction_speed_multiplier(true)
 	)
 	ConstructionReservations.release_footprint(footprint_reservation_id)
 	_bind_tower_lane(building, lane)
@@ -3310,7 +3518,8 @@ func _try_place_building_at_anchor(
 	building.set_construction_cost(gold_cost, wood_cost, true)
 	building.start_under_construction()
 	building.setup_construction(
-		CONSTRUCTION_DURATION / UpgradeManager.get_construction_speed_multiplier(true)
+		BuildingStats.get_construction_seconds(building_type, 1)
+		/ UpgradeManager.get_construction_speed_multiplier(true)
 	)
 	ConstructionReservations.release_footprint(footprint_reservation_id)
 	_assign_nearest_builder(building)

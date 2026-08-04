@@ -2,8 +2,7 @@ class_name HeroItemDefinition
 extends Resource
 
 ## Data for a hero / neutral inventory item.
-## Flat bonus_* fields remain the live apply path for existing shop items.
-## Modular components, recipes, actives, auras, and procs are framework scaffolding.
+## Flat bonus_* fields are the live apply path. Recipes, uniques, and passives are first-class.
 
 const SELL_VALUE_USE_RATIO := -1
 
@@ -30,6 +29,10 @@ enum Category {
 @export var gold_cost: int = 0
 @export var hotkey: String = ""
 @export var icon_color: Color = Color(0.55, 0.58, 0.65, 1)
+@export var tooltip_stats: String = ""
+@export var tooltip_passive: String = ""
+@export var tooltip_aura: String = ""
+@export var tooltip_unique_rules: String = ""
 
 @export var tier: Tier = Tier.TIER_1
 @export var category: Category = Category.BASIC
@@ -57,17 +60,32 @@ enum Category {
 @export var starting_charges: int = -1
 @export var active_mana_cost: int = 0
 
-# --- Flat stat bonuses (existing shop items; identity defaults) ---
+# --- Flat stat bonuses ---
 @export var bonus_attack_damage: int = 0
 @export var bonus_max_health: int = 0
 @export var heal_on_purchase: int = 0
 @export var bonus_move_speed: float = 0.0
+## When true, only the highest boot move-speed bonus applies.
+@export var is_unique_move_speed: bool = false
 @export var bonus_max_mana: int = 0
 @export var restore_mana_on_purchase: int = 0
 @export var bonus_ability_power: int = 0
 @export var bonus_cooldown_reduction: float = 0.0
 @export var bonus_mana_cost_reduction: float = 0.0
 @export var bonus_spell_radius: float = 0.0
+@export var bonus_armor: float = 0.0
+@export var bonus_attack_speed: float = 0.0
+@export var bonus_crit_chance: float = 0.0
+@export var bonus_lifesteal: float = 0.0
+@export var bonus_mana_regen: float = 0.0
+@export var cleave_ratio: float = 0.0
+@export var cleave_radius: float = 0.0
+@export var execute_bonus_ratio: float = 0.0
+@export var aura_armor_bonus: float = 0.0
+@export var aura_attack_speed_bonus: float = 0.0
+@export var aura_radius: float = 0.0
+@export var low_hp_extra_lifesteal: float = 0.0
+@export var has_out_of_combat_regen: bool = false
 
 
 func get_sell_value() -> int:
@@ -83,6 +101,10 @@ func has_recipe() -> bool:
 func get_recipe_gold_cost() -> int:
 	if recipe_gold_cost >= 0:
 		return recipe_gold_cost
+	return gold_cost
+
+
+func get_total_gold_cost() -> int:
 	return gold_cost
 
 
@@ -176,3 +198,13 @@ func get_components_of_kind(kind: ItemComponent.Kind) -> Array[ItemComponent]:
 
 func is_shop_item() -> bool:
 	return not is_neutral and category != Category.NEUTRAL
+
+
+func get_tier_label() -> String:
+	match tier:
+		Tier.TIER_2:
+			return "Tier 2"
+		Tier.TIER_3:
+			return "Tier 3"
+		_:
+			return "Tier 1"

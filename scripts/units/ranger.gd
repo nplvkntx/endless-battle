@@ -52,6 +52,7 @@ func _ready() -> void:
 	attack_cooldown = RangerStats.ATTACK_COOLDOWN
 	mana_regen_rate = RangerStats.MANA_REGEN_RATE
 	max_mana = RangerStats.MAX_MANA
+	armor = RangerStats.ARMOR
 	_trap_charges = RangerStats.BEAR_TRAP_MAX_CHARGES
 
 	super._ready()
@@ -66,7 +67,7 @@ func get_display_name() -> String:
 	return "Ranger"
 
 
-func get_kit_base_attack_damage() -> int:
+func get_kit_base_attack_damage() -> float:
 	return RangerStats.ATTACK_DAMAGE
 
 
@@ -82,7 +83,7 @@ func get_kit_base_max_health() -> int:
 	return RangerStats.MAX_HEALTH
 
 
-func get_kit_attack_damage_per_level() -> int:
+func get_kit_attack_damage_per_level() -> float:
 	return RangerStats.ATTACK_DAMAGE_PER_LEVEL
 
 
@@ -92,6 +93,22 @@ func get_kit_health_per_level() -> int:
 
 func get_kit_mana_per_level() -> int:
 	return RangerStats.MANA_PER_LEVEL
+
+
+func get_kit_base_armor() -> float:
+	return RangerStats.ARMOR
+
+
+func get_kit_armor_per_level() -> float:
+	return RangerStats.ARMOR_PER_LEVEL
+
+
+func get_kit_attack_speed_per_level() -> float:
+	return RangerStats.ATTACK_SPEED_PER_LEVEL
+
+
+func get_kit_move_speed_per_level() -> float:
+	return RangerStats.MOVE_SPEED_PER_LEVEL
 
 
 func _should_show_ability_feedback() -> bool:

@@ -19,9 +19,13 @@ const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
 ## Train costs — edit UnitStats only.
 const TRAIN_GOLD_COST: int = UnitStats.SWORDSMAN_GOLD_COST
 const SPEARMAN_TRAIN_GOLD_COST: int = UnitStats.SPEARMAN_GOLD_COST
+const ARCHER_TRAIN_GOLD_COST: int = UnitStats.ARCHER_GOLD_COST
 const TRAIN_FOOD_COST: int = UnitStats.SWORDSMAN_FOOD_COST
+const SPEARMAN_TRAIN_FOOD_COST: int = UnitStats.SPEARMAN_FOOD_COST
+const ARCHER_TRAIN_FOOD_COST: int = UnitStats.ARCHER_FOOD_COST
 const TRAIN_SECONDS: float = UnitStats.SWORDSMAN_TRAIN_SECONDS
 const SPEARMAN_TRAIN_SECONDS: float = UnitStats.SPEARMAN_TRAIN_SECONDS
+const ARCHER_TRAIN_SECONDS: float = UnitStats.ARCHER_TRAIN_SECONDS
 const RALLY_MARKER_Y: float = 0.05
 const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3
@@ -168,7 +172,8 @@ func _try_train_enemy_unit(train_id: StringName) -> bool:
 		return false
 
 	var gold_cost: int = get_unit_train_gold_cost(train_id)
-	if not EnemyResourceManager.try_pay_training(gold_cost, TRAIN_FOOD_COST):
+	var food_cost: int = get_unit_train_food_cost(train_id)
+	if not EnemyResourceManager.try_pay_training(gold_cost, food_cost):
 		return false
 
 	_enqueue_training(train_id)
@@ -364,14 +369,28 @@ static func get_unit_train_gold_cost(train_id: StringName) -> int:
 	match train_id:
 		TRAIN_ID_SPEARMAN:
 			return SPEARMAN_TRAIN_GOLD_COST
+		TRAIN_ID_ARCHER:
+			return ARCHER_TRAIN_GOLD_COST
 		_:
 			return TRAIN_GOLD_COST
+
+
+static func get_unit_train_food_cost(train_id: StringName) -> int:
+	match train_id:
+		TRAIN_ID_SPEARMAN:
+			return SPEARMAN_TRAIN_FOOD_COST
+		TRAIN_ID_ARCHER:
+			return ARCHER_TRAIN_FOOD_COST
+		_:
+			return TRAIN_FOOD_COST
 
 
 static func get_unit_train_seconds(train_id: StringName) -> float:
 	match train_id:
 		TRAIN_ID_SPEARMAN:
 			return SPEARMAN_TRAIN_SECONDS
+		TRAIN_ID_ARCHER:
+			return ARCHER_TRAIN_SECONDS
 		_:
 			return TRAIN_SECONDS
 
@@ -536,9 +555,10 @@ func _try_train_player_unit(train_id: StringName) -> void:
 		return
 
 	var gold_cost: int = get_unit_train_gold_cost(train_id)
-	if not ResourceManager.try_pay_worker_training(gold_cost, TRAIN_FOOD_COST):
+	var food_cost: int = get_unit_train_food_cost(train_id)
+	if not ResourceManager.try_pay_worker_training(gold_cost, food_cost):
 		ResourceManager.show_feedback(
-			ResourceManager.get_training_failure_message(gold_cost, TRAIN_FOOD_COST)
+			ResourceManager.get_training_failure_message(gold_cost, food_cost)
 		)
 		return
 
@@ -664,18 +684,20 @@ func _try_repeat_training() -> void:
 
 func _can_pay_training_costs() -> bool:
 	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
+	var food_cost: int = get_unit_train_food_cost(_repeat_unit_type)
 	if _uses_player_resources():
-		return ResourceManager.can_afford_worker_training(gold_cost, TRAIN_FOOD_COST)
+		return ResourceManager.can_afford_worker_training(gold_cost, food_cost)
 
-	return EnemyResourceManager.can_afford_training(gold_cost, TRAIN_FOOD_COST)
+	return EnemyResourceManager.can_afford_training(gold_cost, food_cost)
 
 
 func _pay_training_costs() -> bool:
 	var gold_cost: int = get_unit_train_gold_cost(_repeat_unit_type)
+	var food_cost: int = get_unit_train_food_cost(_repeat_unit_type)
 	if _uses_player_resources():
-		return ResourceManager.try_pay_worker_training(gold_cost, TRAIN_FOOD_COST)
+		return ResourceManager.try_pay_worker_training(gold_cost, food_cost)
 
-	return EnemyResourceManager.try_pay_training(gold_cost, TRAIN_FOOD_COST)
+	return EnemyResourceManager.try_pay_training(gold_cost, food_cost)
 
 
 func _uses_player_resources() -> bool:
@@ -716,12 +738,13 @@ func _spawn_archer() -> void:
 
 func _refund_training_cost(train_id: StringName) -> void:
 	var gold_cost: int = get_unit_train_gold_cost(train_id)
+	var food_cost: int = get_unit_train_food_cost(train_id)
 	if _uses_player_resources():
 		ResourceManager.add_gold(gold_cost)
-		ResourceManager.release_food_used(TRAIN_FOOD_COST)
+		ResourceManager.release_food_used(food_cost)
 	else:
 		EnemyResourceManager.add_gold(gold_cost)
-		EnemyResourceManager.release_food_used(TRAIN_FOOD_COST)
+		EnemyResourceManager.release_food_used(food_cost)
 
 
 func _emit_queue_changed() -> void:

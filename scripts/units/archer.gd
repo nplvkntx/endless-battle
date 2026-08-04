@@ -16,6 +16,8 @@ func _init() -> void:
 	attack_range = UnitStats.ARCHER_ATTACK_RANGE
 	attack_cooldown = UnitStats.ARCHER_ATTACK_COOLDOWN
 	armor = UnitStats.ARCHER_ARMOR
+	damage_type = DamageService.DamageType.PIERCE
+	armor_type = DamageService.ArmorType.LIGHT
 
 
 func _ready() -> void:
@@ -58,19 +60,16 @@ func _deliver_attack() -> bool:
 	return true
 
 
-func _compute_incoming_damage(amount: float) -> int:
-	return int(amount)
-
-
 func apply_blacksmith_upgrades() -> void:
 	_cache_base_stats()
 	var attack_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK)
 	var speed_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_ATTACK_SPEED)
 	var range_level: int = _get_blacksmith_upgrade_level(UpgradeManager.UPGRADE_ARCHER_RANGE)
 	attack_damage = _base_attack_damage + attack_level * UnitStats.ARCHER_ATTACK_DAMAGE_PER_UPGRADE_LEVEL
-	attack_cooldown = _base_attack_cooldown * (
-		1.0 - UnitStats.ARCHER_ATTACK_SPEED_COOLDOWN_REDUCTION_PER_LEVEL * float(speed_level)
+	var bonus_attack_speed: float = (
+		UnitStats.ARCHER_ATTACK_SPEED_BONUS_PER_LEVEL * float(speed_level)
 	)
+	attack_cooldown = UnitStats.get_final_attack_cooldown(_base_attack_cooldown, bonus_attack_speed)
 	attack_range = (
 		_base_attack_range + float(range_level) * UnitStats.ARCHER_ATTACK_RANGE_PER_UPGRADE_LEVEL
 	)

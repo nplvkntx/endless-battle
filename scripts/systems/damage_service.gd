@@ -35,6 +35,8 @@ const OPT_DAMAGE_REDUCTION := &"damage_reduction"
 const OPT_SHOW_FLOAT := &"show_floating_number"
 const OPT_EMPHASIZE_FLOAT := &"emphasize_float"
 const OPT_IS_BASIC_ATTACK := &"is_basic_attack"
+## Skip item procs (cleave recursion, etc.) on secondary hits.
+const OPT_NO_ITEM_PROCS := &"no_item_procs"
 
 const RESULT_APPLIED := &"applied"
 const RESULT_BLOCKED := &"blocked"

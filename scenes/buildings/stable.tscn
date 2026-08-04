@@ -72,4 +72,4 @@ shape = SubResource("BoxShape3D_stable")
 
 [node name="HealthComponent" type="Node" parent="."]
 script = ExtResource("2_health_component")
-max_health = 700
+max_health = 850

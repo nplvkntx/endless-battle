@@ -151,4 +151,4 @@ shape = SubResource("BoxShape3D_artillery_depot")
 
 [node name="HealthComponent" type="Node" parent="."]
 script = ExtResource("2_health_component")
-max_health = 750
+max_health = 900
