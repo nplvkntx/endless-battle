@@ -33,6 +33,10 @@ var target_object: Node3D = null
 var priority: int = 0
 var creation_time_msec: int = 0
 var last_progress_time_msec: int = 0
+## Last observed horizontal distance to the objective (-1 = unset).
+var last_distance_to_objective: float = -1.0
+## Why progress was last recorded (for F3 / watchdog diagnostics).
+var last_progress_reason: String = "mission start"
 var completion_condition: CompletionCondition = CompletionCondition.NONE
 var transition_reason: String = ""
 var cancellation_reason: String = ""
@@ -52,6 +56,8 @@ func _init(
 	priority = p_priority
 	creation_time_msec = now_msec
 	last_progress_time_msec = now_msec
+	last_distance_to_objective = -1.0
+	last_progress_reason = "mission start"
 	transition_reason = p_transition_reason
 	completion_condition = CompletionCondition.NONE
 	cancellation_reason = ""
@@ -113,8 +119,27 @@ func get_seconds_since_progress() -> float:
 	return float(Time.get_ticks_msec() - last_progress_time_msec) / 1000.0
 
 
-func note_progress() -> void:
+func note_progress(reason: String = "progress") -> void:
 	last_progress_time_msec = Time.get_ticks_msec()
+	if not reason.is_empty():
+		last_progress_reason = reason
+
+
+## Records meaningful travel progress when distance shrinks by at least `epsilon`.
+func note_distance_progress(distance: float, epsilon: float = 2.5) -> bool:
+	if distance < 0.0:
+		return false
+	if last_distance_to_objective < 0.0:
+		## Baseline only — does not count as meaningful progress.
+		last_distance_to_objective = distance
+		return false
+	if distance < last_distance_to_objective - epsilon:
+		last_distance_to_objective = distance
+		note_progress("closing on objective")
+		return true
+	if distance <= last_distance_to_objective:
+		last_distance_to_objective = distance
+	return false
 
 
 func has_valid_target_object() -> bool:
@@ -124,6 +149,9 @@ func has_valid_target_object() -> bool:
 func sanitize_target_object() -> void:
 	if target_object != null and not is_instance_valid(target_object):
 		target_object = null
+		## Freed node objectives leave a stale world point — clear it so watchdogs
+		## and F3 cannot treat a dead target as still valid.
+		target_position = Vector3.ZERO
 
 
 func get_objective_label() -> String:
@@ -150,6 +178,8 @@ func duplicate_mission() -> ArmyMissionV2:
 	)
 	copy.creation_time_msec = creation_time_msec
 	copy.last_progress_time_msec = last_progress_time_msec
+	copy.last_distance_to_objective = last_distance_to_objective
+	copy.last_progress_reason = last_progress_reason
 	copy.completion_condition = completion_condition
 	copy.cancellation_reason = cancellation_reason
 	return copy

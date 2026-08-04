@@ -28,6 +28,7 @@ func _ready() -> void:
 	_verify_retreat_role_split_helper(failures)
 	_verify_retreat_recover_hysteresis_helpers(failures)
 	_verify_hero_micro_integration(failures)
+	await _verify_watchdog_and_diagnostics(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -1080,3 +1081,386 @@ func _verify_hero_micro_integration(failures: PackedStringArray) -> void:
 
 	hero_stub.queue_free()
 	commander.queue_free()
+
+
+func _verify_watchdog_and_diagnostics(failures: PackedStringArray) -> void:
+	_verify_watchdog_config_and_source(failures)
+	_verify_watchdog_progress_helpers(failures)
+	await _verify_watchdog_recovery_scenarios(failures)
+	_verify_truthful_f3_diagnostics(failures)
+
+
+func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"watchdog stall in 6-8s band",
+		MilitaryAIConfig.V2_WATCHDOG_STALL_SECONDS >= 6.0
+		and MilitaryAIConfig.V2_WATCHDOG_STALL_SECONDS <= 8.0
+	)
+	_expect(
+		failures,
+		"watchdog interval configured",
+		MilitaryAIConfig.V2_WATCHDOG_INTERVAL_SECONDS == 1.0
+	)
+	_expect(
+		failures,
+		"watchdog diag throttle configured",
+		MilitaryAIConfig.V2_WATCHDOG_DIAG_INTERVAL_SECONDS >= 1.0
+	)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "watchdog director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "director ticks mission watchdog", text.contains("_tick_mission_watchdog"))
+		_expect(failures, "director refreshes stalled order once", text.contains("_refresh_stalled_mission_order"))
+		_expect(failures, "director cancels stalled mission", text.contains("_cancel_stalled_mission_and_fallback"))
+		_expect(failures, "director has fallback priority", text.contains("_resolve_watchdog_fallback"))
+		_expect(failures, "director fallback prefers DEFEND", text.contains("fallback DEFEND"))
+		_expect(failures, "director fallback fights nearby", text.contains("fight nearby"))
+		_expect(failures, "director fallback retreats if unsafe", text.contains("fallback RETREAT"))
+		_expect(failures, "director fallback picks another camp", text.contains("fallback CREEP"))
+		_expect(failures, "director fallback assembles", text.contains("fallback ASSEMBLE"))
+		_expect(failures, "director fallback recovers", text.contains("fallback RECOVER"))
+		_expect(failures, "director releases reservations on cancel", text.contains("_release_creep_reservation"))
+		_expect(failures, "director throttles watchdog diagnostics", text.contains("_maybe_log_watchdog_diag"))
+		_expect(failures, "director resolves truthful display", text.contains("_resolve_truthful_display"))
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "watchdog commander source readable", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(
+			failures,
+			"commander exposes order refresh for watchdog",
+			commander_text.contains("request_watchdog_order_refresh")
+		)
+		_expect(
+			failures,
+			"commander notes cleared camp progress",
+			commander_text.contains("cleared camp")
+		)
+		_expect(
+			failures,
+			"commander notes combat progress",
+			commander_text.contains("started combat")
+		)
+
+	var overlay_source := FileAccess.open("res://scripts/debug/perf_debug_overlay.gd", FileAccess.READ)
+	_expect(failures, "watchdog overlay source readable", overlay_source != null)
+	if overlay_source != null:
+		var overlay_text: String = overlay_source.get_as_text()
+		overlay_source.close()
+		_expect(failures, "F3 shows V2 Order", overlay_text.contains("V2 Order"))
+		_expect(failures, "F3 shows V2 Distance", overlay_text.contains("V2 Distance"))
+		_expect(failures, "F3 shows V2 Since Progress", overlay_text.contains("V2 Since Progress"))
+		_expect(failures, "F3 shows V2 State Age", overlay_text.contains("V2 State Age"))
+		_expect(failures, "F3 shows V2 Watchdog", overlay_text.contains("V2 Watchdog"))
+		_expect(failures, "F3 shows V2 Transition", overlay_text.contains("V2 Transition"))
+		_expect(failures, "F3 shows V2 Squad Size", overlay_text.contains("V2 Squad Size"))
+		_expect(failures, "F3 shows V2 Objective", overlay_text.contains("V2 Objective"))
+		_expect(failures, "F3 shows V2 State", overlay_text.contains("V2 State"))
+
+
+func _verify_watchdog_progress_helpers(failures: PackedStringArray) -> void:
+	var mission := ArmyMissionV2.new(
+		ArmyMissionV2.MissionType.CREEP,
+		Vector3(40, 0, 0),
+		null,
+		1,
+		"watchdog progress"
+	)
+	_expect(failures, "progress baseline starts unset", mission.last_distance_to_objective < 0.0)
+	_expect(
+		failures,
+		"first distance sample sets baseline without closing",
+		mission.note_distance_progress(40.0, 2.5) == false
+	)
+	_expect(
+		failures,
+		"baseline does not fake meaningful progress",
+		mission.last_progress_reason == "mission start"
+	)
+	_expect(
+		failures,
+		"small drift is not meaningful progress",
+		mission.note_distance_progress(39.0, 2.5) == false
+	)
+	_expect(
+		failures,
+		"closing distance counts as meaningful progress",
+		mission.note_distance_progress(30.0, 2.5) == true
+	)
+	_expect(failures, "progress reason recorded", mission.last_progress_reason.contains("closing"))
+	mission.note_progress("started combat")
+	_expect(failures, "combat progress reason stored", mission.last_progress_reason == "started combat")
+
+
+func _verify_watchdog_recovery_scenarios(failures: PackedStringArray) -> void:
+	var root := Node.new()
+	root.name = "WatchdogHarness"
+	add_child(root)
+
+	var director := MilitaryDirectorV2.new()
+	director.name = "MilitaryDirectorV2"
+	root.add_child(director)
+	director.reset_match_state()
+
+	var commander := ArmyCommanderV2.new()
+	commander.name = "ArmyCommanderV2"
+	root.add_child(commander)
+	commander.reset_match_state()
+
+	## --- Invalidate a camp during travel ---
+	var camp := Node3D.new()
+	camp.name = "TravelCamp"
+	camp.position = Vector3(50, 0, 0)
+	root.add_child(camp)
+	director._transition_to(
+		MilitaryDirectorV2.State.CREEP,
+		"travel to camp",
+		camp.global_position,
+		camp,
+		10
+	)
+	_expect(failures, "creep mission active before invalidate", director.get_state() == MilitaryDirectorV2.State.CREEP)
+	var camp_id: int = camp.get_instance_id()
+	camp.queue_free()
+	await get_tree().process_frame
+	director.get_mission().sanitize_target_object()
+	_expect(
+		failures,
+		"invalidated camp clears target object",
+		director.get_mission().target_object == null
+	)
+	director.debug_force_watchdog_stall_for_tests()
+	director.debug_set_watchdog_refreshed_for_tests(true)
+	director.debug_tick_watchdog_for_tests()
+	_expect(
+		failures,
+		"invalid camp during travel transitions away from CREEP",
+		director.get_state() != MilitaryDirectorV2.State.CREEP
+	)
+	_expect(
+		failures,
+		"invalid camp releases reservation",
+		director.get_reserved_creep_camp_id() != camp_id
+	)
+	_expect(
+		failures,
+		"watchdog status reports recovery after invalid camp",
+		not director.debug_get_watchdog_status().is_empty()
+	)
+
+	## --- Destroy attack target ---
+	var attack_target := Node3D.new()
+	attack_target.name = "AttackTarget"
+	attack_target.position = Vector3(80, 0, 0)
+	root.add_child(attack_target)
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"push target",
+		attack_target.global_position,
+		attack_target,
+		20
+	)
+	_expect(failures, "attack mission active before destroy", director.get_state() == MilitaryDirectorV2.State.ATTACK)
+	attack_target.queue_free()
+	await get_tree().process_frame
+	director.get_mission().sanitize_target_object()
+	director.debug_force_watchdog_stall_for_tests()
+	director.debug_set_watchdog_refreshed_for_tests(true)
+	director.debug_tick_watchdog_for_tests()
+	_expect(
+		failures,
+		"destroyed attack target causes transition",
+		director.get_state() != MilitaryDirectorV2.State.ATTACK
+		or director.get_mission().completion_condition == ArmyMissionV2.CompletionCondition.CANCELLED
+		or not director.debug_get_watchdog_status().begins_with("tracking")
+	)
+
+	## --- Block a route temporarily (stall then refresh once) ---
+	var blocked_target := Node3D.new()
+	blocked_target.name = "BlockedTarget"
+	blocked_target.position = Vector3(90, 0, 10)
+	root.add_child(blocked_target)
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"blocked route attack",
+		blocked_target.global_position,
+		blocked_target,
+		20
+	)
+	director.debug_force_watchdog_stall_for_tests()
+	director.debug_set_watchdog_refreshed_for_tests(false)
+	director.debug_tick_watchdog_for_tests()
+	_expect(
+		failures,
+		"stalled route refreshes order once before cancel",
+		director.debug_is_watchdog_order_refreshed()
+	)
+	_expect(
+		failures,
+		"first stall refresh keeps mission alive briefly",
+		director.get_state() == MilitaryDirectorV2.State.ATTACK
+		or director.debug_get_watchdog_status().contains("refresh")
+		or director.debug_get_watchdog_status().contains("fallback")
+	)
+
+	## Second stall after refresh → cancel / fallback (no freeze).
+	director.debug_force_watchdog_stall_for_tests()
+	director.debug_set_watchdog_refreshed_for_tests(true)
+	var pre_fallback_state: MilitaryDirectorV2.State = director.get_state()
+	director.debug_tick_watchdog_for_tests()
+	_expect(
+		failures,
+		"second stall after refresh transitions instead of freezing",
+		director.get_state() != pre_fallback_state
+		or director.debug_get_watchdog_status().contains("fallback")
+		or director.get_mission().completion_condition == ArmyMissionV2.CompletionCondition.CANCELLED
+	)
+
+	## --- Kill squad leader / hero ---
+	var hero_stub := Node3D.new()
+	hero_stub.name = "SquadHero"
+	root.add_child(hero_stub)
+	var squad: ArmySquadV2 = director.get_main_squad()
+	squad.try_add_member(hero_stub, ArmySquadV2.UnitRole.HERO)
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"hero-led attack",
+		Vector3(70, 0, 0),
+		null,
+		20
+	)
+	hero_stub.queue_free()
+	await get_tree().process_frame
+	squad.sanitize()
+	director.debug_force_watchdog_stall_for_tests()
+	director.debug_set_watchdog_refreshed_for_tests(true)
+	director.debug_tick_watchdog_for_tests()
+	_expect(
+		failures,
+		"hero death does not freeze AI state machine",
+		director.get_state_name() != "UNKNOWN"
+		and director.get_mission() != null
+	)
+
+	## --- Trigger defense during creeping ---
+	director._transition_to(
+		MilitaryDirectorV2.State.CREEP,
+		"creeping before defend",
+		blocked_target.global_position,
+		blocked_target,
+		10
+	)
+	director._pre_defend_state = MilitaryDirectorV2.State.CREEP
+	director._transition_to(
+		MilitaryDirectorV2.State.DEFEND,
+		"defend during creep",
+		Vector3(5, 0, 5),
+		null,
+		100
+	)
+	_expect(
+		failures,
+		"defense overrides creeping",
+		director.get_state() == MilitaryDirectorV2.State.DEFEND
+	)
+	_expect(
+		failures,
+		"defense release creep reservation",
+		director.get_reserved_creep_camp_id() == 0
+	)
+
+	## Confirm AI always has a defined state (never unknown).
+	_expect(
+		failures,
+		"director always has a mission payload",
+		director.get_mission() != null
+	)
+	_expect(
+		failures,
+		"director state label never UNKNOWN",
+		director.get_state_name() != "UNKNOWN"
+	)
+
+	blocked_target.queue_free()
+	root.queue_free()
+	await get_tree().process_frame
+
+
+func _verify_truthful_f3_diagnostics(failures: PackedStringArray) -> void:
+	PerfCounters.set_military_ai_v2_watchdog_status("attack-move", 12.5, 3.2, 8.0, "tracking (3.2s)")
+	_expect(failures, "F3 active order API", PerfCounters.get_military_ai_v2_active_order() == "attack-move")
+	_expect(failures, "F3 distance API", is_equal_approx(PerfCounters.get_military_ai_v2_distance(), 12.5))
+	_expect(
+		failures,
+		"F3 since progress API",
+		is_equal_approx(PerfCounters.get_military_ai_v2_seconds_since_progress(), 3.2)
+	)
+	_expect(failures, "F3 state age API", is_equal_approx(PerfCounters.get_military_ai_v2_state_age(), 8.0))
+	_expect(
+		failures,
+		"F3 watchdog status API",
+		PerfCounters.get_military_ai_v2_watchdog_status() == "tracking (3.2s)"
+	)
+
+	var director := MilitaryDirectorV2.new()
+	add_child(director)
+	director.reset_match_state()
+
+	## CREEP without a valid camp must not be claimed on F3.
+	director._state = MilitaryDirectorV2.State.CREEP
+	director._mission = ArmyMissionV2.new(
+		ArmyMissionV2.MissionType.CREEP,
+		Vector3.ZERO,
+		null,
+		0,
+		"false creep"
+	)
+	director._watchdog_active_order = "-"
+	var creep_display: Dictionary = director.debug_resolve_truthful_display_for_tests()
+	_expect(
+		failures,
+		"F3 never claims CREEP without camp",
+		String(creep_display.get("state", "CREEP")) != "CREEP"
+	)
+
+	## ATTACK without objective must not be claimed.
+	director._state = MilitaryDirectorV2.State.ATTACK
+	director._mission = ArmyMissionV2.new(
+		ArmyMissionV2.MissionType.ATTACK,
+		Vector3.ZERO,
+		null,
+		0,
+		"false attack"
+	)
+	var attack_display: Dictionary = director.debug_resolve_truthful_display_for_tests()
+	_expect(
+		failures,
+		"F3 never claims ATTACK without objective",
+		String(attack_display.get("state", "ATTACK")) != "ATTACK"
+	)
+
+	## DEFEND without threat must not be claimed.
+	director._state = MilitaryDirectorV2.State.DEFEND
+	director._defend_active = false
+	director._defend_clear_timer = 0.0
+	director._mission = ArmyMissionV2.new(
+		ArmyMissionV2.MissionType.DEFEND,
+		Vector3.ZERO,
+		null,
+		0,
+		"false defend"
+	)
+	var defend_display: Dictionary = director.debug_resolve_truthful_display_for_tests()
+	_expect(
+		failures,
+		"F3 never claims DEFEND without threat",
+		String(defend_display.get("state", "DEFEND")) != "DEFEND"
+	)
+
+	director.queue_free()

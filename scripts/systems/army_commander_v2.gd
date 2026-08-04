@@ -71,6 +71,18 @@ func reset_match_state() -> void:
 	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
 
 
+## Watchdog asks the commander to re-issue current mission orders once.
+func request_watchdog_order_refresh() -> void:
+	_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
+	_creep_focus_reissue_timer = EnemyCreepManager.FOCUS_REISSUE_SECONDS
+	_defend_order_reissue_timer = MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS
+	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
+	_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
+	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
+	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
+	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
+
+
 func _process(delta: float) -> void:
 	if not MilitaryAIConfig.is_v2_enabled():
 		set_process(false)
@@ -520,14 +532,14 @@ func _execute_creep_mission(
 		EnemyArmyCommand.clear_executable_mission("creep regroup")
 		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
 			_regroup_creep_army(creep_manager, creep_army, rally_point)
-		mission.note_progress()
+		mission.note_progress("creep regroup")
 		return
 
 	if creep_manager._is_camp_cleared(tree, camp):
 		EnemyArmyCommand.clear_executable_mission("creep camp cleared")
 		_hold_creep_squad(creep_army, army_center)
 		_creep_regroup_hold_timer = CREEP_REGROUP_HOLD_SECONDS
-		mission.note_progress()
+		mission.note_progress("cleared camp")
 		return
 
 	if creep_manager._is_player_contesting_camp(tree, camp):
@@ -579,7 +591,7 @@ func _execute_creep_mission(
 				_regroup_creep_army(creep_manager, creep_army, rally_point)
 			return
 		EnemyArmyCommand.note_mission_progress(army_center, true, creep_army.size())
-		mission.note_progress()
+		mission.note_progress("started combat")
 		_execute_creep_focus_fire(creep_manager, tree, creep_army, camp)
 		return
 
@@ -599,7 +611,7 @@ func _execute_creep_mission(
 		return
 
 	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
-	mission.note_progress()
+	## Distance reduction is tracked by the director watchdog — do not fake progress here.
 	_creep_order_reissue_timer = 0.0
 
 
@@ -763,7 +775,7 @@ func _execute_defend_mission(
 					EnemyUnitMission.Mission.DEFEND
 				)
 		)
-		mission.note_progress()
+		## Order reissue alone is not meaningful progress — watchdog tracks distance/combat.
 		EnemyArmyCommand.note_mission_progress(
 			EnemyArmyCommand.compute_army_center(defense_army),
 			false,
@@ -784,7 +796,7 @@ func _execute_defend_mission(
 				EnemyUnitMission.Mission.DEFEND
 			)
 		)
-		mission.note_progress()
+		mission.note_progress("started combat")
 		EnemyArmyCommand.note_mission_progress(
 			EnemyArmyCommand.compute_army_center(defense_army),
 			true,
@@ -931,7 +943,8 @@ func _execute_attack_mission(
 					EnemyUnitMission.Mission.ATTACK
 				)
 			)
-		mission.note_progress()
+		if engaging_local:
+			mission.note_progress("started combat")
 		EnemyArmyCommand.note_mission_progress(army_center, engaging_local, attack_army.size())
 		EnemyArmyCommand.begin_fight_tracking(attack_army, army_center)
 
@@ -953,7 +966,7 @@ func _execute_attack_mission(
 					EnemyUnitMission.Mission.ATTACK
 				)
 			)
-			mission.note_progress()
+			mission.note_progress("started combat")
 			EnemyArmyCommand.note_mission_progress(army_center, true, attack_army.size())
 
 
@@ -1042,7 +1055,7 @@ func _execute_retreat_mission(
 	## Pull any stragglers still fighting away from the pack.
 	_pull_retreat_stragglers(retreat_army, army_center, rally_point)
 
-	mission.note_progress()
+	mission.note_progress("completing retreat")
 	EnemyArmyCommand.note_mission_progress(army_center, cover_active, retreat_army.size())
 
 
@@ -1091,7 +1104,7 @@ func _execute_recover_mission(
 				EnemyUnitMission.Mission.RALLY
 			)
 		)
-		mission.note_progress()
+		mission.note_progress("completing regroup")
 		EnemyArmyCommand.note_mission_progress(
 			EnemyArmyCommand.compute_army_center(recover_army),
 			false,

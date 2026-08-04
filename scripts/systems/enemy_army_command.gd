@@ -5442,6 +5442,10 @@ static func get_executable_objective_position() -> Vector3:
 	return _exec_objective_position
 
 
+static func get_executable_order_label() -> String:
+	return _exec_order_label
+
+
 static func is_creeping_executable_active() -> bool:
 	return _exec_mission == ExecutableMission.CREEPING
 

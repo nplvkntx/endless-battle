@@ -11,6 +11,8 @@ extends Node
 ## RETREAT pulls the squad home as one group; RECOVER rebuilds before offense resumes.
 ## After a clear, the director reassesses via RECOVER or ASSEMBLE and never resumes
 ## a stale creep/attack reservation automatically.
+## Mission watchdog cancels stalled CREEP/ATTACK/DEFEND/RETREAT after ~6–8s without
+## meaningful progress, refreshes orders once, then falls back safely.
 
 enum State {
 	IDLE,
@@ -61,6 +63,18 @@ var _state_entered_msec: int = 0
 var _post_retreat_attack_cooldown: float = 0.0
 var _designated_recovery_point: Vector3 = Vector3.ZERO
 
+## Mission watchdog / truthful F3 diagnostics.
+var _watchdog_timer: float = 0.0
+var _watchdog_diag_timer: float = 0.0
+var _watchdog_order_refreshed: bool = false
+var _watchdog_status: String = "idle"
+var _watchdog_recent_combat: bool = false
+var _watchdog_living_members: int = 0
+var _watchdog_distance: float = -1.0
+var _watchdog_active_order: String = "-"
+var _watchdog_last_diag_signature: String = ""
+var _watchdog_objective_valid: bool = true
+
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
@@ -109,6 +123,7 @@ func _clear_roster_state() -> void:
 	_state_entered_msec = Time.get_ticks_msec()
 	_post_retreat_attack_cooldown = 0.0
 	_designated_recovery_point = Vector3.ZERO
+	_reset_watchdog_state("match reset")
 
 
 func _process(delta: float) -> void:
@@ -122,6 +137,7 @@ func _process(delta: float) -> void:
 
 	_tick_timer = 0.0
 	_refresh_army_roster()
+	_tick_mission_watchdog(TICK_SECONDS)
 	_evaluate_strategy()
 	_publish_perf_status()
 	PerfCounters.record_ai_decision_update()
@@ -351,6 +367,17 @@ func _transition_to(
 				_last_transition_reason = reason
 				_mission.transition_reason = reason
 			return false
+		## Same living objective with a drifted position — update in place so the
+		## watchdog progress clock is not reset every strategic tick.
+		if same_target_object and same_priority and NodeSafety.is_alive_node(target_object):
+			_mission.target_position = target_position
+			_mission.target_object = target_object
+			if reason != _last_transition_reason and not reason.is_empty():
+				_last_transition_reason = reason
+				_mission.transition_reason = reason
+			if next_state == State.CREEP:
+				_reserved_creep_camp_id = (target_object as Node).get_instance_id()
+			return false
 		if next_state == State.CREEP and not NodeSafety.is_alive_node(target_object):
 			return false
 		if next_state == State.CREEP:
@@ -367,6 +394,8 @@ func _transition_to(
 			priority,
 			_last_transition_reason
 		)
+		_watchdog_order_refreshed = false
+		_watchdog_distance = -1.0
 		_publish_perf_status()
 		return true
 
@@ -414,6 +443,11 @@ func _transition_to(
 	)
 	if previous_state != next_state:
 		_state_entered_msec = Time.get_ticks_msec()
+		_reset_watchdog_state("entered %s" % state_to_string(next_state))
+	elif next_state in [State.CREEP, State.ATTACK, State.DEFEND, State.RETREAT]:
+		## Objective/target refresh mid-state still counts as a new progress baseline.
+		_watchdog_order_refreshed = false
+		_watchdog_distance = -1.0
 	if next_state == State.CREEP and NodeSafety.is_alive_node(target_object):
 		_reserved_creep_camp_id = (target_object as Node).get_instance_id()
 	elif next_state != State.CREEP:
@@ -767,8 +801,6 @@ func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 			focus,
 			100
 		)
-		if _mission != null:
-			_mission.note_progress()
 		return true
 
 	if _state != State.DEFEND and not _defend_active:
@@ -969,6 +1001,8 @@ func _evaluate_retreat_strategy(tree: SceneTree, rally_point: Vector3) -> void:
 			if arrived
 			else "retreat hold elapsed, recovering"
 		)
+		if _mission != null:
+			_mission.note_progress("completing retreat")
 		_transition_to(State.RECOVER, reason, destination)
 		return
 
@@ -1347,8 +1381,6 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		target_node,
 		int(objective.get("priority", CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL))
 	)
-	if _mission != null:
-		_mission.note_progress()
 	return true
 
 
@@ -1386,6 +1418,7 @@ func _maybe_exit_attack(tree: SceneTree, rally_point: Vector3, attack_army: Arra
 		):
 			## Target destroyed — reassess for a follow-up objective this tick.
 			_mission.completion_condition = ArmyMissionV2.CompletionCondition.TARGET_DESTROYED
+			_mission.note_progress("killing target")
 			return false
 
 	return false
@@ -2263,18 +2296,24 @@ func _publish_perf_status() -> void:
 		return
 
 	var mission: ArmyMissionV2 = _mission
-	var mission_name: String = "-"
-	var objective: String = "-"
+	var display: Dictionary = _resolve_truthful_display(mission)
+	var mission_name: String = String(display.get("mission", "-"))
+	var objective: String = String(display.get("objective", "-"))
+	var display_state: String = String(display.get("state", get_state_name()))
 	var age_seconds: float = 0.0
+	var since_progress: float = 0.0
 	if mission != null:
 		mission.sanitize_target_object()
-		mission_name = mission.get_mission_type_name()
-		objective = mission.get_objective_label()
 		age_seconds = mission.get_age_seconds()
+		since_progress = mission.get_seconds_since_progress()
+
+	var state_age: float = _state_commit_elapsed_seconds()
+	if state_age >= INF:
+		state_age = 0.0
 
 	PerfCounters.set_military_ai_v2_status(
 		MilitaryAIConfig.ai_version_label(),
-		get_state_name(),
+		display_state,
 		mission_name,
 		objective,
 		age_seconds,
@@ -2286,9 +2325,527 @@ func _publish_perf_status() -> void:
 		_main_squad.get_role_counts_label(),
 		_main_squad.estimated_army_value
 	)
+	PerfCounters.set_military_ai_v2_watchdog_status(
+		_watchdog_active_order,
+		_watchdog_distance,
+		since_progress,
+		state_age,
+		_watchdog_status
+	)
 	## Keep legacy AI status fields filled so older overlay lines stay coherent under V2.
-	PerfCounters.set_ai_status(get_state_name(), mission_name, "MilitaryDirectorV2")
+	PerfCounters.set_ai_status(display_state, mission_name, "MilitaryDirectorV2")
 	PerfCounters.set_ai_mission_detail(
-		"V2 %s → %s (%s)" % [get_state_name(), objective, _last_transition_reason]
+		"V2 %s → %s (%s)" % [display_state, objective, _last_transition_reason]
 	)
 	PerfCounters.set_combat_group_size(_main_squad.get_size())
+
+
+func _reset_watchdog_state(status: String = "idle") -> void:
+	_watchdog_timer = 0.0
+	_watchdog_order_refreshed = false
+	_watchdog_status = status if not status.is_empty() else "idle"
+	_watchdog_recent_combat = false
+	_watchdog_living_members = _main_squad.get_size()
+	_watchdog_distance = -1.0
+	_watchdog_objective_valid = true
+
+
+func _resolve_commander() -> ArmyCommanderV2:
+	if _commander == null:
+		_commander = get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
+	return _commander
+
+
+func _tick_mission_watchdog(delta: float) -> void:
+	_watchdog_timer += delta
+	_watchdog_diag_timer += delta
+	if _watchdog_timer < MilitaryAIConfig.V2_WATCHDOG_INTERVAL_SECONDS:
+		_publish_watchdog_snapshot_only()
+		return
+	_watchdog_timer = 0.0
+
+	var tree: SceneTree = get_tree()
+	if tree == null or _mission == null:
+		_watchdog_status = "idle"
+		return
+
+	_mission.sanitize_target_object()
+	var units: Array = _get_watchdog_squad_units()
+	_watchdog_living_members = units.size()
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	var objective_position: Vector3 = _resolve_watchdog_objective_position()
+	_watchdog_active_order = _resolve_active_order_label()
+	_watchdog_objective_valid = _is_current_objective_valid(tree)
+
+	if army_center != Vector3.ZERO and objective_position != Vector3.ZERO:
+		_watchdog_distance = EnemyArmyCommand.horizontal_distance(army_center, objective_position)
+	elif objective_position == Vector3.ZERO:
+		_watchdog_distance = -1.0
+
+	if not _is_watchdog_mission_active():
+		_watchdog_status = "idle"
+		_watchdog_order_refreshed = false
+		_maybe_log_watchdog_diag()
+		return
+
+	## Track meaningful progress before deciding to intervene.
+	_update_watchdog_progress(tree, units, army_center, objective_position)
+
+	## Invalid objective / order → cancel immediately (do not freeze).
+	if not _watchdog_objective_valid:
+		_watchdog_status = "invalid objective"
+		_cancel_stalled_mission_and_fallback(
+			tree,
+			"watchdog invalid objective (%s)" % get_state_name()
+		)
+		_maybe_log_watchdog_diag()
+		return
+
+	var since_progress: float = _mission.get_seconds_since_progress()
+	if since_progress < MilitaryAIConfig.V2_WATCHDOG_STALL_SECONDS:
+		_watchdog_status = "tracking (%.1fs)" % since_progress
+		_maybe_log_watchdog_diag()
+		return
+
+	## 1) Validate objective and orders (already done above).
+	## 2) Refresh the order once.
+	if not _watchdog_order_refreshed:
+		_watchdog_order_refreshed = true
+		_watchdog_status = "refreshing order"
+		if _refresh_stalled_mission_order(tree, units, army_center, objective_position):
+			_mission.note_progress("watchdog order refresh")
+			_maybe_log_watchdog_diag()
+			return
+		## Refresh failed — fall through to cancel.
+
+	## 3–5) Cancel mission, release reservations, safe fallback.
+	_watchdog_status = "stalled → fallback"
+	_cancel_stalled_mission_and_fallback(
+		tree,
+		"watchdog stalled (%s, %.1fs)" % [get_state_name(), since_progress]
+	)
+	_maybe_log_watchdog_diag()
+
+
+func _publish_watchdog_snapshot_only() -> void:
+	## Keep distance / order labels fresh between watchdog intervals without acting.
+	if _mission == null:
+		return
+	var units: Array = _get_watchdog_squad_units()
+	_watchdog_living_members = units.size()
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	var objective_position: Vector3 = _resolve_watchdog_objective_position()
+	_watchdog_active_order = _resolve_active_order_label()
+	if army_center != Vector3.ZERO and objective_position != Vector3.ZERO:
+		_watchdog_distance = EnemyArmyCommand.horizontal_distance(army_center, objective_position)
+
+
+func _is_watchdog_mission_active() -> bool:
+	return _state in [State.CREEP, State.ATTACK, State.DEFEND, State.RETREAT]
+
+
+func _get_watchdog_squad_units() -> Array:
+	match _state:
+		State.CREEP:
+			return _get_creep_squad_units()
+		_:
+			return _get_attack_squad_units()
+
+
+func _resolve_watchdog_objective_position() -> Vector3:
+	if _mission == null:
+		return Vector3.ZERO
+	_mission.sanitize_target_object()
+	if NodeSafety.is_alive_node(_mission.target_object):
+		return _mission.target_object.global_position
+	return _mission.target_position
+
+
+func _resolve_active_order_label() -> String:
+	var order: String = EnemyArmyCommand.get_executable_order_label()
+	if not order.is_empty():
+		return order
+	match _state:
+		State.CREEP:
+			return "creep"
+		State.ATTACK:
+			return "attack-move"
+		State.DEFEND:
+			return "defend"
+		State.RETREAT:
+			return "retreat"
+		State.ASSEMBLE:
+			return "rally"
+		State.RECOVER:
+			return "hold"
+		_:
+			return "-"
+
+
+func _is_current_objective_valid(tree: SceneTree) -> bool:
+	if _mission == null:
+		return false
+	## Detect freed refs before sanitize clears them — destroyed targets are invalid.
+	var target_freed: bool = (
+		_mission.target_object != null and not is_instance_valid(_mission.target_object)
+	)
+	_mission.sanitize_target_object()
+	match _state:
+		State.CREEP:
+			if target_freed:
+				return false
+			var camp: Node3D = _mission.target_object
+			if not NodeSafety.is_alive_node(camp):
+				return false
+			var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+			if creep_manager == null:
+				return false
+			if creep_manager._is_camp_cleared(tree, camp):
+				return false
+			## Truthful CREEP requires a living uncleared camp; order may briefly lag.
+			return true
+		State.ATTACK:
+			if target_freed:
+				return false
+			if NodeSafety.is_alive_node(_mission.target_object):
+				return true
+			## Position-only attacks are allowed, but a freed node objective is not.
+			return _mission.target_object == null and _mission.target_position != Vector3.ZERO
+		State.DEFEND:
+			var threat: Dictionary = _resolve_v2_defense_threat(tree)
+			return bool(threat.get("threatened", false)) or _defend_clear_timer > 0.0
+		State.RETREAT:
+			return _mission.target_position != Vector3.ZERO
+		_:
+			return true
+
+
+func _update_watchdog_progress(
+	tree: SceneTree,
+	units: Array,
+	army_center: Vector3,
+	objective_position: Vector3
+) -> void:
+	if _mission == null:
+		return
+
+	var in_combat: bool = EnemyArmyCommand.is_enemy_army_under_attack(
+		tree,
+		units,
+		EnemyArmyCommand.LOCAL_FIGHT_RADIUS
+	)
+	if not in_combat and _state == State.CREEP and NodeSafety.is_alive_node(_mission.target_object):
+		var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+		if creep_manager != null:
+			in_combat = creep_manager._is_army_engaging_camp(
+				tree,
+				units,
+				_mission.target_object
+			)
+	if in_combat and not _watchdog_recent_combat:
+		_mission.note_progress("started combat")
+		_watchdog_order_refreshed = false
+	_watchdog_recent_combat = in_combat
+	if in_combat:
+		return
+
+	if army_center == Vector3.ZERO or objective_position == Vector3.ZERO:
+		return
+
+	if _mission.note_distance_progress(
+		_watchdog_distance if _watchdog_distance >= 0.0 else EnemyArmyCommand.horizontal_distance(
+			army_center,
+			objective_position
+		),
+		MilitaryAIConfig.V2_WATCHDOG_PROGRESS_DISTANCE_EPSILON
+	):
+		_watchdog_order_refreshed = false
+
+	if (
+		_watchdog_distance >= 0.0
+		and _watchdog_distance <= MilitaryAIConfig.V2_WATCHDOG_NEAR_OBJECTIVE_RADIUS
+	):
+		## Only note arrival once per approach so the stall clock can still fire
+		## when the squad is stuck at the wrong near-point.
+		if _mission.last_progress_reason != "reached objective":
+			_mission.note_progress("reached objective")
+			_watchdog_order_refreshed = false
+
+
+func _refresh_stalled_mission_order(
+	tree: SceneTree,
+	units: Array,
+	_army_center: Vector3,
+	objective_position: Vector3
+) -> bool:
+	var commander: ArmyCommanderV2 = _resolve_commander()
+	if commander != null:
+		commander.request_watchdog_order_refresh()
+
+	## Always treat a commander refresh request as the one allowed reissue.
+	## Order issuance may still fail without a formed squad / nav map.
+	var refreshed: bool = false
+	if objective_position != Vector3.ZERO and not units.is_empty():
+		refreshed = EnemyArmyCommand.refresh_stalled_mission_order(tree)
+		if not refreshed:
+			match _state:
+				State.CREEP:
+					refreshed = EnemyArmyCommand.issue_group_combat_move(
+						tree,
+						units,
+						objective_position,
+						EnemyUnitMission.Mission.CREEP,
+						EnemyArmyCommand.ArmyMode.CREEPING
+					)
+				State.ATTACK:
+					refreshed = EnemyArmyCommand.issue_group_combat_move(
+						tree,
+						units,
+						objective_position,
+						EnemyUnitMission.Mission.ATTACK,
+						EnemyArmyCommand.ArmyMode.ATTACKING,
+						true
+					)
+				State.DEFEND:
+					EnemyArmyCommand.with_authorized_orders(func() -> void:
+						EnemyArmyCommand.command_attack_move(
+							units,
+							objective_position,
+							EnemyUnitMission.Mission.DEFEND
+						)
+					)
+					refreshed = true
+				State.RETREAT:
+					EnemyArmyCommand.with_authorized_orders(func() -> void:
+						EnemyArmyCommand.command_retreat_to(units, objective_position)
+					)
+					refreshed = true
+				_:
+					pass
+	## Empty-squad / harness cases: still consume the single refresh attempt.
+	return refreshed or commander != null
+
+
+func _cancel_stalled_mission_and_fallback(tree: SceneTree, reason: String) -> void:
+	if _mission != null:
+		_mission.mark_cancelled(reason)
+
+	## 4) Release reservations / executable ownership.
+	_release_creep_reservation()
+	if EnemyArmyCommand.is_creeping_executable_active():
+		EnemyArmyCommand.clear_executable_mission(reason)
+	elif EnemyArmyCommand.get_executable_mission() not in [
+		EnemyArmyCommand.ExecutableMission.NONE,
+		EnemyArmyCommand.ExecutableMission.IDLE,
+	]:
+		EnemyArmyCommand.clear_executable_mission(reason)
+
+	_watchdog_order_refreshed = false
+	_resolve_watchdog_fallback(tree, reason)
+
+
+func _resolve_watchdog_fallback(tree: SceneTree, reason: String) -> void:
+	var rally_point: Vector3 = get_assemble_rally_point()
+	if rally_point == Vector3.ZERO:
+		rally_point = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+
+	## 1) DEFEND
+	var threat: Dictionary = _resolve_v2_defense_threat(tree)
+	if threat.get("threatened", false):
+		_evaluate_defend_strategy(tree, rally_point)
+		_watchdog_status = "fallback DEFEND"
+		return
+
+	var units: Array = _get_watchdog_squad_units()
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+
+	## 2) Fight nearby hostile threat
+	if army_center != Vector3.ZERO:
+		var nearby: Array = EnemyArmyCommand.collect_player_military_near(
+			tree,
+			army_center,
+			MilitaryAIConfig.V2_WATCHDOG_NEARBY_THREAT_RADIUS
+		)
+		nearby = NodeSafety.clean_node_array(nearby)
+		if not nearby.is_empty() and (is_attack_ready() or is_lethal_attack_ready()):
+			var focus: Node3D = nearby[0] as Node3D if nearby[0] is Node3D else null
+			var fight_point: Vector3 = EnemyArmyCommand.compute_army_center(nearby)
+			if fight_point == Vector3.ZERO and focus != null:
+				fight_point = focus.global_position
+			if fight_point != Vector3.ZERO:
+				_transition_to(
+					State.ATTACK,
+					"%s → fight nearby" % reason,
+					fight_point,
+					focus,
+					80
+				)
+				_watchdog_status = "fallback ATTACK nearby"
+				return
+
+	## 3) RETREAT if unsafe
+	var retreat_decision: Dictionary = _evaluate_retreat_triggers(tree, units)
+	if retreat_decision.get("should_retreat", false):
+		var destination: Vector3 = _resolve_retreat_destination(tree, rally_point, army_center)
+		_transition_to(
+			State.RETREAT,
+			"%s → %s" % [reason, String(retreat_decision.get("reason", "unsafe"))],
+			destination,
+			null,
+			90
+		)
+		_watchdog_status = "fallback RETREAT"
+		return
+
+	## 4) Select another valid camp
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if creep_manager != null and is_creep_ready():
+		var origin: Vector3 = army_center if army_center != Vector3.ZERO else rally_point
+		var next_camp: Node3D = _select_best_creep_camp(
+			tree,
+			creep_manager,
+			_get_creep_squad_units(),
+			origin,
+			rally_point
+		)
+		if next_camp != null and _can_commit_to_creeping(tree, _get_creep_squad_units(), creep_manager):
+			_transition_to(
+				State.CREEP,
+				"%s → next camp" % reason,
+				next_camp.global_position,
+				next_camp,
+				50
+			)
+			_watchdog_status = "fallback CREEP"
+			return
+
+	## 5) ASSEMBLE
+	if rally_point != Vector3.ZERO and _main_squad.get_size() > 0:
+		_transition_to(State.ASSEMBLE, "%s → assemble" % reason, rally_point)
+		_watchdog_status = "fallback ASSEMBLE"
+		return
+
+	## 6) RECOVER
+	_transition_to(
+		State.RECOVER,
+		"%s → recover" % reason,
+		rally_point if rally_point != Vector3.ZERO else get_designated_recovery_point()
+	)
+	_watchdog_status = "fallback RECOVER"
+
+
+func _resolve_truthful_display(mission: ArmyMissionV2) -> Dictionary:
+	var state_name: String = get_state_name()
+	var mission_name: String = "-"
+	var objective: String = "-"
+	if mission != null:
+		mission.sanitize_target_object()
+		mission_name = mission.get_mission_type_name()
+		objective = mission.get_objective_label()
+
+	var tree: SceneTree = get_tree()
+	var has_order: bool = not _watchdog_active_order.is_empty() and _watchdog_active_order != "-"
+
+	## Never claim CREEP without a valid camp/order.
+	if _state == State.CREEP:
+		var camp_ok: bool = mission != null and NodeSafety.is_alive_node(mission.target_object)
+		if not camp_ok:
+			state_name = "ASSEMBLE" if _main_squad.get_size() > 0 else "IDLE"
+			mission_name = state_name
+			objective = "invalid camp"
+		elif tree != null and not _is_current_objective_valid(tree) and not has_order:
+			state_name = "ASSEMBLE"
+			mission_name = "ASSEMBLE"
+			objective = "awaiting creep order"
+
+	## Never claim ATTACK without an attack objective/order.
+	if _state == State.ATTACK:
+		var attack_ok: bool = (
+			mission != null
+			and (
+				NodeSafety.is_alive_node(mission.target_object)
+				or mission.target_position != Vector3.ZERO
+			)
+		)
+		if not attack_ok:
+			state_name = "ASSEMBLE" if _main_squad.get_size() > 0 else "IDLE"
+			mission_name = state_name
+			objective = "no attack objective"
+
+	## Never claim DEFEND without a current threat (or clear hold window).
+	if _state == State.DEFEND:
+		var defend_ok: bool = _defend_active or _defend_clear_timer > 0.0
+		if tree != null:
+			var threat: Dictionary = _resolve_v2_defense_threat(tree)
+			defend_ok = defend_ok or bool(threat.get("threatened", false))
+		if not defend_ok:
+			state_name = "ASSEMBLE" if _main_squad.get_size() > 0 else "IDLE"
+			mission_name = state_name
+			objective = "no active threat"
+
+	return {
+		"state": state_name,
+		"mission": mission_name,
+		"objective": objective,
+	}
+
+
+func _maybe_log_watchdog_diag() -> void:
+	if _watchdog_diag_timer < MilitaryAIConfig.V2_WATCHDOG_DIAG_INTERVAL_SECONDS:
+		return
+	_watchdog_diag_timer = 0.0
+	var signature: String = "%s|%s|%s|%.1f" % [
+		get_state_name(),
+		_watchdog_status,
+		_watchdog_active_order,
+		_watchdog_distance,
+	]
+	if signature == _watchdog_last_diag_signature:
+		return
+	_watchdog_last_diag_signature = signature
+	EnemyAIDebug.log_once(
+		"v2_watchdog",
+		"V2 Watchdog: %s | order=%s | dist=%.1f | living=%d | combat=%s"
+		% [
+			_watchdog_status,
+			_watchdog_active_order,
+			_watchdog_distance,
+			_watchdog_living_members,
+			"yes" if _watchdog_recent_combat else "no",
+		]
+	)
+
+
+## Test helpers for watchdog recovery scenarios.
+func debug_get_watchdog_status() -> String:
+	return _watchdog_status
+
+
+func debug_get_watchdog_distance() -> float:
+	return _watchdog_distance
+
+
+func debug_force_watchdog_stall_for_tests() -> void:
+	if _mission != null:
+		_mission.last_progress_time_msec = (
+			Time.get_ticks_msec()
+			- int(MilitaryAIConfig.V2_WATCHDOG_STALL_SECONDS * 1000.0)
+			- 500
+		)
+	_watchdog_timer = MilitaryAIConfig.V2_WATCHDOG_INTERVAL_SECONDS
+
+
+func debug_tick_watchdog_for_tests() -> void:
+	_tick_mission_watchdog(MilitaryAIConfig.V2_WATCHDOG_INTERVAL_SECONDS)
+
+
+func debug_set_watchdog_refreshed_for_tests(value: bool) -> void:
+	_watchdog_order_refreshed = value
+
+
+func debug_is_watchdog_order_refreshed() -> bool:
+	return _watchdog_order_refreshed
+
+
+func debug_resolve_truthful_display_for_tests() -> Dictionary:
+	return _resolve_truthful_display(_mission)

@@ -81,6 +81,16 @@ const V2_RECOVER_HERO_MANA_RATIO: float = 0.35
 const V2_RECOVER_MIN_MILITARY_UNITS: int = 5
 const V2_RECOVER_ORDER_REISSUE_SECONDS: float = 0.55
 
+## V2 mission watchdog / stall recovery.
+## Stall window is intentionally in the 6–8s band used by legacy missions.
+const V2_WATCHDOG_INTERVAL_SECONDS: float = 1.0
+const V2_WATCHDOG_STALL_SECONDS: float = 7.0
+const V2_WATCHDOG_PROGRESS_DISTANCE_EPSILON: float = 2.5
+const V2_WATCHDOG_NEAR_OBJECTIVE_RADIUS: float = 6.0
+const V2_WATCHDOG_NEARBY_THREAT_RADIUS: float = 32.0
+## Throttle F3 / console diagnostic churn (never spam identical lines).
+const V2_WATCHDOG_DIAG_INTERVAL_SECONDS: float = 2.0
+
 
 static func is_v2_enabled() -> bool:
 	return USE_MILITARY_AI_V2

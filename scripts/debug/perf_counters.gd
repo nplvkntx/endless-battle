@@ -48,6 +48,11 @@ var _military_ai_v2_squad_size: int = 0
 var _military_ai_v2_hero_present: bool = false
 var _military_ai_v2_role_counts: String = "-"
 var _military_ai_v2_army_strength: float = 0.0
+var _military_ai_v2_active_order: String = "-"
+var _military_ai_v2_distance: float = -1.0
+var _military_ai_v2_seconds_since_progress: float = 0.0
+var _military_ai_v2_state_age: float = 0.0
+var _military_ai_v2_watchdog_status: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -261,6 +266,42 @@ func get_military_ai_v2_army_strength() -> float:
 	return _military_ai_v2_army_strength
 
 
+func set_military_ai_v2_watchdog_status(
+	active_order: String,
+	distance_to_objective: float,
+	seconds_since_progress: float,
+	state_age_seconds: float,
+	watchdog_status: String
+) -> void:
+	_military_ai_v2_active_order = active_order if not active_order.is_empty() else "-"
+	_military_ai_v2_distance = distance_to_objective
+	_military_ai_v2_seconds_since_progress = maxf(0.0, seconds_since_progress)
+	_military_ai_v2_state_age = maxf(0.0, state_age_seconds)
+	_military_ai_v2_watchdog_status = (
+		watchdog_status if not watchdog_status.is_empty() else "-"
+	)
+
+
+func get_military_ai_v2_active_order() -> String:
+	return _military_ai_v2_active_order
+
+
+func get_military_ai_v2_distance() -> float:
+	return _military_ai_v2_distance
+
+
+func get_military_ai_v2_seconds_since_progress() -> float:
+	return _military_ai_v2_seconds_since_progress
+
+
+func get_military_ai_v2_state_age() -> float:
+	return _military_ai_v2_state_age
+
+
+func get_military_ai_v2_watchdog_status() -> String:
+	return _military_ai_v2_watchdog_status
+
+
 func sample_fps(delta: float) -> void:
 	var fps: float = float(Engine.get_frames_per_second())
 	_last_fps = fps
@@ -425,6 +466,11 @@ func reset_all() -> void:
 	_military_ai_v2_hero_present = false
 	_military_ai_v2_role_counts = "-"
 	_military_ai_v2_army_strength = 0.0
+	_military_ai_v2_active_order = "-"
+	_military_ai_v2_distance = -1.0
+	_military_ai_v2_seconds_since_progress = 0.0
+	_military_ai_v2_state_age = 0.0
+	_military_ai_v2_watchdog_status = "-"
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0

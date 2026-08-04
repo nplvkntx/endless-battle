@@ -131,9 +131,14 @@ func _update_label() -> void:
 		"V2 State: %s" % PerfCounters.get_military_ai_v2_state(),
 		"V2 Mission: %s" % PerfCounters.get_military_ai_v2_mission(),
 		"V2 Objective: %s" % PerfCounters.get_military_ai_v2_objective(),
+		"V2 Order: %s" % PerfCounters.get_military_ai_v2_active_order(),
+		"V2 Squad Size: %d" % PerfCounters.get_military_ai_v2_squad_size(),
+		"V2 Distance: %s" % _format_v2_distance(PerfCounters.get_military_ai_v2_distance()),
+		"V2 Since Progress: %.1fs" % PerfCounters.get_military_ai_v2_seconds_since_progress(),
+		"V2 State Age: %.1fs" % PerfCounters.get_military_ai_v2_state_age(),
 		"V2 Mission Age: %.1fs" % PerfCounters.get_military_ai_v2_mission_age(),
 		"V2 Transition: %s" % PerfCounters.get_military_ai_v2_transition_reason(),
-		"V2 Squad Size: %d" % PerfCounters.get_military_ai_v2_squad_size(),
+		"V2 Watchdog: %s" % PerfCounters.get_military_ai_v2_watchdog_status(),
 		"V2 Hero Present: %s" % ("yes" if PerfCounters.get_military_ai_v2_hero_present() else "no"),
 		"V2 Role Counts: %s" % PerfCounters.get_military_ai_v2_role_counts(),
 		"V2 Army Strength: %.0f" % PerfCounters.get_military_ai_v2_army_strength(),
@@ -174,3 +179,9 @@ func _collect_unit_stats(tree: SceneTree) -> Dictionary:
 		"creeps": creeps.size(),
 		"buildings": buildings.size(),
 	}
+
+
+func _format_v2_distance(distance: float) -> String:
+	if distance < 0.0:
+		return "-"
+	return "%.1f" % distance
