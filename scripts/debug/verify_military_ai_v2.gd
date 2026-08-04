@@ -24,6 +24,7 @@ func _ready() -> void:
 	_verify_attack_config_and_source(failures)
 	_verify_attack_priority_order(failures)
 	_verify_attack_chase_leash_helper(failures)
+	_verify_early_creep_priority_config(failures)
 	_verify_retreat_recover_config_and_source(failures)
 	_verify_retreat_role_split_helper(failures)
 	_verify_retreat_recover_hysteresis_helpers(failures)
@@ -493,7 +494,11 @@ func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
 	if director_source != null:
 		var text: String = director_source.get_as_text()
 		director_source.close()
-		_expect(failures, "attack preempts creep", text.contains("preempts CREEP"))
+		_expect(failures, "attack preempts creep on lethal/greed", text.contains("preempts CREEP only on lethal"))
+		_expect(failures, "early creep preference helper", text.contains("_should_prefer_early_creeping"))
+		_expect(failures, "creep interrupt helper", text.contains("_should_interrupt_creeping_for_attack"))
+		_expect(failures, "camp chain reason", text.contains("chain %s"))
+		_expect(failures, "hero xp creep priority", text.contains("hero_xp_priority"))
 		_expect(failures, "attack exits to retreat when losing", text.contains("army clearly losing"))
 		_expect(failures, "attack exits when hero endangered", text.contains("hero in serious danger"))
 		_expect(failures, "attack exits when scattered", text.contains("attack army too scattered"))
@@ -541,6 +546,59 @@ func _verify_attack_priority_order(failures: PackedStringArray) -> void:
 		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_WORKER
 		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_OTHER_STRUCTURE
 	)
+
+
+func _verify_early_creep_priority_config(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"creep target hero level ≈ 3",
+		MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL == 3
+	)
+	_expect(
+		failures,
+		"preferred camps before attack ≥ 2",
+		MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK >= 2
+	)
+	_expect(
+		failures,
+		"greed interrupt score configured",
+		MilitaryAIConfig.V2_CREEP_GREED_INTERRUPT_SCORE >= 40.0
+	)
+	_expect(
+		failures,
+		"strength advantage interrupt configured",
+		MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT >= 1.3
+	)
+
+	var director := MilitaryDirectorV2.new()
+	add_child(director)
+	director.reset_match_state()
+	_expect(failures, "cleared camp count starts at 0", director.get_cleared_creep_camp_count() == 0)
+
+	## Simulate soft early window: without greed/lethal, soft strength interrupts are gated.
+	director._cleared_creep_camp_ids[1001] = true
+	_expect(failures, "cleared camp count tracks clears", director.get_cleared_creep_camp_count() == 1)
+	director._cleared_creep_camp_ids.clear()
+
+	## Greed interrupt outranks early creeping when attack-capable.
+	EnemyAggression.force_scores_for_tests(0.0, 80.0)
+	## Empty squad → interrupt helpers still require attack readiness; expect false.
+	_expect(
+		failures,
+		"greed alone does not interrupt without squad",
+		director._should_interrupt_creeping_for_attack(get_tree(), Vector3(1, 0, 1)) == false
+	)
+	EnemyAggression.force_scores_for_tests(0.0, 0.0)
+	director.queue_free()
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "early creep director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "assemble→creep→creep philosophy documented", text.contains("ASSEMBLE → CREEP → CREEP → CREEP → ATTACK"))
+		_expect(failures, "does not abandon creep for min attack squad", text.contains("minimum attack squad exists"))
+		_expect(failures, "reward value weights XP/gold higher", text.contains("reward_value * 2.25"))
 
 
 func _verify_attack_chase_leash_helper(failures: PackedStringArray) -> void:

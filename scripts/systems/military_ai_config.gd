@@ -34,6 +34,19 @@ const V2_ATTACK_READY_MILITARY_UNITS_PREFERRED: int = 12
 ## High-confidence lethal window may commit with a smaller formed squad.
 const V2_ATTACK_LETHAL_MIN_MILITARY_UNITS: int = 6
 
+## Early CREEP priority: prefer camps until ~hero level 3 / a few clears.
+## Soft goal — lethal / greed / clear strength advantage still interrupt.
+const V2_CREEP_TARGET_HERO_LEVEL: int = 3
+const V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK: int = 2
+## Greed score (0–100) that outranks early creeping for a punish attack.
+const V2_CREEP_GREED_INTERRUPT_SCORE: float = 45.0
+## AI/player strength ratio that outranks early creeping (clear advantage).
+const V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT: float = 1.45
+const V2_CREEP_HERO_HEALTHY_RATIO: float = 0.55
+## Nearby camp chaining after a clear (horizontal units).
+const V2_CREEP_CHAIN_NEAR_RADIUS: float = 26.0
+const V2_CREEP_CHAIN_MEDIUM_RADIUS: float = 38.0
+
 ## V2 ASSEMBLE behavior tuning.
 const V2_ASSEMBLE_SLOT_TOLERANCE: float = 1.25
 const V2_ASSEMBLE_SETTLE_TOLERANCE: float = 0.75

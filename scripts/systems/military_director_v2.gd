@@ -7,10 +7,12 @@ extends Node
 ## Does not issue unit orders — ArmyCommanderV2 executes the mission.
 ##
 ## DEFEND overrides CREEP / ATTACK / ASSEMBLE / RECOVER for emergency base defense.
-## ATTACK commits a formed squad with Attack-Move to a strategic player objective.
+## Early opening philosophy: ASSEMBLE → CREEP → CREEP → CREEP → ATTACK (≈ hero L3).
+## ATTACK preempts CREEP only on lethal / greed / clear strength advantage — never
+## merely because the minimum attack squad exists.
 ## RETREAT pulls the squad home as one group; RECOVER rebuilds before offense resumes.
-## After a clear, the director reassesses via RECOVER or ASSEMBLE and never resumes
-## a stale creep/attack reservation automatically.
+## After a clear, the director chains to another nearby safe camp when valuable,
+## otherwise reassesses via RECOVER or ASSEMBLE (never resumes a stale reservation).
 ## Mission watchdog cancels stalled CREEP/ATTACK/DEFEND/RETREAT after ~6–8s without
 ## meaningful progress, refreshes orders once, then falls back safely.
 
@@ -185,12 +187,23 @@ func _evaluate_strategy() -> void:
 		_evaluate_recover_strategy(tree, rally_point)
 		return
 
-	## ATTACK (incl. lethal windows) preempts CREEP so the AI finishes exposed players.
-	if _evaluate_attack_strategy(tree, rally_point):
-		return
-
-	if _evaluate_creep_strategy(tree, rally_point):
-		return
+	## ATTACK preempts CREEP only on lethal/greed/clear advantage (or mid-ATTACK).
+	## Early openings prefer camp chaining until ~hero level 3.
+	var interrupt_creep_for_attack: bool = _should_interrupt_creeping_for_attack(
+		tree,
+		rally_point
+	)
+	var prefer_early_creep: bool = _should_prefer_early_creeping(tree, rally_point)
+	if _state == State.ATTACK or interrupt_creep_for_attack or not prefer_early_creep:
+		if _evaluate_attack_strategy(tree, rally_point):
+			return
+		if _evaluate_creep_strategy(tree, rally_point):
+			return
+	else:
+		if _evaluate_creep_strategy(tree, rally_point):
+			return
+		if _evaluate_attack_strategy(tree, rally_point):
+			return
 
 	_transition_to(State.ASSEMBLE, "gathering squad at base", rally_point)
 
@@ -320,6 +333,10 @@ func get_reserved_creep_camp_id() -> int:
 
 func has_reserved_creep_camp() -> bool:
 	return _reserved_creep_camp_id != 0
+
+
+func get_cleared_creep_camp_count() -> int:
+	return _cleared_creep_camp_ids.size()
 
 
 func get_defend_reason() -> StringName:
@@ -1219,18 +1236,39 @@ func _evaluate_recover_strategy(tree: SceneTree, rally_point: Vector3) -> void:
 		)
 		return
 
-	## Resume: ATTACK if strong, CREEP if safe/valuable, else ASSEMBLE while incomplete.
-	if is_attack_ready() and _can_reenter_attack(tree, recovery_point):
+	## Resume: prefer CREEP while early hero XP is still valuable; ATTACK on interrupt
+	## or once the soft level/camp goals are met.
+	var prefer_early_creep: bool = _should_prefer_early_creeping(tree, recovery_point)
+	if prefer_early_creep:
+		var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+		if (
+			creep_manager != null
+			and is_creep_ready()
+			and _can_commit_to_creeping(tree, _get_creep_squad_units(), creep_manager)
+		):
+			_transition_to(State.ASSEMBLE, "recover complete, creep valuable", recovery_point)
+			if _evaluate_creep_strategy(tree, recovery_point):
+				return
+			return
+
+	if (
+		is_attack_ready()
+		and _can_reenter_attack(tree, recovery_point)
+		and (
+			not prefer_early_creep
+			or _should_interrupt_creeping_for_attack(tree, recovery_point)
+		)
+	):
 		_transition_to(State.ASSEMBLE, "recover complete, attack ready", recovery_point)
 		if _evaluate_attack_strategy(tree, recovery_point):
 			return
 		return
 
-	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	var creep_manager_fallback: EnemyCreepManager = _resolve_creep_manager()
 	if (
-		creep_manager != null
+		creep_manager_fallback != null
 		and is_creep_ready()
-		and _can_commit_to_creeping(tree, _get_creep_squad_units(), creep_manager)
+		and _can_commit_to_creeping(tree, _get_creep_squad_units(), creep_manager_fallback)
 	):
 		_transition_to(State.ASSEMBLE, "recover complete, creep valuable", recovery_point)
 		if _evaluate_creep_strategy(tree, recovery_point):
@@ -1795,9 +1833,13 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		return false
 
 	var current_camp: Node3D = _get_current_creep_camp()
+	var just_cleared_camp: bool = false
 	if _is_camp_cleared_or_invalid(tree, current_camp, creep_manager):
 		if current_camp != null and is_instance_valid(current_camp):
 			_cleared_creep_camp_ids[current_camp.get_instance_id()] = true
+			just_cleared_camp = true
+			if _mission != null:
+				_mission.note_progress("cleared camp")
 		current_camp = null
 		_release_creep_reservation()
 
@@ -1825,6 +1867,8 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		rally_point
 	)
 	var reason: String = "creep %s" % creep_manager._format_camp_name(current_camp)
+	if just_cleared_camp:
+		reason = "chain %s" % creep_manager._format_camp_name(current_camp)
 	_transition_to(
 		State.CREEP,
 		reason,
@@ -1848,6 +1892,156 @@ func _get_creep_squad_units() -> Array:
 	return NodeSafety.clean_node_array(units)
 
 
+## Soft early-game preference: keep clearing safe camps until ~hero level 3.
+## Never forces CREEP through defense, retreat, or a clear winning attack.
+func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> bool:
+	if tree == null:
+		return false
+	if _should_interrupt_creeping_for_attack(tree, rally_point):
+		return false
+	if not is_creep_ready():
+		return false
+
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if creep_manager == null:
+		return false
+
+	var creep_army: Array = _get_creep_squad_units()
+	if creep_army.is_empty():
+		return false
+	if not creep_manager._squad_safe_to_commit(tree, creep_army):
+		return false
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero == null:
+		return false
+	if EnemyArmyCommand.get_health_ratio(hero) < MilitaryAIConfig.V2_CREEP_HERO_HEALTHY_RATIO:
+		return false
+
+	var hero_level: int = hero.level
+	var camps_cleared: int = _cleared_creep_camp_ids.size()
+	var below_power_spike: bool = hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL
+	var under_camp_goal: bool = (
+		camps_cleared < MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK
+	)
+	## After the soft goals, only keep preferring while already chaining camps.
+	if not below_power_spike and not under_camp_goal and _state != State.CREEP:
+		return false
+
+	var origin: Vector3 = _main_squad.center
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.compute_army_center(creep_army)
+	if origin == Vector3.ZERO:
+		origin = rally_point
+
+	var next_camp: Node3D = _get_current_creep_camp()
+	if not _is_valid_creep_camp(tree, next_camp, creep_manager, creep_army, origin, rally_point):
+		next_camp = _select_best_creep_camp(tree, creep_manager, creep_army, origin, rally_point)
+	return next_camp != null
+
+
+## Immediate CREEP → ATTACK interrupt conditions (not "min attack squad ready").
+func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3) -> bool:
+	if tree == null:
+		return false
+
+	## Town Hall / workers are handled by DEFEND before this path.
+	if EnemyAggression.should_suspend_creeping():
+		return true
+
+	var lethal: bool = _detect_lethal_attack_window(tree, rally_point)
+	if lethal and (is_attack_ready() or is_lethal_attack_ready()):
+		return true
+
+	var greed: float = EnemyAggression.get_greed_score()
+	if (
+		greed >= MilitaryAIConfig.V2_CREEP_GREED_INTERRUPT_SCORE
+		and (is_attack_ready() or is_lethal_attack_ready())
+	):
+		return true
+
+	if not is_attack_ready() and not is_lethal_attack_ready():
+		return false
+
+	## Soft early window: keep camping until ≈L3 / a few clears unless greed/lethal above.
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	var hero_level: int = hero.level if hero != null else 1
+	var early_creep_window: bool = (
+		hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL
+		and _cleared_creep_camp_ids.size()
+		< MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK
+	)
+	if early_creep_window:
+		return false
+
+	var attack_army: Array = _get_attack_squad_units()
+	if attack_army.is_empty():
+		return false
+
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var probe: Vector3 = rally_point
+	if player_cc != null:
+		probe = player_cc.global_position
+	elif _main_squad.center != Vector3.ZERO:
+		probe = _main_squad.center
+
+	var player_military: Array = EnemyArmyCommand.collect_player_military_near(tree, probe, 90.0)
+	player_military = NodeSafety.clean_node_array(player_military)
+	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(attack_army)
+	var player_strength: float = EnemyArmyCommand.estimate_combat_strength(player_military)
+	var known_player_strength: float = float(
+		EnemyArmyCommand.estimate_known_player_army_strength(tree, rally_point)
+	)
+	if known_player_strength > player_strength:
+		player_strength = known_player_strength
+
+	## Player has almost no army (visible + known memory), not merely "away creeping".
+	var tiny_player_army: bool = (
+		player_military.size() <= 2
+		and player_strength <= 120.0
+	)
+	if tiny_player_army and ai_strength >= maxf(player_strength, 1.0) * 1.15:
+		return true
+
+	## Army clearly stronger than the player.
+	if (
+		player_strength > 0.0
+		and ai_strength
+		>= player_strength * MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT
+	):
+		return true
+
+	## Player Town Hall vulnerable: undefended AND (damaged / greed / preferred army).
+	## Empty TH alone while the player fields an army elsewhere is not enough —
+	## that is a normal mutual-creep opening, not a punish window.
+	if player_cc != null:
+		var defenders: Array = EnemyArmyCommand.collect_player_military_near(
+			tree,
+			player_cc.global_position,
+			MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+		)
+		defenders = NodeSafety.clean_node_array(defenders)
+		var defender_strength: float = EnemyArmyCommand.estimate_combat_strength(defenders)
+		var th_hp: float = EnemyArmyCommand.get_health_ratio(player_cc)
+		var preferred_army: bool = (
+			get_military_unit_count()
+			>= MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS_PREFERRED
+		)
+		var th_vulnerable: bool = (
+			defenders.size() <= 1
+			and defender_strength <= 80.0
+			and (
+				th_hp < 0.70
+				or greed >= 28.0
+				or (preferred_army and tiny_player_army)
+			)
+		)
+		if th_vulnerable and ai_strength >= maxf(defender_strength, 1.0) * 1.2:
+			return true
+
+	return false
+
+
 func _can_commit_to_creeping(
 	tree: SceneTree,
 	creep_army: Array,
@@ -1861,10 +2055,12 @@ func _can_commit_to_creeping(
 		return false
 	if EnemyAggression.should_suspend_creeping():
 		return false
-	## Do not keep creeping while a high-confidence finish is available.
-	if _detect_lethal_attack_window(tree, EnemyArmyCommand.resolve_enemy_rally_position(tree)):
-		if is_attack_ready() or is_lethal_attack_ready():
-			return false
+	## Do not keep creeping while a high-confidence finish / greed punish is available.
+	if _should_interrupt_creeping_for_attack(
+		tree,
+		EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	):
+		return false
 	if EnemyArmyCommand.is_defense_blocking_offense():
 		return false
 	if not EnemyArmyCommand.allows_creep_orders():
@@ -2003,20 +2199,53 @@ func _score_creep_camp(
 	var reward_value: float = _estimate_camp_reward_value(camp)
 	var preference_bonus: float = 0.0
 	if camp_power < V2_CREEP_MEDIUM_POWER_THRESHOLD:
-		preference_bonus = 120.0
+		preference_bonus = 145.0
 	elif strong_camp:
-		preference_bonus = 15.0 + maxf(safety_ratio - 1.35, 0.0) * 35.0
+		preference_bonus = 20.0 + maxf(safety_ratio - 1.35, 0.0) * 35.0
 	else:
-		preference_bonus = 70.0 if distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.65 else 35.0
+		preference_bonus = 85.0 if distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.65 else 45.0
+
+	## Hero XP progression: L1 weak → L2 better → L3 major power spike.
+	var hero_xp_priority: float = 0.0
+	if hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL:
+		hero_xp_priority = float(MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL - hero_level) * 110.0
+	elif hero_level == MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL:
+		hero_xp_priority = 30.0
+
+	## Map control: strongly prefer safe nearby camps over distant ones.
+	var map_control_bonus: float = 0.0
+	if distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.40:
+		map_control_bonus = 95.0
+	elif distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.65:
+		map_control_bonus = 50.0
+	elif distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.85:
+		map_control_bonus = 20.0
+
+	## Camp chaining: after a clear, keep valuing the next nearby safe camp.
+	var chain_bonus: float = 0.0
+	if _state == State.CREEP or not _cleared_creep_camp_ids.is_empty():
+		if distance <= MilitaryAIConfig.V2_CREEP_CHAIN_NEAR_RADIUS:
+			chain_bonus = 90.0
+		elif distance <= MilitaryAIConfig.V2_CREEP_CHAIN_MEDIUM_RADIUS:
+			chain_bonus = 45.0
+
+	## Soft goal: still below preferred camps-before-attack → keep camping valuable.
+	var early_clear_bonus: float = 0.0
+	if _cleared_creep_camp_ids.size() < MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK:
+		early_clear_bonus = 55.0
 
 	return (
 		preference_bonus
-		+ reward_value * 1.4
-		+ safety_ratio * 85.0
-		+ hero_hp * 25.0
+		+ reward_value * 2.25
+		+ safety_ratio * 95.0
+		+ hero_hp * 30.0
 		+ hero_mana * 10.0
-		- distance * 2.4
-		- float(camp_power) * 0.09
+		+ hero_xp_priority
+		+ map_control_bonus
+		+ chain_bonus
+		+ early_clear_bonus
+		- distance * 1.75
+		- float(camp_power) * 0.08
 		- player_power * 0.18
 	)
 

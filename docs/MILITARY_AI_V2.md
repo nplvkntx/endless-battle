@@ -60,17 +60,17 @@ Director priority each strategic tick (high → low):
 2. **RETREAT** — finish an in-progress withdrawal before other offense
 3. Emergency **RETREAT** from a losing ATTACK / CREEP fight
 4. **RECOVER** — rebuild near base; hard max duration prevents stalls
-5. **ATTACK** — formed squad or lethal window; preempts CREEP
-6. **CREEP** — clear reserved camps when attack is not ready
-7. **ASSEMBLE** — default gather at safe rally
+5. **ATTACK vs CREEP** — early openings prefer CREEP (≈ hero level 3 / 2–3 camps). ATTACK preempts CREEP only on lethal / high greed / clear strength advantage, never merely because the minimum attack squad exists.
+6. **ASSEMBLE** — default gather at safe rally
 
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
     IDLE --> ASSEMBLE: rally available
-    ASSEMBLE --> CREEP: creep-ready squad
-    ASSEMBLE --> ATTACK: attack-ready / lethal
-    CREEP --> ATTACK: lethal / commit window
+    ASSEMBLE --> CREEP: creep-ready squad (early default)
+    ASSEMBLE --> ATTACK: lethal / greed / post-L3 ready
+    CREEP --> CREEP: chain next safe camp
+    CREEP --> ATTACK: lethal / greed / clear advantage
     CREEP --> DEFEND: base threatened
     ATTACK --> DEFEND: base threatened
     ASSEMBLE --> DEFEND: base threatened
@@ -81,8 +81,8 @@ stateDiagram-v2
     DEFEND --> ASSEMBLE: threat cleared (reassess)
     RETREAT --> RECOVER: army safe / timed out
     RECOVER --> ASSEMBLE: rebuilt
-    RECOVER --> ATTACK: rebuilt + commit ready
-    RECOVER --> CREEP: rebuilt + creep ready
+    RECOVER --> CREEP: rebuilt + early creep valuable
+    RECOVER --> ATTACK: rebuilt + interrupt / post-L3
 ```
 
 Key invariants:
