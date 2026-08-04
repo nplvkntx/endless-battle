@@ -17,6 +17,8 @@ const V2_ASSEMBLE_SLOT_TOLERANCE: float = 1.25
 const V2_ASSEMBLE_SETTLE_TOLERANCE: float = 0.75
 const V2_ASSEMBLE_RALLY_MIN_RADIUS: float = 8.0
 const V2_ASSEMBLE_RALLY_MAX_RADIUS: float = 15.0
+const V2_ASSEMBLE_PRODUCTION_EXIT_CLEARANCE: float = 4.0
+const V2_ASSEMBLE_ATTACK_MOVE_DISTANCE: float = 6.0
 
 
 static func is_v2_enabled() -> bool:

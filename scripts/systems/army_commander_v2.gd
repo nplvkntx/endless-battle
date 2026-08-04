@@ -205,6 +205,12 @@ func _execute_assemble_mission(
 
 
 func _resolve_assemble_forward(rally_point: Vector3) -> Vector3:
+	var director: MilitaryDirectorV2 = _resolve_director()
+	if director != null:
+		var hint: Vector3 = director.get_assemble_forward_hint()
+		if hint.length_squared() > 0.01:
+			return hint
+
 	var origin: Vector3 = _assemble_anchor if _assemble_anchor != Vector3.ZERO else rally_point
 	var forward: Vector3 = rally_point - origin
 	forward.y = 0.0
@@ -326,11 +332,11 @@ func _should_use_attack_move_for_assemble(unit: Node3D, distance_to_slot: float)
 	if unit is Hero:
 		return false
 	if _active_squad == null:
-		return distance_to_slot > 6.0
+		return distance_to_slot > MilitaryAIConfig.V2_ASSEMBLE_ATTACK_MOVE_DISTANCE
 	var role: ArmySquadV2.UnitRole = _active_squad.get_role(unit)
 	if role == ArmySquadV2.UnitRole.SIEGE:
 		return false
-	return distance_to_slot > 6.0
+	return distance_to_slot > MilitaryAIConfig.V2_ASSEMBLE_ATTACK_MOVE_DISTANCE
 
 
 func debug_get_assemble_slot_positions(rally_point: Vector3) -> Dictionary:

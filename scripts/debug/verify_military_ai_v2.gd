@@ -206,12 +206,14 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		var text: String = director_source.get_as_text()
 		director_source.close()
 		_expect(failures, "director has assemble rally helper", text.contains("get_assemble_rally_point"))
+		_expect(failures, "director exposes assemble forward hint", text.contains("get_assemble_forward_hint"))
 		_expect(failures, "director transitions to CREEP", text.contains("_transition_to(State.CREEP"))
 		_expect(failures, "director transitions to DEFEND", text.contains("_transition_to(State.DEFEND"))
 		_expect(failures, "director checks construction reservations", text.contains("ConstructionReservations.overlaps_reserved_footprint"))
 		_expect(failures, "director checks construction points", text.contains("get_construction_points"))
 		_expect(failures, "director checks enemy workers", text.contains("_collect_enemy_workers"))
 		_expect(failures, "director checks enemy resources", text.contains("GROUP_ENEMY_RESOURCES"))
+		_expect(failures, "director checks production exits", text.contains("_get_building_exit_points"))
 
 	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
 	_expect(failures, "commander source readable", commander_source != null)
@@ -222,6 +224,7 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "commander uses attack-move for regroup", commander_text.contains("command_attack_move"))
 		_expect(failures, "commander settles assembled units", commander_text.contains("_settle_unit"))
 		_expect(failures, "commander keeps stable slots", commander_text.contains("_assemble_role_slots"))
+		_expect(failures, "commander uses forward hint", commander_text.contains("get_assemble_forward_hint"))
 
 
 func _verify_assemble_slot_stability(failures: PackedStringArray) -> void:

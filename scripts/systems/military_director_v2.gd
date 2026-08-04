@@ -207,6 +207,23 @@ func get_assemble_rally_point() -> Vector3:
 	return _assemble_rally_point
 
 
+func get_assemble_forward_hint() -> Vector3:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return Vector3.ZERO
+	var base: CommandCenter = _find_primary_enemy_base(tree)
+	if base == null:
+		return Vector3.ZERO
+	var rally_point: Vector3 = get_assemble_rally_point()
+	if rally_point == Vector3.ZERO:
+		return Vector3.ZERO
+	var forward: Vector3 = rally_point - base.global_position
+	forward.y = 0.0
+	if forward.length_squared() <= 0.01:
+		return Vector3.ZERO
+	return forward.normalized()
+
+
 ## Strategic API for future behavior / tests. Commander must not call this for self-decisions.
 func request_state(
 	next_state: State,
@@ -600,6 +617,11 @@ func _is_safe_assemble_rally_candidate(
 					return false
 			if EnemyArmyCommand.horizontal_distance(candidate, building.global_position) <= 5.0:
 				return false
+		for exit_point: Vector3 in _get_building_exit_points(building):
+			if EnemyArmyCommand.horizontal_distance(candidate, exit_point) <= MilitaryAIConfig.V2_ASSEMBLE_PRODUCTION_EXIT_CLEARANCE:
+				return false
+			if _candidate_near_worker_route(building.global_position, exit_point, candidate, 2.0):
+				return false
 
 	for worker: Worker in _collect_enemy_workers(tree):
 		if not NodeSafety.is_alive_node(worker):
@@ -670,6 +692,37 @@ func _candidate_near_worker_route(
 	var t: float = clampf(rel.dot(route) / length_sq, 0.0, 1.0)
 	var closest: Vector2 = Vector2(from_position.x, from_position.z) + route * t
 	return Vector2(candidate.x, candidate.z).distance_to(closest) <= clearance
+
+
+func _get_building_exit_points(building: Building) -> Array[Vector3]:
+	var exit_points: Array[Vector3] = []
+	if building == null or not is_instance_valid(building):
+		return exit_points
+
+	for property_name: StringName in [
+		&"worker_spawn_offset",
+		&"spearman_spawn_offset",
+		&"swordsman_spawn_offset",
+		&"archer_spawn_offset",
+		&"heavy_cavalry_spawn_offset",
+		&"light_cavalry_spawn_offset",
+		&"cavalry_archer_spawn_offset",
+		&"cannon_spawn_offset",
+	]:
+		var local_offset: Variant = building.get(property_name)
+		if not (local_offset is Vector3):
+			continue
+		exit_points.append(_building_local_offset_to_world(building, local_offset as Vector3))
+	return exit_points
+
+
+func _building_local_offset_to_world(building: Building, local_offset: Vector3) -> Vector3:
+	var world_offset: Vector3 = building.global_transform.basis * local_offset
+	return Vector3(
+		building.global_position.x + world_offset.x,
+		building.global_position.y,
+		building.global_position.z + world_offset.z
+	)
 
 
 func _publish_perf_status() -> void:
