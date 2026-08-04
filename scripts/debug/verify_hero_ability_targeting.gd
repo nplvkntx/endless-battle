@@ -17,7 +17,7 @@ func _ready() -> void:
 
 	_verify_definitions(failures)
 	_verify_targeting_controller_api(failures)
-	await _verify_player_hero_no_idle_auto_attack(failures)
+	await _verify_player_hero_idle_auto_attack(failures)
 	await _verify_military_keeps_auto_attack(failures)
 	await _verify_attack_windup_and_move_cancel(failures)
 	await _verify_invalid_cast_spends_nothing(failures)
@@ -104,7 +104,7 @@ func _verify_targeting_controller_api(failures: PackedStringArray) -> void:
 	_expect(failures, "cancel while inactive safe", not HeroAbilityTargetingController.is_targeting())
 
 
-func _verify_player_hero_no_idle_auto_attack(failures: PackedStringArray) -> void:
+func _verify_player_hero_idle_auto_attack(failures: PackedStringArray) -> void:
 	var hero: MeleeHero = HERO_SCENE.instantiate() as MeleeHero
 	var enemy: Node3D = ENEMY_DUMMY_SCENE.instantiate() as Node3D
 	add_child(hero)
@@ -112,11 +112,14 @@ func _verify_player_hero_no_idle_auto_attack(failures: PackedStringArray) -> voi
 	await get_tree().process_frame
 	hero.global_position = Vector3.ZERO
 	enemy.global_position = Vector3(1.5, 0, 0)
+	CombatTargetValidation.reset_match_state()
 
-	for _i in range(10):
+	for _i in range(30):
 		await get_tree().physics_frame
+		if hero.get_attack_target() == enemy:
+			break
 
-	_expect(failures, "player hero idle has no attack target", hero.get_attack_target() == null)
+	_expect(failures, "player hero idle auto-acquires nearby enemy", hero.get_attack_target() == enemy)
 	_expect(failures, "player hero is player controlled", hero.is_player_controlled_hero())
 
 	hero.queue_free()

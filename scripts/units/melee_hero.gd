@@ -19,6 +19,8 @@ const MOVE_SPEED_PER_LEVEL_AFTER_18 := HeroStats.MOVE_SPEED_PER_LEVEL_AFTER_18
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
 const HOLD_RETURN_DISTANCE := 1.25
 const OPPORTUNISTIC_CHASE_LEASH := 18.0
+const ACQUISITION_RANGE_BONUS := 3.5
+const AUTO_ACQUIRE_CHASE_LEASH := 8.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -56,6 +58,10 @@ var _has_move_to_cast: bool = false
 ## Seconds since match start-ish; negative means never hit by a unit/hero.
 var _last_unit_combat_damage_time: float = -99999.0
 var _fortress_regen_accumulator: float = 0.0
+var _auto_acquire_origin: Vector3 = Vector3.ZERO
+var _has_auto_acquire_origin: bool = false
+var _is_returning_from_leash: bool = false
+var _leash_return_destination: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -522,6 +528,7 @@ func _prepare_for_new_player_order() -> void:
 	_on_prepare_for_new_player_order()
 	_clear_hold_position_state()
 	_clear_patrol_state()
+	_clear_auto_acquire_leash()
 	cancel_move_to_cast()
 	cancel_attack_move()
 	cancel_attack()
@@ -549,6 +556,14 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 
 
 func _begin_attack_on_target(target: Node3D, assigned_slot: int, committed: bool) -> void:
+	if (
+		_attack_target == target
+		and _has_active_attack_order
+		and _committed_attack_order == committed
+		and (assigned_slot < 0 or assigned_slot == _attack_approach_slot)
+	):
+		return
+
 	_on_prepare_for_new_player_order()
 	_assign_attack_approach_slot(target, assigned_slot)
 	_set_attack_target(NodeSafety.safe_node(target) as Node3D)
@@ -557,6 +572,13 @@ func _begin_attack_on_target(target: Node3D, assigned_slot: int, committed: bool
 	_has_active_attack_order = true
 	_committed_attack_order = committed
 	_has_chase_target = false
+	_is_returning_from_leash = false
+
+	if committed or _has_attack_move_destination or _is_patrolling:
+		_has_auto_acquire_origin = false
+	elif not _has_auto_acquire_origin:
+		_auto_acquire_origin = global_position
+		_has_auto_acquire_origin = true
 
 	if _is_holding_position:
 		if not _is_in_attack_range(_attack_target):
@@ -739,6 +761,11 @@ func cancel_attack() -> void:
 	_clear_attack_windup()
 
 
+func _clear_auto_acquire_leash() -> void:
+	_has_auto_acquire_origin = false
+	_is_returning_from_leash = false
+
+
 func _clear_attack_windup() -> void:
 	_attack_windup_active = false
 	_attack_windup_timer = 0.0
@@ -899,7 +926,11 @@ func _physics_process(delta: float) -> void:
 		_update_hold_position(can_scan_targets, delta)
 		return
 
-	# Player heroes never idle-auto-acquire; AI heroes and Attack-Move keep acquisition.
+	if _is_returning_from_leash:
+		_update_leash_return(delta)
+		return
+
+	# Idle combat units auto-acquire within acquisition range (throttled).
 	if _attack_target == null and not has_move_target:
 		if can_scan_targets:
 			_try_auto_attack()
@@ -914,9 +945,10 @@ func _physics_process(delta: float) -> void:
 		elif not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			_finish_attack_target_lost()
 		elif not _committed_attack_order and _should_break_opportunistic_chase():
-			cancel_attack()
-			_resume_attack_move_or_patrol()
+			_break_opportunistic_or_auto_chase()
 		else:
+			if can_scan_targets and not _committed_attack_order:
+				_try_retarget_higher_priority_during_attack()
 			_process_attack(delta)
 			return
 
@@ -960,19 +992,29 @@ func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	# Player-controlled heroes require explicit Attack / Attack-Move / right-click.
-	if is_player_controlled_hero():
-		return
-
 	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
 		return
 
-	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)
 
 
+func get_acquisition_range() -> float:
+	return attack_range + ACQUISITION_RANGE_BONUS
+
+
+func _find_auto_acquire_target() -> Node3D:
+	var search_range: float = get_acquisition_range()
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
+
+
 func _find_closest_attack_target_in_range() -> Node3D:
+	## Hold Position uses strict attack range (no chase).
 	if CombatTargetValidation.is_enemy_faction(self):
 		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 			self, attack_range
@@ -981,6 +1023,52 @@ func _find_closest_attack_target_in_range() -> Node3D:
 	return CombatTargetValidation.find_closest_player_unit_attack_target_in_range(
 		self, attack_range
 	)
+
+
+func _try_retarget_higher_priority_during_attack() -> void:
+	if _attack_target == null or _committed_attack_order:
+		return
+
+	var search_range: float = get_acquisition_range()
+	if _has_attack_move_destination:
+		search_range = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+
+	var candidate: Node3D = _find_auto_acquire_target_in_search_range(search_range)
+	if candidate == null or candidate == _attack_target:
+		return
+
+	var current_distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+		self, _attack_target
+	)
+	var candidate_distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+		self, candidate
+	)
+	var current_priority: int
+	var candidate_priority: int
+	if CombatTargetValidation.is_enemy_faction(self):
+		current_priority = CombatTargetValidation.get_enemy_attack_target_priority(
+			self, _attack_target, current_distance
+		)
+		candidate_priority = CombatTargetValidation.get_enemy_attack_target_priority(
+			self, candidate, candidate_distance
+		)
+	else:
+		current_priority = CombatTargetValidation.get_auto_acquire_target_priority(
+			self, _attack_target, current_distance
+		)
+		candidate_priority = CombatTargetValidation.get_auto_acquire_target_priority(
+			self, candidate, candidate_distance
+		)
+	if candidate_priority < current_priority:
+		_begin_attack_on_target(candidate, -1, _committed_attack_order)
+
+
+func _find_auto_acquire_target_in_search_range(search_range: float) -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
 
 
 func _process_attack(delta: float) -> void:
@@ -1358,9 +1446,7 @@ func _try_attack_move_engagement() -> void:
 		return
 
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-	var closest_target: Node3D = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
-		self, search_range
-	)
+	var closest_target: Node3D = _find_auto_acquire_target_in_search_range(search_range)
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)
 
@@ -1368,6 +1454,18 @@ func _try_attack_move_engagement() -> void:
 func _should_break_opportunistic_chase() -> bool:
 	if not NodeSafety.is_alive_node(_attack_target):
 		return true
+
+	if _has_auto_acquire_origin and not _has_attack_move_destination and not _is_patrolling:
+		var from_origin: Vector3 = global_position - _auto_acquire_origin
+		from_origin.y = 0.0
+		if from_origin.length() > AUTO_ACQUIRE_CHASE_LEASH:
+			return true
+		var target_from_origin: Vector3 = _attack_target.global_position - _auto_acquire_origin
+		target_from_origin.y = 0.0
+		if target_from_origin.length() > AUTO_ACQUIRE_CHASE_LEASH:
+			return true
+		return false
+
 	var distance: float = CombatTargetValidation.get_horizontal_attack_distance(self, _attack_target)
 	if distance > OPPORTUNISTIC_CHASE_LEASH:
 		return true
@@ -1377,6 +1475,41 @@ func _should_break_opportunistic_chase() -> bool:
 		if target_from_dest.length() > OPPORTUNISTIC_CHASE_LEASH:
 			return true
 	return false
+
+
+func _break_opportunistic_or_auto_chase() -> void:
+	var should_return_home: bool = (
+		_has_auto_acquire_origin
+		and not _has_attack_move_destination
+		and not _is_patrolling
+	)
+	var return_pos: Vector3 = _auto_acquire_origin
+	cancel_attack()
+	if _resume_attack_move_or_patrol():
+		_clear_auto_acquire_leash()
+		return
+	if should_return_home:
+		_begin_leash_return(return_pos)
+	else:
+		_clear_auto_acquire_leash()
+
+
+func _begin_leash_return(destination: Vector3) -> void:
+	_is_returning_from_leash = true
+	_leash_return_destination = Vector3(destination.x, global_position.y, destination.z)
+	_has_auto_acquire_origin = false
+	_set_move_destination(_leash_return_destination, RepathUrgency.NORMAL)
+
+
+func _update_leash_return(delta: float) -> void:
+	var offset: Vector3 = global_position - _leash_return_destination
+	offset.y = 0.0
+	if offset.length() <= get_movement_acceptance_radius() or not has_move_target:
+		_is_returning_from_leash = false
+		clear_move_target()
+		_try_auto_attack()
+		return
+	super._physics_process(delta)
 
 
 func _resume_attack_move() -> bool:

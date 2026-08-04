@@ -19,6 +19,17 @@ const ENEMY_ATTACK_PRIORITY_LOW_VALUE_BUILDING := 8
 const ENEMY_ATTACK_PRIORITY_NEUTRAL_CREEP := 9
 const ENEMY_ATTACK_PRIORITY_INVALID := 99
 
+## Player / idle auto-acquire priorities (lower = higher priority).
+const AUTO_ACQUIRE_PRIORITY_HERO := 1
+const AUTO_ACQUIRE_PRIORITY_FIGHTING_MILITARY := 2
+const AUTO_ACQUIRE_PRIORITY_RANGED := 3
+const AUTO_ACQUIRE_PRIORITY_MELEE := 4
+const AUTO_ACQUIRE_PRIORITY_SIEGE := 5
+const AUTO_ACQUIRE_PRIORITY_WORKER := 6
+const AUTO_ACQUIRE_PRIORITY_BUILDING := 7
+const AUTO_ACQUIRE_PRIORITY_OTHER := 8
+const AUTO_ACQUIRE_PRIORITY_INVALID := 99
+
 ## Lower number = higher priority while defending the AI base.
 const ENEMY_DEFENSE_PRIORITY_TOWN_HALL_ATTACKER := 1
 const ENEMY_DEFENSE_PRIORITY_HERO := 2
@@ -566,6 +577,104 @@ static func find_closest_player_unit_attack_target_in_range(
 		return null
 
 	return _find_closest_hostile_attack_target_in_range(attacker, attack_range)
+
+
+static func find_best_auto_acquire_target_in_range(
+	attacker: Node3D, search_range: float
+) -> Node3D:
+	if not NodeSafety.is_alive_node(attacker):
+		return null
+	if not attacker is Node3D:
+		return null
+	if search_range <= 0.0:
+		return null
+
+	PerfCounters.record_target_search()
+	var best_target: Node3D = null
+	var best_priority: int = AUTO_ACQUIRE_PRIORITY_INVALID
+	var best_distance: float = INF
+	var tree: SceneTree = attacker.get_tree()
+	if tree == null:
+		return null
+
+	for group_name: StringName in get_hostile_search_groups(attacker):
+		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+				continue
+			var node: Node = node_variant as Node
+			if not node is Node3D:
+				continue
+			var target: Node3D = node as Node3D
+			if not is_attack_target_for_attacker(attacker, target):
+				continue
+			if StealthService.is_combat_hidden(target):
+				continue
+
+			var distance: float = get_horizontal_attack_distance(attacker, target)
+			if distance > search_range:
+				continue
+
+			var priority: int = get_auto_acquire_target_priority(attacker, target, distance)
+			if priority >= AUTO_ACQUIRE_PRIORITY_INVALID:
+				continue
+			if priority > best_priority:
+				continue
+			if priority < best_priority or distance < best_distance:
+				best_priority = priority
+				best_distance = distance
+				best_target = target
+
+	return best_target
+
+
+static func get_auto_acquire_target_priority(
+	attacker: Node3D, target: Node3D, distance: float
+) -> int:
+	if not is_attack_target_for_attacker(attacker, target):
+		return AUTO_ACQUIRE_PRIORITY_INVALID
+
+	if target is Building:
+		return AUTO_ACQUIRE_PRIORITY_BUILDING
+
+	if target is Worker:
+		return AUTO_ACQUIRE_PRIORITY_WORKER
+
+	if target is Hero:
+		return AUTO_ACQUIRE_PRIORITY_HERO
+
+	var attack_range: float = _get_attacker_attack_range(attacker)
+	var retaliation_target: Node = CombatKillTracker.get_attacker(attacker)
+	var is_military: bool = (
+		target is Spearman
+		or target is Swordsman
+		or target is Archer
+		or target is HeavyCavalry
+		or target is LightCavalry
+		or target is CavalryArcher
+		or target is Cannon
+		or target is MilitaryUnit
+		or EnemyArmyCommand.is_combat_unit(target)
+	)
+	if is_military and (target == retaliation_target or distance <= attack_range):
+		return AUTO_ACQUIRE_PRIORITY_FIGHTING_MILITARY
+
+	if target is Cannon or UnitFormationRole.is_siege_role(UnitFormationRole.get_role(target)):
+		return AUTO_ACQUIRE_PRIORITY_SIEGE
+
+	if (
+		target is Archer
+		or target is CavalryArcher
+		or UnitFormationRole.is_ranged_role(UnitFormationRole.get_role(target))
+	):
+		return AUTO_ACQUIRE_PRIORITY_RANGED
+
+	if is_military:
+		return AUTO_ACQUIRE_PRIORITY_MELEE
+
+	if is_neutral_creep(target):
+		return AUTO_ACQUIRE_PRIORITY_OTHER
+
+	return AUTO_ACQUIRE_PRIORITY_OTHER
 
 
 static func get_enemy_attack_target_priority(

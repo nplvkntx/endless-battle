@@ -29,6 +29,8 @@ const HUNTERS_PRECISION_HIT_COUNT: int = 3
 const HUNTERS_PRECISION_MAX_HEALTH_RATIO: float = 0.08
 const HUNTERS_PRECISION_DAMAGE_CAP_BASE: int = 60
 const HUNTERS_PRECISION_DAMAGE_CAP_PER_LEVEL: int = 5
+## Stacks expire if no successful basic attack continues the chain.
+const HUNTERS_PRECISION_STACK_TIMEOUT: float = 4.0
 
 # --- Q: Combat Roll ---
 const COMBAT_ROLL_DISTANCE: float = 5.0

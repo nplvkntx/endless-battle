@@ -339,8 +339,15 @@ func _deliver_basic_attack_hit(strike_target: Node3D) -> bool:
 
 
 func _stop_and_attack(delta: float) -> void:
-	# Use shared windup / cooldown / kite path from MeleeHero.
+	# Use shared windup / cooldown path from MeleeHero. Never auto-kite.
 	super._stop_and_attack(delta)
+
+
+## Player and AI Ranger both fire at any distance inside attack range.
+## AI kiting is owned by explicit mastery / ability movement, not preferred-range backstep.
+func _should_reposition_for_preferred_range() -> bool:
+	_is_backing_off_for_range = false
+	return false
 
 
 func _fire_basic_arrow(target: Node3D) -> void:
@@ -358,7 +365,17 @@ func _fire_basic_arrow(target: Node3D) -> void:
 
 	spawn_parent.add_child(arrow)
 	var spawn_position: Vector3 = global_position + Vector3(0.0, RangerStats.BASIC_ARROW_SPAWN_HEIGHT, 0.0)
-	arrow.launch(target, float(attack_damage), spawn_position, self)
+	var empower: bool = _should_empower_next_basic_arrow()
+	arrow.launch(target, float(attack_damage), spawn_position, self, empower)
+
+
+func _should_empower_next_basic_arrow() -> bool:
+	var passive_component: HeroPassiveComponent = HeroPassiveComponent.find_on(self)
+	if passive_component == null or passive_component.passive == null:
+		return false
+	if not passive_component.passive is RangerPassive:
+		return false
+	return (passive_component.passive as RangerPassive).is_next_hit_precision_proc()
 
 
 # ---------------------------------------------------------------------------

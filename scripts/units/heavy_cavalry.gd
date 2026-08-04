@@ -16,6 +16,8 @@ var _base_armor: int = -1
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
+const ACQUISITION_RANGE_BONUS := 3.5
+const AUTO_ACQUIRE_CHASE_LEASH := 8.0
 
 @onready var _health_component: HealthComponent = $HealthComponent
 @onready var _health_bar: Node3D = $HealthBar
@@ -31,6 +33,9 @@ var _has_active_attack_order: bool = false
 var _is_backing_off_for_range: bool = false
 var _attack_move_destination: Vector3 = Vector3.ZERO
 var _has_attack_move_destination: bool = false
+var _auto_acquire_origin: Vector3 = Vector3.ZERO
+var _has_auto_acquire_origin: bool = false
+var _idle_auto_acquire: bool = false
 
 
 func _ready() -> void:
@@ -152,6 +157,12 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 		return
 	_has_active_attack_order = true
 	_has_chase_target = false
+	if not _idle_auto_acquire:
+		_has_auto_acquire_origin = false
+	elif not _has_auto_acquire_origin:
+		_auto_acquire_origin = global_position
+		_has_auto_acquire_origin = true
+	_idle_auto_acquire = false
 
 	if not _is_in_attack_range(_attack_target):
 		_begin_chase()
@@ -238,6 +249,7 @@ func cancel_attack() -> void:
 	_has_chase_target = false
 	_is_backing_off_for_range = false
 	_has_active_attack_order = false
+	_idle_auto_acquire = false
 
 
 func set_movement_target(
@@ -283,8 +295,11 @@ func _physics_process(delta: float) -> void:
 		elif not CombatTargetValidation.is_valid_combat_target(_attack_target):
 			cancel_attack()
 			_resume_attack_move()
+		elif _has_auto_acquire_origin and _should_break_auto_acquire_leash():
+			cancel_attack()
+			_return_from_auto_acquire_leash()
 		else:
-			if CombatTargetValidation.is_enemy_faction(self) and can_scan_targets:
+			if can_scan_targets:
 				_try_retarget_higher_priority_during_attack()
 			_process_attack(delta)
 			return
@@ -300,9 +315,19 @@ func _try_auto_attack() -> void:
 	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
 		return
 
-	var closest_target: Node3D = _find_closest_attack_target_in_range()
+	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
+		_idle_auto_acquire = true
 		command_attack(closest_target)
+
+
+func _find_auto_acquire_target() -> Node3D:
+	var search_range: float = attack_range + ACQUISITION_RANGE_BONUS
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
 
 
 func _find_closest_attack_target_in_range() -> Node3D:
@@ -318,8 +343,33 @@ func _find_closest_attack_target_in_range() -> Node3D:
 
 func _find_engagement_target_in_range() -> Node3D:
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-	return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
-		self, search_range
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
+
+
+func _should_break_auto_acquire_leash() -> bool:
+	if not _has_auto_acquire_origin or _has_attack_move_destination:
+		return false
+	if not NodeSafety.is_alive_node(_attack_target):
+		return true
+	var from_origin: Vector3 = global_position - _auto_acquire_origin
+	from_origin.y = 0.0
+	if from_origin.length() > AUTO_ACQUIRE_CHASE_LEASH:
+		return true
+	var target_from_origin: Vector3 = _attack_target.global_position - _auto_acquire_origin
+	target_from_origin.y = 0.0
+	return target_from_origin.length() > AUTO_ACQUIRE_CHASE_LEASH
+
+
+func _return_from_auto_acquire_leash() -> void:
+	var destination: Vector3 = _auto_acquire_origin
+	_has_auto_acquire_origin = false
+	_set_move_destination(
+		Vector3(destination.x, global_position.y, destination.z),
+		RepathUrgency.NORMAL
 	)
 
 
@@ -327,10 +377,10 @@ func _try_retarget_higher_priority_during_attack() -> void:
 	if _attack_target == null:
 		return
 
-	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-	var candidate: Node3D = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
-		self, search_range
-	)
+	var search_range: float = attack_range + ACQUISITION_RANGE_BONUS
+	if _has_attack_move_destination:
+		search_range = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	var candidate: Node3D = _find_engagement_candidate(search_range)
 	if candidate == null or candidate == _attack_target:
 		return
 
@@ -340,14 +390,32 @@ func _try_retarget_higher_priority_during_attack() -> void:
 	var candidate_distance: float = CombatTargetValidation.get_horizontal_attack_distance(
 		self, candidate
 	)
-	var current_priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
-		self, _attack_target, current_distance
-	)
-	var candidate_priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
-		self, candidate, candidate_distance
-	)
+	var current_priority: int
+	var candidate_priority: int
+	if CombatTargetValidation.is_enemy_faction(self):
+		current_priority = CombatTargetValidation.get_enemy_attack_target_priority(
+			self, _attack_target, current_distance
+		)
+		candidate_priority = CombatTargetValidation.get_enemy_attack_target_priority(
+			self, candidate, candidate_distance
+		)
+	else:
+		current_priority = CombatTargetValidation.get_auto_acquire_target_priority(
+			self, _attack_target, current_distance
+		)
+		candidate_priority = CombatTargetValidation.get_auto_acquire_target_priority(
+			self, candidate, candidate_distance
+		)
 	if candidate_priority < current_priority:
 		command_attack(candidate)
+
+
+func _find_engagement_candidate(search_range: float) -> Node3D:
+	if CombatTargetValidation.is_enemy_faction(self):
+		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
 
 
 func _process_attack(delta: float) -> void:
