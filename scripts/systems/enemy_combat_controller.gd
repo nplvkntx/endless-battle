@@ -32,8 +32,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## Legacy combat decisions and order issuance are suspended under V2.
-		## ArmyCommanderV2 drains the shared order batch instead.
+		## DISABLED under Military AI V2 (legacy regroup + retreat + combat mission owner).
+		## ArmyCommanderV2 drains the shared order batch and executes missions instead.
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()

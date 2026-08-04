@@ -2,11 +2,29 @@ class_name MilitaryAIConfig
 extends RefCounted
 
 ## Feature toggle for the Military AI V2 stack.
-## When false, legacy military AI runs unchanged.
-## When true, legacy military decision-makers and main-army order issuers
-## must not run; economy / production AI remains active.
+## PRODUCTION DEFAULT: true — MilitaryDirectorV2 + ArmyCommanderV2 own the main army.
+##
+## Developer-only legacy switch:
+## Set USE_MILITARY_AI_V2 = false to run the pre-V2 military controllers for comparison.
+## Never ship with both stacks issuing main-army orders at once.
+##
+## When true (default), these legacy main-army mission / order owners are suspended:
+##   - EnemyCreepManager._process          (legacy creep mission owner)
+##   - EnemyWaveManager._process           (attack-wave / lethal / finishing mission owner)
+##   - EnemyCombatController._process      (legacy regroup + retreat + combat mission owner)
+##   - EnemyDefenseManager._process        (competing defense mission owner)
+##   - EnemyStrategicDirector._set_main_mission / _run_recovery_checks
+##                                         (competing mission + recovery owners)
+## Low-level helpers on those scripts (camp queries, army math, spawn rally helpers)
+## remain available for V2 reuse.
+##
+## Kept active under V2 (non-military / economy boundary):
+##   EnemyBuildManager, EnemyGatherManager, EnemyResourceManager, TechTree,
+##   UpgradeManager, EnemyBuildPlacement, worker / construction / production AI.
+##
+## See docs/MILITARY_AI_V2.md for ownership, transitions, and extension rules.
 
-const USE_MILITARY_AI_V2: bool = false
+const USE_MILITARY_AI_V2: bool = true
 
 ## V2 readiness thresholds.
 const V2_CREEP_READY_MILITARY_UNITS: int = 5

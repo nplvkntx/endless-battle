@@ -95,7 +95,9 @@ func reset_match_state() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## Creep mission FSM is owned by MilitaryDirectorV2 / ArmyCommanderV2 when enabled.
+		## DISABLED under Military AI V2 (legacy creep mission owner).
+		## Creep camp selection / clearance is owned by MilitaryDirectorV2;
+		## ArmyCommanderV2 executes CREEP orders and may call low-level helpers here.
 		return
 
 	_track_phase_entry()

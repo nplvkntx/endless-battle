@@ -60,8 +60,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## Attack waves / finishing / aggression ownership move to V2.
-		## Hero micro is ticked by ArmyCommanderV2 instead.
+		## DISABLED under Military AI V2 (attack-wave / competing lethal mission owner).
+		## Offense, finishing, and aggression commits move to MilitaryDirectorV2.
+		## Hero kit micro is ticked by ArmyCommanderV2 instead of this manager.
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()

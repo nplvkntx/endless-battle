@@ -60,9 +60,23 @@ func _write_report(report: String) -> void:
 
 
 func _verify_toggle_default(failures: PackedStringArray) -> void:
-	_expect(failures, "USE_MILITARY_AI_V2 defaults false", MilitaryAIConfig.USE_MILITARY_AI_V2 == false)
-	_expect(failures, "is_v2_enabled mirrors const", MilitaryAIConfig.is_v2_enabled() == false)
-	_expect(failures, "ai_version_label Legacy when disabled", MilitaryAIConfig.ai_version_label() == "Legacy")
+	_expect(failures, "USE_MILITARY_AI_V2 defaults true", MilitaryAIConfig.USE_MILITARY_AI_V2 == true)
+	_expect(failures, "is_v2_enabled mirrors const", MilitaryAIConfig.is_v2_enabled() == true)
+	_expect(failures, "ai_version_label V2 when enabled", MilitaryAIConfig.ai_version_label() == "V2")
+
+	var docs := FileAccess.open("res://docs/MILITARY_AI_V2.md", FileAccess.READ)
+	_expect(failures, "docs/MILITARY_AI_V2.md exists", docs != null)
+	if docs != null:
+		var docs_text: String = docs.get_as_text()
+		docs.close()
+		_expect(failures, "docs cover ownership rules", docs_text.contains("Ownership"))
+		_expect(failures, "docs cover prohibited owners", docs_text.contains("Prohibited"))
+		_expect(failures, "docs cover extension rules", docs_text.contains("Extension"))
+		_expect(
+			failures,
+			"docs require MilitaryDirectorV2 or ArmyCommanderV2 integration",
+			docs_text.contains("MilitaryDirectorV2") and docs_text.contains("ArmyCommanderV2")
+		)
 
 
 func _verify_mission_payload(failures: PackedStringArray) -> void:
@@ -106,13 +120,24 @@ func _verify_director_states(failures: PackedStringArray) -> void:
 	)
 	_expect(
 		failures,
-		"request_state rejected while V2 disabled",
-		director.request_state(MilitaryDirectorV2.State.ATTACK, "should fail") == false
+		"request_state accepted while V2 enabled",
+		director.request_state(MilitaryDirectorV2.State.ATTACK, "verify accept") == true
+	)
+	_expect(
+		failures,
+		"director entered ATTACK after accepted request",
+		director.get_state() == MilitaryDirectorV2.State.ATTACK
+	)
+	director.reset_match_state()
+	_expect(
+		failures,
+		"director returns to IDLE after reset",
+		director.get_state() == MilitaryDirectorV2.State.IDLE
 	)
 	_expect(failures, "director owns empty main squad", director.get_main_squad() != null)
 	_expect(failures, "main squad starts empty", director.get_main_squad().get_size() == 0)
 
-	## Exercise state enum coverage without enabling the feature toggle.
+	## Exercise state enum label coverage.
 	for state: MilitaryDirectorV2.State in [
 		MilitaryDirectorV2.State.IDLE,
 		MilitaryDirectorV2.State.ASSEMBLE,
@@ -188,6 +213,42 @@ func _verify_legacy_gate_helpers(failures: PackedStringArray) -> void:
 			failures,
 			"%s gates on MilitaryAIConfig" % path.get_file(),
 			text.contains("MilitaryAIConfig.is_v2_enabled()")
+		)
+		_expect(
+			failures,
+			"%s documents DISABLED under V2" % path.get_file(),
+			text.contains("DISABLED under Military AI V2")
+		)
+
+	var config_source := FileAccess.open("res://scripts/systems/military_ai_config.gd", FileAccess.READ)
+	_expect(failures, "military_ai_config readable", config_source != null)
+	if config_source != null:
+		var config_text: String = config_source.get_as_text()
+		config_source.close()
+		_expect(
+			failures,
+			"config documents legacy creep owner gate",
+			config_text.contains("EnemyCreepManager")
+		)
+		_expect(
+			failures,
+			"config documents attack-wave owner gate",
+			config_text.contains("EnemyWaveManager")
+		)
+		_expect(
+			failures,
+			"config documents regroup/retreat owner gate",
+			config_text.contains("EnemyCombatController")
+		)
+		_expect(
+			failures,
+			"config documents defense owner gate",
+			config_text.contains("EnemyDefenseManager")
+		)
+		_expect(
+			failures,
+			"config documents developer legacy switch",
+			config_text.contains("Developer-only legacy switch")
 		)
 
 

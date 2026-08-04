@@ -29,7 +29,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## Defense ownership moves to MilitaryDirectorV2 when V2 is enabled.
+		## DISABLED under Military AI V2 (competing defense mission owner).
+		## Emergency base defense is owned by MilitaryDirectorV2 DEFEND state.
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()
