@@ -94,6 +94,10 @@ func reset_match_state() -> void:
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Creep mission FSM is owned by MilitaryDirectorV2 / ArmyCommanderV2 when enabled.
+		return
+
 	_track_phase_entry()
 	_track_hero_level()
 

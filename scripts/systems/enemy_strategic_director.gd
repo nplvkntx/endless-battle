@@ -91,6 +91,16 @@ func _ready() -> void:
 	var creep_manager: EnemyCreepManager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	if creep_manager != null:
 		creep_manager.reset_match_state()
+	var military_director_v2: MilitaryDirectorV2 = (
+		get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+	)
+	if military_director_v2 != null:
+		military_director_v2.reset_match_state()
+	var army_commander_v2: ArmyCommanderV2 = (
+		get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
+	)
+	if army_commander_v2 != null:
+		army_commander_v2.reset_match_state()
 	_match_start_msec = Time.get_ticks_msec()
 	# Stagger strategic ticks away from combat/defense shared frames.
 	_fast_timer = FAST_TICK_SECONDS * 0.2
@@ -152,8 +162,20 @@ func _process(delta: float) -> void:
 
 
 func _publish_perf_status() -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## MilitaryDirectorV2 owns F3 military status while V2 is active.
+		return
+
 	var mission_label: String = EnemyArmyCommand.executable_mission_to_label(
 		EnemyArmyCommand.get_executable_mission()
+	)
+	PerfCounters.set_military_ai_v2_status(
+		MilitaryAIConfig.ai_version_label(),
+		"-",
+		"-",
+		"-",
+		0.0,
+		"-"
 	)
 	PerfCounters.set_ai_status(
 		get_strategic_phase_name(),
@@ -1232,6 +1254,10 @@ func _recommend_main_army_mission() -> void:
 
 
 func _set_main_mission(mission: EnemyUnitMission.Mission, reason: String) -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Main-army mission ownership moves to MilitaryDirectorV2.
+		return
+
 	if not EnemyUnitMission.set_main_army_mission(mission, reason):
 		return
 
@@ -1252,6 +1278,9 @@ func _sync_hero_to_main_mission() -> void:
 
 
 func _run_recovery_checks() -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		return
+
 	if EnemyArmyCommand.is_attack_wave_controlling_hero():
 		return
 

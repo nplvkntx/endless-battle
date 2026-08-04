@@ -31,6 +31,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Legacy combat decisions and order issuance are suspended under V2.
+		## ArmyCommanderV2 drains the shared order batch instead.
+		return
+
 	EnemyArmyCommand.apply_pending_strategic_transition()
 	EnemyArmyCommand.tick_group_order_batch(get_tree())
 	EnemyArmyCommand.tick_perf_diagnostics(get_tree(), delta)

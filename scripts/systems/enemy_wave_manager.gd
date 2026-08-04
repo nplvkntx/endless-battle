@@ -66,6 +66,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Attack waves / finishing / aggression ownership move to V2.
+		## Hero micro is ticked by ArmyCommanderV2 instead.
+		return
+
 	EnemyArmyCommand.apply_pending_strategic_transition()
 	EnemyArmyCommand.update_finishing_mode(get_tree(), delta)
 	_cache_player_base_position()

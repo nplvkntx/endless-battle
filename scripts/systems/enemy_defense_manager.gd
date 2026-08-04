@@ -28,6 +28,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Defense ownership moves to MilitaryDirectorV2 when V2 is enabled.
+		return
+
 	EnemyArmyCommand.apply_pending_strategic_transition()
 	_tick_timer += delta
 	if _tick_timer < DEFENSE_TICK_INTERVAL_SECONDS:

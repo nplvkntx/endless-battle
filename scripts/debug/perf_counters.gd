@@ -38,6 +38,12 @@ var _ai_phase_name: String = "-"
 var _ai_combat_state: String = "-"
 var _ai_mission_owner: String = "-"
 var _ai_mission_detail: String = "-"
+var _military_ai_version: String = "Legacy"
+var _military_ai_v2_state: String = "-"
+var _military_ai_v2_mission: String = "-"
+var _military_ai_v2_objective: String = "-"
+var _military_ai_v2_mission_age: float = 0.0
+var _military_ai_v2_transition_reason: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -53,6 +59,7 @@ var verbose_ai_logging: bool = false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process(true)
+	_military_ai_version = MilitaryAIConfig.ai_version_label()
 	MatchSession.register_match_reset(&"PerfCounters", reset_all)
 
 
@@ -178,6 +185,48 @@ func get_ai_mission_owner() -> String:
 
 func get_ai_mission_detail() -> String:
 	return _ai_mission_detail
+
+
+func set_military_ai_v2_status(
+	ai_version: String,
+	v2_state: String,
+	mission: String,
+	objective: String,
+	mission_age_seconds: float,
+	transition_reason: String
+) -> void:
+	_military_ai_version = ai_version if not ai_version.is_empty() else "-"
+	_military_ai_v2_state = v2_state if not v2_state.is_empty() else "-"
+	_military_ai_v2_mission = mission if not mission.is_empty() else "-"
+	_military_ai_v2_objective = objective if not objective.is_empty() else "-"
+	_military_ai_v2_mission_age = maxf(0.0, mission_age_seconds)
+	_military_ai_v2_transition_reason = (
+		transition_reason if not transition_reason.is_empty() else "-"
+	)
+
+
+func get_military_ai_version() -> String:
+	return _military_ai_version
+
+
+func get_military_ai_v2_state() -> String:
+	return _military_ai_v2_state
+
+
+func get_military_ai_v2_mission() -> String:
+	return _military_ai_v2_mission
+
+
+func get_military_ai_v2_objective() -> String:
+	return _military_ai_v2_objective
+
+
+func get_military_ai_v2_mission_age() -> float:
+	return _military_ai_v2_mission_age
+
+
+func get_military_ai_v2_transition_reason() -> String:
+	return _military_ai_v2_transition_reason
 
 
 func sample_fps(delta: float) -> void:
@@ -334,6 +383,12 @@ func reset_all() -> void:
 	_ai_combat_state = "-"
 	_ai_mission_owner = "-"
 	_ai_mission_detail = "-"
+	_military_ai_version = MilitaryAIConfig.ai_version_label()
+	_military_ai_v2_state = "-"
+	_military_ai_v2_mission = "-"
+	_military_ai_v2_objective = "-"
+	_military_ai_v2_mission_age = 0.0
+	_military_ai_v2_transition_reason = "-"
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0

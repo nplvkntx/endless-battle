@@ -1,7 +1,12 @@
 ﻿extends Node
 
 ## Owns AI hero kit selection (once per match) and hero tactical combat decisions.
-## Autoload singleton â€” Wave manager calls tick(); kit ability casts stay on heroes.
+## Autoload singleton — Wave manager / ArmyCommanderV2 call tick(); kit ability casts stay on heroes.
+##
+## Hero AI boundary (Military AI V2):
+## MAY: cast abilities, choose targets during the current mission, perform survival micro.
+## MAY NOT: choose the army mission, start creeping, launch attacks, order regrouping,
+##          or override defend/retreat states owned by MilitaryDirectorV2.
 
 const AIHeroComboPlanner = preload("res://scripts/systems/ai_hero_combo_planner.gd")
 
@@ -150,7 +155,9 @@ func _announce_selection_once(kit_id: StringName) -> void:
 	_debug_log(message)
 
 
-## Primary AI hero micro entry â€” owns tactical state and combos.
+## Primary AI hero micro entry — owns tactical state and combos.
+## Under Military AI V2, army mission / creep / attack / defend / retreat are owned by
+## MilitaryDirectorV2. This tick only performs ability casting, target choice, and survival micro.
 func tick(hero: Hero, context: Dictionary) -> void:
 	if not NodeSafety.is_alive_node(hero):
 		return
