@@ -32,6 +32,16 @@ const OUTNUMBERED_RATIO := 0.45
 const LOW_HP_RATIO := 0.38
 const CRITICAL_HP_RATIO := 0.28
 const SAFE_BUILDING_THREAT_RADIUS := 7.0
+const ROLE_ANCHOR_SETTLE_DISTANCE := 1.6
+const PALADIN_SQUAD_CHASE_LEASH := 10.0
+const ASSASSIN_SQUAD_CHASE_LEASH := 14.0
+## Enemy ability upgrade order: main damage, survival, secondary damage, then ultimate.
+const ABILITY_UPGRADE_PRIORITY: Array[StringName] = [
+	HeroAbilityProgression.ABILITY_Q,
+	HeroAbilityProgression.ABILITY_W,
+	HeroAbilityProgression.ABILITY_E,
+	HeroAbilityProgression.ABILITY_R,
+]
 
 ## Equal weight across the three Human kits (â‰ˆ33.33% each).
 const AI_HERO_POOL: Array[StringName] = [
@@ -165,6 +175,9 @@ func tick(hero: Hero, context: Dictionary) -> void:
 		return
 
 	ensure_enemy_hero_choice()
+	spend_ability_points(hero)
+	if not NodeSafety.is_alive_node(hero):
+		return
 
 	var now: float = _now_seconds()
 	var situation: Dictionary = _build_situation(hero, context)
@@ -196,10 +209,76 @@ func tick(hero: Hero, context: Dictionary) -> void:
 	_run_kit_behavior(hero, situation, now)
 
 
+## Spend every available point using shared learn rules (AP, max rank, ultimate levels).
+func spend_ability_points(hero: Hero) -> void:
+	if not NodeSafety.is_alive_node(hero):
+		return
+	if not CombatTargetValidation.is_enemy_faction(hero):
+		return
+	if hero.ability_progression == null:
+		return
+	if hero.ability_points <= 0:
+		return
+
+	var spend_guard: int = 0
+	var max_spends: int = hero.ability_points
+	while hero.ability_points > 0 and spend_guard < max_spends:
+		spend_guard += 1
+		if not NodeSafety.is_alive_node(hero):
+			return
+		var learned_ability: bool = false
+		for ability_id: StringName in ABILITY_UPGRADE_PRIORITY:
+			if hero.try_learn_ability(ability_id, false):
+				learned_ability = true
+				break
+		if not learned_ability:
+			break
+
+
+## Count hostile player military near the hero; optionally include neutrals while creeping.
+func count_nearby_hostiles(hero: Hero, include_neutrals: bool = false) -> int:
+	if not NodeSafety.is_alive_node(hero):
+		return 0
+	var tree: SceneTree = hero.get_tree()
+	if tree == null:
+		return 0
+
+	var hostiles: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		hero.global_position,
+		EnemyArmyCommand.HERO_AOE_CHECK_RANGE
+	)
+	hostiles = NodeSafety.clean_node_array(hostiles)
+	var count: int = hostiles.size()
+	if not include_neutrals:
+		return count
+
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		CombatTargetValidation.NEUTRAL_CREEP_GROUP
+	):
+		if not NodeSafety.is_alive_node(node_variant) or not node_variant is Node3D:
+			continue
+		if not CombatTargetValidation.is_neutral_creep(node_variant):
+			continue
+		if CombatTargetValidation.get_target_current_health(node_variant) <= 0:
+			continue
+		if (
+			_horizontal_distance(hero.global_position, (node_variant as Node3D).global_position)
+			> EnemyArmyCommand.HERO_AOE_CHECK_RANGE
+		):
+			continue
+		count += 1
+	return count
+
+
 func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 	var tree: SceneTree = hero.get_tree()
 	var health_ratio: float = float(context.get("health_ratio", EnemyArmyCommand.get_health_ratio(hero)))
-	var nearby_enemies: int = int(context.get("nearby_enemy_count", 0))
+	var nearby_enemies: int = int(context.get("nearby_enemy_count", -1))
+	var creeping_hint: bool = bool(context.get("creeping", false))
+	if nearby_enemies < 0:
+		nearby_enemies = count_nearby_hostiles(hero, creeping_hint)
 	var nearby_allies: int = _count_allied_military_near(hero, 12.0)
 	var enemy_strength: float = float(nearby_enemies)
 	var ally_strength: float = float(maxi(nearby_allies, 1))
@@ -207,8 +286,16 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 	if nearby_enemies >= nearby_allies + 3 and health_ratio < 0.7:
 		outnumbered = true
 
-	var army_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(tree)
-	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(army_units)
+	var military_ai_v2: bool = bool(context.get("military_ai_v2", false))
+	var army_mission: String = str(context.get("army_mission", ""))
+	var army_state: String = str(context.get("army_state", ""))
+	if army_mission.is_empty() and army_state != "":
+		army_mission = army_state
+
+	var army_center: Vector3 = context.get("squad_center", Vector3.ZERO) as Vector3
+	if army_center == Vector3.ZERO:
+		var army_units: Array = EnemyArmyCommand.collect_living_non_hero_combat_units(tree)
+		army_center = EnemyArmyCommand.compute_army_center(army_units)
 	var distance_to_army: float = 0.0
 	if army_center != Vector3.ZERO:
 		distance_to_army = _horizontal_distance(hero.global_position, army_center)
@@ -218,16 +305,37 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 		_horizontal_distance(hero.global_position, rally) if rally != Vector3.ZERO else 0.0
 	)
 
-	var retreating: bool = bool(context.get("retreating", false))
-	var defend_base: bool = EnemyArmyCommand.is_emergency_defense_active()
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
-	if army_mode in [EnemyArmyCommand.ArmyMode.DEFENDING, EnemyArmyCommand.ArmyMode.INTERCEPTING]:
-		defend_base = true
+	var defend_base: bool = (
+		bool(context.get("defend_base", false))
+		or EnemyArmyCommand.is_emergency_defense_active()
+		or army_mode in [EnemyArmyCommand.ArmyMode.DEFENDING, EnemyArmyCommand.ArmyMode.INTERCEPTING]
+		or army_mission == "DEFEND"
+		or army_state == "DEFEND"
+	)
 	var creeping: bool = (
-		bool(context.get("creeping", false))
+		creeping_hint
 		or army_mode == EnemyArmyCommand.ArmyMode.CREEPING
 		or EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP
+		or army_mission == "CREEP"
+		or army_state == "CREEP"
 	)
+	var attacking: bool = (
+		bool(context.get("attacking", false))
+		or army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
+		or army_mission == "ATTACK"
+		or army_state == "ATTACK"
+	)
+	var retreating: bool = (
+		bool(context.get("retreating", false))
+		or army_mission == "RETREAT"
+		or army_state == "RETREAT"
+		or army_mode == EnemyArmyCommand.ArmyMode.RETREATING
+		or health_ratio < LOW_HP_RATIO
+	)
+	var role_anchor: Vector3 = context.get("role_anchor", Vector3.ZERO) as Vector3
+	if role_anchor == Vector3.ZERO and army_center != Vector3.ZERO:
+		role_anchor = _default_role_anchor(hero, army_center, context)
 
 	return {
 		"health_ratio": health_ratio,
@@ -239,9 +347,14 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 		"distance_to_army": distance_to_army,
 		"distance_to_base": distance_to_base,
 		"rally": rally,
-		"retreating": retreating or health_ratio < LOW_HP_RATIO,
+		"role_anchor": role_anchor,
+		"retreating": retreating,
 		"defend_base": defend_base,
 		"creeping": creeping,
+		"attacking": attacking,
+		"military_ai_v2": military_ai_v2,
+		"army_mission": army_mission,
+		"army_state": army_state,
 		"aoe_needed": int(context.get("aoe_needed", EnemyArmyCommand.HERO_AOE_PLAYER_COUNT)),
 		"defensive_hp_ratio": float(
 			context.get("defensive_hp_ratio", EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO)
@@ -251,24 +364,62 @@ func _build_situation(hero: Hero, context: Dictionary) -> Dictionary:
 		"kit_id": hero.get_hero_kit_id(),
 		"level": hero.level,
 		"combo_abort_reason": "",
+		"mission_destination": context.get("mission_destination", Vector3.ZERO),
+		"mission_target": context.get("mission_target"),
+		"hero_follow_spacing": float(context.get("hero_follow_spacing", 2.4)),
 	}
+
+
+func _default_role_anchor(hero: Hero, army_center: Vector3, context: Dictionary) -> Vector3:
+	var destination: Vector3 = context.get("mission_destination", Vector3.ZERO) as Vector3
+	var mission_target: Node3D = context.get("mission_target") as Node3D
+	var forward: Vector3 = Vector3.ZERO
+	if NodeSafety.is_alive_node(mission_target):
+		forward = mission_target.global_position - army_center
+	elif destination != Vector3.ZERO:
+		forward = destination - army_center
+	forward.y = 0.0
+	if forward.length_squared() < 0.01:
+		forward = Vector3(0.0, 0.0, 1.0)
+	else:
+		forward = forward.normalized()
+	var right: Vector3 = forward.cross(Vector3.UP)
+	if right.length_squared() < 0.01:
+		right = Vector3.RIGHT
+	else:
+		right = right.normalized()
+	var spacing: float = float(context.get("hero_follow_spacing", 2.4))
+	var local_offset: Vector3 = UnitFormationRole.hero_follow_offset(
+		UnitFormationRole.get_role(hero),
+		spacing
+	)
+	return Vector3(
+		army_center.x + right.x * local_offset.x + forward.x * local_offset.z,
+		army_center.y,
+		army_center.z + right.z * local_offset.x + forward.z * local_offset.z
+	)
 
 
 func _update_tactical_state(hero: Hero, situation: Dictionary) -> void:
 	var health_ratio: float = float(situation.get("health_ratio", 1.0))
 	var kit_id: StringName = StringName(str(situation.get("kit_id", "")))
 	var desired: TacticalState = TacticalState.FOLLOW_ARMY
+	var retreating_mission: bool = _is_retreat_mission(situation)
 
 	if bool(situation.get("defend_base", false)):
 		desired = TacticalState.DEFEND_BASE
-	elif health_ratio <= CRITICAL_HP_RATIO or (
+	elif retreating_mission or health_ratio <= CRITICAL_HP_RATIO or (
 		bool(situation.get("outnumbered", false)) and health_ratio < 0.55
 	):
-		desired = TacticalState.ESCAPE
+		desired = TacticalState.ESCAPE if not retreating_mission else TacticalState.ESCAPE
 		_debug_log_throttled(
 			"retreat",
-			"Hero retreat triggered (hp=%.2f outnumbered=%s)"
-			% [health_ratio, str(situation.get("outnumbered", false))]
+			"Hero retreat triggered (hp=%.2f outnumbered=%s mission=%s)"
+			% [
+				health_ratio,
+				str(situation.get("outnumbered", false)),
+				str(situation.get("army_mission", "")),
+			]
 		)
 	elif float(situation.get("distance_to_army", 0.0)) > EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY:
 		desired = TacticalState.RETURN_TO_ARMY
@@ -279,7 +430,8 @@ func _update_tactical_state(hero: Hero, situation: Dictionary) -> void:
 	elif kit_id == HeroCatalog.KIT_PALADIN and _paladin_should_protect(hero, situation):
 		desired = TacticalState.PROTECT_BACKLINE
 	elif kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN and int(situation.get("nearby_enemy_count", 0)) > 0:
-		if health_ratio > 0.45 and not bool(situation.get("outnumbered", false)):
+		## Assassin only commits to engage/combo under valid attack/defend pressure — never solo opens.
+		if _assassin_may_engage(situation) and health_ratio > 0.45 and not bool(situation.get("outnumbered", false)):
 			desired = TacticalState.POKE if hero.level < 6 else TacticalState.ENGAGE
 		else:
 			desired = TacticalState.REPOSITION
@@ -292,6 +444,23 @@ func _update_tactical_state(hero: Hero, situation: Dictionary) -> void:
 		desired = TacticalState.FOLLOW_ARMY
 
 	_set_state(desired)
+
+
+func _is_retreat_mission(situation: Dictionary) -> bool:
+	return (
+		str(situation.get("army_mission", "")) == "RETREAT"
+		or str(situation.get("army_state", "")) == "RETREAT"
+	)
+
+
+func _assassin_may_engage(situation: Dictionary) -> bool:
+	## Does not independently start attacks — only engage under army ATTACK/DEFEND.
+	if bool(situation.get("attacking", false)):
+		return true
+	if bool(situation.get("defend_base", false)):
+		return true
+	## While creeping, poke is fine but full engage/combo is not an independent open.
+	return false
 
 
 func _set_state(state: TacticalState) -> void:
@@ -307,6 +476,9 @@ func _should_abort_combo(situation: Dictionary) -> bool:
 	if bool(situation.get("defend_base", false)):
 		situation["combo_abort_reason"] = "base defense"
 		return true
+	if _is_retreat_mission(situation) or bool(situation.get("retreating", false)):
+		situation["combo_abort_reason"] = "retreat"
+		return true
 	if float(situation.get("health_ratio", 1.0)) <= CRITICAL_HP_RATIO:
 		situation["combo_abort_reason"] = "low health"
 		return true
@@ -315,6 +487,9 @@ func _should_abort_combo(situation: Dictionary) -> bool:
 		return true
 	if float(situation.get("mana_ratio", 1.0)) < 0.08:
 		situation["combo_abort_reason"] = "out of mana"
+		return true
+	if float(situation.get("distance_to_army", 0.0)) > ASSASSIN_SQUAD_CHASE_LEASH * 1.25:
+		situation["combo_abort_reason"] = "too far from squad"
 		return true
 	return false
 
@@ -500,6 +675,14 @@ func _try_start_combo(hero: Hero, situation: Dictionary, now: float) -> bool:
 		return false
 	if _tactical_state in [TacticalState.ESCAPE, TacticalState.RETURN_TO_ARMY]:
 		return false
+	if _is_retreat_mission(situation) or bool(situation.get("retreating", false)):
+		return false
+	## Combos are attack/defend micro only — never an independent strategic open.
+	if not _assassin_may_engage(situation):
+		return false
+	if bool(situation.get("creeping", false)) and not bool(situation.get("attacking", false)):
+		## Avoid wasting ultimate combo resources while farming camps.
+		return false
 	if float(situation.get("health_ratio", 1.0)) < 0.32:
 		return false
 	if bool(situation.get("outnumbered", false)) and hero.level < 6:
@@ -661,10 +844,23 @@ func _run_kit_behavior(hero: Hero, situation: Dictionary, now: float) -> void:
 				_paladin_divine_if_needed(hero, situation)
 		return
 
+	## RETREAT mission: survival / disengage tools only — no offensive opens.
+	if _is_retreat_mission(situation):
+		_handle_escape_or_return(hero, situation, now)
+		match kit_id:
+			HeroCatalog.KIT_SHADOW_ASSASSIN:
+				_assassin_escape_if_needed(hero, situation)
+			HeroCatalog.KIT_RANGER:
+				_ranger_escape_tools(hero, situation, now)
+			HeroCatalog.KIT_PALADIN:
+				_paladin_divine_if_needed(hero, situation)
+		return
+
 	if NodeSafety.is_alive_node(focus) and _tactical_state != TacticalState.FOLLOW_ARMY:
-		# Avoid attacking buildings under active unit pressure.
-		if not (focus is Building and _is_under_unit_pressure(hero)):
-			_issue_attack_on_focus(hero, focus)
+		if _focus_within_squad_leash(hero, focus, situation):
+			# Avoid attacking buildings under active unit pressure.
+			if not (focus is Building and _is_under_unit_pressure(hero)):
+				_issue_attack_on_focus(hero, focus)
 
 	match kit_id:
 		HeroCatalog.KIT_RANGER:
@@ -674,19 +870,107 @@ func _run_kit_behavior(hero: Hero, situation: Dictionary, now: float) -> void:
 		_:
 			_run_paladin(hero, situation, now)
 
+	## Short tactical positioning around the squad role slot (never changes mission).
+	_apply_role_positioning(hero, situation, now)
+
+
+func _focus_within_squad_leash(hero: Hero, focus: Node3D, situation: Dictionary) -> bool:
+	if not NodeSafety.is_alive_node(focus):
+		return false
+	var army_center: Vector3 = situation.get("army_center", Vector3.ZERO)
+	if army_center == Vector3.ZERO:
+		return true
+	var kit_id: StringName = StringName(str(situation.get("kit_id", "")))
+	var leash: float = EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY
+	if kit_id == HeroCatalog.KIT_PALADIN:
+		leash = PALADIN_SQUAD_CHASE_LEASH
+	elif kit_id == HeroCatalog.KIT_SHADOW_ASSASSIN:
+		leash = ASSASSIN_SQUAD_CHASE_LEASH
+	elif kit_id == HeroCatalog.KIT_RANGER:
+		## Ranger only chases under valid attack orders; otherwise shoot-in-range only.
+		if not bool(situation.get("attacking", false)) and not bool(situation.get("defend_base", false)):
+			var attack_range: float = float(hero.attack_range)
+			return CombatTargetValidation.get_horizontal_attack_distance(hero, focus) <= attack_range * 1.05
+		leash = EnemyArmyCommand.HERO_MAX_DISTANCE_FROM_ARMY * 0.85
+	return _horizontal_distance(focus.global_position, army_center) <= leash
+
 
 func _handle_escape_or_return(hero: Hero, situation: Dictionary, now: float) -> void:
 	if now - _last_micro_move_at < MICRO_MOVE_COOLDOWN:
 		return
 
-	var destination: Vector3 = situation.get("army_center", Vector3.ZERO)
+	var destination: Vector3 = situation.get("role_anchor", Vector3.ZERO)
+	if destination == Vector3.ZERO:
+		destination = situation.get("army_center", Vector3.ZERO)
 	if destination == Vector3.ZERO:
 		destination = situation.get("rally", Vector3.ZERO)
 	if destination == Vector3.ZERO:
 		return
 
 	_last_micro_move_at = now
+	## Under V2 never call command_retreat_hero — it can initiate full-army retreat.
+	if bool(situation.get("military_ai_v2", false)):
+		_micro_hold_toward(hero, destination, situation)
+		return
 	EnemyArmyCommand.command_retreat_hero(hero, destination)
+
+
+func _micro_hold_toward(hero: Hero, destination: Vector3, situation: Dictionary) -> void:
+	if not NodeSafety.is_alive_node(hero) or destination == Vector3.ZERO:
+		return
+	var hold_mission: EnemyUnitMission.Mission = _mission_for_situation(situation)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			[hero],
+			destination,
+			hold_mission
+		)
+	)
+
+
+func _mission_for_situation(situation: Dictionary) -> EnemyUnitMission.Mission:
+	var mission_name: String = str(situation.get("army_mission", ""))
+	match mission_name:
+		"CREEP":
+			return EnemyUnitMission.Mission.CREEP
+		"ATTACK":
+			return EnemyUnitMission.Mission.ATTACK
+		"DEFEND":
+			return EnemyUnitMission.Mission.DEFEND
+		"RETREAT":
+			return EnemyUnitMission.Mission.RETREAT
+		_:
+			return EnemyUnitMission.Mission.RALLY
+
+
+func _apply_role_positioning(hero: Hero, situation: Dictionary, now: float) -> void:
+	if not bool(situation.get("military_ai_v2", false)):
+		return
+	if _tactical_state in [TacticalState.ESCAPE, TacticalState.COMBO, TacticalState.KITE]:
+		return
+	if now - _last_micro_move_at < MICRO_MOVE_COOLDOWN:
+		return
+
+	var anchor: Vector3 = situation.get("role_anchor", Vector3.ZERO)
+	if anchor == Vector3.ZERO:
+		return
+	var distance: float = _horizontal_distance(hero.global_position, anchor)
+	if distance <= ROLE_ANCHOR_SETTLE_DISTANCE:
+		return
+
+	## During ENGAGE/POKE/PROTECT stay near role slot unless actively connecting a valid focus.
+	var focus: Node3D = situation.get("focus_target") as Node3D
+	if (
+		_tactical_state in [TacticalState.ENGAGE, TacticalState.POKE, TacticalState.PROTECT_BACKLINE, TacticalState.DEFEND_BASE]
+		and NodeSafety.is_alive_node(focus)
+		and _focus_within_squad_leash(hero, focus, situation)
+	):
+		var focus_dist: float = CombatTargetValidation.get_horizontal_attack_distance(hero, focus)
+		if focus_dist <= float(hero.attack_range) * 1.15:
+			return
+
+	_last_micro_move_at = now
+	_micro_hold_toward(hero, anchor, situation)
 
 
 func _issue_attack_on_focus(hero: Hero, focus: Node3D) -> void:
@@ -724,15 +1008,25 @@ func _run_ranger(ranger, situation: Dictionary, now: float) -> void:
 	if _tactical_state == TacticalState.KITE or ranger.ai_has_melee_threat_nearby():
 		_ranger_kite_move(ranger, situation, now)
 
-	# R â€” approach / escape / major fight.
+	# R — approach / escape / major fight.
 	if ranger.can_use_camouflage():
+		var allow_offensive_camo: bool = (
+			bool(situation.get("attacking", false))
+			or bool(situation.get("defend_base", false))
+			or not bool(situation.get("creeping", false))
+		)
 		if health_ratio < defensive_hp or retreating:
 			ranger.try_camouflage()
-		elif nearby >= int(situation.get("aoe_needed", 3)):
+		elif allow_offensive_camo and nearby >= int(situation.get("aoe_needed", 3)):
 			ranger.try_camouflage()
-		elif ranger.ai_has_valuable_hunt_prey_nearby():
+		elif allow_offensive_camo and ranger.ai_has_valuable_hunt_prey_nearby():
 			ranger.try_camouflage()
-		elif NodeSafety.is_alive_node(focus) and focus is Hero and health_ratio > 0.45:
+		elif (
+			allow_offensive_camo
+			and NodeSafety.is_alive_node(focus)
+			and focus is Hero
+			and health_ratio > 0.45
+		):
 			ranger.try_camouflage()
 
 	# Q â€” roll away from melee / AoE pressure; prefer sideways / backline.
@@ -797,7 +1091,9 @@ func _ranger_escape_tools(ranger, situation: Dictionary, now: float) -> void:
 func _ranger_kite_move(ranger, situation: Dictionary, now: float) -> void:
 	if now - _last_micro_move_at < MICRO_MOVE_COOLDOWN:
 		return
-	var army_center: Vector3 = situation.get("army_center", Vector3.ZERO)
+	var army_center: Vector3 = situation.get("role_anchor", Vector3.ZERO)
+	if army_center == Vector3.ZERO:
+		army_center = situation.get("army_center", Vector3.ZERO)
 	var focus: Node3D = situation.get("focus_target") as Node3D
 	var destination: Vector3 = army_center
 	if destination == Vector3.ZERO:
@@ -810,23 +1106,14 @@ func _ranger_kite_move(ranger, situation: Dictionary, now: float) -> void:
 	if destination == Vector3.ZERO:
 		return
 
-	# Keep attack range when safe â€” don't chase into melee.
+	# Keep attack range when safe — don't chase into melee.
 	if NodeSafety.is_alive_node(focus) and not ranger.ai_has_melee_threat_nearby():
 		var dist: float = CombatTargetValidation.get_horizontal_attack_distance(ranger, focus)
 		if dist <= float(ranger.attack_range) and dist >= float(ranger.attack_range) * 0.55:
 			return
 
 	_last_micro_move_at = now
-	var hold_mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
-	if bool(situation.get("creeping", false)):
-		hold_mission = EnemyUnitMission.Mission.CREEP
-	EnemyArmyCommand.with_authorized_orders(func() -> void:
-		EnemyArmyCommand.command_hold_at_rally(
-			[ranger],
-			destination,
-			hold_mission
-		)
-	)
+	_micro_hold_toward(ranger, destination, situation)
 
 
 func _resolve_ranger_roll_destination(ranger, situation: Dictionary) -> Vector3:
@@ -882,23 +1169,30 @@ func _run_assassin(assassin, situation: Dictionary, now: float) -> void:
 		_assassin_smoke_reposition(assassin, situation, now)
 		var focus: Node3D = situation.get("focus_target") as Node3D
 		if (
-			NodeSafety.is_alive_node(focus)
+			_assassin_may_engage(situation)
+			and NodeSafety.is_alive_node(focus)
 			and focus is Hero
 			and EnemyArmyCommand.get_health_ratio(focus) <= 0.3
 			and float(situation.get("health_ratio", 1.0)) > 0.4
+			and _focus_within_squad_leash(assassin, focus, situation)
 		):
 			_issue_attack_on_focus(assassin, focus)
 		return
 
 	var focus_target: Node3D = situation.get("focus_target") as Node3D
+	if NodeSafety.is_alive_node(focus_target) and not _focus_within_squad_leash(assassin, focus_target, situation):
+		## Return to flank slot instead of wandering after a dive.
+		_apply_role_positioning(assassin, situation, now)
+		return
+
 	var q_range: float = assassin.get_ability_range(HeroAbilityProgression.ABILITY_Q)
 
-	# Frequent Q poke on reachable priority targets.
+	# Frequent Q poke on reachable priority targets (allowed during creep/attack).
 	if assassin.can_use_axe_mark(q_range) and NodeSafety.is_alive_node(focus_target):
 		var dist: float = CombatTargetValidation.get_horizontal_attack_distance(assassin, focus_target)
 		if dist <= q_range:
 			assassin.try_axe_mark(focus_target)
-		elif dist <= q_range * 1.3 and not bool(situation.get("outnumbered", false)):
+		elif dist <= q_range * 1.3 and _assassin_may_engage(situation) and not bool(situation.get("outnumbered", false)):
 			_issue_attack_on_focus(assassin, focus_target)
 
 	# Consume mark with basic attack when marked target is near.
@@ -908,9 +1202,10 @@ func _run_assassin(assassin, situation: Dictionary, now: float) -> void:
 	if assassin.can_use_slash() and int(situation.get("nearby_enemy_count", 0)) >= 2:
 		assassin.try_slash()
 
-	# Dash only when follow-up is realistic.
+	# Dash only when follow-up is realistic and army is already committing.
 	if (
-		assassin.can_use_dash()
+		_assassin_may_engage(situation)
+		and assassin.can_use_dash()
 		and NodeSafety.is_alive_node(focus_target)
 		and not (focus_target is Building)
 		and float(situation.get("health_ratio", 1.0)) > 0.4
@@ -954,12 +1249,17 @@ func _assassin_smoke_reposition(
 ) -> void:
 	if now - _last_micro_move_at < MICRO_MOVE_COOLDOWN:
 		return
-	var army_center: Vector3 = situation.get("army_center", Vector3.ZERO)
+	var army_center: Vector3 = situation.get("role_anchor", Vector3.ZERO)
+	if army_center == Vector3.ZERO:
+		army_center = situation.get("army_center", Vector3.ZERO)
 	if army_center == Vector3.ZERO:
 		army_center = situation.get("rally", Vector3.ZERO)
 	if army_center == Vector3.ZERO:
 		return
 	_last_micro_move_at = now
+	if bool(situation.get("military_ai_v2", false)):
+		_micro_hold_toward(assassin, army_center, situation)
+		return
 	EnemyArmyCommand.command_retreat_hero(assassin, army_center)
 
 
@@ -980,27 +1280,36 @@ func _run_paladin(hero: Hero, situation: Dictionary, _now: float) -> void:
 	var execute_range: float = float(situation.get("execute_range", 14.0))
 	var nearby: int = int(situation.get("nearby_enemy_count", 0))
 	var aoe_needed: int = int(situation.get("aoe_needed", 3))
+	var creeping: bool = bool(situation.get("creeping", false)) and not bool(situation.get("attacking", false))
 
-	# R â€” only valid execute-threshold targets; prefer heroes.
+	# R — only valid execute-threshold targets; prefer heroes.
+	## During CREEP avoid wasting ultimate on random camp fodder.
 	if hero.has_method("can_use_execute") and bool(hero.call("can_use_execute", execute_range)):
-		if NodeSafety.is_alive_node(focus) and focus is Hero:
-			hero.call("try_execute", focus)
-		else:
-			hero.call("try_execute")
+		var allow_execute: bool = true
+		if creeping:
+			allow_execute = NodeSafety.is_alive_node(focus) and focus is Hero
+		if allow_execute:
+			if NodeSafety.is_alive_node(focus) and focus is Hero:
+				hero.call("try_execute", focus)
+			elif not creeping:
+				hero.call("try_execute")
 
-	# E â€” heroes / dangerous melee / sieges / finishes.
+	# E — heroes / dangerous melee / sieges / finishes.
 	if hero.has_method("can_use_power_strike") and bool(hero.call("can_use_power_strike", power_range)):
 		if NodeSafety.is_alive_node(focus):
 			hero.call("try_power_strike", focus)
 		else:
 			hero.call("try_power_strike")
 
-	# Q â€” groups / choke / diving melee near ranged.
+	# Q — groups / choke / diving melee near ranged.
 	if hero.has_method("can_use_ground_slam") and bool(hero.call("can_use_ground_slam")):
 		var slam_ok: bool = nearby >= aoe_needed
 		if not slam_ok and nearby >= 2 and _allied_ranged_threatened(hero):
 			slam_ok = true
 		if not slam_ok and NodeSafety.is_alive_node(focus) and focus is Hero and nearby >= 2:
+			slam_ok = true
+		## During DEFEND, slam packs threatening the backline even at 2.
+		if not slam_ok and bool(situation.get("defend_base", false)) and nearby >= 2:
 			slam_ok = true
 		if slam_ok:
 			hero.call("try_ground_slam")

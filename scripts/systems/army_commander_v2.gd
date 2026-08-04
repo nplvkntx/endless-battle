@@ -5,8 +5,9 @@ extends Node
 ## Does not choose creep / attack / defend / retreat itself.
 ## Receives the main squad from the director; cannot recruit units independently.
 ##
-## Foundation task: drains shared order batch infrastructure, ticks hero micro,
-## and holds the army idle. Advanced execution is not migrated yet.
+## Executes ASSEMBLE / CREEP / ATTACK / DEFEND / RETREAT / RECOVER orders and ticks
+## hero kit micro (abilities, local targets, short positioning). Hero AI never
+## chooses strategic missions — MilitaryDirectorV2 owns that authority.
 
 const HERO_MICRO_INTERVAL_SECONDS: float = 1.0
 const HERO_EXECUTE_SEARCH_RANGE: float = 14.0
@@ -14,6 +15,7 @@ const ASSEMBLE_ROW_SPACING: float = 2.35
 const ASSEMBLE_COLUMN_SPACING: float = 2.1
 const CREEP_REGROUP_HOLD_SECONDS: float = 2.0
 const CREEP_ORDER_REISSUE_SECONDS: float = 0.35
+const HERO_ROLE_FOLLOW_SPACING: float = 2.4
 
 var _director: MilitaryDirectorV2 = null
 var _hero_micro_timer: float = 0.0
@@ -178,40 +180,120 @@ func _tick_hero_micro() -> void:
 	if hero == null or not is_instance_valid(hero):
 		return
 
+	## Ability learning stays with hero micro ownership under V2 (legacy wave manager gated).
+	AIHeroMastery.spend_ability_points(hero)
+	if not NodeSafety.is_alive_node(hero):
+		return
+
 	var health_ratio: float = EnemyArmyCommand.get_health_ratio(hero)
 	var state_name: String = "IDLE"
 	var mission_type_name: String = "IDLE"
+	var mission_target: Node3D = null
+	var mission_destination: Vector3 = Vector3.ZERO
 	if director != null:
 		state_name = director.get_state_name()
 		var mission: ArmyMissionV2 = director.get_mission()
 		if mission != null:
 			mission_type_name = mission.get_mission_type_name()
+			mission_destination = mission.target_position
+			if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
+				mission_target = mission.target_object
 
 	var creeping: bool = state_name == "CREEP" or mission_type_name == "CREEP"
+	var attacking: bool = state_name == "ATTACK" or mission_type_name == "ATTACK"
 	var retreating: bool = (
 		state_name == "RETREAT"
 		or mission_type_name == "RETREAT"
 		or health_ratio < EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO
 	)
 	var defend_base: bool = state_name == "DEFEND" or mission_type_name == "DEFEND"
+	var nearby_hostiles: int = AIHeroMastery.count_nearby_hostiles(hero, creeping)
+	var squad_center: Vector3 = _resolve_squad_center_for_hero(squad, hero)
+	var role_anchor: Vector3 = _resolve_hero_role_anchor(hero, squad_center, mission_destination, mission_target)
 
 	AIHeroMastery.tick(
 		hero,
 		{
 			"health_ratio": health_ratio,
-			"nearby_enemy_count": 0,
+			"nearby_enemy_count": nearby_hostiles,
 			"aoe_needed": EnemyArmyCommand.HERO_AOE_PLAYER_COUNT,
 			"defensive_hp_ratio": EnemyArmyCommand.HERO_DEFENSIVE_ABILITY_HP_RATIO,
 			"power_strike_range": EnemyArmyCommand.HERO_POWER_STRIKE_SEARCH_RANGE,
 			"execute_range": HERO_EXECUTE_SEARCH_RANGE,
 			"retreating": retreating,
 			"creeping": creeping,
+			"attacking": attacking,
 			"defend_base": defend_base,
 			"mastery_owned": true,
 			"military_ai_v2": true,
 			"army_state": state_name,
 			"army_mission": mission_type_name,
+			"squad_center": squad_center,
+			"role_anchor": role_anchor,
+			"mission_destination": mission_destination,
+			"mission_target": mission_target,
+			"hero_follow_spacing": HERO_ROLE_FOLLOW_SPACING,
 		}
+	)
+
+
+func _resolve_squad_center_for_hero(squad: ArmySquadV2, hero: Hero) -> Vector3:
+	if squad == null:
+		return Vector3.ZERO
+	var members: Array = []
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		## Prefer non-hero center so the hero can orbit a stable squad body.
+		if entry is Hero:
+			continue
+		members.append(entry)
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(members)
+	if center != Vector3.ZERO:
+		return center
+	if NodeSafety.is_alive_node(hero):
+		return hero.global_position
+	return Vector3.ZERO
+
+
+func _resolve_hero_role_anchor(
+	hero: Hero,
+	squad_center: Vector3,
+	mission_destination: Vector3,
+	mission_target: Node3D
+) -> Vector3:
+	if squad_center == Vector3.ZERO or not NodeSafety.is_alive_node(hero):
+		return Vector3.ZERO
+
+	var forward: Vector3 = Vector3.ZERO
+	if NodeSafety.is_alive_node(mission_target):
+		forward = mission_target.global_position - squad_center
+	elif mission_destination != Vector3.ZERO:
+		forward = mission_destination - squad_center
+	forward.y = 0.0
+	if forward.length_squared() < 0.01:
+		var director: MilitaryDirectorV2 = _resolve_director()
+		if director != null:
+			forward = director.get_assemble_forward_hint()
+		if forward.length_squared() < 0.01:
+			forward = Vector3(0.0, 0.0, 1.0)
+		else:
+			forward = forward.normalized()
+	else:
+		forward = forward.normalized()
+
+	var right: Vector3 = forward.cross(Vector3.UP)
+	if right.length_squared() < 0.01:
+		right = Vector3.RIGHT
+	else:
+		right = right.normalized()
+
+	var role: UnitFormationRole.Role = UnitFormationRole.get_role(hero)
+	var local_offset: Vector3 = UnitFormationRole.hero_follow_offset(role, HERO_ROLE_FOLLOW_SPACING)
+	return Vector3(
+		squad_center.x + right.x * local_offset.x + forward.x * local_offset.z,
+		squad_center.y,
+		squad_center.z + right.z * local_offset.x + forward.z * local_offset.z
 	)
 
 

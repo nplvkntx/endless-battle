@@ -27,6 +27,7 @@ func _ready() -> void:
 	_verify_retreat_recover_config_and_source(failures)
 	_verify_retreat_role_split_helper(failures)
 	_verify_retreat_recover_hysteresis_helpers(failures)
+	_verify_hero_micro_integration(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -988,3 +989,94 @@ func _verify_perf_squad_api(failures: PackedStringArray) -> void:
 		_expect(failures, "overlay shows V2 Hero Present", text.contains("V2 Hero Present"))
 		_expect(failures, "overlay shows V2 Role Counts", text.contains("V2 Role Counts"))
 		_expect(failures, "overlay shows V2 Army Strength", text.contains("V2 Army Strength"))
+
+
+func _verify_hero_micro_integration(failures: PackedStringArray) -> void:
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "hero micro commander source readable", commander_source != null)
+	if commander_source != null:
+		var text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(failures, "commander ticks hero micro", text.contains("_tick_hero_micro"))
+		_expect(failures, "commander passes military_ai_v2 context", text.contains("\"military_ai_v2\": true"))
+		_expect(failures, "commander counts nearby hostiles", text.contains("count_nearby_hostiles"))
+		_expect(failures, "commander spends ability points", text.contains("spend_ability_points"))
+		_expect(failures, "commander resolves role anchors", text.contains("_resolve_hero_role_anchor"))
+		_expect(failures, "commander uses squad center for hero", text.contains("_resolve_squad_center_for_hero"))
+		_expect(failures, "commander never chooses strategy for hero", text.contains("Does not choose creep / attack / defend / retreat itself"))
+		_expect(failures, "commander does not call request_state", not text.contains("request_state("))
+
+	var mastery_source := FileAccess.open("res://scripts/systems/ai_hero_mastery.gd", FileAccess.READ)
+	_expect(failures, "hero mastery source readable", mastery_source != null)
+	if mastery_source != null:
+		var mastery_text: String = mastery_source.get_as_text()
+		mastery_source.close()
+		_expect(
+			failures,
+			"mastery documents V2 authority boundary",
+			mastery_text.contains("MAY NOT: choose the army mission")
+		)
+		_expect(failures, "mastery honors army_mission context", mastery_text.contains("army_mission"))
+		_expect(failures, "mastery applies role positioning", mastery_text.contains("_apply_role_positioning"))
+		_expect(failures, "mastery uses micro hold under V2", mastery_text.contains("_micro_hold_toward"))
+		_expect(
+			failures,
+			"mastery avoids command_retreat_hero under V2",
+			mastery_text.contains("never call command_retreat_hero")
+		)
+		_expect(failures, "assassin cannot independently open attacks", mastery_text.contains("_assassin_may_engage"))
+		_expect(failures, "paladin respects squad chase leash", mastery_text.contains("PALADIN_SQUAD_CHASE_LEASH"))
+		_expect(failures, "retreat aborts combos", mastery_text.contains("combo_abort_reason\"] = \"retreat\""))
+		_expect(failures, "creep avoids wasting paladin ultimate", mastery_text.contains("During CREEP avoid wasting ultimate"))
+		_expect(failures, "mastery spends ability points", mastery_text.contains("func spend_ability_points"))
+		_expect(failures, "mastery counts nearby hostiles", mastery_text.contains("func count_nearby_hostiles"))
+
+	## Role offsets: Paladin front, Assassin flank, Ranger rear.
+	var front: Vector3 = UnitFormationRole.hero_follow_offset(UnitFormationRole.Role.HERO_FRONT, 2.4)
+	var flank: Vector3 = UnitFormationRole.hero_follow_offset(UnitFormationRole.Role.HERO_FLANK, 2.4)
+	var rear: Vector3 = UnitFormationRole.hero_follow_offset(UnitFormationRole.Role.HERO_REAR, 2.4)
+	_expect(failures, "paladin role is front-center", is_equal_approx(front.x, 0.0) and front.z > 0.0)
+	_expect(failures, "assassin role is flank", absf(flank.x) > 0.0)
+	_expect(failures, "ranger role is rear", rear.z < 0.0)
+
+	## Commander role-anchor helper stays with the squad body (no wander).
+	var commander := ArmyCommanderV2.new()
+	add_child(commander)
+	commander.reset_match_state()
+	var squad_center := Vector3(10.0, 0.0, 10.0)
+	var destination := Vector3(10.0, 0.0, 30.0)
+	## Stub hero node — role defaults to HERO_FRONT without a real kit.
+	var hero_stub := Node3D.new()
+	hero_stub.name = "HeroRoleStub"
+	add_child(hero_stub)
+	## Without a Hero instance, get_role returns NONE; exercise forward projection via mission destination.
+	var anchor: Vector3 = commander._resolve_hero_role_anchor(
+		null,
+		squad_center,
+		destination,
+		null
+	)
+	_expect(failures, "null hero yields zero role anchor", anchor == Vector3.ZERO)
+
+	## Live tactical state names still cover mission-bound micro states.
+	_expect(
+		failures,
+		"return-to-army tactical state exists",
+		AIHeroMastery.get_tactical_state_name(AIHeroMastery.TacticalState.RETURN_TO_ARMY)
+		== "RETURN_TO_ARMY"
+	)
+	_expect(
+		failures,
+		"protect-backline tactical state exists",
+		AIHeroMastery.get_tactical_state_name(AIHeroMastery.TacticalState.PROTECT_BACKLINE)
+		== "PROTECT_BACKLINE"
+	)
+	_expect(
+		failures,
+		"defend-base tactical state exists",
+		AIHeroMastery.get_tactical_state_name(AIHeroMastery.TacticalState.DEFEND_BASE)
+		== "DEFEND_BASE"
+	)
+
+	hero_stub.queue_free()
+	commander.queue_free()

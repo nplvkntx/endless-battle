@@ -14,13 +14,6 @@ const WAVE_GATHER_PULL_INTERVAL_SECONDS: float = 1.0
 const FALLBACK_ATTACK_MIN_COMBAT_UNITS: int = 12
 const FALLBACK_ATTACK_READY_SECONDS: float = 10.0
 const HERO_EXECUTE_SEARCH_RANGE := 14.0
-## Enemy ability upgrade order: main damage, survival, secondary damage, then ultimate.
-const ENEMY_ABILITY_UPGRADE_PRIORITY: Array[StringName] = [
-	HeroAbilityProgression.ABILITY_Q,
-	HeroAbilityProgression.ABILITY_W,
-	HeroAbilityProgression.ABILITY_E,
-	HeroAbilityProgression.ABILITY_R,
-]
 
 @export var player_command_center_path: NodePath
 @export var wave_interval_seconds: float = 35.0
@@ -473,14 +466,18 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 		return
 
 	## Single owner for AI hero tactical state, targeting, and ability micro.
-	var nearby_hostiles: int = _count_player_military_near_hero(hero)
+	var nearby_hostiles: int = AIHeroMastery.count_nearby_hostiles(
+		hero as Hero,
+		(
+			EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.CREEPING
+			or EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP
+		)
+	)
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	var creeping: bool = (
 		army_mode == EnemyArmyCommand.ArmyMode.CREEPING
 		or EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.CREEP
 	)
-	if creeping:
-		nearby_hostiles = maxi(nearby_hostiles, _count_neutral_creeps_near_hero(hero))
 
 	AIHeroMastery.tick(
 		hero as Hero,
@@ -499,112 +496,9 @@ func _try_enemy_hero_abilities(hero, health_ratio: float) -> void:
 
 
 func _spend_enemy_hero_ability_points(hero) -> void:
-	if not NodeSafety.is_alive_node(hero):
+	if not NodeSafety.is_alive_node(hero) or not hero is Hero:
 		return
-
-	if not hero is Hero:
-		return
-	if not CombatTargetValidation.is_enemy_faction(hero):
-		return
-	if hero.ability_progression == null:
-		return
-	if hero.ability_points <= 0:
-		return
-
-	## Spend every available point using shared learn rules (AP, max rank, ultimate levels).
-	var spend_guard: int = 0
-	var max_spends: int = hero.ability_points
-	while hero.ability_points > 0 and spend_guard < max_spends:
-		spend_guard += 1
-
-		if not NodeSafety.is_alive_node(hero):
-			return
-
-		var learned_ability: bool = false
-		for ability_id: StringName in ENEMY_ABILITY_UPGRADE_PRIORITY:
-			if hero.try_learn_ability(ability_id, false):
-				learned_ability = true
-				break
-
-		if not learned_ability:
-			break
-
-
-func _count_player_military_near_hero(hero) -> int:
-	if not NodeSafety.is_alive_node(hero):
-		return 0
-
-	if not hero is Hero:
-		return 0
-
-	var count: int = 0
-	var search_range: float = EnemyArmyCommand.HERO_AOE_CHECK_RANGE
-	var tree: SceneTree = get_tree()
-
-	for group_name: StringName in [&"units", &"heroes"]:
-		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(tree, group_name):
-			if node_variant == null or not is_instance_valid(node_variant):
-				continue
-			if not node_variant is Node:
-				continue
-
-			var node: Node = node_variant as Node
-			if CombatTargetValidation.is_enemy_faction(node):
-				continue
-
-			if not (node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero):
-				continue
-
-			if node is Worker:
-				continue
-
-			var health_component: HealthComponent = node.get_node_or_null(
-				"HealthComponent"
-			) as HealthComponent
-			if health_component != null and health_component.current_health <= 0:
-				continue
-
-			var target: Node3D = node as Node3D
-			if _horizontal_distance(hero.global_position, target.global_position) > search_range:
-				continue
-
-			count += 1
-
-	return count
-
-
-func _count_neutral_creeps_near_hero(hero) -> int:
-	if not NodeSafety.is_alive_node(hero):
-		return 0
-
-	if not hero is Hero:
-		return 0
-
-	var count: int = 0
-	var search_range: float = EnemyArmyCommand.HERO_AOE_CHECK_RANGE
-	var tree: SceneTree = get_tree()
-
-	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
-		tree,
-		CombatTargetValidation.NEUTRAL_CREEP_GROUP
-	):
-		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node3D:
-			continue
-		if not CombatTargetValidation.is_neutral_creep(node_variant):
-			continue
-		if CombatTargetValidation.get_target_current_health(node_variant) <= 0:
-			continue
-		if (
-			_horizontal_distance(
-				hero.global_position,
-				(node_variant as Node3D).global_position
-			)
-			> search_range
-		):
-			continue
-		count += 1
-
-	return count
+	AIHeroMastery.spend_ability_points(hero as Hero)
 
 
 func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
