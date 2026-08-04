@@ -123,6 +123,15 @@ func _update_label() -> void:
 		"Creeps: %d" % int(unit_stats.get("creeps", 0)),
 		"Buildings: %d" % int(unit_stats.get("buildings", 0)),
 		"",
+	])
+
+	var difficulty_lines: PackedStringArray = _collect_difficulty_debug_lines(tree)
+	for line: String in difficulty_lines:
+		lines.append(line)
+	if not difficulty_lines.is_empty():
+		lines.append("")
+
+	lines.append_array(PackedStringArray([
 		"AI Version: %s" % PerfCounters.get_military_ai_version(),
 		"AI Phase: %s" % PerfCounters.get_ai_phase(),
 		"AI Combat: %s" % PerfCounters.get_ai_combat_state(),
@@ -151,7 +160,7 @@ func _update_label() -> void:
 		"Orders/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),
 		"Repaths/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_REPATH_REQUESTS),
 		"Target Searches/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_TARGET_SEARCHES),
-	])
+	]))
 
 	var warnings: PackedStringArray = PerfCounters.collect_warnings()
 	if not warnings.is_empty():
@@ -161,6 +170,49 @@ func _update_label() -> void:
 			lines.append("- %s" % warning)
 
 	_label.text = "\n".join(lines)
+
+
+func _collect_difficulty_debug_lines(tree: SceneTree) -> PackedStringArray:
+	var lines: PackedStringArray = PackedStringArray([
+		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
+		"Production Limit:",
+	])
+
+	var build_manager: EnemyBuildManager = _find_enemy_build_manager(tree)
+	if build_manager == null:
+		lines.append(
+			"Barracks: - / %d" % AIDifficultyConfig.max_barracks()
+		)
+		lines.append(
+			"Stable: - / %d" % AIDifficultyConfig.max_stables()
+		)
+		lines.append(
+			"Artillery Depot: - / %d" % AIDifficultyConfig.max_artillery_depots()
+		)
+		return lines
+
+	var info: Dictionary = build_manager.get_difficulty_debug_info()
+	lines.append(
+		"Barracks: %d / %d"
+		% [int(info.get("barracks_current", 0)), int(info.get("barracks_max", 0))]
+	)
+	lines.append(
+		"Stable: %d / %d"
+		% [int(info.get("stables_current", 0)), int(info.get("stables_max", 0))]
+	)
+	lines.append(
+		"Artillery Depot: %d / %d"
+		% [int(info.get("artillery_current", 0)), int(info.get("artillery_max", 0))]
+	)
+	return lines
+
+
+func _find_enemy_build_manager(tree: SceneTree) -> EnemyBuildManager:
+	var nodes: Array = tree.get_nodes_in_group(&"enemy_build_manager")
+	for node: Variant in nodes:
+		if node is EnemyBuildManager and is_instance_valid(node):
+			return node as EnemyBuildManager
+	return null
 
 
 func _collect_unit_stats(tree: SceneTree) -> Dictionary:

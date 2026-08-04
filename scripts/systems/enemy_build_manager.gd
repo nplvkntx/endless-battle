@@ -33,10 +33,9 @@ const FARM_HEADROOM_MID: int = 7
 const FARM_HEADROOM_LATE: int = 10
 const MAX_FARMS: int = 8
 const DEBUG_AI_WORKER_PRODUCTION: bool = false
-const DEFAULT_MAX_BARRACKS: int = 3
-const MAX_BARRACKS_MID: int = 5
-const MAX_BARRACKS_LATE: int = 8
-const MAX_STABLES_LATE: int = 2
+## Legacy export default; runtime caps come from AIDifficultyConfig.
+const DEFAULT_MAX_BARRACKS: int = 2
+const PRODUCTION_EXPAND_FOOD_HEADROOM: int = 4
 const DESIRED_ARMY_EARLY: int = 28
 const DESIRED_ARMY_MID: int = 45
 const DESIRED_ARMY_LATE: int = 60
@@ -1183,6 +1182,10 @@ func _should_build_expansion_barracks() -> bool:
 	if _count_barracks() == 0:
 		return _count_enemy_workers() >= _get_min_workers_before_military()
 
+	## Expansion only after the current barracks line is earning its keep.
+	if not _can_expand_military_production(PLACEMENT_BARRACKS):
+		return false
+
 	if _has_abundant_resources():
 		return EnemyResourceManager.can_afford(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
 
@@ -1469,10 +1472,16 @@ func _should_build_artillery_depot() -> bool:
 	if not TechTree.can_build_artillery_depot(ENEMY_TEAM_ID):
 		return false
 
-	if _has_completed_building(PLACEMENT_ARTILLERY_DEPOT):
+	if _count_artillery_depots() >= _get_max_artillery_depots():
 		return false
 
 	if _is_building_type_in_progress(PLACEMENT_ARTILLERY_DEPOT):
+		return false
+
+	## Finish barracks then stables before expanding siege production.
+	if _count_barracks() < AIDifficultyConfig.max_barracks():
+		return false
+	if _count_stables() < AIDifficultyConfig.max_stables():
 		return false
 
 	if (
@@ -1485,6 +1494,9 @@ func _should_build_artillery_depot() -> bool:
 		_has_completed_building(PLACEMENT_BLACKSMITH)
 		or _is_building_type_in_progress(PLACEMENT_BLACKSMITH)
 	):
+		return false
+
+	if _count_artillery_depots() > 0 and not _can_expand_military_production(PLACEMENT_ARTILLERY_DEPOT):
 		return false
 
 	return EnemyResourceManager.can_afford(ARTILLERY_DEPOT_GOLD_COST, ARTILLERY_DEPOT_WOOD_COST)
@@ -2786,26 +2798,69 @@ func _has_wasted_resources() -> bool:
 
 
 func _get_max_barracks() -> int:
+	## Progressive unlock within the difficulty hard cap (never exceeds it).
+	var hard_cap: int = AIDifficultyConfig.max_barracks()
+	if hard_cap <= 1:
+		return hard_cap
+
+	var unlocked: int = _get_progressive_production_slots(hard_cap)
+	return mini(unlocked, hard_cap)
+
+
+func _get_max_stables() -> int:
+	var hard_cap: int = AIDifficultyConfig.max_stables()
+	if hard_cap <= 1:
+		return hard_cap
+
+	## Do not open stables until barracks have reached their difficulty cap.
+	if _count_barracks() < AIDifficultyConfig.max_barracks():
+		return 0 if _count_stables() <= 0 else mini(_count_stables(), hard_cap)
+
+	var unlocked: int = _get_progressive_production_slots(hard_cap)
+	return mini(unlocked, hard_cap)
+
+
+func _get_max_artillery_depots() -> int:
+	var hard_cap: int = AIDifficultyConfig.max_artillery_depots()
+	if hard_cap <= 1:
+		return hard_cap
+
+	if _count_barracks() < AIDifficultyConfig.max_barracks():
+		return 0 if _count_artillery_depots() <= 0 else mini(_count_artillery_depots(), hard_cap)
+	if _count_stables() < AIDifficultyConfig.max_stables():
+		return 0 if _count_artillery_depots() <= 0 else mini(_count_artillery_depots(), hard_cap)
+
+	var unlocked: int = _get_progressive_production_slots(hard_cap)
+	return mini(unlocked, hard_cap)
+
+
+func _get_progressive_production_slots(hard_cap: int) -> int:
+	## Unlock additional production buildings as the match progresses.
+	var unlocked: int = 1
 	if _director != null:
 		match _director.get_strategic_phase():
 			EnemyStrategicDirector.StrategicPhase.OPENING, \
-			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY, \
+			EnemyStrategicDirector.StrategicPhase.EARLY_ARMY:
+				unlocked = 1
 			EnemyStrategicDirector.StrategicPhase.CREEPING, \
 			EnemyStrategicDirector.StrategicPhase.TIER_2, \
 			EnemyStrategicDirector.StrategicPhase.EXPANSION:
-				return maxi(max_barracks, 3)
+				unlocked = 2
 			EnemyStrategicDirector.StrategicPhase.MID_GAME, \
 			EnemyStrategicDirector.StrategicPhase.TIER_3:
-				return MAX_BARRACKS_MID
+				unlocked = 3
 			_:
-				return MAX_BARRACKS_LATE
+				unlocked = 4
+	else:
+		var elapsed_seconds: float = _get_match_elapsed_seconds()
+		if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
+			unlocked = 2
+		elif elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
+			unlocked = 3
+		else:
+			unlocked = 4
 
-	var elapsed_seconds: float = _get_match_elapsed_seconds()
-	if elapsed_seconds < ARMY_SIZE_MID_AFTER_SECONDS:
-		return maxi(max_barracks, 3)
-	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
-		return MAX_BARRACKS_MID
-	return MAX_BARRACKS_LATE
+	return clampi(unlocked, 1, hard_cap)
 
 
 func _should_build_stable() -> bool:
@@ -2821,6 +2876,10 @@ func _should_build_stable() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
+	## Barracks-first progression: finish barracks cap before opening stables.
+	if _count_barracks() < AIDifficultyConfig.max_barracks():
+		return false
+
 	if not TechTree.player_has_tier_2(ENEMY_TEAM_ID):
 		return false
 
@@ -2828,30 +2887,133 @@ func _should_build_stable() -> bool:
 		if not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME):
 			return false
 
+	if _count_stables() > 0 and not _can_expand_military_production(PLACEMENT_STABLE):
+		return false
+
 	return (
 		_has_excess_resources()
 		and EnemyResourceManager.can_afford(STABLE_GOLD_COST, STABLE_WOOD_COST)
 	)
 
 
-func _get_max_stables() -> int:
-	if _director != null:
-		if _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME):
-			return MAX_STABLES_LATE
-		return 1
+func _can_expand_military_production(building_type: StringName) -> bool:
+	## Extra production buildings require economy, busy queues, and food headroom.
+	if not EnemyResourceManager.can_afford(
+		_get_building_gold_cost(building_type),
+		_get_building_wood_cost(building_type)
+	):
+		return false
 
-	var elapsed_seconds: float = _get_match_elapsed_seconds()
-	if elapsed_seconds < ARMY_SIZE_LATE_AFTER_SECONDS:
-		return 1
-	return MAX_STABLES_LATE
+	if _get_projected_free_population() < PRODUCTION_EXPAND_FOOD_HEADROOM:
+		return false
+
+	if not _are_production_buildings_busy(building_type):
+		return false
+
+	return true
+
+
+func _get_building_gold_cost(building_type: StringName) -> int:
+	match building_type:
+		PLACEMENT_BARRACKS:
+			return BARRACKS_GOLD_COST
+		PLACEMENT_STABLE:
+			return STABLE_GOLD_COST
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_GOLD_COST
+		_:
+			return 0
+
+
+func _get_building_wood_cost(building_type: StringName) -> int:
+	match building_type:
+		PLACEMENT_BARRACKS:
+			return BARRACKS_WOOD_COST
+		PLACEMENT_STABLE:
+			return STABLE_WOOD_COST
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_WOOD_COST
+		_:
+			return 0
+
+
+func _are_production_buildings_busy(building_type: StringName) -> bool:
+	var total: int = 0
+	var busy: int = 0
+
+	match building_type:
+		PLACEMENT_BARRACKS:
+			for barracks: Barracks in _find_all_completed_enemy_barracks():
+				if not is_instance_valid(barracks):
+					continue
+				total += 1
+				if barracks.is_enemy_training_busy() or barracks.get_enemy_pending_unit_count() > 0:
+					busy += 1
+		PLACEMENT_STABLE:
+			for stable: Stable in _find_all_completed_enemy_stables():
+				if not is_instance_valid(stable):
+					continue
+				total += 1
+				if stable.is_enemy_training_busy() or stable.get_enemy_pending_unit_count() > 0:
+					busy += 1
+		PLACEMENT_ARTILLERY_DEPOT:
+			for depot: ArtilleryDepot in _find_all_completed_enemy_artillery_depots():
+				if not is_instance_valid(depot):
+					continue
+				total += 1
+				if depot.has_active_unit_training() or depot.get_enemy_pending_unit_count() > 0:
+					busy += 1
+		_:
+			return false
+
+	if total <= 0:
+		return false
+
+	## Require most existing buildings to be actively training before expanding.
+	return busy * 2 >= total
 
 
 func _count_stables() -> int:
 	var count: int = 0
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_BUILDING_GROUP):
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
 		if node is Stable and _is_living_building(node as Building):
 			count += 1
 	return count
+
+
+func _count_artillery_depots() -> int:
+	var count: int = 0
+	_refresh_building_cache_if_needed()
+	for node: Variant in _cached_enemy_buildings:
+		if node is ArtilleryDepot and _is_living_building(node as Building):
+			count += 1
+	return count
+
+
+func get_difficulty_debug_info() -> Dictionary:
+	return {
+		"difficulty": MatchSession.get_ai_difficulty_name(),
+		"barracks_current": _count_barracks(),
+		"barracks_max": AIDifficultyConfig.max_barracks(),
+		"stables_current": _count_stables(),
+		"stables_max": AIDifficultyConfig.max_stables(),
+		"artillery_current": _count_artillery_depots(),
+		"artillery_max": AIDifficultyConfig.max_artillery_depots(),
+	}
+
+
+func _is_within_difficulty_production_cap(building_type: StringName) -> bool:
+	## Absolute hard-cap guard — never exceed difficulty production limits.
+	match building_type:
+		PLACEMENT_BARRACKS:
+			return _count_barracks() < AIDifficultyConfig.max_barracks()
+		PLACEMENT_STABLE:
+			return _count_stables() < AIDifficultyConfig.max_stables()
+		PLACEMENT_ARTILLERY_DEPOT:
+			return _count_artillery_depots() < AIDifficultyConfig.max_artillery_depots()
+		_:
+			return true
 
 
 func _should_rebuild_workers() -> bool:
@@ -3413,6 +3575,9 @@ func _try_place_building_at_anchor(
 	allow_parallel: bool = false
 ) -> bool:
 	if not is_inside_tree():
+		return false
+
+	if not _is_within_difficulty_production_cap(building_type):
 		return false
 
 	var is_farm: bool = building_type == PLACEMENT_FARM

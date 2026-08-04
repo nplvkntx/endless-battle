@@ -8,6 +8,21 @@ const MAIN_MENU_SCENE := "res://scenes/ui/main_menu.tscn"
 const MATCH_SCENE := "res://scenes/main.tscn"
 
 var last_match_result: String = ""
+## AI-only match setting chosen in Create Match. Survives rematch; not wiped by prepare.
+var ai_difficulty: int = AIDifficultyConfig.DEFAULT_DIFFICULTY
+
+
+func set_ai_difficulty(difficulty: int) -> void:
+	ai_difficulty = AIDifficultyConfig.clamp_difficulty(difficulty)
+
+
+func get_ai_difficulty() -> int:
+	return AIDifficultyConfig.clamp_difficulty(ai_difficulty)
+
+
+func get_ai_difficulty_name() -> String:
+	return AIDifficultyConfig.display_name(ai_difficulty)
+
 
 ## Owners register once; prepare_new_match() invokes every callback.
 var _match_resetters: Array[Callable] = []
