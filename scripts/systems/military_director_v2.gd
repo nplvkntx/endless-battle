@@ -7,6 +7,8 @@ extends Node
 ## Does not issue unit orders — ArmyCommanderV2 executes the mission.
 ##
 ## DEFEND overrides CREEP / ATTACK / ASSEMBLE / RECOVER for emergency base defense.
+## ATTACK commits a formed squad with Attack-Move to a strategic player objective.
+## RETREAT pulls the squad home as one group; RECOVER rebuilds before offense resumes.
 ## After a clear, the director reassesses via RECOVER or ASSEMBLE and never resumes
 ## a stale creep/attack reservation automatically.
 
@@ -48,6 +50,16 @@ var _defend_clear_timer: float = 0.0
 var _defend_active: bool = false
 var _defend_reason: StringName = &""
 var _pre_defend_state: State = State.IDLE
+var _attack_start_strength: float = 0.0
+var _attack_start_frontline_count: int = 0
+var _attack_is_lethal: bool = false
+var _creep_start_strength: float = 0.0
+var _creep_start_frontline_count: int = 0
+var _retreat_elapsed: float = 0.0
+var _recover_elapsed: float = 0.0
+var _state_entered_msec: int = 0
+var _post_retreat_attack_cooldown: float = 0.0
+var _designated_recovery_point: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -87,6 +99,16 @@ func _clear_roster_state() -> void:
 	_defend_active = false
 	_defend_reason = &""
 	_pre_defend_state = State.IDLE
+	_attack_start_strength = 0.0
+	_attack_start_frontline_count = 0
+	_attack_is_lethal = false
+	_creep_start_strength = 0.0
+	_creep_start_frontline_count = 0
+	_retreat_elapsed = 0.0
+	_recover_elapsed = 0.0
+	_state_entered_msec = Time.get_ticks_msec()
+	_post_retreat_attack_cooldown = 0.0
+	_designated_recovery_point = Vector3.ZERO
 
 
 func _process(delta: float) -> void:
@@ -115,13 +137,40 @@ func _evaluate_strategy() -> void:
 	if tree == null:
 		return
 
+	if _post_retreat_attack_cooldown > 0.0:
+		_post_retreat_attack_cooldown = maxf(
+			0.0,
+			_post_retreat_attack_cooldown - TICK_SECONDS
+		)
+
 	var rally_point: Vector3 = get_assemble_rally_point()
 	if rally_point == Vector3.ZERO:
 		_transition_to(State.IDLE, "awaiting safe rally point")
 		return
 
+	if _designated_recovery_point == Vector3.ZERO:
+		_designated_recovery_point = rally_point
+
 	## DEFEND always wins over CREEP / ATTACK / ASSEMBLE / RECOVER.
 	if _evaluate_defend_strategy(tree, rally_point):
+		return
+
+	## Finish an in-progress retreat before resuming offense.
+	if _state == State.RETREAT:
+		_evaluate_retreat_strategy(tree, rally_point)
+		return
+
+	## Losing fights abort ATTACK/CREEP into RETREAT (emergency, bypasses commit).
+	if _maybe_begin_retreat(tree, rally_point):
+		return
+
+	## Rebuild near base before offense; never stall forever.
+	if _state == State.RECOVER:
+		_evaluate_recover_strategy(tree, rally_point)
+		return
+
+	## ATTACK (incl. lethal windows) preempts CREEP so the AI finishes exposed players.
+	if _evaluate_attack_strategy(tree, rally_point):
 		return
 
 	if _evaluate_creep_strategy(tree, rally_point):
@@ -190,8 +239,27 @@ func is_creep_ready() -> bool:
 	return _main_squad.hero_present and get_military_unit_count() >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
 
 
+func is_attack_ready() -> bool:
+	return (
+		_main_squad.hero_present
+		and get_military_unit_count() >= MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
+	)
+
+
+## Compatibility alias for older call sites / verify helpers.
 func is_attack_ready_placeholder() -> bool:
-	return _main_squad.hero_present and get_military_unit_count() >= MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
+	return is_attack_ready()
+
+
+func is_lethal_attack_ready() -> bool:
+	return (
+		_main_squad.hero_present
+		and get_military_unit_count() >= MilitaryAIConfig.V2_ATTACK_LETHAL_MIN_MILITARY_UNITS
+	)
+
+
+func is_attack_lethal_active() -> bool:
+	return _attack_is_lethal
 
 
 func get_assemble_rally_point() -> Vector3:
@@ -244,6 +312,12 @@ func get_defend_reason() -> StringName:
 
 func is_defend_active() -> bool:
 	return _defend_active
+
+
+func get_designated_recovery_point() -> Vector3:
+	if _designated_recovery_point != Vector3.ZERO:
+		return _designated_recovery_point
+	return get_assemble_rally_point()
 
 
 ## Strategic API for future behavior / tests. Commander must not call this for self-decisions.
@@ -307,6 +381,28 @@ func _transition_to(
 	if previous_state == State.DEFEND and next_state != State.DEFEND:
 		_deactivate_v2_defend("left defend: %s" % reason)
 
+	if previous_state == State.ATTACK and next_state != State.ATTACK:
+		_clear_attack_tracking()
+		if EnemyArmyCommand.get_executable_mission() in [
+			EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
+			EnemyArmyCommand.ExecutableMission.LETHAL_PUSH,
+		]:
+			EnemyArmyCommand.clear_executable_mission("attack state ended")
+
+	if previous_state == State.RETREAT and next_state != State.RETREAT:
+		_retreat_elapsed = 0.0
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+			EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.RETREATING)
+		## Hysteresis: block immediate ATTACK re-entry after a retreat.
+		_post_retreat_attack_cooldown = MilitaryAIConfig.V2_POST_RETREAT_ATTACK_COOLDOWN_SECONDS
+
+	if previous_state == State.RECOVER and next_state != State.RECOVER:
+		_recover_elapsed = 0.0
+
+	if previous_state == State.CREEP and next_state != State.CREEP:
+		_creep_start_strength = 0.0
+		_creep_start_frontline_count = 0
+
 	_state = next_state
 	_last_transition_reason = reason if not reason.is_empty() else "unspecified"
 	_mission = ArmyMissionV2.new(
@@ -316,6 +412,8 @@ func _transition_to(
 		priority,
 		_last_transition_reason
 	)
+	if previous_state != next_state:
+		_state_entered_msec = Time.get_ticks_msec()
 	if next_state == State.CREEP and NodeSafety.is_alive_node(target_object):
 		_reserved_creep_camp_id = (target_object as Node).get_instance_id()
 	elif next_state != State.CREEP:
@@ -326,12 +424,78 @@ func _transition_to(
 	elif previous_state == State.DEFEND:
 		_defend_active = false
 
+	if next_state == State.ATTACK and previous_state != State.ATTACK:
+		_begin_attack_tracking(get_tree())
+	elif next_state == State.ATTACK:
+		## Keep lethal flag sticky while the attack continues.
+		pass
+
+	if next_state == State.CREEP and previous_state != State.CREEP:
+		_begin_creep_fight_tracking()
+
+	if next_state == State.RETREAT and previous_state != State.RETREAT:
+		_retreat_elapsed = 0.0
+		if target_position != Vector3.ZERO:
+			_designated_recovery_point = target_position
+
+	if next_state == State.RECOVER and previous_state != State.RECOVER:
+		_recover_elapsed = 0.0
+		_admit_pending_reinforcements()
+		if target_position != Vector3.ZERO:
+			_designated_recovery_point = target_position
+		elif _designated_recovery_point == Vector3.ZERO:
+			_designated_recovery_point = get_assemble_rally_point()
+
 	## Safe admission window: join reinforcements on state transitions into idle/assemble/recover.
 	if previous_state != next_state and _can_admit_reinforcements():
 		_admit_pending_reinforcements()
 
 	_publish_perf_status()
 	return true
+
+
+func _begin_attack_tracking(tree: SceneTree) -> void:
+	var units: Array = _get_attack_squad_units()
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	_attack_start_strength = EnemyArmyCommand.estimate_combat_strength(units)
+	_attack_start_frontline_count = _count_frontline_units(units)
+	if tree != null and not units.is_empty():
+		EnemyArmyCommand.begin_fight_tracking(units, center if center != Vector3.ZERO else Vector3.ZERO)
+
+
+func _begin_creep_fight_tracking() -> void:
+	var units: Array = _get_creep_squad_units()
+	_creep_start_strength = EnemyArmyCommand.estimate_combat_strength(units)
+	_creep_start_frontline_count = _count_frontline_units(units)
+
+
+func _clear_attack_tracking() -> void:
+	_attack_start_strength = 0.0
+	_attack_start_frontline_count = 0
+	_attack_is_lethal = false
+
+
+func _count_frontline_units(units: Array) -> int:
+	var count: int = 0
+	for entry: Variant in units:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		if entry is Hero:
+			continue
+		var role: ArmySquadV2.UnitRole = _main_squad.get_role(entry as Node3D)
+		if role == ArmySquadV2.UnitRole.FRONTLINE or role == ArmySquadV2.UnitRole.MELEE_GUARD:
+			count += 1
+	return count
+
+
+func _state_commit_elapsed_seconds() -> float:
+	if _state_entered_msec <= 0:
+		return INF
+	return float(Time.get_ticks_msec() - _state_entered_msec) / 1000.0
+
+
+func _has_met_state_commitment() -> bool:
+	return _state_commit_elapsed_seconds() >= MilitaryAIConfig.V2_STATE_COMMIT_SECONDS
 
 
 func _state_to_mission_type(state: State) -> ArmyMissionV2.MissionType:
@@ -781,6 +945,807 @@ func _is_main_squad_scattered(rally_point: Vector3) -> bool:
 	return float(near_count) / float(units.size()) < MilitaryAIConfig.V2_DEFEND_SCATTER_COHESION_RATIO
 
 
+func _evaluate_retreat_strategy(tree: SceneTree, rally_point: Vector3) -> void:
+	_retreat_elapsed += TICK_SECONDS
+	var units: Array = _get_attack_squad_units()
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	var destination: Vector3 = _resolve_retreat_destination(tree, rally_point, center)
+	var arrived: bool = (
+		destination != Vector3.ZERO
+		and center != Vector3.ZERO
+		and EnemyArmyCommand.horizontal_distance(center, destination)
+		<= MilitaryAIConfig.V2_RETREAT_ARRIVAL_RADIUS
+	)
+	## Pull stragglers: do not leave isolated units fighting indefinitely.
+	var stragglers_left: bool = _has_isolated_stragglers(units, destination, center)
+	if (
+		(arrived and not stragglers_left)
+		or _retreat_elapsed >= MilitaryAIConfig.V2_RETREAT_COMPLETE_SECONDS
+	):
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+			EnemyArmyCommand.complete_retreat_to_regroup(tree)
+		var reason: String = (
+			"retreat complete, recovering"
+			if arrived
+			else "retreat hold elapsed, recovering"
+		)
+		_transition_to(State.RECOVER, reason, destination)
+		return
+
+	## Keep the original trigger reason on F3; only refresh destination / mission.
+	var hold_reason: String = _last_transition_reason
+	if hold_reason.is_empty():
+		hold_reason = "retreating to recovery point"
+	_transition_to(
+		State.RETREAT,
+		hold_reason,
+		destination,
+		null,
+		90
+	)
+
+
+func _maybe_begin_retreat(tree: SceneTree, rally_point: Vector3) -> bool:
+	if _state != State.ATTACK and _state != State.CREEP:
+		return false
+
+	var units: Array = (
+		_get_attack_squad_units() if _state == State.ATTACK else _get_creep_squad_units()
+	)
+	var decision: Dictionary = _evaluate_retreat_triggers(tree, units)
+	if not decision.get("should_retreat", false):
+		return false
+
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	var destination: Vector3 = _resolve_retreat_destination(tree, rally_point, center)
+	_transition_to(
+		State.RETREAT,
+		String(decision.get("reason", "retreating")),
+		destination,
+		null,
+		90
+	)
+	return true
+
+
+func _evaluate_retreat_triggers(tree: SceneTree, units: Array) -> Dictionary:
+	units = NodeSafety.clean_node_array(units)
+	if units.is_empty():
+		return {"should_retreat": false}
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero != null and EnemyArmyCommand.get_health_ratio(hero) < MilitaryAIConfig.V2_RETREAT_HERO_HP_RATIO:
+		return {"should_retreat": true, "reason": "hero in serious danger"}
+
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	if center == Vector3.ZERO:
+		return {"should_retreat": false}
+
+	var balance: Dictionary = EnemyArmyCommand.estimate_local_fight_balance(tree, center)
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ratio: float = float(balance.get("ratio", 1.0))
+	if player_strength > 0.0 and ratio <= MilitaryAIConfig.V2_RETREAT_STRENGTH_RATIO:
+		return {"should_retreat": true, "reason": "army clearly losing"}
+
+	## Nearby enemy reinforcements tipping an otherwise contested fight.
+	var wider: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		center,
+		MilitaryAIConfig.V2_RETREAT_REINFORCEMENT_RADIUS
+	)
+	wider = NodeSafety.clean_node_array(wider)
+	var local_player: Array = balance.get("player_units", []) as Array
+	if wider.size() > local_player.size():
+		var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(units)
+		var reinforced_strength: float = EnemyArmyCommand.estimate_combat_strength(wider)
+		if (
+			reinforced_strength > 0.0
+			and ai_strength
+			<= reinforced_strength * MilitaryAIConfig.V2_RETREAT_REINFORCEMENT_STRENGTH_RATIO
+		):
+			return {"should_retreat": true, "reason": "enemy reinforcements unfavorable"}
+
+	var start_strength: float = (
+		_attack_start_strength if _state == State.ATTACK else _creep_start_strength
+	)
+	if start_strength > 0.0:
+		var current_strength: float = EnemyArmyCommand.estimate_combat_strength(units)
+		if current_strength <= start_strength * (1.0 - MilitaryAIConfig.V2_ATTACK_ARMY_LOSS_RATIO):
+			var fight_label: String = "attack" if _state == State.ATTACK else "creep"
+			return {
+				"should_retreat": true,
+				"reason": "%s fight unwinnable" % fight_label,
+			}
+
+	var start_frontline: int = (
+		_attack_start_frontline_count
+		if _state == State.ATTACK
+		else _creep_start_frontline_count
+	)
+	if start_frontline >= 2:
+		var current_frontline: int = _count_frontline_units(units)
+		var lost_ratio: float = (
+			float(start_frontline - current_frontline) / float(start_frontline)
+		)
+		if lost_ratio >= MilitaryAIConfig.V2_RETREAT_FRONTLINE_LOSS_RATIO:
+			return {"should_retreat": true, "reason": "frontline losses critical"}
+
+	return {"should_retreat": false}
+
+
+func _resolve_retreat_destination(
+	tree: SceneTree,
+	rally_point: Vector3,
+	army_center: Vector3
+) -> Vector3:
+	## Prefer designated recovery point, then tower coverage, then main-base rally.
+	var recovery: Vector3 = _designated_recovery_point
+	if recovery == Vector3.ZERO:
+		recovery = rally_point
+	if recovery == Vector3.ZERO:
+		recovery = EnemyArmyCommand.get_retreat_destination(tree)
+
+	var tower_cover: Vector3 = _find_tower_cover_point(tree, army_center, recovery)
+	if tower_cover != Vector3.ZERO:
+		## If the army is still far from base, stage under the nearest friendly tower.
+		if (
+			army_center != Vector3.ZERO
+			and recovery != Vector3.ZERO
+			and EnemyArmyCommand.horizontal_distance(army_center, recovery)
+			> MilitaryAIConfig.V2_RETREAT_ARRIVAL_RADIUS * 1.5
+		):
+			return tower_cover
+
+	if recovery != Vector3.ZERO:
+		return recovery
+	return EnemyArmyCommand.get_retreat_destination(tree)
+
+
+func _find_tower_cover_point(
+	tree: SceneTree,
+	army_center: Vector3,
+	recovery: Vector3
+) -> Vector3:
+	if tree == null:
+		return Vector3.ZERO
+
+	var best: Vector3 = Vector3.ZERO
+	var best_score: float = -INF
+	for node: Node in tree.get_nodes_in_group(EnemyArmyCommand.BUILDINGS_GROUP):
+		if not node is Tower or not NodeSafety.is_alive_node(node):
+			continue
+		if not CombatTargetValidation.is_enemy_faction(node):
+			continue
+		var tower: Tower = node as Tower
+		if tower.building_state != Building.STATE_COMPLETED:
+			continue
+		var tower_pos: Vector3 = tower.global_position
+		var to_recovery: float = (
+			EnemyArmyCommand.horizontal_distance(tower_pos, recovery)
+			if recovery != Vector3.ZERO
+			else 0.0
+		)
+		var to_army: float = (
+			EnemyArmyCommand.horizontal_distance(tower_pos, army_center)
+			if army_center != Vector3.ZERO
+			else 0.0
+		)
+		## Prefer towers that sit between the army and the recovery point.
+		var score: float = (
+			MilitaryAIConfig.V2_RETREAT_SAFE_TOWER_RADIUS * 2.0
+			- to_army * 0.55
+			- to_recovery * 0.35
+		)
+		if score > best_score:
+			best_score = score
+			best = tower_pos
+
+	if best == Vector3.ZERO or best_score < 0.0:
+		return Vector3.ZERO
+	return best
+
+
+func _has_isolated_stragglers(
+	units: Array,
+	destination: Vector3,
+	army_center: Vector3
+) -> bool:
+	if destination == Vector3.ZERO and army_center == Vector3.ZERO:
+		return false
+	var anchor: Vector3 = destination if destination != Vector3.ZERO else army_center
+	var near_count: int = EnemyArmyCommand.filter_units_near_rally(
+		units,
+		anchor,
+		MilitaryAIConfig.V2_RETREAT_STRAGGLER_RADIUS
+	).size()
+	if units.is_empty():
+		return false
+	return float(near_count) / float(units.size()) < 0.75
+
+
+func _evaluate_recover_strategy(tree: SceneTree, rally_point: Vector3) -> void:
+	_recover_elapsed += TICK_SECONDS
+	_admit_pending_reinforcements()
+
+	var recovery_point: Vector3 = _designated_recovery_point
+	if recovery_point == Vector3.ZERO:
+		recovery_point = rally_point
+
+	var ready: bool = _is_recover_ready(tree)
+	var timed_out: bool = _recover_elapsed >= MilitaryAIConfig.V2_RECOVER_MAX_SECONDS
+	var min_hold_met: bool = _recover_elapsed >= MilitaryAIConfig.V2_RECOVER_MIN_SECONDS
+	if (not ready and not timed_out) or (ready and not min_hold_met and not timed_out):
+		## Keep publishing RECOVER so F3 shows why we are waiting.
+		_transition_to(
+			State.RECOVER,
+			_format_recover_hold_reason(tree),
+			recovery_point,
+			null,
+			40
+		)
+		return
+
+	## Resume: ATTACK if strong, CREEP if safe/valuable, else ASSEMBLE while incomplete.
+	if is_attack_ready() and _can_reenter_attack(tree, recovery_point):
+		_transition_to(State.ASSEMBLE, "recover complete, attack ready", recovery_point)
+		if _evaluate_attack_strategy(tree, recovery_point):
+			return
+		return
+
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if (
+		creep_manager != null
+		and is_creep_ready()
+		and _can_commit_to_creeping(tree, _get_creep_squad_units(), creep_manager)
+	):
+		_transition_to(State.ASSEMBLE, "recover complete, creep valuable", recovery_point)
+		if _evaluate_creep_strategy(tree, recovery_point):
+			return
+		return
+
+	if get_military_unit_count() < MilitaryAIConfig.V2_RECOVER_MIN_MILITARY_UNITS:
+		_transition_to(State.ASSEMBLE, "recover complete, army incomplete", recovery_point)
+		return
+
+	_transition_to(
+		State.ASSEMBLE,
+		"recover complete, reassembling" if not timed_out else "recover timeout, reassembling",
+		recovery_point
+	)
+
+
+func _format_recover_hold_reason(tree: SceneTree) -> String:
+	var parts: PackedStringArray = []
+	if not _main_squad.hero_present:
+		parts.append("awaiting hero")
+	else:
+		var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+		if hero != null:
+			var hp: float = EnemyArmyCommand.get_health_ratio(hero)
+			if hp < MilitaryAIConfig.V2_RECOVER_HERO_HP_RATIO:
+				parts.append("hero HP %.0f%%" % (hp * 100.0))
+			var mana_ratio: float = float(hero.current_mana) / float(maxi(hero.max_mana, 1))
+			if mana_ratio < MilitaryAIConfig.V2_RECOVER_HERO_MANA_RATIO:
+				parts.append("hero mana %.0f%%" % (mana_ratio * 100.0))
+	if get_military_unit_count() < MilitaryAIConfig.V2_RECOVER_MIN_MILITARY_UNITS:
+		parts.append(
+			"squad %d/%d"
+			% [get_military_unit_count(), MilitaryAIConfig.V2_RECOVER_MIN_MILITARY_UNITS]
+		)
+	if not _pending_reinforcements.is_empty():
+		parts.append("awaiting reinforcements")
+	if parts.is_empty():
+		return "recovering near base"
+	return "recovering: %s" % ", ".join(parts)
+
+
+func _is_recover_ready(tree: SceneTree) -> bool:
+	if not _main_squad.hero_present:
+		return false
+	if get_military_unit_count() < MilitaryAIConfig.V2_RECOVER_MIN_MILITARY_UNITS:
+		return false
+	## Do not stall forever waiting on every pending unit — admit what we have.
+	if _pending_reinforcements.size() >= 3:
+		return false
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero == null:
+		return false
+	if EnemyArmyCommand.get_health_ratio(hero) < MilitaryAIConfig.V2_RECOVER_HERO_HP_RATIO:
+		return false
+	var mana_ratio: float = float(hero.current_mana) / float(maxi(hero.max_mana, 1))
+	if mana_ratio < MilitaryAIConfig.V2_RECOVER_HERO_MANA_RATIO:
+		return false
+	return true
+
+
+func _can_reenter_attack(tree: SceneTree, rally_point: Vector3) -> bool:
+	## Hysteresis: after retreat, require cooldown OR a clearly favorable local fight.
+	if _post_retreat_attack_cooldown <= 0.0:
+		return true
+
+	var units: Array = _get_attack_squad_units()
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	if center == Vector3.ZERO:
+		center = rally_point
+	if center == Vector3.ZERO:
+		return false
+
+	var balance: Dictionary = EnemyArmyCommand.estimate_local_fight_balance(tree, center)
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ratio: float = float(balance.get("ratio", 0.0))
+	## No nearby enemies — allow rebuild-and-push once the squad is ready.
+	if player_strength <= 0.0:
+		return true
+	return ratio >= MilitaryAIConfig.V2_ATTACK_REENTRY_STRENGTH_RATIO
+
+
+func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
+	var attack_army: Array = _get_attack_squad_units()
+	if _state == State.ATTACK:
+		if _maybe_exit_attack(tree, rally_point, attack_army):
+			return true
+
+	var lethal: bool = _detect_lethal_attack_window(tree, rally_point)
+	var ready: bool = is_attack_ready()
+	if lethal:
+		ready = ready or is_lethal_attack_ready()
+
+	if not ready:
+		if _state == State.ATTACK:
+			## Soft exit after commitment — not an emergency retreat.
+			if not _has_met_state_commitment():
+				return true
+			_transition_to(State.RECOVER, "attack squad below threshold", rally_point)
+			return true
+		return false
+
+	if attack_army.is_empty():
+		return false
+
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		return false
+
+	if _state != State.ATTACK and not _can_reenter_attack(tree, rally_point):
+		return false
+
+	var origin: Vector3 = _main_squad.center
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.compute_army_center(attack_army)
+	if origin == Vector3.ZERO:
+		origin = rally_point
+
+	var objective: Dictionary = _select_attack_strategic_target(
+		tree,
+		attack_army,
+		origin,
+		rally_point,
+		lethal
+	)
+	var target_node: Node3D = objective.get("node") as Node3D
+	var target_position: Vector3 = objective.get("position", Vector3.ZERO) as Vector3
+	if target_position == Vector3.ZERO and not NodeSafety.is_alive_node(target_node):
+		if _state == State.ATTACK:
+			if not _has_met_state_commitment():
+				return true
+			_transition_to(State.RECOVER, "no attack targets remain", rally_point)
+			return true
+		return false
+
+	if NodeSafety.is_alive_node(target_node):
+		target_position = target_node.global_position
+
+	_attack_is_lethal = lethal or bool(objective.get("commit_town_hall", false))
+	var reason: String = String(objective.get("reason", "attack"))
+	if _attack_is_lethal and not reason.begins_with("lethal"):
+		reason = "lethal %s" % reason
+
+	_transition_to(
+		State.ATTACK,
+		reason,
+		target_position,
+		target_node,
+		int(objective.get("priority", CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL))
+	)
+	if _mission != null:
+		_mission.note_progress()
+	return true
+
+
+func _maybe_exit_attack(tree: SceneTree, rally_point: Vector3, attack_army: Array) -> bool:
+	if attack_army.is_empty():
+		_transition_to(State.RECOVER, "attack army wiped", rally_point)
+		return true
+
+	## Emergency retreats are handled by `_maybe_begin_retreat` before this path.
+	## Soft exits respect minimum ATTACK commitment to avoid ATTACK↔RETREAT flicker.
+	if not _has_met_state_commitment():
+		var emergency: Dictionary = _evaluate_retreat_triggers(tree, attack_army)
+		if emergency.get("should_retreat", false):
+			var center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+			var destination: Vector3 = _resolve_retreat_destination(tree, rally_point, center)
+			_transition_to(
+				State.RETREAT,
+				String(emergency.get("reason", "retreating")),
+				destination,
+				null,
+				90
+			)
+			return true
+		return false
+
+	if _is_attack_army_scattered(attack_army):
+		_transition_to(State.RECOVER, "attack army too scattered", rally_point)
+		return true
+
+	if _mission != null:
+		_mission.sanitize_target_object()
+		if (
+			_mission.target_object != null
+			and not NodeSafety.is_alive_node(_mission.target_object)
+		):
+			## Target destroyed — reassess for a follow-up objective this tick.
+			_mission.completion_condition = ArmyMissionV2.CompletionCondition.TARGET_DESTROYED
+			return false
+
+	return false
+
+
+func _is_attack_army_losing(tree: SceneTree, attack_army: Array) -> bool:
+	var decision: Dictionary = _evaluate_retreat_triggers(tree, attack_army)
+	return bool(decision.get("should_retreat", false))
+
+
+func _is_attack_army_scattered(attack_army: Array) -> bool:
+	if attack_army.size() < 4:
+		return false
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+	if center == Vector3.ZERO:
+		return false
+	var near_count: int = EnemyArmyCommand.filter_units_near_rally(
+		attack_army,
+		center,
+		MilitaryAIConfig.V2_ATTACK_SCATTER_RADIUS
+	).size()
+	return float(near_count) / float(attack_army.size()) < MilitaryAIConfig.V2_ATTACK_SCATTER_COHESION_RATIO
+
+
+func _detect_lethal_attack_window(tree: SceneTree, rally_point: Vector3) -> bool:
+	if EnemyAggression.get_lethal_score() >= MilitaryAIConfig.V2_ATTACK_LETHAL_SCORE_THRESHOLD:
+		return true
+	if EnemyAggression.is_aggression_mode_active() and EnemyAggression.should_prefer_town_hall_focus():
+		return true
+
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var probe: Vector3 = rally_point
+	if player_cc != null:
+		probe = player_cc.global_position
+	elif _main_squad.center != Vector3.ZERO:
+		probe = _main_squad.center
+
+	var player_military: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		probe,
+		90.0
+	)
+	player_military = NodeSafety.clean_node_array(player_military)
+	var player_hero: Hero = null
+	for entry: Variant in player_military:
+		if entry is Hero and NodeSafety.is_alive_node(entry):
+			player_hero = entry as Hero
+			break
+	if player_hero == null:
+		for node: Node in tree.get_nodes_in_group(&"heroes"):
+			if node is Hero and NodeSafety.is_alive_node(node) and not CombatTargetValidation.is_enemy_faction(node):
+				player_hero = node as Hero
+				break
+
+	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(_get_attack_squad_units())
+	var player_strength: float = EnemyArmyCommand.estimate_combat_strength(player_military)
+	var hero_away: bool = false
+	if player_cc != null and player_hero != null:
+		hero_away = (
+			EnemyArmyCommand.horizontal_distance(
+				player_hero.global_position,
+				player_cc.global_position
+			) >= 55.0
+		)
+	elif player_hero == null:
+		hero_away = true
+
+	var tiny_army: bool = player_military.size() <= 2
+	var collapsed: bool = (
+		player_strength > 0.0
+		and ai_strength >= player_strength * MilitaryAIConfig.V2_ATTACK_COMMIT_STRENGTH_RATIO
+		and player_military.size() <= 4
+	)
+	if tiny_army and ai_strength >= player_strength * 1.1:
+		return true
+	if hero_away and (tiny_army or collapsed):
+		return true
+	return false
+
+
+func _select_attack_strategic_target(
+	tree: SceneTree,
+	attack_army: Array,
+	origin: Vector3,
+	rally_point: Vector3,
+	lethal: bool
+) -> Dictionary:
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var commit_th: bool = _should_commit_to_town_hall(
+		tree,
+		attack_army,
+		player_cc,
+		origin,
+		lethal
+	)
+	if commit_th and player_cc != null:
+		return {
+			"node": player_cc,
+			"position": player_cc.global_position,
+			"reason": "commit town hall",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL,
+			"commit_town_hall": true,
+		}
+
+	if not lethal and not commit_th:
+		var blocking: Dictionary = _find_route_blocking_player_army(
+			tree,
+			origin,
+			player_cc
+		)
+		if not blocking.is_empty():
+			return blocking
+
+	if player_cc != null:
+		return {
+			"node": player_cc,
+			"position": player_cc.global_position,
+			"reason": "player town hall",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL,
+			"commit_town_hall": commit_th,
+		}
+
+	var tower: Node3D = _find_dangerous_player_tower(tree, origin, attack_army)
+	if tower != null:
+		return {
+			"node": tower,
+			"position": tower.global_position,
+			"reason": "dangerous tower",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_DANGEROUS_TOWER,
+			"commit_town_hall": false,
+		}
+
+	var production: Node3D = _find_player_production_building(tree, origin)
+	if production != null:
+		return {
+			"node": production,
+			"position": production.global_position,
+			"reason": "production building",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_PRODUCTION,
+			"commit_town_hall": false,
+		}
+
+	var worker: Node3D = _find_nearest_player_worker(tree, origin)
+	if worker != null:
+		return {
+			"node": worker,
+			"position": worker.global_position,
+			"reason": "worker",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_WORKER,
+			"commit_town_hall": false,
+		}
+
+	var other: Node3D = _find_nearest_player_structure(tree, origin)
+	if other != null:
+		return {
+			"node": other,
+			"position": other.global_position,
+			"reason": "valuable structure",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_OTHER_STRUCTURE,
+			"commit_town_hall": false,
+		}
+
+	if rally_point != Vector3.ZERO:
+		return {
+			"node": null,
+			"position": rally_point,
+			"reason": "no target fallback",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_INVALID,
+			"commit_town_hall": false,
+		}
+	return {}
+
+
+func _should_commit_to_town_hall(
+	tree: SceneTree,
+	attack_army: Array,
+	player_cc: CommandCenter,
+	_origin: Vector3,
+	lethal: bool
+) -> bool:
+	if player_cc == null or not NodeSafety.is_alive_node(player_cc):
+		return false
+	if lethal:
+		return true
+
+	var defenders: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		player_cc.global_position,
+		MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+	)
+	defenders = NodeSafety.clean_node_array(defenders)
+	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(attack_army)
+	var defender_strength: float = EnemyArmyCommand.estimate_combat_strength(defenders)
+	if defender_strength <= 0.0:
+		return ai_strength > 0.0
+	return ai_strength >= defender_strength * MilitaryAIConfig.V2_ATTACK_COMMIT_STRENGTH_RATIO
+
+
+func _find_route_blocking_player_army(
+	tree: SceneTree,
+	origin: Vector3,
+	player_cc: CommandCenter
+) -> Dictionary:
+	if origin == Vector3.ZERO:
+		return {}
+
+	var goal: Vector3 = player_cc.global_position if player_cc != null else origin
+	var sample_points: Array[Vector3] = [origin]
+	if player_cc != null:
+		sample_points.append(origin.lerp(goal, 0.35))
+		sample_points.append(origin.lerp(goal, 0.6))
+
+	var best_units: Array = []
+	var best_center: Vector3 = Vector3.ZERO
+	for sample: Vector3 in sample_points:
+		var units: Array = EnemyArmyCommand.collect_player_military_near(
+			tree,
+			sample,
+			MilitaryAIConfig.V2_ATTACK_ROUTE_BLOCK_RADIUS
+		)
+		units = NodeSafety.clean_node_array(units)
+		if units.size() < MilitaryAIConfig.V2_ATTACK_ROUTE_BLOCK_MIN_UNITS:
+			continue
+		var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+		if center == Vector3.ZERO:
+			continue
+		## Only treat as route-blocking when the cluster sits between army and the goal.
+		if player_cc != null:
+			var to_goal: float = EnemyArmyCommand.horizontal_distance(origin, goal)
+			var via_cluster: float = (
+				EnemyArmyCommand.horizontal_distance(origin, center)
+				+ EnemyArmyCommand.horizontal_distance(center, goal)
+			)
+			if via_cluster > to_goal * 1.35 and EnemyArmyCommand.horizontal_distance(origin, center) > 18.0:
+				continue
+		if units.size() > best_units.size():
+			best_units = units
+			best_center = center
+
+	if best_units.is_empty() or best_center == Vector3.ZERO:
+		return {}
+
+	var strongest: Node3D = null
+	var strongest_power: int = 0
+	for entry: Variant in best_units:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var power: int = EnemyArmyCommand.estimate_military_power([entry])
+		if power > strongest_power:
+			strongest_power = power
+			strongest = entry as Node3D
+
+	return {
+		"node": strongest,
+		"position": best_center,
+		"reason": "route-blocking army",
+		"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_ROUTE_BLOCKING_ARMY,
+		"commit_town_hall": false,
+	}
+
+
+func _find_dangerous_player_tower(
+	tree: SceneTree,
+	origin: Vector3,
+	attack_army: Array
+) -> Node3D:
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+	if army_center == Vector3.ZERO:
+		army_center = origin
+
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"buildings"):
+		if not node is Tower or not NodeSafety.is_alive_node(node):
+			continue
+		if CombatTargetValidation.is_enemy_faction(node):
+			continue
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+		var tower: Tower = node as Tower
+		if tower.building_state != Building.STATE_COMPLETED:
+			continue
+		var threat_range: float = (
+			tower.attack_range + MilitaryAIConfig.V2_ATTACK_TOWER_THREAT_BUFFER
+		)
+		var distance: float = EnemyArmyCommand.horizontal_distance(
+			army_center,
+			tower.global_position
+		)
+		if distance > threat_range * 1.75:
+			continue
+		if distance < best_distance:
+			best_distance = distance
+			best = tower
+	return best
+
+
+func _find_player_production_building(tree: SceneTree, origin: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"buildings"):
+		if not node is Building or not NodeSafety.is_alive_node(node):
+			continue
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+		if not (node is Barracks or node is Stable or node is ArtilleryDepot or node is Academy):
+			continue
+		var building: Node3D = node as Node3D
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, building.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = building
+	return best
+
+
+func _find_nearest_player_worker(tree: SceneTree, origin: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Node in tree.get_nodes_in_group(&"workers"):
+		if not node is Worker or not NodeSafety.is_alive_node(node):
+			continue
+		if CombatTargetValidation.is_enemy_faction(node):
+			continue
+		var worker: Node3D = node as Node3D
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, worker.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = worker
+	return best
+
+
+func _find_nearest_player_structure(tree: SceneTree, origin: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"buildings"):
+		if not node is Building or not NodeSafety.is_alive_node(node):
+			continue
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+		if node is Farm:
+			continue
+		var building: Node3D = node as Node3D
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, building.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = building
+	return best
+
+
+func _get_attack_squad_units() -> Array:
+	var units: Array = []
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		units.append(entry)
+	return NodeSafety.clean_node_array(units)
+
+
 func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
 	if creep_manager == null:
@@ -863,6 +1828,10 @@ func _can_commit_to_creeping(
 		return false
 	if EnemyAggression.should_suspend_creeping():
 		return false
+	## Do not keep creeping while a high-confidence finish is available.
+	if _detect_lethal_attack_window(tree, EnemyArmyCommand.resolve_enemy_rally_position(tree)):
+		if is_attack_ready() or is_lethal_attack_ready():
+			return false
 	if EnemyArmyCommand.is_defense_blocking_offense():
 		return false
 	if not EnemyArmyCommand.allows_creep_orders():

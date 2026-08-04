@@ -29,6 +29,14 @@ var _creep_manager: EnemyCreepManager = null
 var _defend_order_reissue_timer: float = 0.0
 var _defend_focus_reissue_timer: float = 0.0
 var _defend_focus_target: Node3D = null
+var _attack_order_reissue_timer: float = 0.0
+var _attack_focus_reissue_timer: float = 0.0
+var _attack_chase_target: Node3D = null
+var _attack_chase_anchor: Vector3 = Vector3.ZERO
+var _attack_chase_start_msec: int = 0
+var _retreat_order_reissue_timer: float = 0.0
+var _retreat_cover_elapsed: float = 0.0
+var _recover_order_reissue_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -51,6 +59,14 @@ func reset_match_state() -> void:
 	_defend_order_reissue_timer = MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS
 	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
 	_defend_focus_target = null
+	_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
+	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
+	_attack_chase_target = null
+	_attack_chase_anchor = Vector3.ZERO
+	_attack_chase_start_msec = 0
+	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
+	_retreat_cover_elapsed = 0.0
+	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
 
 
 func _process(delta: float) -> void:
@@ -63,12 +79,20 @@ func _process(delta: float) -> void:
 	EnemyArmyCommand.tick_group_order_batch(get_tree())
 	EnemyArmyCommand.tick_perf_diagnostics(get_tree(), delta)
 	EnemyArmyCommand.tick_retreat_cooldown(delta)
+	## Keep lethal / aggression scoring alive while the legacy wave manager is gated off.
+	EnemyArmyCommand.update_finishing_mode(get_tree(), delta)
 	_creep_focus_reissue_timer += delta
 	_creep_order_reissue_timer += delta
 	_defend_order_reissue_timer += delta
 	_defend_focus_reissue_timer += delta
+	_attack_order_reissue_timer += delta
+	_attack_focus_reissue_timer += delta
+	_retreat_order_reissue_timer += delta
+	_recover_order_reissue_timer += delta
 	if _creep_regroup_hold_timer > 0.0:
 		_creep_regroup_hold_timer = maxf(0.0, _creep_regroup_hold_timer - delta)
+	if _retreat_cover_elapsed > 0.0:
+		_retreat_cover_elapsed += delta
 
 	_hero_micro_timer += delta
 	if _hero_micro_timer >= HERO_MICRO_INTERVAL_SECONDS:
@@ -116,17 +140,26 @@ func _execute_current_mission(_delta: float) -> void:
 
 	## Foundation: no strategic self-decisions. Execution adapters own order issuance.
 	match director.get_state():
-		MilitaryDirectorV2.State.IDLE, MilitaryDirectorV2.State.RECOVER:
-			pass
+		MilitaryDirectorV2.State.IDLE:
+			_retreat_cover_elapsed = 0.0
+			_stage_pending_reinforcements(director)
+		MilitaryDirectorV2.State.RECOVER:
+			_retreat_cover_elapsed = 0.0
+			_execute_recover_mission(director, mission, squad)
 		MilitaryDirectorV2.State.ASSEMBLE:
+			_retreat_cover_elapsed = 0.0
 			_execute_assemble_mission(director, mission, squad)
 		MilitaryDirectorV2.State.CREEP:
+			_retreat_cover_elapsed = 0.0
 			_execute_creep_mission(director, mission, squad)
 		MilitaryDirectorV2.State.DEFEND:
+			_retreat_cover_elapsed = 0.0
 			_execute_defend_mission(director, mission, squad)
-		MilitaryDirectorV2.State.ATTACK, MilitaryDirectorV2.State.RETREAT:
-			## Reserved for future execution adapters. Commander still must not choose these.
-			pass
+		MilitaryDirectorV2.State.ATTACK:
+			_retreat_cover_elapsed = 0.0
+			_execute_attack_mission(director, mission, squad)
+		MilitaryDirectorV2.State.RETREAT:
+			_execute_retreat_mission(director, mission, squad)
 
 
 func _tick_hero_micro() -> void:
@@ -731,6 +764,515 @@ func _defend_objective_label(focus: Node3D, mission: ArmyMissionV2) -> String:
 	if mission != null and not mission.transition_reason.is_empty():
 		return mission.transition_reason
 	return "DefendPoint"
+
+
+func _execute_attack_mission(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var attack_army: Array = _collect_attack_army(squad)
+	if attack_army.is_empty():
+		return
+
+	_stage_pending_reinforcements(director)
+
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+	var strategic_target: Node3D = null
+	if mission.target_object != null and NodeSafety.is_alive_node(mission.target_object):
+		strategic_target = mission.target_object
+	var strategic_destination: Vector3 = mission.target_position
+	if strategic_target != null:
+		strategic_destination = strategic_target.global_position
+	if strategic_destination == Vector3.ZERO:
+		strategic_destination = army_center
+	if strategic_destination == Vector3.ZERO:
+		return
+
+	var local_focus: Node3D = _pick_local_attack_focus(tree, army_center, strategic_target)
+	var destination: Vector3 = strategic_destination
+	var focus: Node3D = strategic_target
+	var engaging_local: bool = false
+
+	if NodeSafety.is_alive_node(local_focus):
+		if _should_continue_local_chase(army_center, local_focus, strategic_destination):
+			engaging_local = true
+			focus = local_focus
+			destination = _clamp_attack_chase_destination(
+				strategic_destination,
+				local_focus.global_position
+			)
+		else:
+			_clear_attack_chase()
+
+	var lethal: bool = director.is_attack_lethal_active()
+	var exec_mission: EnemyArmyCommand.ExecutableMission = (
+		EnemyArmyCommand.ExecutableMission.LETHAL_PUSH
+		if lethal
+		else EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER
+	)
+	EnemyArmyCommand.set_executable_mission(
+		exec_mission,
+		mission.transition_reason,
+		focus,
+		destination,
+		_attack_objective_label(focus, mission),
+		"attack-move",
+		attack_army,
+		false
+	)
+
+	if _attack_order_reissue_timer >= MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS:
+		_attack_order_reissue_timer = 0.0
+		var issued: bool = EnemyArmyCommand.issue_group_combat_move(
+			tree,
+			attack_army,
+			destination,
+			EnemyUnitMission.Mission.ATTACK,
+			EnemyArmyCommand.ArmyMode.ATTACKING,
+			true
+		)
+		if not issued:
+			EnemyArmyCommand.request_strategic_state(
+				EnemyArmyCommand.StrategicState.ATTACKING,
+				mission.transition_reason
+			)
+			EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING, true)
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_attack_move(
+					attack_army,
+					destination,
+					EnemyUnitMission.Mission.ATTACK
+				)
+			)
+		mission.note_progress()
+		EnemyArmyCommand.note_mission_progress(army_center, engaging_local, attack_army.size())
+		EnemyArmyCommand.begin_fight_tracking(attack_army, army_center)
+
+	## Focus the strategic (or leashed local) target once in contact — never endless chase.
+	if (
+		NodeSafety.is_alive_node(focus)
+		and _attack_focus_reissue_timer >= MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
+	):
+		var focus_distance: float = EnemyArmyCommand.horizontal_distance(
+			army_center,
+			focus.global_position
+		)
+		if focus_distance <= MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS:
+			_attack_focus_reissue_timer = 0.0
+			EnemyArmyCommand.with_authorized_orders(func() -> void:
+				EnemyArmyCommand.command_focus_attack(
+					attack_army,
+					focus,
+					EnemyUnitMission.Mission.ATTACK
+				)
+			)
+			mission.note_progress()
+			EnemyArmyCommand.note_mission_progress(army_center, true, attack_army.size())
+
+
+func _execute_retreat_mission(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var retreat_army: Array = _collect_attack_army(squad)
+	if retreat_army.is_empty():
+		return
+
+	_stage_pending_reinforcements(director)
+
+	var rally_point: Vector3 = mission.target_position
+	if rally_point == Vector3.ZERO:
+		rally_point = director.get_designated_recovery_point()
+	if rally_point == Vector3.ZERO:
+		rally_point = director.get_assemble_rally_point()
+	if rally_point == Vector3.ZERO:
+		rally_point = EnemyArmyCommand.get_retreat_destination(tree)
+	if rally_point == Vector3.ZERO:
+		return
+
+	if _retreat_cover_elapsed <= 0.0:
+		_retreat_cover_elapsed = 0.001
+
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.RETREAT,
+		mission.transition_reason,
+		null,
+		rally_point,
+		"RecoveryPoint",
+		"move",
+		retreat_army,
+		false
+	)
+
+	## Do not spam retreat destinations every frame.
+	if _retreat_order_reissue_timer < MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS:
+		return
+	_retreat_order_reissue_timer = 0.0
+
+	var withdraw_units: Array = []
+	var cover_units: Array = []
+	_split_retreat_roles(squad, retreat_army, withdraw_units, cover_units)
+
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(retreat_army)
+	var threat_center: Vector3 = _estimate_retreat_threat_center(tree, army_center)
+	var cover_point: Vector3 = _resolve_retreat_cover_point(
+		army_center,
+		rally_point,
+		threat_center
+	)
+
+	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.RETREATING)
+	EnemyArmyCommand.request_strategic_state(
+		EnemyArmyCommand.StrategicState.RETREATING,
+		mission.transition_reason
+	)
+
+	## Preserve the hero with the withdrawing group. Ranged/siege leave first.
+	## Frontline may briefly cover, then also withdraw — never suicide forever.
+	var cover_active: bool = (
+		_retreat_cover_elapsed < 1.75
+		and not cover_units.is_empty()
+		and cover_point != Vector3.ZERO
+	)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		if not withdraw_units.is_empty():
+			EnemyArmyCommand.command_retreat_to(withdraw_units, rally_point)
+		if cover_active:
+			EnemyArmyCommand.command_attack_move(
+				cover_units,
+				cover_point,
+				EnemyUnitMission.Mission.RETREAT
+			)
+		elif not cover_units.is_empty():
+			EnemyArmyCommand.command_retreat_to(cover_units, rally_point)
+	)
+
+	## Pull any stragglers still fighting away from the pack.
+	_pull_retreat_stragglers(retreat_army, army_center, rally_point)
+
+	mission.note_progress()
+	EnemyArmyCommand.note_mission_progress(army_center, cover_active, retreat_army.size())
+
+
+func _execute_recover_mission(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> void:
+	_stage_pending_reinforcements(director)
+
+	var recover_army: Array = _collect_attack_army(squad)
+	var rally_point: Vector3 = mission.target_position
+	if rally_point == Vector3.ZERO:
+		rally_point = director.get_designated_recovery_point()
+	if rally_point == Vector3.ZERO:
+		rally_point = director.get_assemble_rally_point()
+	if rally_point == Vector3.ZERO:
+		return
+
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.REGROUP,
+		mission.transition_reason,
+		null,
+		rally_point,
+		"Recover",
+		"hold",
+		recover_army,
+		false
+	)
+
+	if _recover_order_reissue_timer < MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS:
+		return
+	_recover_order_reissue_timer = 0.0
+
+	## Regroup near base and wait — do not trickle back into the previous fight.
+	if not recover_army.is_empty():
+		EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.REGROUPING)
+		EnemyArmyCommand.request_strategic_state(
+			EnemyArmyCommand.StrategicState.RECOVERING,
+			mission.transition_reason
+		)
+		EnemyArmyCommand.with_authorized_orders(func() -> void:
+			EnemyArmyCommand.command_hold_at_rally(
+				recover_army,
+				rally_point,
+				EnemyUnitMission.Mission.RALLY
+			)
+		)
+		mission.note_progress()
+		EnemyArmyCommand.note_mission_progress(
+			EnemyArmyCommand.compute_army_center(recover_army),
+			false,
+			recover_army.size()
+		)
+
+
+func _split_retreat_roles(
+	squad: ArmySquadV2,
+	retreat_army: Array,
+	withdraw_units: Array,
+	cover_units: Array
+) -> void:
+	for entry: Variant in retreat_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var unit: Node3D = entry as Node3D
+		var role: ArmySquadV2.UnitRole = squad.get_role(unit)
+		if role == ArmySquadV2.UnitRole.RANGED or role == ArmySquadV2.UnitRole.SIEGE:
+			withdraw_units.append(unit)
+			continue
+		if role == ArmySquadV2.UnitRole.HERO or unit is Hero:
+			withdraw_units.append(unit)
+			continue
+		if role == ArmySquadV2.UnitRole.FRONTLINE or role == ArmySquadV2.UnitRole.MELEE_GUARD:
+			cover_units.append(unit)
+			continue
+		## Cavalry / misc withdraw with the safe group.
+		withdraw_units.append(unit)
+
+
+func _estimate_retreat_threat_center(tree: SceneTree, army_center: Vector3) -> Vector3:
+	if army_center == Vector3.ZERO:
+		return Vector3.ZERO
+	var threats: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		army_center,
+		MilitaryAIConfig.V2_RETREAT_REINFORCEMENT_RADIUS
+	)
+	threats = NodeSafety.clean_node_array(threats)
+	if threats.is_empty():
+		return Vector3.ZERO
+	return EnemyArmyCommand.compute_army_center(threats)
+
+
+func _resolve_retreat_cover_point(
+	army_center: Vector3,
+	rally_point: Vector3,
+	threat_center: Vector3
+) -> Vector3:
+	if army_center == Vector3.ZERO:
+		return rally_point
+	var away: Vector3 = rally_point - army_center
+	away.y = 0.0
+	if away.length_squared() < 0.01 and threat_center != Vector3.ZERO:
+		away = army_center - threat_center
+		away.y = 0.0
+	if away.length_squared() < 0.01:
+		return rally_point
+	away = away.normalized()
+	## Brief cover screen between threat and withdrawal path — not a death stand.
+	return army_center + away * MilitaryAIConfig.V2_RETREAT_COVER_OFFSET
+
+
+func _pull_retreat_stragglers(
+	retreat_army: Array,
+	army_center: Vector3,
+	rally_point: Vector3
+) -> void:
+	if army_center == Vector3.ZERO and rally_point == Vector3.ZERO:
+		return
+	var anchor: Vector3 = army_center if army_center != Vector3.ZERO else rally_point
+	var stragglers: Array = []
+	for entry: Variant in retreat_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var unit: Node3D = entry as Node3D
+		if (
+			EnemyArmyCommand.horizontal_distance(unit.global_position, anchor)
+			> MilitaryAIConfig.V2_RETREAT_STRAGGLER_RADIUS
+		):
+			stragglers.append(unit)
+	if stragglers.is_empty():
+		return
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_retreat_to(stragglers, rally_point)
+	)
+
+
+func _stage_pending_reinforcements(director: MilitaryDirectorV2) -> void:
+	if director == null:
+		return
+	var pending: Array = director.get_pending_reinforcements_copy()
+	pending = NodeSafety.clean_node_array(pending)
+	if pending.is_empty():
+		return
+	var rally_point: Vector3 = director.get_assemble_rally_point()
+	if rally_point == Vector3.ZERO:
+		return
+	## Reinforcements assemble safely at base instead of trickling into the field fight.
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_hold_at_rally(
+			pending,
+			rally_point,
+			EnemyUnitMission.Mission.RALLY
+		)
+	)
+
+
+func _collect_attack_army(squad: ArmySquadV2) -> Array:
+	var units: Array = []
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
+			continue
+		units.append(entry)
+	return NodeSafety.clean_node_array(units)
+
+
+func _pick_local_attack_focus(
+	tree: SceneTree,
+	army_center: Vector3,
+	strategic_target: Node3D
+) -> Node3D:
+	if army_center == Vector3.ZERO:
+		return null
+
+	var candidates: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		army_center,
+		MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+	)
+	candidates = NodeSafety.clean_node_array(candidates)
+	if candidates.is_empty():
+		return null
+
+	## Prefer the current chase target while it remains nearby and alive.
+	if (
+		NodeSafety.is_alive_node(_attack_chase_target)
+		and candidates.has(_attack_chase_target)
+	):
+		return _attack_chase_target
+
+	var best: Node3D = null
+	var best_priority: int = CombatTargetValidation.ENEMY_ATTACK_PRIORITY_INVALID
+	var best_distance: float = INF
+	var probe: Node3D = strategic_target
+	if probe == null and not candidates.is_empty() and candidates[0] is Node3D:
+		probe = candidates[0] as Node3D
+	if probe == null:
+		return null
+
+	for entry: Variant in candidates:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		## Do not abandon a town-hall commit to chase a lone scout forever.
+		if (
+			strategic_target is CommandCenter
+			and entry is Unit
+			and not entry is Hero
+			and candidates.size() == 1
+		):
+			var lone_distance: float = EnemyArmyCommand.horizontal_distance(
+				army_center,
+				(entry as Node3D).global_position
+			)
+			if lone_distance > MilitaryAIConfig.V2_ATTACK_CHASE_LEASH * 0.75:
+				continue
+		var candidate: Node3D = entry as Node3D
+		var distance: float = EnemyArmyCommand.horizontal_distance(army_center, candidate.global_position)
+		var priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
+			probe,
+			candidate,
+			distance
+		)
+		if priority >= CombatTargetValidation.ENEMY_ATTACK_PRIORITY_INVALID:
+			continue
+		if priority < best_priority or (priority == best_priority and distance < best_distance):
+			best_priority = priority
+			best_distance = distance
+			best = candidate
+
+	if best != null:
+		_begin_attack_chase(best, army_center)
+	return best
+
+
+func _begin_attack_chase(target: Node3D, army_center: Vector3) -> void:
+	if not NodeSafety.is_alive_node(target):
+		return
+	if _attack_chase_target == target and _attack_chase_start_msec > 0:
+		return
+	_attack_chase_target = target
+	_attack_chase_anchor = army_center
+	_attack_chase_start_msec = Time.get_ticks_msec()
+
+
+func _clear_attack_chase() -> void:
+	_attack_chase_target = null
+	_attack_chase_anchor = Vector3.ZERO
+	_attack_chase_start_msec = 0
+
+
+func _should_continue_local_chase(
+	army_center: Vector3,
+	local_focus: Node3D,
+	strategic_destination: Vector3
+) -> bool:
+	if not NodeSafety.is_alive_node(local_focus):
+		return false
+	if _attack_chase_start_msec <= 0:
+		_begin_attack_chase(local_focus, army_center)
+
+	var chase_age: float = float(Time.get_ticks_msec() - _attack_chase_start_msec) / 1000.0
+	if chase_age >= MilitaryAIConfig.V2_ATTACK_CHASE_DURATION_SECONDS:
+		return false
+
+	var from_anchor: Vector3 = (
+		_attack_chase_anchor if _attack_chase_anchor != Vector3.ZERO else army_center
+	)
+	if (
+		from_anchor != Vector3.ZERO
+		and EnemyArmyCommand.horizontal_distance(from_anchor, local_focus.global_position)
+		> MilitaryAIConfig.V2_ATTACK_CHASE_LEASH
+	):
+		return false
+
+	## Resume the strategic route once the skirmish drifts too far from the objective path.
+	if (
+		strategic_destination != Vector3.ZERO
+		and EnemyArmyCommand.horizontal_distance(local_focus.global_position, strategic_destination)
+		> MilitaryAIConfig.V2_ATTACK_CHASE_LEASH * 1.5
+		and EnemyArmyCommand.horizontal_distance(army_center, strategic_destination)
+		> MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+	):
+		return false
+
+	return true
+
+
+func _clamp_attack_chase_destination(
+	strategic_destination: Vector3,
+	chase_point: Vector3
+) -> Vector3:
+	if strategic_destination == Vector3.ZERO:
+		return chase_point
+	if chase_point == Vector3.ZERO:
+		return strategic_destination
+	var offset: Vector3 = chase_point - strategic_destination
+	offset.y = 0.0
+	var distance: float = offset.length()
+	if distance <= MilitaryAIConfig.V2_ATTACK_CHASE_LEASH or distance <= 0.01:
+		return chase_point
+	return strategic_destination + offset.normalized() * MilitaryAIConfig.V2_ATTACK_CHASE_LEASH
+
+
+func _attack_objective_label(focus: Node3D, mission: ArmyMissionV2) -> String:
+	if NodeSafety.is_alive_node(focus):
+		return String(focus.name)
+	if mission != null and not mission.transition_reason.is_empty():
+		return mission.transition_reason
+	return "AttackObjective"
 
 
 func debug_get_assemble_slot_positions(rally_point: Vector3) -> Dictionary:

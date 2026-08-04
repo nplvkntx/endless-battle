@@ -545,6 +545,11 @@ static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
 ## Shared player-attack gate. Fail-closed when the strategic director is missing.
 ## DEFEND / emergency defense intentionally bypass this — callers must allow Mission.DEFEND.
 static func can_launch_player_attack(tree: SceneTree) -> bool:
+	## Military AI V2 owns offense readiness (squad size / lethal window).
+	## Legacy strategic-phase gates must not block V2 Attack-Move.
+	if MilitaryAIConfig.is_v2_enabled():
+		return true
+
 	var director: EnemyStrategicDirector = find_strategic_director(tree)
 	if director == null:
 		return false

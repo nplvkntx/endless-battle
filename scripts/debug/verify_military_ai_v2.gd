@@ -21,6 +21,12 @@ func _ready() -> void:
 	_verify_defend_config_and_source(failures)
 	_verify_defend_priority_order(failures)
 	_verify_defend_leash_helper(failures)
+	_verify_attack_config_and_source(failures)
+	_verify_attack_priority_order(failures)
+	_verify_attack_chase_leash_helper(failures)
+	_verify_retreat_recover_config_and_source(failures)
+	_verify_retreat_role_split_helper(failures)
+	_verify_retreat_recover_hysteresis_helpers(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -217,6 +223,21 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		)
 		_expect(
 			failures,
+			"director evaluates attack strategy",
+			text.contains("_evaluate_attack_strategy")
+		)
+		_expect(
+			failures,
+			"director selects strategic attack target",
+			text.contains("_select_attack_strategic_target")
+		)
+		_expect(
+			failures,
+			"director detects lethal attack window",
+			text.contains("_detect_lethal_attack_window")
+		)
+		_expect(
+			failures,
 			"director owns creep reservation",
 			text.contains("get_reserved_creep_camp_id")
 		)
@@ -238,9 +259,15 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "commander has assemble executor", commander_text.contains("_execute_assemble_mission"))
 		_expect(failures, "commander has creep executor", commander_text.contains("_execute_creep_mission"))
 		_expect(failures, "commander has defend executor", commander_text.contains("_execute_defend_mission"))
+		_expect(failures, "commander has attack executor", commander_text.contains("_execute_attack_mission"))
+		_expect(failures, "commander has retreat executor", commander_text.contains("_execute_retreat_mission"))
+		_expect(failures, "commander has recover executor", commander_text.contains("_execute_recover_mission"))
+		_expect(failures, "commander stages pending reinforcements", commander_text.contains("_stage_pending_reinforcements"))
 		_expect(failures, "commander uses attack-move for regroup", commander_text.contains("command_attack_move"))
 		_expect(failures, "commander clamps defend leash", commander_text.contains("_clamp_defend_destination"))
+		_expect(failures, "commander clamps attack chase", commander_text.contains("_clamp_attack_chase_destination"))
 		_expect(failures, "commander splits defend roles", commander_text.contains("_split_defend_roles"))
+		_expect(failures, "commander splits retreat roles", commander_text.contains("_split_retreat_roles"))
 		_expect(failures, "commander settles assembled units", commander_text.contains("_settle_unit"))
 		_expect(failures, "commander keeps stable slots", commander_text.contains("_assemble_role_slots"))
 		_expect(failures, "commander uses forward hint", commander_text.contains("get_assemble_forward_hint"))
@@ -358,6 +385,307 @@ func _verify_defend_leash_helper(failures: PackedStringArray) -> void:
 		clamped.x > base.x
 	)
 	commander.queue_free()
+
+
+func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"attack-ready threshold configurable",
+		MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS == 10
+	)
+	_expect(
+		failures,
+		"attack preferred band configurable",
+		MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS_PREFERRED == 12
+	)
+	_expect(
+		failures,
+		"attack lethal min configurable",
+		MilitaryAIConfig.V2_ATTACK_LETHAL_MIN_MILITARY_UNITS == 6
+	)
+	_expect(
+		failures,
+		"attack chase leash configurable",
+		MilitaryAIConfig.V2_ATTACK_CHASE_LEASH == 22.0
+	)
+	_expect(
+		failures,
+		"attack lethal score threshold configurable",
+		MilitaryAIConfig.V2_ATTACK_LETHAL_SCORE_THRESHOLD == 70.0
+	)
+
+	var director := MilitaryDirectorV2.new()
+	add_child(director)
+	director.reset_match_state()
+	_expect(failures, "attack ready false on empty squad", director.is_attack_ready() == false)
+	_expect(
+		failures,
+		"attack ready alias matches",
+		director.is_attack_ready() == director.is_attack_ready_placeholder()
+	)
+	director.queue_free()
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "attack director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "attack preempts creep", text.contains("preempts CREEP"))
+		_expect(failures, "attack exits to retreat when losing", text.contains("army clearly losing"))
+		_expect(failures, "attack exits when hero endangered", text.contains("hero in serious danger"))
+		_expect(failures, "attack exits when scattered", text.contains("attack army too scattered"))
+		_expect(failures, "attack admits no mid-fight reinforcements", text.contains("_can_admit_reinforcements"))
+		_expect(failures, "attack commits to town hall", text.contains("_should_commit_to_town_hall"))
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "attack commander source readable", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(failures, "attack uses Attack-Move", commander_text.contains("Mission.ATTACK"))
+		_expect(failures, "attack resumes strategic route", commander_text.contains("strategic_destination"))
+		_expect(failures, "attack stops endless chase", commander_text.contains("V2_ATTACK_CHASE_DURATION_SECONDS"))
+
+
+func _verify_attack_priority_order(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"route-blocking army outranks town hall",
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_ROUTE_BLOCKING_ARMY
+		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL
+	)
+	_expect(
+		failures,
+		"town hall outranks dangerous towers",
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL
+		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_DANGEROUS_TOWER
+	)
+	_expect(
+		failures,
+		"towers outrank production",
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_DANGEROUS_TOWER
+		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_PRODUCTION
+	)
+	_expect(
+		failures,
+		"production outranks workers",
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_PRODUCTION
+		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_WORKER
+	)
+	_expect(
+		failures,
+		"workers outrank other structures",
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_WORKER
+		< CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_OTHER_STRUCTURE
+	)
+
+
+func _verify_attack_chase_leash_helper(failures: PackedStringArray) -> void:
+	var commander := ArmyCommanderV2.new()
+	add_child(commander)
+	commander.reset_match_state()
+
+	var strategic := Vector3(5.0, 0.0, 5.0)
+	var near := Vector3(15.0, 0.0, 5.0)
+	var far := Vector3(125.0, 0.0, 5.0)
+	var clamped: Vector3 = commander._clamp_attack_chase_destination(strategic, far)
+	_expect(
+		failures,
+		"attack chase leaves near targets unchanged",
+		commander._clamp_attack_chase_destination(strategic, near) == near
+	)
+	_expect(
+		failures,
+		"attack chase clamps far pursuit",
+		is_equal_approx(
+			EnemyArmyCommand.horizontal_distance(strategic, clamped),
+			MilitaryAIConfig.V2_ATTACK_CHASE_LEASH
+		)
+	)
+	_expect(
+		failures,
+		"attack chase points toward pursuit",
+		clamped.x > strategic.x
+	)
+	commander.queue_free()
+
+
+func _verify_retreat_recover_config_and_source(failures: PackedStringArray) -> void:
+	_expect(
+		failures,
+		"retreat strength ratio configurable",
+		MilitaryAIConfig.V2_RETREAT_STRENGTH_RATIO == 0.55
+	)
+	_expect(
+		failures,
+		"attack reentry hysteresis configurable",
+		MilitaryAIConfig.V2_ATTACK_REENTRY_STRENGTH_RATIO == 1.15
+	)
+	_expect(
+		failures,
+		"state commit seconds configurable",
+		MilitaryAIConfig.V2_STATE_COMMIT_SECONDS == 3.0
+	)
+	_expect(
+		failures,
+		"post-retreat attack cooldown configurable",
+		MilitaryAIConfig.V2_POST_RETREAT_ATTACK_COOLDOWN_SECONDS == 6.0
+	)
+	_expect(
+		failures,
+		"recover min seconds configurable",
+		MilitaryAIConfig.V2_RECOVER_MIN_SECONDS == 4.0
+	)
+	_expect(
+		failures,
+		"recover max seconds configurable",
+		MilitaryAIConfig.V2_RECOVER_MAX_SECONDS == 18.0
+	)
+	_expect(
+		failures,
+		"recover hero hp not full",
+		MilitaryAIConfig.V2_RECOVER_HERO_HP_RATIO < 1.0
+		and MilitaryAIConfig.V2_RECOVER_HERO_HP_RATIO > MilitaryAIConfig.V2_RETREAT_HERO_HP_RATIO
+	)
+	_expect(
+		failures,
+		"recover min military configurable",
+		MilitaryAIConfig.V2_RECOVER_MIN_MILITARY_UNITS == 5
+	)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "retreat director source readable", director_source != null)
+	if director_source != null:
+		var text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(failures, "director evaluates retreat triggers", text.contains("_evaluate_retreat_triggers"))
+		_expect(failures, "director begins retreat from losing fights", text.contains("_maybe_begin_retreat"))
+		_expect(failures, "director evaluates recover strategy", text.contains("_evaluate_recover_strategy"))
+		_expect(failures, "director resolves retreat destination", text.contains("_resolve_retreat_destination"))
+		_expect(failures, "director prefers tower coverage", text.contains("_find_tower_cover_point"))
+		_expect(failures, "director reports frontline losses", text.contains("frontline losses critical"))
+		_expect(failures, "director reports enemy reinforcements", text.contains("enemy reinforcements unfavorable"))
+		_expect(failures, "director reports unwinnable fights", text.contains("fight unwinnable"))
+		_expect(failures, "director formats recover hold reason", text.contains("_format_recover_hold_reason"))
+		_expect(failures, "director has recover timeout", text.contains("recover timeout, reassembling"))
+		_expect(failures, "director blocks attack reentry hysteresis", text.contains("_can_reenter_attack"))
+		_expect(failures, "director preserves recovery point", text.contains("get_designated_recovery_point"))
+		_expect(failures, "director commits state minimum", text.contains("_has_met_state_commitment"))
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "retreat commander source readable", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(failures, "retreat preserves hero with withdraw group", commander_text.contains("Preserve the hero"))
+		_expect(failures, "retreat ranged and siege withdraw first", commander_text.contains("Ranged/siege leave first"))
+		_expect(failures, "retreat frontline covers briefly", commander_text.contains("Frontline may briefly cover"))
+		_expect(failures, "retreat pulls stragglers", commander_text.contains("_pull_retreat_stragglers"))
+		_expect(failures, "retreat uses order reissue timer", commander_text.contains("V2_RETREAT_ORDER_REISSUE_SECONDS"))
+		_expect(failures, "recover holds near base", commander_text.contains("_execute_recover_mission"))
+
+
+func _verify_retreat_role_split_helper(failures: PackedStringArray) -> void:
+	var commander := ArmyCommanderV2.new()
+	add_child(commander)
+	commander.reset_match_state()
+
+	var squad := ArmySquadV2.new()
+	var frontline := Node3D.new()
+	frontline.name = "RetreatFrontline"
+	var ranged := Node3D.new()
+	ranged.name = "RetreatRanged"
+	var siege := Node3D.new()
+	siege.name = "RetreatSiege"
+	var hero_stub := Node3D.new()
+	hero_stub.name = "RetreatHero"
+	add_child(frontline)
+	add_child(ranged)
+	add_child(siege)
+	add_child(hero_stub)
+
+	_expect(failures, "retreat frontline joins", squad.try_add_member(frontline, ArmySquadV2.UnitRole.FRONTLINE))
+	_expect(failures, "retreat ranged joins", squad.try_add_member(ranged, ArmySquadV2.UnitRole.RANGED))
+	_expect(failures, "retreat siege joins", squad.try_add_member(siege, ArmySquadV2.UnitRole.SIEGE))
+	_expect(failures, "retreat hero joins", squad.try_add_member(hero_stub, ArmySquadV2.UnitRole.HERO))
+
+	var army: Array = [frontline, ranged, siege, hero_stub]
+	var withdraw: Array = []
+	var cover: Array = []
+	commander._split_retreat_roles(squad, army, withdraw, cover)
+
+	_expect(failures, "hero withdraws with safe group", withdraw.has(hero_stub))
+	_expect(failures, "ranged withdraws safely", withdraw.has(ranged))
+	_expect(failures, "siege withdraws safely", withdraw.has(siege))
+	_expect(failures, "frontline covers withdrawal", cover.has(frontline))
+	_expect(failures, "hero is not left covering alone", not cover.has(hero_stub))
+
+	var army_center := Vector3(5.0, 0.0, 5.0)
+	var rally := Vector3(25.0, 0.0, 5.0)
+	var threat := Vector3(-10.0, 0.0, 5.0)
+	var cover_point: Vector3 = commander._resolve_retreat_cover_point(army_center, rally, threat)
+	_expect(
+		failures,
+		"cover point leans toward recovery",
+		cover_point.x > army_center.x
+	)
+	_expect(
+		failures,
+		"cover offset is brief not suicidal",
+		EnemyArmyCommand.horizontal_distance(army_center, cover_point)
+		<= MilitaryAIConfig.V2_RETREAT_COVER_OFFSET + 0.1
+	)
+
+	frontline.queue_free()
+	ranged.queue_free()
+	siege.queue_free()
+	hero_stub.queue_free()
+	commander.queue_free()
+
+
+func _verify_retreat_recover_hysteresis_helpers(failures: PackedStringArray) -> void:
+	var director := MilitaryDirectorV2.new()
+	add_child(director)
+	director.reset_match_state()
+
+	## Empty army never falsely forces retreat.
+	var no_fight: Dictionary = director._evaluate_retreat_triggers(get_tree(), [])
+	_expect(failures, "empty army does not retreat", not bool(no_fight.get("should_retreat", true)))
+
+	## Recover readiness requires hero + minimum squad — never perfection alone.
+	_expect(failures, "recover not ready without army", not director._is_recover_ready(get_tree()))
+	var hold_reason: String = director._format_recover_hold_reason(get_tree())
+	_expect(failures, "recover hold reason reports awaiting hero", hold_reason.contains("awaiting hero"))
+
+	## Post-retreat attack cooldown blocks immediate re-entry (no ATTACK↔RETREAT loop).
+	director._post_retreat_attack_cooldown = MilitaryAIConfig.V2_POST_RETREAT_ATTACK_COOLDOWN_SECONDS
+	director._state_entered_msec = Time.get_ticks_msec()
+	_expect(
+		failures,
+		"state commitment blocks soft exits",
+		not director._has_met_state_commitment()
+	)
+	## With no nearby enemies, reentry is allowed even during cooldown (rebuild-and-push).
+	_expect(
+		failures,
+		"reentry allowed when no nearby enemies",
+		director._can_reenter_attack(get_tree(), Vector3(1, 0, 1))
+	)
+
+	## Recover hard ceiling prevents endless RECOVER.
+	_expect(
+		failures,
+		"recover max exceeds min hold",
+		MilitaryAIConfig.V2_RECOVER_MAX_SECONDS > MilitaryAIConfig.V2_RECOVER_MIN_SECONDS
+	)
+	_expect(
+		failures,
+		"attack reentry stronger than retreat trigger",
+		MilitaryAIConfig.V2_ATTACK_REENTRY_STRENGTH_RATIO
+		> MilitaryAIConfig.V2_RETREAT_STRENGTH_RATIO
+	)
+
+	director.queue_free()
 
 
 func _verify_assemble_slot_stability(failures: PackedStringArray) -> void:
