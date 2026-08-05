@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://dxe8agh3majfa"]
 
 [ext_resource type="Script" path="res://scripts/ui/main_menu.gd" id="1_main_menu"]
+[ext_resource type="PackedScene" uid="uid://bq8displaysettings1" path="res://scenes/ui/display_settings_panel.tscn" id="2_settings"]
 
 [sub_resource type="ButtonGroup" id="ButtonGroup_difficulty"]
 
@@ -98,7 +99,21 @@ custom_minimum_size = Vector2(220, 44)
 layout_mode = 2
 text = "Start Match"
 
+[node name="SettingsButton" type="Button" parent="CenterContainer/VBoxContainer"]
+custom_minimum_size = Vector2(220, 44)
+layout_mode = 2
+text = "Settings"
+
 [node name="QuitButton" type="Button" parent="CenterContainer/VBoxContainer"]
 custom_minimum_size = Vector2(220, 44)
 layout_mode = 2
 text = "Quit"
+
+[node name="DisplaySettingsPanel" parent="." instance=ExtResource("2_settings")]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
