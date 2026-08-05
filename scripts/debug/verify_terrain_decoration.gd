@@ -2,7 +2,7 @@ extends Node
 
 ## Lightweight map harness for decoration scatter (avoids full match/AI systems).
 
-const REPORT_PATH := "res://terrain_decoration_verify_result.txt"
+const REPORT_PATH := "user://terrain_decoration_verify_result.txt"
 const BATTLEFIELD: PackedScene = preload("res://scenes/maps/battlefield_1v1.tscn")
 const MAP_RESOURCES: PackedScene = preload("res://scenes/world/map_resources.tscn")
 const PLAYER_BASE: PackedScene = preload("res://scenes/match/player_starting_base.tscn")
@@ -35,16 +35,13 @@ func _ready() -> void:
 
 
 func _write_report(report: String) -> void:
-	var absolute_report := ProjectSettings.globalize_path(REPORT_PATH)
-	var file := FileAccess.open(absolute_report, FileAccess.WRITE)
-	if file == null:
-		file = FileAccess.open(REPORT_PATH, FileAccess.WRITE)
+	var file := FileAccess.open(REPORT_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(report)
 		file.close()
 	else:
 		push_error("verify_terrain_decoration: could not write report path=%s err=%s" % [
-			absolute_report,
+			REPORT_PATH,
 			FileAccess.get_open_error(),
 		])
 

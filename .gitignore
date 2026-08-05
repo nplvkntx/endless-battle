@@ -2,3 +2,17 @@
 .godot/
 /android/
 endlessbattleexport/
+.tmp/
+
+# Historical / local verification outputs must not pollute the source tree.
+# Harnesses write to user://; CI artifacts stay outside the repo.
+*_verify_run.txt
+*_verify_err.txt
+*_verify_log.txt
+*_verify_result.txt
+*_verify_run*.txt
+*_run_log.txt
+godot_verify_log.txt
+*handles_verify.txt
+*verify_after_handles.txt
+terrain_decoration_verify_result.txt

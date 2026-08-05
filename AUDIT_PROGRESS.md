@@ -8,9 +8,22 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #3 complete for removable stubs.** Remaining: `GameSettings` is partial/referenced — do not remove without relocating cast-mode ownership. Next phase task selected below.
+**PHASE 1 #4 complete.** Next: PHASE 1 #5 — crash/freed-instance regression tests around orders, construction, hero casting and match restart.
 
 ## Completed tasks
+
+### 2026-08-05 — Canonical main scene + clean stale verify artifacts (audit PHASE 1 #4 / #50 / #51)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Canonical scene evidence** | `project.godot` `run/main_scene` already = `res://scenes/ui/main_menu.tscn`, matching `MatchSession.MAIN_MENU_SCENE`. Match load is only `MatchSession.MATCH_SCENE` → `res://scenes/main.tscn` via `start_match()` / rematch. Outdated `cursor/AI_CONTEXT.md` incorrectly said F5 runs `main.tscn` — corrected. |
+| **Root cause of artifact noise** | Historical headless verify outputs were committed at repo root (audit #51). Three harnesses still wrote `REPORT_FALLBACK` under `res://`, and `verify_terrain_decoration.gd` wrote its report to `res://`, recreating source-tree pollution. Debug scenes were included in `export_filter=all_resources` with empty exclude (audit #50 partial). |
+| **Exact change** | Deleted 23 stale root verify/log `.txt` files. `.gitignore` ignores verify output patterns + `.tmp/`. Removed `res://` report fallbacks from `verify_ai_aggression`, `verify_ai_hostile_mission`, `verify_military_ai_v2`; terrain decoration reports to `user://` only. `export_presets.cfg` excludes `scenes/debug/*`, `scripts/debug/*`, `scenes/combat_test.tscn`, and verify log globs. CI `validate_import.sh` asserts menu/match scene constants stay aligned and fails if root verify logs reappear. `MatchSession` documents the two canonical scenes. |
+| **Not done (blocker scope)** | Full move of debug harnesses into a separate Godot test project/addon (audit #50 remainder) would be a major packaging rewrite — deferred; export exclusion is the stability-phase fix. |
+| **Files changed** | `.gitignore`, `export_presets.cfg`, `scripts/ci/validate_import.sh`, `autoloads/match_session.gd`, `cursor/AI_CONTEXT.md`, 4 verify scripts, 23 deleted root logs, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless `--import`: clean. `scripts/ci/validate_import.sh`: `VALIDATION PASS` (canonical scene + no-root-logs checks). `verify_match_reset.tscn`: `PASS` (2 lifecycle cycles, registry=27). |
+| **Next audit task** | PHASE 1 #5 — Add crash/freed-instance regression tests around orders, construction, hero casting and match restart. |
 
 ### 2026-08-05 — Remove obsolete ProjectileManager stub autoload (audit PHASE 1 #3 / #12)
 
@@ -125,9 +138,11 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 | Audit item | Status |
 |---|---|
-| **#10** Navigation verify log parse failures (`UnitNavigation`, `Unit`) | **Outdated** — `scripts/systems/unit_navigation.gd` has `class_name UnitNavigation`; headless verify passes in current tree. |
+| **#10** Navigation verify log parse failures (`UnitNavigation`, `Unit`) | **Outdated** — `scripts/systems/unit_navigation.gd` has `class_name UnitNavigation`; headless verify passes in current tree. Historical `nav_verify_log.txt` removed from source tree 2026-08-05. |
 | **#39** AIHeroMastery parser errors | **Resolved** in `6d562aa` (validated 2026-08-05). |
 | **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **Mostly resolved** — `FogOfWarManager` and `ProjectileManager` unregistered 2026-08-05. `GameSettings` remains as partial/referenced (cast-mode API); not a pure stub. |
+| **#50** Debug verification scripts in project | **Partially resolved** — release export now excludes `scenes/debug/*` and `scripts/debug/*`. Separate test project deferred (packaging rewrite). |
+| **#51** Stored verification logs include stale failures | **Resolved** — root historical logs deleted; gitignore + CI gate + harnesses no longer write `res://` reports. |
 | **#63–64** Debug perf autoloads in production | **Deferred** — `PerfDebugOverlay` gates input on `OS.is_debug_build()`; not a parser/startup failure. |
 
 ## Validation history
@@ -152,11 +167,12 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Search `FogOfWarManager` after removal | Only docs / progress tracker; not in `project.godot` |
 | 2026-08-05 | Unregister `ProjectileManager` stub | Import clean; `validate_import.sh` PASS; `verify_match_reset` PASS |
 | 2026-08-05 | Search `ProjectileManager` after removal | Only docs / progress tracker; not in `project.godot` |
+| 2026-08-05 | Canonical scenes + remove 23 root verify logs | Import clean; `validate_import.sh` PASS (new gates); `verify_match_reset` PASS |
 
 ## Known blockers
 
-None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared. Remaining partial: `GameSettings` (referenced).
+None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
 
 ## Next task
 
-**PHASE 1 #4:** Establish one canonical main scene and clean test artifacts. Do not expand scope into gameplay refactors.
+**PHASE 1 #5:** Add crash/freed-instance regression tests around orders, construction, hero casting and match restart. Do not expand scope into gameplay refactors.

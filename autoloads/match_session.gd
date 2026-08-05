@@ -1,6 +1,8 @@
 extends Node
 
 ## Cross-scene navigation and match reset for menu, restart, and end screens.
+## Canonical entry: project run/main_scene + MAIN_MENU_SCENE (menu).
+## Canonical match: MATCH_SCENE only via start_match()/restart_match().
 ## Scene reload destroys units, buildings, projectiles, and scene AI managers.
 ## Autoload/static runtime state is wiped via registered reset callbacks.
 

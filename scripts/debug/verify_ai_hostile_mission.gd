@@ -4,7 +4,6 @@ extends Node
 ## Godot_v4.7-stable_win64.exe --headless --path <project> res://scenes/debug/verify_ai_hostile_mission.tscn
 
 const REPORT_PATH := "user://ai_hostile_mission_verify_result.txt"
-const REPORT_FALLBACK := "res://ai_hostile_mission_verify_run.txt"
 
 
 func _ready() -> void:
@@ -42,11 +41,6 @@ func _write_report(report: String) -> void:
 	if file != null:
 		file.store_string(report)
 		file.close()
-
-	var fallback := FileAccess.open(REPORT_FALLBACK, FileAccess.WRITE)
-	if fallback != null:
-		fallback.store_string(report)
-		fallback.close()
 
 
 func _verify_false_creeping_display(failures: PackedStringArray) -> void:

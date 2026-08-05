@@ -73,6 +73,44 @@ check_main_scene() {
 	fi
 }
 
+check_canonical_scenes() {
+	local main_scene menu_const match_const
+	main_scene="$(grep -E '^run/main_scene=' "$ROOT/project.godot" | head -n1 | cut -d= -f2- | tr -d '"')"
+	menu_const="$(grep -E '^\s*const MAIN_MENU_SCENE' "$ROOT/autoloads/match_session.gd" | head -n1 | grep -oE 'res://[^"]+' || true)"
+	match_const="$(grep -E '^\s*const MATCH_SCENE' "$ROOT/autoloads/match_session.gd" | head -n1 | grep -oE 'res://[^"]+' || true)"
+
+	if [[ -z "$menu_const" || -z "$match_const" ]]; then
+		fail "Could not read MatchSession.MAIN_MENU_SCENE / MATCH_SCENE constants"
+		return
+	fi
+	if [[ "$main_scene" != "$menu_const" ]]; then
+		fail "run/main_scene ($main_scene) must match MatchSession.MAIN_MENU_SCENE ($menu_const)"
+	fi
+	if [[ "$main_scene" == "$match_const" ]]; then
+		fail "run/main_scene must be the menu entry, not MatchSession.MATCH_SCENE ($match_const)"
+	fi
+	local match_rel="${match_const#res://}"
+	if [[ ! -f "$ROOT/$match_rel" ]]; then
+		fail "MatchSession.MATCH_SCENE points to missing file: $match_const"
+	fi
+}
+
+check_no_root_verify_logs() {
+	local stale=()
+	local f
+	shopt -s nullglob
+	for f in "$ROOT"/*_verify_run.txt "$ROOT"/*_verify_err.txt "$ROOT"/*_verify_log.txt \
+		"$ROOT"/*_verify_result.txt "$ROOT"/*_run_log.txt "$ROOT"/godot_verify_log.txt \
+		"$ROOT"/*handles_verify.txt "$ROOT"/*verify_after_handles.txt \
+		"$ROOT"/terrain_decoration_verify_result.txt "$ROOT"/balance_overhaul_verify_run*.txt; do
+		[[ -f "$f" ]] && stale+=("$(basename "$f")")
+	done
+	shopt -u nullglob
+	if [[ ${#stale[@]} -gt 0 ]]; then
+		fail "Stale root verification logs must not ship in the source tree: ${stale[*]}"
+	fi
+}
+
 check_scene_resource_paths() {
 	local missing=0
 	while IFS= read -r path; do
@@ -124,6 +162,8 @@ check_headless_smoke_scene() {
 echo "== Static checks =="
 check_autoload_paths
 check_main_scene
+check_canonical_scenes
+check_no_root_verify_logs
 check_scene_resource_paths
 
 echo "== Godot headless import/parse =="
