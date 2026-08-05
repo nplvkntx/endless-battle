@@ -79,6 +79,14 @@ var _watchdog_objective_valid: bool = true
 ## Last blocked offense evaluation reason (change-only telemetry).
 var _last_attack_block_reason: String = ""
 var _last_offense_diag_signature: String = ""
+## Change-only strategy telemetry signature.
+var _last_strategy_diag_signature: String = ""
+## Seconds remaining in the short post-defense regroup window.
+var _post_defend_regroup_remaining: float = 0.0
+## Seconds spent in a passive (non-offensive) state with a healthy army.
+var _passive_army_seconds: float = 0.0
+## Log resolved HARD difficulty knobs once per match.
+var _logged_hard_runtime_values: bool = false
 ## instance_id of the Node whose tree_exiting clears the active mission target.
 var _mission_target_exit_bound_id: int = 0
 ## Provider intents drained once per strategic tick (PHASE 2 #4).
@@ -116,6 +124,10 @@ func reset_match_state() -> void:
 	_watchdog_last_diag_signature = ""
 	_last_attack_block_reason = ""
 	_last_offense_diag_signature = ""
+	_last_strategy_diag_signature = ""
+	_post_defend_regroup_remaining = 0.0
+	_passive_army_seconds = 0.0
+	_logged_hard_runtime_values = false
 	_publish_perf_status()
 
 
@@ -144,6 +156,9 @@ func _clear_roster_state() -> void:
 	_designated_recovery_point = Vector3.ZERO
 	_last_attack_block_reason = ""
 	_last_offense_diag_signature = ""
+	_last_strategy_diag_signature = ""
+	_post_defend_regroup_remaining = 0.0
+	_passive_army_seconds = 0.0
 	_unbind_mission_target_exit()
 	_reset_watchdog_state("match reset")
 
@@ -175,6 +190,7 @@ func _evaluate_strategy() -> void:
 	if tree == null:
 		return
 
+	_maybe_log_hard_runtime_values()
 	_refresh_intent_snapshot()
 
 	if _post_retreat_attack_cooldown > 0.0:
@@ -193,20 +209,48 @@ func _evaluate_strategy() -> void:
 
 	## DEFEND always wins over CREEP / ATTACK / ASSEMBLE / RECOVER.
 	if _evaluate_defend_strategy(tree, rally_point):
+		_passive_army_seconds = 0.0
+		_maybe_log_strategy_diag(tree, rally_point, true)
 		return
 
 	## Finish an in-progress retreat before resuming offense.
 	if _state == State.RETREAT:
 		_evaluate_retreat_strategy(tree, rally_point)
+		_passive_army_seconds = 0.0
 		return
 
 	## Losing fights abort ATTACK/CREEP into RETREAT (emergency, bypasses commit).
 	if _maybe_begin_retreat(tree, rally_point):
+		_passive_army_seconds = 0.0
 		return
+
+	## Short bounded regroup after defense clears — no perfect formation required.
+	if _post_defend_regroup_remaining > 0.0:
+		_post_defend_regroup_remaining = maxf(
+			0.0,
+			_post_defend_regroup_remaining - TICK_SECONDS
+		)
+		if _post_defend_regroup_remaining > 0.0:
+			if _state not in [State.ASSEMBLE, State.RECOVER]:
+				_transition_to(
+					State.ASSEMBLE,
+					"post-defense regroup",
+					rally_point
+				)
+			_admit_pending_reinforcements()
+			_maybe_log_strategy_diag(tree, rally_point, false)
+			return
+		## Regroup finished — force an offensive reevaluation this tick.
+		if _force_offensive_reevaluation(tree, rally_point, "post-defense regroup complete"):
+			_passive_army_seconds = 0.0
+			_maybe_log_strategy_diag(tree, rally_point, false)
+			return
 
 	## Rebuild near base before offense; never stall forever.
 	if _state == State.RECOVER:
 		_evaluate_recover_strategy(tree, rally_point)
+		_tick_passive_army_invariant(tree, rally_point)
+		_maybe_log_strategy_diag(tree, rally_point, false)
 		return
 
 	## ATTACK preempts CREEP only on lethal/greed/clear advantage (or mid-ATTACK).
@@ -218,13 +262,21 @@ func _evaluate_strategy() -> void:
 	var prefer_early_creep: bool = _should_prefer_early_creeping(tree, rally_point)
 	if _state == State.ATTACK or interrupt_creep_for_attack or not prefer_early_creep:
 		if _evaluate_attack_strategy(tree, rally_point):
+			_passive_army_seconds = 0.0
+			_maybe_log_strategy_diag(tree, rally_point, false)
 			return
 		if _evaluate_creep_strategy(tree, rally_point):
+			_passive_army_seconds = 0.0
+			_maybe_log_strategy_diag(tree, rally_point, false)
 			return
 	else:
 		if _evaluate_creep_strategy(tree, rally_point):
+			_passive_army_seconds = 0.0
+			_maybe_log_strategy_diag(tree, rally_point, false)
 			return
 		if _evaluate_attack_strategy(tree, rally_point):
+			_passive_army_seconds = 0.0
+			_maybe_log_strategy_diag(tree, rally_point, false)
 			return
 
 	## Healthy army must not gather forever — force creep/attack after the passive ceiling.
@@ -233,10 +285,14 @@ func _evaluate_strategy() -> void:
 		and _state_commit_elapsed_seconds() >= MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS
 		and _force_passive_assemble_breakout(tree, rally_point)
 	):
+		_passive_army_seconds = 0.0
+		_maybe_log_strategy_diag(tree, rally_point, false)
 		return
 
 	_transition_to(State.ASSEMBLE, "gathering squad at base", rally_point)
+	_tick_passive_army_invariant(tree, rally_point)
 	_maybe_log_offense_diag(tree, rally_point, "fallback ASSEMBLE")
+	_maybe_log_strategy_diag(tree, rally_point, false)
 
 
 func _refresh_intent_snapshot() -> void:
@@ -1010,6 +1066,7 @@ func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	var threat: Dictionary = _resolve_v2_defense_threat(tree)
 	if threat.get("threatened", false):
 		_defend_clear_timer = 0.0
+		_post_defend_regroup_remaining = 0.0
 		var intercept: Vector3 = EnemyArmyCommand.resolve_defense_intercept_position(
 			tree,
 			threat,
@@ -1053,7 +1110,8 @@ func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		return true
 
 	_exit_defend_after_clear(tree, rally_point)
-	return true
+	## Allow same-tick regroup / offense evaluation after the clear.
+	return false
 
 
 ## Update defend objective in place when the strategic state is already DEFEND.
@@ -1113,22 +1171,26 @@ func _soft_update_defend_mission(
 
 
 func _resolve_v2_defense_threat(tree: SceneTree) -> Dictionary:
-	## Prefer provider intents when present; fall back to shared evaluators.
-	var defend_intent: MilitaryIntent = _find_intent(MilitaryIntent.Kind.DEFEND)
-	if defend_intent != null and not defend_intent.payload.is_empty():
-		_accept_intent_for_mission(defend_intent)
-		var payload: Dictionary = defend_intent.payload.duplicate(true)
-		if not payload.has("threatened"):
-			payload["threatened"] = true
-		if not payload.has("intercept_position") and defend_intent.target_position != Vector3.ZERO:
-			payload["intercept_position"] = defend_intent.target_position
-		if not payload.has("reason") and defend_intent.reason != &"":
-			payload["reason"] = defend_intent.reason
-		return payload
-
+	## Live emergency evaluation is authoritative. Provider DEFEND intents are hints
+	## only — never keep DEFEND alive from a stale payload after the player left.
 	var emergency: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
 	if emergency.get("threatened", false):
 		return emergency
+
+	var defend_intent: MilitaryIntent = _find_intent(MilitaryIntent.Kind.DEFEND)
+	if defend_intent != null and not defend_intent.payload.is_empty():
+		## Re-check live danger before accepting an intent-driven DEFEND.
+		var standard_for_intent: Dictionary = EnemyArmyCommand.evaluate_defense_threat(tree)
+		if standard_for_intent.get("threatened", false):
+			var intent_reason: StringName = standard_for_intent.get("reason", &"") as StringName
+			if intent_reason in [&"workers", &"buildings"]:
+				_accept_intent_for_mission(defend_intent)
+				return standard_for_intent
+			if intent_reason == &"base" and _has_near_base_military_threat(tree):
+				_accept_intent_for_mission(defend_intent)
+				return standard_for_intent
+		## Stale DEFEND intent with no live threat — drop accepted ownership.
+		_clear_accepted_intent()
 
 	## Workers being killed / harassed near base are an emergency for V2 even when
 	## the shared emergency evaluator only flags workers attacking buildings.
@@ -1137,9 +1199,28 @@ func _resolve_v2_defense_threat(tree: SceneTree) -> Dictionary:
 		return {"threatened": false}
 
 	var reason: StringName = standard.get("reason", &"") as StringName
-	if reason == &"workers" or reason == &"buildings" or reason == &"base":
+	if reason == &"workers" or reason == &"buildings":
+		return standard
+	## "base" from the shared evaluator uses a wide 60u radius. V2 only accepts it
+	## when hostiles are inside the tighter defense search radius around the TC/rally.
+	if reason == &"base" and _has_near_base_military_threat(tree):
 		return standard
 	return {"threatened": false}
+
+
+func _has_near_base_military_threat(tree: SceneTree) -> bool:
+	var origin: Vector3 = get_assemble_rally_point()
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if origin == Vector3.ZERO:
+		return false
+	var near: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		origin,
+		MilitaryAIConfig.V2_DEFEND_THREAT_SEARCH_RANGE
+	)
+	near = NodeSafety.clean_node_array(near)
+	return not near.is_empty()
 
 
 func _pick_defend_focus_target(
@@ -1225,6 +1306,16 @@ func _format_defend_reason(reason: StringName, focus: Node3D) -> String:
 
 
 func _exit_defend_after_clear(tree: SceneTree, rally_point: Vector3) -> void:
+	var attacker_count: int = _count_near_base_attackers(tree, rally_point)
+	var damaged_recently: bool = _is_enemy_base_damaged_recently(tree)
+	EnemyAIDebug.log_once(
+		"v2_defense_exit",
+		"[AI V2 STRATEGY] defense_exit threat=false attackers=%d damaged_recently=%s next=REGROUP" % [
+			attacker_count,
+			str(damaged_recently),
+		]
+	)
+
 	if _mission != null and _mission.mission_type == ArmyMissionV2.MissionType.DEFEND:
 		_mission.completion_condition = ArmyMissionV2.CompletionCondition.THREAT_CLEARED
 
@@ -1232,6 +1323,8 @@ func _exit_defend_after_clear(tree: SceneTree, rally_point: Vector3) -> void:
 	_clear_accepted_intent()
 	_defend_clear_timer = 0.0
 	_defend_reason = &""
+	_post_defend_regroup_remaining = MilitaryAIConfig.V2_POST_DEFEND_REGROUP_SECONDS
+	_passive_army_seconds = 0.0
 
 	## Never resume a stale creep/attack reservation — reassess from a safe state.
 	_release_creep_reservation()
@@ -1247,13 +1340,11 @@ func _exit_defend_after_clear(tree: SceneTree, rally_point: Vector3) -> void:
 		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.INTERCEPTING:
 			EnemyArmyCommand.release_army_mode(EnemyArmyCommand.ArmyMode.INTERCEPTING)
 
+	## Bounded short regroup — do not require perfect formation cohesion.
 	if _is_main_squad_damaged():
 		_transition_to(State.RECOVER, "defense cleared, recovering damage", rally_point)
 		return
-	if _is_main_squad_scattered(rally_point):
-		_transition_to(State.ASSEMBLE, "defense cleared, reassembling scattered squad", rally_point)
-		return
-	_transition_to(State.ASSEMBLE, "defense cleared, reassess strategy", rally_point)
+	_transition_to(State.ASSEMBLE, "defense cleared, short regroup", rally_point)
 
 
 func _deactivate_v2_defend(_reason: String) -> void:
@@ -1674,25 +1765,30 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 			_transition_to(State.RECOVER, "attack squad below threshold", rally_point)
 			return true
 		_note_attack_block(
-			"not attack-ready (mil=%d hero=%s lethal=%s)" % [
+			"attack_ready=false mil=%d need=%d hero=%s lethal_ready=%s lethal_window=%s pending=%d" % [
 				get_military_unit_count(),
+				MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS,
 				str(_main_squad.hero_present),
+				str(is_lethal_attack_ready()),
 				str(lethal),
+				_pending_reinforcements.size(),
 			]
 		)
 		return false
 
 	if attack_army.is_empty():
-		_note_attack_block("attack army empty despite ready gate")
+		_note_attack_block("attack army empty despite ready gate (squad=%d living_combat=0)" % _main_squad.get_size())
 		return false
 
 	if EnemyArmyCommand.is_defense_blocking_offense():
-		_note_attack_block("emergency defense blocking offense")
+		_note_attack_block(
+			"emergency_defense_active=true reason=%s" % String(EnemyArmyCommand.get_emergency_defense_reason())
+		)
 		return false
 
 	if _state != State.ATTACK and not _can_reenter_attack(tree, rally_point):
 		_note_attack_block(
-			"post-retreat attack cooldown (%.1fs)" % _post_retreat_attack_cooldown
+			"post_retreat_attack_cooldown=%.1fs remaining" % _post_retreat_attack_cooldown
 		)
 		return false
 
@@ -1717,7 +1813,10 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 				return true
 			_transition_to(State.RECOVER, "no attack targets remain", rally_point)
 			return true
-		_note_attack_block("no valid attack target")
+		var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+		_note_attack_block(
+			"no valid attack target (player_tc=%s objective_empty=true)" % str(player_cc != null)
+		)
 		return false
 
 	if NodeSafety.is_alive_node(target_node):
@@ -2207,55 +2306,279 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 ## After a long ASSEMBLE, push a healthy grouped army into CREEP or ATTACK.
 ## Never peels individuals off — uses the same squad gates as normal strategy.
 func _force_passive_assemble_breakout(tree: SceneTree, rally_point: Vector3) -> bool:
+	return _force_offensive_reevaluation(tree, rally_point, "assemble timeout")
+
+
+## Shared offensive breakout used by assemble timeout, post-defense regroup, and the
+## healthy-army passive invariant. Always publishes through director → mission → commander.
+func _force_offensive_reevaluation(
+	tree: SceneTree,
+	rally_point: Vector3,
+	context: String
+) -> bool:
 	if tree == null:
 		return false
 	if EnemyArmyCommand.is_defense_blocking_offense():
-		_note_attack_block("assemble timeout blocked by emergency defense")
-		_maybe_log_offense_diag(tree, rally_point, "assemble timeout blocked")
+		_note_attack_block("%s blocked by emergency_defense_active" % context)
+		_maybe_log_offense_diag(tree, rally_point, "%s blocked" % context)
 		return false
 
+	var combat_units: int = get_military_unit_count()
 	var healthy: bool = (
 		is_creep_ready()
 		or is_attack_ready()
 		or is_lethal_attack_ready()
+		or combat_units >= MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
 	)
-	if not healthy:
+	if not healthy and not _main_squad.hero_present and combat_units < 10:
 		_note_attack_block(
-			"assemble timeout: army incomplete (mil=%d hero=%s pending=%d)" % [
-				get_military_unit_count(),
+			"%s: army incomplete (mil=%d hero=%s pending=%d)" % [
+				context,
+				combat_units,
 				str(_main_squad.hero_present),
 				_pending_reinforcements.size(),
 			]
 		)
-		_maybe_log_offense_diag(tree, rally_point, "assemble timeout incomplete")
+		_maybe_log_offense_diag(tree, rally_point, "%s incomplete" % context)
 		return false
 
 	## Prefer creeping so the army stays grouped and gains XP before a full push.
-	if is_creep_ready() and _evaluate_creep_strategy(tree, rally_point):
-		_maybe_log_offense_diag(tree, rally_point, "assemble timeout → CREEP")
+	var can_try_creep: bool = (
+		is_creep_ready()
+		or combat_units >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
+	)
+	if can_try_creep and _evaluate_creep_strategy(tree, rally_point):
+		_maybe_log_offense_diag(tree, rally_point, "%s → CREEP" % context)
 		return true
 
-	## Bypass early-creep preference: attack with the formed squad.
-	if is_attack_ready() or is_lethal_attack_ready():
-		## Temporarily clear post-retreat cooldown so a healthy army can leave base.
-		var previous_cooldown: float = _post_retreat_attack_cooldown
-		_post_retreat_attack_cooldown = 0.0
-		var launched: bool = _evaluate_attack_strategy(tree, rally_point)
-		if not launched:
-			_post_retreat_attack_cooldown = previous_cooldown
-			_note_attack_block("assemble timeout: attack evaluation failed")
-			_maybe_log_offense_diag(tree, rally_point, "assemble timeout attack failed")
-			return false
-		_maybe_log_offense_diag(tree, rally_point, "assemble timeout → ATTACK")
-		return true
+	## Bypass early-creep preference: attack/pressure with the formed squad.
+	## Temporarily clear post-retreat cooldown so a healthy army can leave base.
+	var previous_cooldown: float = _post_retreat_attack_cooldown
+	_post_retreat_attack_cooldown = 0.0
+	## Hero-less but large armies may still pressure a known player base.
+	var launched: bool = false
+	if is_attack_ready() or is_lethal_attack_ready() or combat_units >= 10:
+		launched = _evaluate_attack_strategy(tree, rally_point)
+		if not launched and combat_units >= 10:
+			launched = _publish_pressure_attack(tree, rally_point, context)
+	if not launched:
+		_post_retreat_attack_cooldown = previous_cooldown
+		_note_attack_block(
+			"%s: attack evaluation failed (%s)" % [
+				context,
+				_last_attack_block_reason if not _last_attack_block_reason.is_empty() else "no_target",
+			]
+		)
+		_maybe_log_offense_diag(tree, rally_point, "%s attack failed" % context)
+		return false
+	_maybe_log_offense_diag(tree, rally_point, "%s → ATTACK" % context)
+	return true
 
-	return false
+
+## Fallback pressure when normal attack gates fail but a large army and player TC exist.
+func _publish_pressure_attack(tree: SceneTree, rally_point: Vector3, context: String) -> bool:
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var target_node: Node3D = player_cc
+	var target_position: Vector3 = Vector3.ZERO
+	if NodeSafety.is_alive_node(player_cc):
+		target_position = player_cc.global_position
+	else:
+		var structure: Node3D = _find_nearest_player_structure(tree, rally_point)
+		if NodeSafety.is_alive_node(structure):
+			target_node = structure
+			target_position = structure.global_position
+	if target_position == Vector3.ZERO:
+		_note_attack_block(
+			"%s: pressure failed — no player Town Center or structure registered" % context
+		)
+		return false
+
+	_last_attack_block_reason = ""
+	_attack_is_lethal = false
+	_transition_to(
+		State.ATTACK,
+		"pressure %s" % context,
+		target_position,
+		target_node,
+		CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL
+	)
+	return true
+
+
+func _tick_passive_army_invariant(tree: SceneTree, rally_point: Vector3) -> void:
+	## Hard invariant: healthy army with no threat and no offensive mission cannot
+	## remain passive beside the base indefinitely.
+	if _state in [State.CREEP, State.ATTACK, State.DEFEND, State.RETREAT]:
+		_passive_army_seconds = 0.0
+		return
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		_passive_army_seconds = 0.0
+		return
+	if _resolve_v2_defense_threat(tree).get("threatened", false):
+		_passive_army_seconds = 0.0
+		return
+
+	var combat_units: int = get_military_unit_count()
+	var main_healthy: bool = (
+		_main_squad.get_size() >= 10
+		and (is_attack_ready() or is_lethal_attack_ready() or combat_units >= 10)
+	)
+	if not main_healthy:
+		_passive_army_seconds = 0.0
+		return
+
+	var offensive_active: bool = (
+		_mission != null
+		and _mission.completion_condition == ArmyMissionV2.CompletionCondition.NONE
+		and _mission.mission_type in [
+			ArmyMissionV2.MissionType.CREEP,
+			ArmyMissionV2.MissionType.ATTACK,
+		]
+	)
+	if offensive_active:
+		_passive_army_seconds = 0.0
+		return
+
+	_passive_army_seconds += TICK_SECONDS
+	if _passive_army_seconds < MilitaryAIConfig.V2_PASSIVE_OFFENSE_REEVAL_SECONDS:
+		return
+
+	_passive_army_seconds = 0.0
+	_force_offensive_reevaluation(tree, rally_point, "passive army invariant")
 
 
 func _note_attack_block(reason: String) -> void:
 	if reason.is_empty():
 		return
 	_last_attack_block_reason = reason
+
+
+func _maybe_log_hard_runtime_values() -> void:
+	if _logged_hard_runtime_values:
+		return
+	_logged_hard_runtime_values = true
+	var difficulty: int = MatchSession.ai_difficulty if MatchSession != null else -1
+	var difficulty_name: String = AIDifficultyConfig.display_name(difficulty)
+	EnemyAIDebug.log_once(
+		"v2_hard_runtime",
+		"[AI V2 HARD] difficulty=%s barracks=%d stables=%d artillery=%d attack_ready_mil=%d creep_ready_mil=%d assemble_passive=%.1fs post_defend_regroup=%.1fs passive_reeval=%.1fs defend_clear=%.1fs recent_damage=%.1fs" % [
+			difficulty_name,
+			AIDifficultyConfig.max_barracks(difficulty),
+			AIDifficultyConfig.max_stables(difficulty),
+			AIDifficultyConfig.max_artillery_depots(difficulty),
+			MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS,
+			MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS,
+			MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS,
+			MilitaryAIConfig.V2_POST_DEFEND_REGROUP_SECONDS,
+			MilitaryAIConfig.V2_PASSIVE_OFFENSE_REEVAL_SECONDS,
+			MilitaryAIConfig.V2_DEFEND_THREAT_CLEAR_SECONDS,
+			MilitaryAIConfig.V2_DEFEND_RECENT_DAMAGE_SECONDS,
+		]
+	)
+
+
+func _count_near_base_attackers(tree: SceneTree, rally_point: Vector3) -> int:
+	var origin: Vector3 = rally_point
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.resolve_enemy_rally_position(tree)
+	if origin == Vector3.ZERO:
+		return 0
+	var near: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		origin,
+		MilitaryAIConfig.V2_DEFEND_THREAT_SEARCH_RANGE
+	)
+	return NodeSafety.clean_node_array(near).size()
+
+
+func _is_enemy_base_damaged_recently(tree: SceneTree) -> bool:
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is CommandCenter or not NodeSafety.is_alive_node(node):
+			continue
+		if CombatKillTracker.was_damaged_recently(
+			node,
+			MilitaryAIConfig.V2_DEFEND_RECENT_DAMAGE_SECONDS
+		):
+			return true
+	return false
+
+
+func _count_creep_candidates(tree: SceneTree, rally_point: Vector3) -> int:
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	if creep_manager == null:
+		return 0
+	var creep_army: Array = _get_creep_squad_units()
+	var origin: Vector3 = _main_squad.center
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.compute_army_center(creep_army)
+	if origin == Vector3.ZERO:
+		origin = rally_point
+	var camp: Node3D = _select_best_creep_camp(
+		tree,
+		creep_manager,
+		creep_army,
+		origin,
+		rally_point
+	)
+	return 1 if camp != null else 0
+
+
+func _maybe_log_strategy_diag(
+	tree: SceneTree,
+	rally_point: Vector3,
+	threat_active: bool
+) -> void:
+	var mission_name: String = "-"
+	if _mission != null:
+		mission_name = _mission.get_mission_type_name()
+	var attacker_count: int = _count_near_base_attackers(tree, rally_point)
+	var damaged_recently: bool = _is_enemy_base_damaged_recently(tree)
+	var defended_ok: bool = false
+	if _mission != null and _mission.mission_type == ArmyMissionV2.MissionType.DEFEND:
+		defended_ok = (
+			_mission.get_alive_target_object() != null
+			or _mission.target_position != Vector3.ZERO
+		)
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var attack_target_ok: bool = NodeSafety.is_alive_node(player_cc)
+	var creep_candidates: int = _count_creep_candidates(tree, rally_point)
+	var regroup_remaining: float = _post_defend_regroup_remaining
+	var signature: String = "%s|%s|%s|%s|%d|%d|%s|%.1f|%.1f|%s" % [
+		get_state_name(),
+		mission_name,
+		str(threat_active),
+		String(_defend_reason),
+		get_military_unit_count(),
+		attacker_count,
+		_last_attack_block_reason,
+		_state_commit_elapsed_seconds() if _state_commit_elapsed_seconds() < INF else 0.0,
+		regroup_remaining,
+		str(EnemyArmyCommand.is_emergency_defense_active()),
+	]
+	if signature == _last_strategy_diag_signature:
+		return
+	_last_strategy_diag_signature = signature
+	EnemyAIDebug.log_once(
+		"v2_strategy",
+		"[AI V2 STRATEGY] state=%s mission=%s threat=%s reason=\"%s\" duration=%.1f units=%d squad=%d attackers=%d emergency=%s defended_ok=%s damage_recent=%s defend_cd=%.1f regroup=%.1f creep_camps=%d attack_target=%s block=\"%s\"" % [
+			get_state_name(),
+			mission_name,
+			str(threat_active),
+			String(_defend_reason) if _defend_reason != &"" else _last_transition_reason,
+			_state_commit_elapsed_seconds() if _state_commit_elapsed_seconds() < INF else 0.0,
+			get_military_unit_count(),
+			_main_squad.get_size(),
+			attacker_count,
+			str(EnemyArmyCommand.is_emergency_defense_active()),
+			str(defended_ok),
+			str(damaged_recently),
+			maxf(0.0, MilitaryAIConfig.V2_DEFEND_THREAT_CLEAR_SECONDS - _defend_clear_timer),
+			regroup_remaining,
+			creep_candidates,
+			str(attack_target_ok),
+			_last_attack_block_reason if not _last_attack_block_reason.is_empty() else "-",
+		]
+	)
 
 
 func _maybe_log_offense_diag(tree: SceneTree, rally_point: Vector3, event: String) -> void:
@@ -2267,19 +2590,22 @@ func _maybe_log_offense_diag(tree: SceneTree, rally_point: Vector3, event: Strin
 	if _mission != null:
 		mission_name = _mission.get_mission_type_name()
 	var target_ok: bool = false
+	var player_cc: CommandCenter = null
+	if tree != null:
+		player_cc = EnemyArmyCommand.find_living_player_command_center(tree)
 	if _mission != null:
 		target_ok = (
 			_mission.get_alive_target_object() != null
 			or _mission.target_position != Vector3.ZERO
 		)
+	if not target_ok:
+		target_ok = NodeSafety.is_alive_node(player_cc)
 	var assemble_age: float = 0.0
 	if _state == State.ASSEMBLE:
 		assemble_age = _state_commit_elapsed_seconds()
 		if assemble_age >= INF:
 			assemble_age = 0.0
-	var rally_text: String = "-"
-	if rally_point != Vector3.ZERO:
-		rally_text = "(%.0f,%.0f)" % [rally_point.x, rally_point.z]
+	var ready: bool = is_attack_ready() or is_lethal_attack_ready()
 	var signature: String = "%s|%s|%s|%d|%d|%s|%s|%.0f|%s" % [
 		get_state_name(),
 		mission_name,
@@ -2296,19 +2622,18 @@ func _maybe_log_offense_diag(tree: SceneTree, rally_point: Vector3, event: Strin
 	_last_offense_diag_signature = signature
 	EnemyAIDebug.log_once(
 		"v2_offense",
-		"[V2 Military] state=%s mission=%s event=%s mil=%d squad=%d hero=%s L%d attack_ready=%s block=%s target_ok=%s assemble=%.1fs rally=%s" % [
+		"[AI V2 OFFENSE] units=%d hero=%s attack_target=%s attack_ready=%s blocked=\"%s\" state=%s mission=%s event=%s squad=%d L%d assemble=%.1fs" % [
+			get_military_unit_count(),
+			str(_main_squad.hero_present),
+			str(target_ok),
+			str(ready),
+			_last_attack_block_reason if not _last_attack_block_reason.is_empty() else "-",
 			get_state_name(),
 			mission_name,
 			event,
-			get_military_unit_count(),
 			_main_squad.get_size(),
-			str(_main_squad.hero_present),
 			hero_level,
-			str(is_attack_ready()),
-			_last_attack_block_reason if not _last_attack_block_reason.is_empty() else "-",
-			str(target_ok),
 			assemble_age,
-			rally_text,
 		]
 	)
 
@@ -3633,6 +3958,35 @@ func debug_force_assemble_passive_elapsed_for_tests(seconds: float) -> void:
 func debug_force_passive_assemble_breakout_for_tests(rally_point: Vector3 = Vector3.ZERO) -> bool:
 	var tree: SceneTree = get_tree()
 	return _force_passive_assemble_breakout(tree, rally_point)
+
+
+func debug_force_offensive_reevaluation_for_tests(rally_point: Vector3 = Vector3.ZERO) -> bool:
+	var tree: SceneTree = get_tree()
+	return _force_offensive_reevaluation(tree, rally_point, "test reevaluation")
+
+
+func debug_set_post_defend_regroup_for_tests(seconds: float) -> void:
+	_post_defend_regroup_remaining = maxf(0.0, seconds)
+
+
+func debug_get_post_defend_regroup_for_tests() -> float:
+	return _post_defend_regroup_remaining
+
+
+func debug_set_passive_army_seconds_for_tests(seconds: float) -> void:
+	_passive_army_seconds = maxf(0.0, seconds)
+
+
+func debug_get_passive_army_seconds_for_tests() -> float:
+	return _passive_army_seconds
+
+
+func debug_resolve_v2_defense_threat_for_tests() -> Dictionary:
+	return _resolve_v2_defense_threat(get_tree())
+
+
+func debug_exit_defend_after_clear_for_tests(rally_point: Vector3 = Vector3.ZERO) -> void:
+	_exit_defend_after_clear(get_tree(), rally_point)
 
 
 func debug_get_last_attack_block_reason_for_tests() -> String:

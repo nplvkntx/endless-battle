@@ -59,11 +59,18 @@ const V2_ASSEMBLE_RALLY_MAX_RADIUS: float = 15.0
 const V2_ASSEMBLE_PRODUCTION_EXIT_CLEARANCE: float = 4.0
 const V2_ASSEMBLE_ATTACK_MOVE_DISTANCE: float = 6.0
 ## Hard ceiling so a healthy army cannot remain gathered forever.
-const V2_ASSEMBLE_MAX_PASSIVE_SECONDS: float = 45.0
+## Kept aligned with the passive offense reevaluation invariant.
+const V2_ASSEMBLE_MAX_PASSIVE_SECONDS: float = 15.0
 
 ## V2 DEFEND behavior tuning.
 const V2_DEFEND_LEASH_RADIUS: float = 42.0
 const V2_DEFEND_THREAT_CLEAR_SECONDS: float = 5.0
+## Short post-defense regroup before CREEP / PRESSURE / ATTACK reevaluation.
+const V2_POST_DEFEND_REGROUP_SECONDS: float = 3.0
+## Recent building damage may keep defense live only within this window.
+const V2_DEFEND_RECENT_DAMAGE_SECONDS: float = 8.0
+## Healthy passive army must reevaluate offense at least this often.
+const V2_PASSIVE_OFFENSE_REEVAL_SECONDS: float = 15.0
 ## Longer reissue stops Attack-Move / focus storms on large defense armies.
 const V2_DEFEND_ORDER_REISSUE_SECONDS: float = 1.25
 const V2_DEFEND_FOCUS_REISSUE_SECONDS: float = 1.50

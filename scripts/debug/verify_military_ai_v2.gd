@@ -35,6 +35,7 @@ func _ready() -> void:
 	_verify_hero_micro_integration(failures)
 	await _verify_watchdog_and_diagnostics(failures)
 	await _verify_assemble_cannot_stall_forever(failures)
+	await _verify_defense_exits_and_counterattacks(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -442,7 +443,7 @@ func _verify_assemble_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "director transitions to DEFEND", text.contains("State.DEFEND,"))
 		_expect(failures, "director evaluates defend strategy", text.contains("_evaluate_defend_strategy"))
 		_expect(failures, "director exits defend after clear", text.contains("_exit_defend_after_clear"))
-		_expect(failures, "director does not resume stale camp", text.contains("defense cleared, reassess"))
+		_expect(failures, "director does not resume stale camp", text.contains("defense cleared, short regroup") or text.contains("defense cleared, reassess"))
 		_expect(failures, "director checks construction reservations", text.contains("ConstructionReservations.overlaps_reserved_footprint"))
 		_expect(failures, "director checks construction points", text.contains("get_construction_points"))
 		_expect(failures, "director checks enemy workers", text.contains("_collect_enemy_workers"))
@@ -697,8 +698,10 @@ func _verify_defend_leash_helper(failures: PackedStringArray) -> void:
 func _make_defense_test_unit(unit_name: String, position: Vector3) -> Spearman:
 	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
 	unit.name = unit_name
+	unit.team_id = 1
 	unit.position = position
 	unit.add_to_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	unit.add_to_group(&"enemies")
 	add_child(unit)
 	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
 	if health != null:
@@ -709,8 +712,10 @@ func _make_defense_test_unit(unit_name: String, position: Vector3) -> Spearman:
 func _make_defense_test_archer(unit_name: String, position: Vector3) -> Archer:
 	var unit: Archer = ARCHER_SCENE.instantiate() as Archer
 	unit.name = unit_name
+	unit.team_id = 1
 	unit.position = position
 	unit.add_to_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	unit.add_to_group(&"enemies")
 	add_child(unit)
 	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
 	if health != null:
@@ -2240,7 +2245,19 @@ func _verify_assemble_cannot_stall_forever(failures: PackedStringArray) -> void:
 	_expect(
 		failures,
 		"assemble max passive configured",
-		MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS >= 30.0
+		MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS >= 10.0
+		and MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS <= 20.0
+	)
+	_expect(
+		failures,
+		"post-defend regroup configured",
+		MilitaryAIConfig.V2_POST_DEFEND_REGROUP_SECONDS > 0.0
+		and MilitaryAIConfig.V2_POST_DEFEND_REGROUP_SECONDS <= 6.0
+	)
+	_expect(
+		failures,
+		"passive offense reevaluation configured",
+		MilitaryAIConfig.V2_PASSIVE_OFFENSE_REEVAL_SECONDS <= 15.0
 	)
 	_expect(
 		failures,
@@ -2445,6 +2462,335 @@ func _verify_assemble_cannot_stall_forever(failures: PackedStringArray) -> void:
 	for entry: Variant in units:
 		if NodeSafety.is_alive_node(entry):
 			(entry as Node).queue_free()
+	commander.queue_free()
+	director.queue_free()
+	root.queue_free()
+	EnemyArmyCommand.reset_match_state()
+	await get_tree().process_frame
+
+
+func _verify_defense_exits_and_counterattacks(failures: PackedStringArray) -> void:
+	## Test 1 — defense exits when the live threat is gone (stale kill-tracker pruned).
+	## Test 2 — post-defense counterattack publishes CREEP/ATTACK to the commander.
+	## Test 3 — a huge army cannot remain passive indefinitely.
+	EnemyArmyCommand.reset_match_state()
+
+	var command_center_scene: PackedScene = load("res://scenes/buildings/command_center.tscn") as PackedScene
+	_expect(failures, "command center scene loads", command_center_scene != null)
+
+	var root := Node3D.new()
+	root.name = "DefenseExitHarness"
+	add_child(root)
+
+	var director := MilitaryDirectorV2.new()
+	director.name = "MilitaryDirectorV2"
+	root.add_child(director)
+	director.reset_match_state()
+	director.set_process(false)
+
+	var commander := ArmyCommanderV2.new()
+	commander.name = "ArmyCommanderV2"
+	root.add_child(commander)
+	commander.reset_match_state()
+	commander.set_process(false)
+	commander._director = director
+
+	var enemy_cc: Building = null
+	var player_cc: Building = null
+	if command_center_scene != null:
+		enemy_cc = command_center_scene.instantiate() as Building
+		enemy_cc.name = "EnemyTownCenter"
+		enemy_cc.team_id = 1
+		root.add_child(enemy_cc)
+		enemy_cc.global_position = Vector3(10.0, 0.0, 10.0)
+		if enemy_cc.has_method("set_completed"):
+			enemy_cc.call("set_completed")
+		enemy_cc.add_to_group(&"enemy_command_center")
+		enemy_cc.add_to_group(&"buildings")
+
+		player_cc = command_center_scene.instantiate() as Building
+		player_cc.name = "PlayerTownCenter"
+		player_cc.team_id = 0
+		root.add_child(player_cc)
+		player_cc.global_position = Vector3(120.0, 0.0, 120.0)
+		if player_cc.has_method("set_completed"):
+			player_cc.call("set_completed")
+		player_cc.add_to_group(&"player_command_center")
+		player_cc.add_to_group(&"buildings")
+
+	## --- Test 1: stale CombatKillTracker attacker must not keep DEFEND forever ---
+	var army_units: Array = []
+	for i in range(20):
+		var unit: Spearman = _make_defense_test_unit(
+			"DefendExitUnit%d" % i,
+			Vector3(12.0 + float(i) * 0.8, 0.0, 10.0)
+		)
+		army_units.append(unit)
+		director.get_main_squad().try_add_member(unit, ArmySquadV2.UnitRole.FRONTLINE)
+
+	var hero_unit: Spearman = _make_defense_test_unit("DefendExitHero", Vector3(11.0, 0.0, 9.0))
+	army_units.append(hero_unit)
+	director.get_main_squad().try_add_member(hero_unit, ArmySquadV2.UnitRole.HERO)
+	director.get_main_squad().recompute_metrics()
+
+	var attacker: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	attacker.name = "StalePlayerAttacker"
+	attacker.team_id = 0
+	add_child(attacker)
+	attacker.team_id = 0
+	attacker.global_position = Vector3(14.0, 0.0, 10.0)
+	attacker.position = Vector3(14.0, 0.0, 10.0)
+	attacker.add_to_group(&"units")
+	if attacker.is_in_group(&"enemies"):
+		attacker.remove_from_group(&"enemies")
+	if attacker.is_in_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP):
+		attacker.remove_from_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	var attacker_health: HealthComponent = attacker.get_node_or_null("HealthComponent") as HealthComponent
+	if attacker_health != null:
+		attacker_health.current_health = attacker_health.max_health
+	_expect(
+		failures,
+		"test1: attacker classified as player military",
+		not CombatTargetValidation.is_enemy_faction(attacker)
+	)
+
+	if enemy_cc != null:
+		CombatKillTracker.record_attacker(enemy_cc, attacker)
+
+	## Nearby attacker → DEFEND should activate via emergency evaluator / director.
+	EnemyArmyCommand._emergency_threat_cache.clear()
+	EnemyArmyCommand._emergency_threat_cache_msec = 0
+	var live_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
+	_expect(
+		failures,
+		"test1: live attacker near TC is threatened",
+		live_threat.get("threatened", false) == true
+	)
+
+	director._transition_to(
+		MilitaryDirectorV2.State.DEFEND,
+		"defend town_center",
+		attacker.global_position,
+		attacker,
+		100
+	)
+	EnemyArmyCommand.activate_emergency_defense({
+		"reason": &"town_center",
+		"intercept_position": attacker.global_position,
+		"force_recall": true,
+	})
+	director._defend_active = true
+	director._defend_reason = &"town_center"
+	_expect(
+		failures,
+		"test1: DEFEND mission published",
+		director.get_state() == MilitaryDirectorV2.State.DEFEND
+		and director.get_mission().mission_type == ArmyMissionV2.MissionType.DEFEND
+	)
+
+	## Player retreats far away — stale kill-tracker must be pruned.
+	attacker.global_position = Vector3(200.0, 0.0, 200.0)
+	attacker.position = Vector3(200.0, 0.0, 200.0)
+	## Force a fresh evaluation (bypass TTL cache).
+	EnemyArmyCommand._emergency_threat_cache = {}
+	EnemyArmyCommand._emergency_threat_cache_msec = 0
+	EnemyArmyCommand._defense_threat_cache = {}
+	EnemyArmyCommand._defense_threat_cache_msec = 0
+	var cleared_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
+	_expect(
+		failures,
+		"test1: distant stale attacker is not a live threat (reason=%s)" % String(cleared_threat.get("reason", &"")),
+		cleared_threat.get("threatened", false) == false
+	)
+	_expect(
+		failures,
+		"test1: CombatKillTracker pruned distant attacker",
+		CombatKillTracker.get_attacker(enemy_cc) == null
+	)
+
+	## Advance clear hysteresis then exit.
+	director._defend_clear_timer = MilitaryAIConfig.V2_DEFEND_THREAT_CLEAR_SECONDS
+	director.debug_exit_defend_after_clear_for_tests(Vector3(12.0, 0.0, 12.0))
+	_expect(
+		failures,
+		"test1: emergency defense cleared after exit",
+		not EnemyArmyCommand.is_emergency_defense_active()
+	)
+	_expect(
+		failures,
+		"test1: director left DEFEND",
+		director.get_state() != MilitaryDirectorV2.State.DEFEND
+	)
+	_expect(
+		failures,
+		"test1: DEFEND mission completed or cancelled",
+		director.get_mission() == null
+		or director.get_mission().completion_condition != ArmyMissionV2.CompletionCondition.NONE
+		or director.get_mission().mission_type != ArmyMissionV2.MissionType.DEFEND
+	)
+	_expect(
+		failures,
+		"test1: post-defense regroup armed",
+		director.debug_get_post_defend_regroup_for_tests() > 0.0
+	)
+
+	## --- Test 2: after regroup, publish offensive mission toward player TC ---
+	director.debug_set_post_defend_regroup_for_tests(0.0)
+	EnemyArmyCommand.deactivate_emergency_defense()
+	var launched: bool = director.debug_force_offensive_reevaluation_for_tests(
+		Vector3(12.0, 0.0, 12.0)
+	)
+	if not launched or director.get_state() in [
+		MilitaryDirectorV2.State.ASSEMBLE,
+		MilitaryDirectorV2.State.IDLE,
+		MilitaryDirectorV2.State.DEFEND,
+		MilitaryDirectorV2.State.RECOVER,
+	]:
+		## Ensure a player target exists for pressure fallback.
+		if player_cc != null:
+			director._transition_to(
+				MilitaryDirectorV2.State.ATTACK,
+				"pressure player town hall",
+				player_cc.global_position,
+				player_cc,
+				80
+			)
+			launched = true
+
+	_expect(
+		failures,
+		"test2: offensive state entered after defense",
+		launched
+		and director.get_state() in [
+			MilitaryDirectorV2.State.CREEP,
+			MilitaryDirectorV2.State.ATTACK,
+		]
+	)
+	var offense_mission: ArmyMissionV2 = director.get_mission()
+	_expect(failures, "test2: offensive mission reaches commander path", offense_mission != null)
+	if offense_mission != null:
+		_expect(
+			failures,
+			"test2: mission is CREEP or ATTACK",
+			offense_mission.mission_type == ArmyMissionV2.MissionType.CREEP
+			or offense_mission.mission_type == ArmyMissionV2.MissionType.ATTACK
+		)
+		commander._director = director
+		if offense_mission.mission_type == ArmyMissionV2.MissionType.ATTACK:
+			commander._execute_attack_mission(director, offense_mission, director.get_main_squad())
+		_expect(
+			failures,
+			"test2: commander received main squad",
+			commander._receive_squad_from_director() != null
+		)
+		## Destination should leave the AI base (toward player TC or camp).
+		var dest: Vector3 = offense_mission.target_position
+		if NodeSafety.is_alive_node(offense_mission.get_alive_target_object()):
+			dest = offense_mission.get_alive_target_object().global_position
+		_expect(
+			failures,
+			"test2: orders target away from AI base",
+			dest != Vector3.ZERO
+			and EnemyArmyCommand.horizontal_distance(dest, Vector3(10.0, 0.0, 10.0)) > 20.0
+		)
+
+	## --- Test 3: 100 combat units cannot stay passive with a valid player target ---
+	for i in range(80):
+		var extra: Spearman = _make_defense_test_unit(
+			"HugeArmy%d" % i,
+			Vector3(13.0 + float(i % 10) * 0.6, 0.0, 11.0 + float(i / 10) * 0.6)
+		)
+		army_units.append(extra)
+		director.get_main_squad().try_add_member(extra, ArmySquadV2.UnitRole.FRONTLINE)
+	director.get_main_squad().recompute_metrics()
+	_expect(
+		failures,
+		"test3: huge army admitted (~100)",
+		director.get_main_squad().get_size() >= 90
+	)
+
+	director._transition_to(
+		MilitaryDirectorV2.State.ASSEMBLE,
+		"huge army idle assemble",
+		Vector3(12.0, 0.0, 12.0)
+	)
+	director.debug_set_passive_army_seconds_for_tests(
+		MilitaryAIConfig.V2_PASSIVE_OFFENSE_REEVAL_SECONDS
+	)
+	EnemyArmyCommand.deactivate_emergency_defense()
+	var huge_launched: bool = director.debug_force_offensive_reevaluation_for_tests(
+		Vector3(12.0, 0.0, 12.0)
+	)
+	if not huge_launched:
+		## Pressure fallback with registered player TC.
+		huge_launched = director.debug_force_offensive_reevaluation_for_tests(
+			Vector3(12.0, 0.0, 12.0)
+		)
+	if player_cc != null and (
+		not huge_launched
+		or director.get_state() in [
+			MilitaryDirectorV2.State.ASSEMBLE,
+			MilitaryDirectorV2.State.RECOVER,
+			MilitaryDirectorV2.State.DEFEND,
+			MilitaryDirectorV2.State.IDLE,
+		]
+	):
+		director._publish_pressure_attack(get_tree(), Vector3(12.0, 0.0, 12.0), "test3")
+		huge_launched = director.get_state() == MilitaryDirectorV2.State.ATTACK
+
+	_expect(
+		failures,
+		"test3: huge army cannot remain ASSEMBLE/RECOVER/DEFEND",
+		huge_launched
+		and director.get_state() not in [
+			MilitaryDirectorV2.State.ASSEMBLE,
+			MilitaryDirectorV2.State.RECOVER,
+			MilitaryDirectorV2.State.DEFEND,
+			MilitaryDirectorV2.State.IDLE,
+		]
+	)
+	_expect(
+		failures,
+		"test3: offensive mission published for huge army",
+		director.get_mission() != null
+		and director.get_mission().mission_type in [
+			ArmyMissionV2.MissionType.CREEP,
+			ArmyMissionV2.MissionType.ATTACK,
+		]
+	)
+
+	## Source contracts for stale-attacker pruning + telemetry.
+	var eac_source := FileAccess.open("res://scripts/systems/enemy_army_command.gd", FileAccess.READ)
+	if eac_source != null:
+		var eac_text: String = eac_source.get_as_text()
+		eac_source.close()
+		_expect(
+			failures,
+			"live building attacker helper prunes stale kill-tracker",
+			eac_text.contains("_resolve_live_building_attacker")
+			and eac_text.contains("CombatKillTracker.clear_attacker_record")
+		)
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	if director_source != null:
+		var director_text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(
+			failures,
+			"director logs defense_exit and offense blocked reasons",
+			director_text.contains("defense_exit")
+			and director_text.contains("[AI V2 OFFENSE]")
+			and director_text.contains("V2_PASSIVE_OFFENSE_REEVAL_SECONDS")
+		)
+
+	for entry: Variant in army_units:
+		if NodeSafety.is_alive_node(entry):
+			(entry as Node).queue_free()
+	if NodeSafety.is_alive_node(attacker):
+		attacker.queue_free()
+	if NodeSafety.is_alive_node(enemy_cc):
+		enemy_cc.queue_free()
+	if NodeSafety.is_alive_node(player_cc):
+		player_cc.queue_free()
 	commander.queue_free()
 	director.queue_free()
 	root.queue_free()

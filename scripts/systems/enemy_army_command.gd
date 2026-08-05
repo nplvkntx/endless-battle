@@ -2127,6 +2127,11 @@ static func deactivate_emergency_defense() -> void:
 	_emergency_defense_active = false
 	_emergency_threat_position = Vector3.ZERO
 	_emergency_reason = &""
+	## Drop cached threat so the next evaluation cannot republish a stale DEFEND.
+	_emergency_threat_cache.clear()
+	_emergency_threat_cache_msec = 0
+	_defense_threat_cache.clear()
+	_defense_threat_cache_msec = 0
 	_sync_player_state_identity()
 	EnemyUnitMission.set_main_army_mission(
 		EnemyUnitMission.Mission.RALLY,
@@ -7067,32 +7072,21 @@ static func _evaluate_emergency_command_center_threat(tree: SceneTree) -> Dictio
 
 		var building: CommandCenter = node as CommandCenter
 		var building_position: Vector3 = (node as Node3D).global_position
-		var attacker: Variant = CombatKillTracker.get_attacker(building)
-		if attacker != null and is_instance_valid(attacker) and _is_player_military_unit(attacker) and attacker is Node3D:
+		var live_attacker: Node3D = _resolve_live_building_attacker(
+			tree,
+			building,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if live_attacker != null:
 			return _build_emergency_threat_result(
 				_resolve_player_threat_cluster_position(
 					tree,
-					(attacker as Node3D).global_position
+					live_attacker.global_position
 				),
 				&"town_center",
 				true
 			)
-
-		if get_health_ratio(building) < 0.995:
-			var damage_attacker: Node3D = _find_player_military_near_position(
-				tree,
-				building_position,
-				BUILDING_THREAT_RANGE
-			)
-			if damage_attacker != null:
-				return _build_emergency_threat_result(
-					_resolve_player_threat_cluster_position(
-						tree,
-						damage_attacker.global_position
-					),
-					&"town_center",
-					true
-				)
 
 		var nearby_threat: Node3D = _find_player_military_near_position(
 			tree,
@@ -7125,15 +7119,20 @@ static func _evaluate_emergency_production_building_threat(tree: SceneTree) -> D
 
 		var building: Building = node as Building
 		var building_position: Vector3 = (node as Node3D).global_position
-		var attacker: Variant = CombatKillTracker.get_attacker(building)
-		if attacker != null and is_instance_valid(attacker) and _is_player_military_unit(attacker) and attacker is Node3D:
+		var live_attacker: Node3D = _resolve_live_building_attacker(
+			tree,
+			building,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if live_attacker != null:
 			var distance: float = _horizontal_distance(
 				building_position,
-				(attacker as Node3D).global_position
+				live_attacker.global_position
 			)
 			if distance < closest_distance:
 				closest_distance = distance
-				closest_attacker = attacker as Node3D
+				closest_attacker = live_attacker
 			continue
 
 		var nearby_threat: Node3D = _find_player_military_near_position(
@@ -7233,6 +7232,7 @@ static func _evaluate_emergency_worker_attack_threat(tree: SceneTree) -> Diction
 			continue
 
 		var building: Building = node as Building
+		var building_position: Vector3 = (node as Node3D).global_position
 		var attacker: Variant = CombatKillTracker.get_attacker(building)
 		if not NodeSafety.is_alive_node(attacker):
 			continue
@@ -7243,11 +7243,24 @@ static func _evaluate_emergency_worker_attack_threat(tree: SceneTree) -> Diction
 		if CombatTargetValidation.is_enemy_faction(attacker):
 			continue
 
+		if not attacker is Node3D:
+			CombatKillTracker.clear_attacker_record(building)
+			continue
+
+		var attacker_node: Node3D = attacker as Node3D
+		var distance: float = _horizontal_distance(building_position, attacker_node.global_position)
+		var actively_targeting: bool = _is_unit_actively_targeting(attacker_node, building)
+		var damaged_recently: bool = CombatKillTracker.was_damaged_recently(
+			building,
+			MilitaryAIConfig.V2_DEFEND_RECENT_DAMAGE_SECONDS
+		)
+		if distance > BUILDING_THREAT_RANGE and not actively_targeting:
+			if not damaged_recently or distance > BUILDING_THREAT_RANGE * 1.75:
+				CombatKillTracker.clear_attacker_record(building)
+			continue
+
 		return _build_emergency_threat_result(
-			_resolve_player_threat_cluster_position(
-				tree,
-				(node as Node3D).global_position
-			),
+			_resolve_player_threat_cluster_position(tree, attacker_node.global_position),
 			&"worker_attack"
 		)
 
@@ -7301,6 +7314,60 @@ static func _build_emergency_threat_result(
 	}
 
 
+## Living player military that is a *current* danger to a building.
+## Prunes CombatKillTracker entries that are dead, distant, or expired.
+static func _resolve_live_building_attacker(
+	_tree: SceneTree,
+	building: Node,
+	building_position: Vector3,
+	threat_range: float
+) -> Node3D:
+	if building == null or not is_instance_valid(building) or building_position == Vector3.ZERO:
+		return null
+
+	var damage_window: float = MilitaryAIConfig.V2_DEFEND_RECENT_DAMAGE_SECONDS
+	if not MilitaryAIConfig.is_v2_enabled():
+		damage_window = STRATEGIC_THREAT_CLEAR_SECONDS
+
+	var attacker: Variant = CombatKillTracker.get_attacker(building)
+	if not NodeSafety.is_alive_node(attacker) or not attacker is Node3D:
+		if attacker != null:
+			CombatKillTracker.clear_attacker_record(building)
+		return null
+
+	if not _is_player_military_unit(attacker):
+		CombatKillTracker.clear_attacker_record(building)
+		return null
+
+	var attacker_node: Node3D = attacker as Node3D
+	var distance: float = _horizontal_distance(building_position, attacker_node.global_position)
+	var actively_targeting: bool = _is_unit_actively_targeting(attacker_node, building)
+	var damaged_recently: bool = CombatKillTracker.was_damaged_recently(building, damage_window)
+
+	## Live danger: inside the defense radius, or still swinging at the building.
+	if distance <= threat_range or actively_targeting:
+		return attacker_node
+
+	## Recent damage alone is not enough once the attacker has left the area.
+	## Clear the stale kill-credit pointer so DEFEND cannot stick forever.
+	if not damaged_recently or distance > threat_range * 1.75:
+		CombatKillTracker.clear_attacker_record(building)
+	return null
+
+
+static func _is_unit_actively_targeting(unit: Node, target: Node) -> bool:
+	if not NodeSafety.is_alive_node(unit) or not NodeSafety.is_alive_node(target):
+		return false
+	var attack_target: Variant = unit.get("_attack_target")
+	if NodeSafety.is_alive_node(attack_target) and attack_target == target:
+		return true
+	if unit.has_method("get_attack_target"):
+		var via_method: Variant = unit.call("get_attack_target")
+		if NodeSafety.is_alive_node(via_method) and via_method == target:
+			return true
+	return false
+
+
 static func _evaluate_worker_defense_threat(tree: SceneTree) -> Dictionary:
 	var rally_position: Vector3 = resolve_enemy_rally_position(tree)
 	var closest_attacker: Node3D = null
@@ -7315,15 +7382,20 @@ static func _evaluate_worker_defense_threat(tree: SceneTree) -> Dictionary:
 
 		var worker: Worker = node as Worker
 		var worker_position: Vector3 = (node as Node3D).global_position
-		var attacker: Variant = CombatKillTracker.get_attacker(worker)
-		if attacker != null and is_instance_valid(attacker) and _is_player_military_unit(attacker) and attacker is Node3D:
+		var live_attacker: Node3D = _resolve_live_building_attacker(
+			tree,
+			worker,
+			worker_position,
+			WORKER_THREAT_RANGE
+		)
+		if live_attacker != null:
 			var distance: float = _horizontal_distance(
 				rally_position,
-				(attacker as Node3D).global_position
+				live_attacker.global_position
 			)
 			if distance < closest_distance:
 				closest_distance = distance
-				closest_attacker = attacker as Node3D
+				closest_attacker = live_attacker
 			continue
 
 		var nearby_threat: Node3D = _find_player_military_near_position(
@@ -7366,15 +7438,20 @@ static func _evaluate_building_defense_threat(tree: SceneTree) -> Dictionary:
 
 		var building: Building = node as Building
 		var building_position: Vector3 = (node as Node3D).global_position
-		var attacker: Variant = CombatKillTracker.get_attacker(building)
-		if attacker != null and is_instance_valid(attacker) and _is_player_military_unit(attacker) and attacker is Node3D:
+		var live_attacker: Node3D = _resolve_live_building_attacker(
+			tree,
+			building,
+			building_position,
+			BUILDING_THREAT_RANGE
+		)
+		if live_attacker != null:
 			var distance: float = _horizontal_distance(
 				rally_position,
-				(attacker as Node3D).global_position
+				live_attacker.global_position
 			)
 			if distance < closest_distance:
 				closest_distance = distance
-				closest_attacker = attacker as Node3D
+				closest_attacker = live_attacker
 			continue
 
 		var nearby_threat: Node3D = _find_player_military_near_position(
