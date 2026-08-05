@@ -297,14 +297,12 @@ func _verify_commander_does_not_choose_strategy(failures: PackedStringArray) -> 
 
 
 func _verify_legacy_gate_helpers(failures: PackedStringArray) -> void:
-	var gated_scripts: PackedStringArray = PackedStringArray([
+	## Fully gated legacy mission owners (must not run under V2).
+	var disabled_scripts: PackedStringArray = PackedStringArray([
 		"res://scripts/systems/enemy_combat_controller.gd",
-		"res://scripts/systems/enemy_creep_manager.gd",
-		"res://scripts/systems/enemy_defense_manager.gd",
-		"res://scripts/systems/enemy_wave_manager.gd",
 		"res://scripts/systems/enemy_strategic_director.gd",
 	])
-	for path: String in gated_scripts:
+	for path: String in disabled_scripts:
 		var source := FileAccess.open(path, FileAccess.READ)
 		_expect(failures, "%s readable" % path.get_file(), source != null)
 		if source == null:
@@ -320,6 +318,37 @@ func _verify_legacy_gate_helpers(failures: PackedStringArray) -> void:
 			failures,
 			"%s documents DISABLED under V2" % path.get_file(),
 			text.contains("DISABLED under Military AI V2")
+		)
+
+	## Intent providers under V2 — publish MilitaryIntent, never issue unit orders.
+	var intent_scripts: Dictionary = {
+		"res://scripts/systems/enemy_creep_manager.gd": "_publish_creep_intents",
+		"res://scripts/systems/enemy_defense_manager.gd": "_publish_defense_intents",
+		"res://scripts/systems/enemy_wave_manager.gd": "_publish_offense_intents",
+	}
+	for path: Variant in intent_scripts.keys():
+		var path_text: String = String(path)
+		var publish_fn: String = String(intent_scripts[path])
+		var source := FileAccess.open(path_text, FileAccess.READ)
+		_expect(failures, "%s readable" % path_text.get_file(), source != null)
+		if source == null:
+			continue
+		var text: String = source.get_as_text()
+		source.close()
+		_expect(
+			failures,
+			"%s gates on MilitaryAIConfig" % path_text.get_file(),
+			text.contains("MilitaryAIConfig.is_v2_enabled()")
+		)
+		_expect(
+			failures,
+			"%s publishes intents under V2" % path_text.get_file(),
+			text.contains(publish_fn)
+		)
+		_expect(
+			failures,
+			"%s uses MilitaryIntent" % path_text.get_file(),
+			text.contains("MilitaryIntent")
 		)
 
 	var config_source := FileAccess.open("res://scripts/systems/military_ai_config.gd", FileAccess.READ)
@@ -1453,6 +1482,12 @@ func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
 		)
 		_expect(
 			failures,
+			"commander executes watchdog stall orders",
+			commander_text.contains("execute_watchdog_order_refresh")
+			and commander_text.contains("_issue_stall_recovery_orders")
+		)
+		_expect(
+			failures,
 			"commander notes cleared camp progress",
 			commander_text.contains("cleared camp")
 		)
@@ -1460,6 +1495,46 @@ func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
 			failures,
 			"commander notes combat progress",
 			commander_text.contains("started combat")
+		)
+
+	## Director must request recovery intent only — never issue unit orders.
+	var director_order_source := FileAccess.open(
+		"res://scripts/systems/military_director_v2.gd",
+		FileAccess.READ
+	)
+	_expect(failures, "director order-authority source readable", director_order_source != null)
+	if director_order_source != null:
+		var director_order_text: String = director_order_source.get_as_text()
+		director_order_source.close()
+		_expect(
+			failures,
+			"director requests commander watchdog execution",
+			director_order_text.contains("execute_watchdog_order_refresh")
+		)
+		_expect(
+			failures,
+			"director issues zero issue_group_combat_move calls",
+			not director_order_text.contains("issue_group_combat_move")
+		)
+		_expect(
+			failures,
+			"director issues zero command_attack_move calls",
+			not director_order_text.contains("command_attack_move")
+		)
+		_expect(
+			failures,
+			"director issues zero command_retreat_to calls",
+			not director_order_text.contains("command_retreat_to")
+		)
+		_expect(
+			failures,
+			"director never calls refresh_stalled_mission_order",
+			not director_order_text.contains("EnemyArmyCommand.refresh_stalled_mission_order")
+		)
+		_expect(
+			failures,
+			"director never wraps with_authorized_orders",
+			not director_order_text.contains("with_authorized_orders")
 		)
 
 	var overlay_source := FileAccess.open("res://scripts/debug/perf_debug_overlay.gd", FileAccess.READ)
@@ -1704,6 +1779,70 @@ func _verify_watchdog_recovery_scenarios(failures: PackedStringArray) -> void:
 		failures,
 		"director state label never UNKNOWN",
 		director.get_state_name() != "UNKNOWN"
+	)
+
+	## --- Cancelled mission cannot trigger stale recovery orders ---
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"pre-cancel attack",
+		Vector3(55, 0, 0),
+		null,
+		20
+	)
+	director.get_mission().mark_cancelled("verify cancel before refresh")
+	EnemyArmyCommandTelemetry.clear_issued_order()
+	var cancelled_refresh: bool = commander.execute_watchdog_order_refresh()
+	_expect(
+		failures,
+		"cancelled mission blocks watchdog order refresh",
+		cancelled_refresh == false
+	)
+	_expect(
+		failures,
+		"cancelled mission issues no stale recovery orders",
+		EnemyArmyCommand.get_pending_group_order_count() == 0
+		and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "-"
+	)
+
+	## --- Match reset clears watchdog recovery state ---
+	director.debug_set_watchdog_refreshed_for_tests(true)
+	director._watchdog_status = "refreshing order"
+	director._watchdog_timer = 9.0
+	commander._attack_order_reissue_timer = 99.0
+	director.reset_match_state()
+	commander.reset_match_state()
+	_expect(
+		failures,
+		"match reset clears director watchdog recovery flags",
+		not director.debug_is_watchdog_order_refreshed()
+		and director.debug_get_watchdog_status() == "idle"
+		and director.get_state() == MilitaryDirectorV2.State.IDLE
+	)
+	_expect(
+		failures,
+		"match reset restores commander reissue timers to defaults",
+		commander._attack_order_reissue_timer
+		== MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
+	)
+
+	## --- Live mission refresh requests commander execution path ---
+	director._transition_to(
+		MilitaryDirectorV2.State.ATTACK,
+		"watchdog refresh authority",
+		Vector3(40, 0, 0),
+		null,
+		20
+	)
+	var refresh_accepted: bool = director._refresh_stalled_mission_order(
+		get_tree(),
+		[],
+		Vector3.ZERO,
+		Vector3(40, 0, 0)
+	)
+	_expect(
+		failures,
+		"director watchdog refresh delegates to commander",
+		refresh_accepted
 	)
 
 	blocked_target.queue_free()

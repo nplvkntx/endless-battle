@@ -871,3 +871,89 @@ func _verify_authority_and_providers(
 	state.clear_intents()
 	state.clear_accepted_intent()
 	state.pending_group_orders.clear()
+
+	## MilitaryDirectorV2 must never issue executable unit orders (watchdog recovery
+	## is recovery-intent → ArmyCommanderV2.execute_watchdog_order_refresh only).
+	var director_src := FileAccess.open(
+		"res://scripts/systems/military_director_v2.gd",
+		FileAccess.READ
+	)
+	_expect(failures, "authority: director source readable", director_src != null)
+	if director_src != null:
+		var director_text: String = director_src.get_as_text()
+		director_src.close()
+		_expect(
+			failures,
+			"authority: director has zero executable order APIs",
+			not director_text.contains("issue_group_combat_move")
+			and not director_text.contains("command_attack_move")
+			and not director_text.contains("command_retreat_to")
+			and not director_text.contains("command_hold_at_rally")
+			and not director_text.contains("command_focus_attack")
+			and not director_text.contains("with_authorized_orders")
+			and not director_text.contains("EnemyArmyCommand.refresh_stalled_mission_order")
+		)
+		_expect(
+			failures,
+			"authority: director requests commander watchdog refresh",
+			director_text.contains("execute_watchdog_order_refresh")
+		)
+
+	var commander_src := FileAccess.open(
+		"res://scripts/systems/army_commander_v2.gd",
+		FileAccess.READ
+	)
+	_expect(failures, "authority: commander source readable", commander_src != null)
+	if commander_src != null:
+		var commander_text: String = commander_src.get_as_text()
+		commander_src.close()
+		_expect(
+			failures,
+			"authority: commander owns stall recovery orders",
+			commander_text.contains("execute_watchdog_order_refresh")
+			and commander_text.contains("_issue_stall_recovery_orders")
+			and commander_text.contains("issue_group_combat_move")
+		)
+
+	## Runtime: cancelled / completed missions cannot resurrect recovery orders.
+	var director: MilitaryDirectorV2 = root.military_director_v2
+	var commander: ArmyCommanderV2 = root.army_commander_v2
+	_expect(
+		failures,
+		"authority: composition has director+commander",
+		director != null and commander != null
+	)
+	if director != null and commander != null:
+		director.reset_match_state()
+		commander.reset_match_state()
+		director.request_state(
+			MilitaryDirectorV2.State.ATTACK,
+			"authority watchdog probe",
+			Vector3(22.0, 0.0, 11.0)
+		)
+		_expect(
+			failures,
+			"authority: live attack accepts watchdog refresh request",
+			commander.execute_watchdog_order_refresh()
+		)
+		director.get_mission().mark_cancelled("authority stale recovery probe")
+		EnemyArmyCommandTelemetry.clear_issued_order()
+		state.pending_group_orders.clear()
+		_expect(
+			failures,
+			"authority: cancelled mission rejects stale recovery orders",
+			not commander.execute_watchdog_order_refresh()
+			and state.pending_group_orders.is_empty()
+			and EnemyArmyCommand.get_pending_group_order_count() == 0
+			and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "-"
+		)
+		director.debug_set_watchdog_refreshed_for_tests(true)
+		director.reset_match_state()
+		commander.reset_match_state()
+		_expect(
+			failures,
+			"authority: match reset clears watchdog recovery state",
+			not director.debug_is_watchdog_order_refreshed()
+			and director.debug_get_watchdog_status() == "idle"
+			and director.get_state() == MilitaryDirectorV2.State.IDLE
+		)

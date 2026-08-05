@@ -8,9 +8,23 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 2 second scoped EnemyArmyCommand extraction complete** (`EnemyArmyForceMath`). Further Phase 2 extractions are diminishing returns unless a fresh re-audit finds a cleaner seam — do not begin a third extraction in the same pass.
+**PHASE 2 major architecture complete.** Military command authority is singular (`ArmyCommanderV2`). Do not begin navigation, gameplay, AI tuning, performance, or further refactoring until a fresh re-audit identifies the next high-impact seam.
 
 ## Completed tasks
+
+### 2026-08-05 — ArmyCommanderV2 watchdog order authority (final high-impact architecture)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Exact authority violation** | `MilitaryDirectorV2._refresh_stalled_mission_order` directly called `EnemyArmyCommand.refresh_stalled_mission_order`, `issue_group_combat_move`, `command_attack_move`, and `command_retreat_to` during watchdog stall recovery (~lines 3231–3282). |
+| **Root cause** | Watchdog recovery treated the director as a fallback order issuer when the commander throttle-reset alone was considered insufficient, bypassing the declared sole executable authority. |
+| **Order calls removed from MilitaryDirectorV2** | All of: `EnemyArmyCommand.refresh_stalled_mission_order`, `issue_group_combat_move` (CREEP/ATTACK), `with_authorized_orders` + `command_attack_move` (DEFEND), `with_authorized_orders` + `command_retreat_to` (RETREAT). Director now only calls `ArmyCommanderV2.execute_watchdog_order_refresh()`. |
+| **ArmyCommanderV2 execution path** | New `execute_watchdog_order_refresh()` (recovery request API) → shared `_issue_stall_recovery_orders()` (also used by idle-guard regen). Cancelled/completed missions rejected; match reset clears director watchdog flags + commander reissue timers. |
+| **Authority unchanged / strengthened** | `AIPlayerState` SoT; director selects missions + recovery intent only; commander sole order executor; intent providers issue no orders. |
+| **Major architecture work** | **Complete** for military V2 ownership / command authority. Prefer a fresh re-audit before navigation, AI tuning, performance, or further god-object splits. |
+| **Files changed** | `army_commander_v2.gd`, `military_director_v2.gd`, `verify_match_composition_root.gd`, `verify_military_ai_v2.gd`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 `--import` clean. `validate_import.sh` → `VALIDATION PASS`. `verify_match_composition_root` → `PASS` (director zero order APIs; commander owns stall recovery; cancelled mission rejects refresh; reset clears watchdog). `verify_match_reset` → `PASS`. `verify_freed_instance_regression` → `PASS`. `verify_military_ai_v2` → `PASS` (watchdog delegates to commander; cancelled/reset recovery checks). |
 
 ### 2026-08-05 — EnemyArmyCommand force-math extraction (second scoped helper)
 
@@ -358,13 +372,14 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | EAC final static ownership (creep contest + objective timers; telemetry isolated) | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | First scoped EAC extraction → `EnemyArmyCommandTelemetry` | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | Second scoped EAC extraction → `EnemyArmyForceMath` | `VALIDATION PASS`; composition/reset/freed all PASS |
+| 2026-08-05 | ArmyCommanderV2 sole watchdog order authority (director zero unit orders) | `VALIDATION PASS`; composition/reset/freed/military_ai_v2 all PASS |
 
 ## Known blockers
 
 None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed; freed-instance regression gated in CI. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
 
-Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. Scoped EAC extractions complete: `EnemyArmyCommandTelemetry` + `EnemyArmyForceMath`. Remaining EAC statics are frame-local caches + binding only. Further pure-math extractions are diminishing returns — prefer a fresh re-audit before another split.
+Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership, and **watchdog stall recovery orders owned solely by ArmyCommanderV2** (director issues zero unit orders). Scoped EAC extractions complete: `EnemyArmyCommandTelemetry` + `EnemyArmyForceMath`. Remaining EAC statics are frame-local caches + binding only. **Major architecture work for military V2 command authority is complete.**
 
 ## Next task
 
-**PHASE 2 / re-audit:** Prefer a **fresh technical re-audit** of remaining `EnemyArmyCommand` surface before a third extraction. Optional Phase 2 continuation only if a narrow non-authoritative seam is re-confirmed. Do not begin broad god-object splitting.
+**Fresh re-audit / next phase:** Prefer a fresh technical re-audit before navigation, gameplay, AI tuning, performance, or further refactoring. Do not begin those domains in the same pass as this authority fix.

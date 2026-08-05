@@ -29,8 +29,10 @@ Helpers:
 | Strategic state machine | `MilitaryDirectorV2` | Exactly one active state |
 | Mission payload | `MilitaryDirectorV2` publishes `ArmyMissionV2` | Commander never invents missions |
 | Main squad membership | `MilitaryDirectorV2` / `ArmySquadV2` | Commander reads; does not recruit |
-| Unit order issuance | `ArmyCommanderV2` | Attack-move, retreat, assemble slots |
+| Unit order issuance | `ArmyCommanderV2` | Attack-move, retreat, assemble slots, **watchdog stall recovery** |
+| Watchdog recovery intent | `MilitaryDirectorV2` | Detects stall / invalid objective; requests refresh or selects fallback state — never issues unit orders |
 | Shared order-bus drain | `ArmyCommanderV2` via `EnemyArmyCommand` | Queue owned by match `AIPlayerState.pending_group_orders` |
+
 | Reinforcement waiting registry | `AIPlayerState.reinforcement_pool` | Sole match owner; EAC accessors only |
 | Creep contest cooldowns | `AIPlayerState.creep_contest_cooldowns` | Match-durable; blocks camp contest only |
 | Attack-objective timers | `AIPlayerState.objective_*` | Mission/wave-owned; cleared on objective cancel + reset |
@@ -47,16 +49,18 @@ Helpers:
 
 ```
 MilitaryDirectorV2          chooses IDLE / ASSEMBLE / CREEP / ATTACK / DEFEND / RETREAT / RECOVER
-        │ publishes
+        │ publishes mission + recovery intent (stall → execute_watchdog_order_refresh)
         ▼
 ArmyMissionV2 + ArmySquadV2  immutable-ish payload + roster
         │
         ▼
-ArmyCommanderV2              issues formation orders + hero micro tick
-        │
+ArmyCommanderV2              sole executable military authority
+        │                    (formation orders, hero micro, watchdog stall refresh)
         ▼
 EnemyArmyCommand             shared order bus / unit APIs
 ```
+
+**Invariant:** `MilitaryDirectorV2` never calls `EnemyArmyCommand.issue_*` / `command_*` / `with_authorized_orders`. Watchdog stall recovery goes through `ArmyCommanderV2.execute_watchdog_order_refresh()` → `_issue_stall_recovery_orders()`. Cancelled or completed missions are rejected so stale recovery cannot re-issue orders. Match reset clears director watchdog flags and commander reissue timers.
 
 ---
 
@@ -98,7 +102,7 @@ Key invariants:
 - After DEFEND clears, the director **reassesses** — it never resumes a stale creep/attack reservation automatically.
 - Voluntary exits respect `V2_STATE_COMMIT_SECONDS`; emergencies (DEFEND / RETREAT) may bypass.
 - Post-retreat ATTACK re-entry is blocked by `V2_POST_RETREAT_ATTACK_COOLDOWN_SECONDS`.
-- Mission watchdog cancels stalled CREEP / ATTACK / DEFEND / RETREAT after ~6–8s without progress, refreshes orders once, then falls back safely.
+- Mission watchdog cancels stalled CREEP / ATTACK / DEFEND / RETREAT after ~6–8s without progress, requests one commander order refresh, then falls back safely (director selects next state; commander alone issues movement).
 - F3 status is owned by `MilitaryDirectorV2` while V2 is active (no false Legacy mission labels).
 
 ---

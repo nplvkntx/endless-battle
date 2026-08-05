@@ -107,6 +107,10 @@ func reset_match_state() -> void:
 	)
 	_tick_timer = TICK_SECONDS * 0.25
 	_clear_roster_state()
+	_reset_watchdog_state("idle")
+	_watchdog_diag_timer = 0.0
+	_watchdog_active_order = "-"
+	_watchdog_last_diag_signature = ""
 	_publish_perf_status()
 
 
@@ -3229,57 +3233,17 @@ func _update_watchdog_progress(
 
 
 func _refresh_stalled_mission_order(
-	tree: SceneTree,
-	units: Array,
+	_tree: SceneTree,
+	_units: Array,
 	_army_center: Vector3,
-	objective_position: Vector3
+	_objective_position: Vector3
 ) -> bool:
+	## Recovery intent only — ArmyCommanderV2 is the sole executable order authority.
+	## Never call EnemyArmyCommand issue/command APIs from the director.
 	var commander: ArmyCommanderV2 = _resolve_commander()
-	if commander != null:
-		commander.request_watchdog_order_refresh()
-
-	## Always treat a commander refresh request as the one allowed reissue.
-	## Order issuance may still fail without a formed squad / nav map.
-	var refreshed: bool = false
-	if objective_position != Vector3.ZERO and not units.is_empty():
-		refreshed = EnemyArmyCommand.refresh_stalled_mission_order(tree)
-		if not refreshed:
-			match _state:
-				State.CREEP:
-					refreshed = EnemyArmyCommand.issue_group_combat_move(
-						tree,
-						units,
-						objective_position,
-						EnemyUnitMission.Mission.CREEP,
-						EnemyArmyCommand.ArmyMode.CREEPING
-					)
-				State.ATTACK:
-					refreshed = EnemyArmyCommand.issue_group_combat_move(
-						tree,
-						units,
-						objective_position,
-						EnemyUnitMission.Mission.ATTACK,
-						EnemyArmyCommand.ArmyMode.ATTACKING,
-						true
-					)
-				State.DEFEND:
-					EnemyArmyCommand.with_authorized_orders(func() -> void:
-						EnemyArmyCommand.command_attack_move(
-							units,
-							objective_position,
-							EnemyUnitMission.Mission.DEFEND
-						)
-					)
-					refreshed = true
-				State.RETREAT:
-					EnemyArmyCommand.with_authorized_orders(func() -> void:
-						EnemyArmyCommand.command_retreat_to(units, objective_position)
-					)
-					refreshed = true
-				_:
-					pass
-	## Empty-squad / harness cases: still consume the single refresh attempt.
-	return refreshed or commander != null
+	if commander == null:
+		return false
+	return commander.execute_watchdog_order_refresh()
 
 
 func _cancel_stalled_mission_and_fallback(tree: SceneTree, reason: String) -> void:

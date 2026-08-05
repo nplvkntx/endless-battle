@@ -94,6 +94,7 @@ func reset_match_state() -> void:
 
 
 ## Watchdog asks the commander to re-issue current mission orders once.
+## Resets reissue throttles so the next execute path cannot soft-skip.
 func request_watchdog_order_refresh() -> void:
 	_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
 	_creep_focus_reissue_timer = EnemyCreepManager.FOCUS_REISSUE_SECONDS
@@ -103,6 +104,34 @@ func request_watchdog_order_refresh() -> void:
 	_attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
 	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
 	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
+
+
+## Director recovery intent → immediate stall refresh. Sole executable path for
+## watchdog unit orders (MilitaryDirectorV2 must never call order APIs itself).
+## Returns true when the refresh request is accepted (consumes the one allowed
+## reissue), even if the squad is empty / nav cannot move yet.
+func execute_watchdog_order_refresh() -> bool:
+	var director: MilitaryDirectorV2 = _resolve_director()
+	if director == null:
+		return false
+	var state: MilitaryDirectorV2.State = director.get_state()
+	if state not in [
+		MilitaryDirectorV2.State.CREEP,
+		MilitaryDirectorV2.State.ATTACK,
+		MilitaryDirectorV2.State.DEFEND,
+		MilitaryDirectorV2.State.RETREAT,
+	]:
+		return false
+
+	var mission: ArmyMissionV2 = director.get_mission()
+	## Cancelled / completed missions must never resurrect stale recovery orders.
+	if mission == null or mission.completion_condition != ArmyMissionV2.CompletionCondition.NONE:
+		return false
+
+	request_watchdog_order_refresh()
+	var squad: ArmySquadV2 = _receive_squad_from_director()
+	_issue_stall_recovery_orders(director, mission, squad)
+	return true
 
 
 func get_squad_idle_seconds() -> float:
@@ -344,72 +373,139 @@ func _force_regenerate_squad_order(
 	request_watchdog_order_refresh()
 	_squad_idle_seconds = 0.0
 
+	if mission == null or mission.completion_condition != ArmyMissionV2.CompletionCondition.NONE:
+		return
+	if director.get_state() not in [
+		MilitaryDirectorV2.State.CREEP,
+		MilitaryDirectorV2.State.ATTACK,
+		MilitaryDirectorV2.State.DEFEND,
+	]:
+		return
+
+	var destination: Vector3 = _resolve_stall_recovery_destination(director, mission)
+	if destination == Vector3.ZERO:
+		return
+	if not _issue_stall_recovery_orders(director, mission, squad):
+		return
+
+	EnemyAIDebug.log_once(
+		"v2_idle_regen",
+		"[AI Idle] regenerated %s order -> (%.1f, %.1f)" % [
+			director.get_state_name(),
+			destination.x,
+			destination.z,
+		]
+	)
+
+
+## Shared executable recovery for watchdog stall refresh + idle-guard regen.
+## ArmyCommanderV2 is the only caller that may issue these unit orders.
+func _issue_stall_recovery_orders(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	squad: ArmySquadV2
+) -> bool:
+	if director == null or mission == null:
+		return false
+	if mission.completion_condition != ArmyMissionV2.CompletionCondition.NONE:
+		return false
+
+	mission.sanitize_target_object()
+	var destination: Vector3 = _resolve_stall_recovery_destination(director, mission)
+	if destination == Vector3.ZERO:
+		return false
+
+	var units: Array = _collect_stall_recovery_units(squad)
+	if units.is_empty():
+		return false
+
+	_sync_execution_authority(director, mission)
+	var tree: SceneTree = get_tree()
+	var alive_target: Node3D = mission.get_alive_target_object()
+	var issued: bool = false
+
+	## Prefer the shared exec-mission refresh when executable state is live.
+	if tree != null:
+		issued = EnemyArmyCommand.refresh_stalled_mission_order(tree)
+
+	if not issued:
+		match director.get_state():
+			MilitaryDirectorV2.State.CREEP:
+				issued = EnemyArmyCommand.issue_group_combat_move(
+					tree,
+					units,
+					destination,
+					EnemyUnitMission.Mission.CREEP,
+					EnemyArmyCommand.ArmyMode.CREEPING
+				)
+				if not issued:
+					_force_attack_move(units, destination, EnemyUnitMission.Mission.CREEP)
+					issued = true
+			MilitaryDirectorV2.State.ATTACK:
+				issued = EnemyArmyCommand.issue_group_combat_move(
+					tree,
+					units,
+					destination,
+					EnemyUnitMission.Mission.ATTACK,
+					EnemyArmyCommand.ArmyMode.ATTACKING,
+					true
+				)
+				if not issued:
+					_force_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
+					issued = true
+			MilitaryDirectorV2.State.DEFEND:
+				## Prefer role-aware defend slots; fall back to a group attack-move.
+				if squad != null:
+					_issue_defend_squad_orders(
+						squad,
+						director.get_assemble_rally_point(),
+						destination,
+						alive_target,
+						false
+					)
+					issued = true
+				else:
+					EnemyArmyCommand.with_authorized_orders(func() -> void:
+						EnemyArmyCommand.command_attack_move(
+							units,
+							destination,
+							EnemyUnitMission.Mission.DEFEND
+						)
+					)
+					issued = true
+			MilitaryDirectorV2.State.RETREAT:
+				EnemyArmyCommand.with_authorized_orders(func() -> void:
+					EnemyArmyCommand.command_retreat_to(units, destination)
+				)
+				EnemyArmyCommand.note_mission_order("retreat-refresh", destination)
+				issued = true
+			_:
+				pass
+
+	return issued
+
+
+func _resolve_stall_recovery_destination(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2
+) -> Vector3:
 	var destination: Vector3 = mission.target_position
 	var alive_target: Node3D = mission.get_alive_target_object()
 	if alive_target != null:
 		destination = alive_target.global_position
-	if destination == Vector3.ZERO:
+	if destination == Vector3.ZERO and director != null:
 		destination = director.get_assemble_rally_point()
-	if destination == Vector3.ZERO:
-		return
+	return destination
 
+
+func _collect_stall_recovery_units(squad: ArmySquadV2) -> Array:
 	var units: Array = []
+	if squad == null:
+		return units
 	for entry: Variant in squad.get_members_copy():
 		if NodeSafety.is_alive_node(entry) and EnemyArmyCommand.is_living_combat_unit(entry as Node):
 			units.append(entry)
-	units = NodeSafety.clean_node_array(units)
-	if units.is_empty():
-		return
-
-	_sync_execution_authority(director, mission)
-	var tree: SceneTree = get_tree()
-	var issued: bool = false
-	match director.get_state():
-		MilitaryDirectorV2.State.CREEP:
-			issued = EnemyArmyCommand.issue_group_combat_move(
-				tree,
-				units,
-				destination,
-				EnemyUnitMission.Mission.CREEP,
-				EnemyArmyCommand.ArmyMode.CREEPING
-			)
-			if not issued:
-				_force_attack_move(units, destination, EnemyUnitMission.Mission.CREEP)
-				issued = true
-		MilitaryDirectorV2.State.ATTACK:
-			issued = EnemyArmyCommand.issue_group_combat_move(
-				tree,
-				units,
-				destination,
-				EnemyUnitMission.Mission.ATTACK,
-				EnemyArmyCommand.ArmyMode.ATTACKING,
-				true
-			)
-			if not issued:
-				_force_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
-				issued = true
-		MilitaryDirectorV2.State.DEFEND:
-			## Never dump the whole army onto one point during idle recovery.
-			_issue_defend_squad_orders(
-				squad,
-				director.get_assemble_rally_point(),
-				destination,
-				alive_target,
-				false
-			)
-			issued = true
-		_:
-			return
-
-	if issued:
-		EnemyAIDebug.log_once(
-			"v2_idle_regen",
-			"[AI Idle] regenerated %s order -> (%.1f, %.1f)" % [
-				director.get_state_name(),
-				destination.x,
-				destination.z,
-			]
-		)
+	return NodeSafety.clean_node_array(units)
 
 
 func _force_attack_move(
