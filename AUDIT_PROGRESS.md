@@ -8,9 +8,41 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 2 military ownership migration slice complete** (wave/formation/finishing SoT + aggression publisher + intent TTL/ownership). Next Phase 2 milestone: migrate remaining EnemyArmyCommand ephemerals (threat caches, reinforcement pool, pending order bus) or begin scoped god-object splits only after those bags are match-owned.
+**PHASE 2 EnemyArmyCommand runtime ephemeral migration complete** (threat TTL caches, reinforcement pool, pending group-order queue, exec watchdog/scratch). Next Phase 2 milestone: migrate remaining low-risk EAC statics (creep-contest cooldowns, objective stuck timers, debug telemetry) **or** begin the first scoped god-object extraction only after those leftovers are classified and non-authoritative.
 
 ## Completed tasks
+
+### 2026-08-05 — EnemyArmyCommand runtime state migration (threat / reinforcement / queue / watchdog)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Related issues** | (1) Classify remaining EAC static bags. (2) Migrate highest-risk bags: threat TTL caches, reinforcement pool, pending group orders, exec watchdog/scratch. (3) Prove frame-local caches stay frame-local. |
+| **Classification of remaining EAC static state (post-migration)** | See table below. |
+| **State migrated → `AIPlayerState`** | `pending_group_orders`, `issuing_group_order_batch`, `reinforcement_pool`, `defense_threat_cache` (+ msec), `emergency_threat_cache` (+ msec), `exec_objective_node`, `exec_last_progress_msec`, `exec_last_distance`, `exec_squad_ids`, `exec_watchdog_timer`, `exec_watchdog_refreshed`, `exec_last_report`. EAC names are `_rt()` accessors — no dual authoritative copy. |
+| **Frame-local (kept on EAC static; cleared on reset; never SoT)** | `_main_army_cache`, `_combat_units_cache_frame`, `_cached_offensive_wave_units` (+ frame), `_last_combat_eval_msec`. Seeded + asserted empty after `prepare_new_match`. |
+| **Command queue owner** | Match-owned `AIPlayerState.pending_group_orders`. Drained by `ArmyCommanderV2` via `EnemyArmyCommand.tick_group_order_batch`. |
+| **Remaining compatibility mirrors** | None for migrated bags (accessors only). `_sync_player_state_identity` remains a documented no-op. |
+| **Remaining EAC static (not migrated this slice)** | `_creep_contest_cooldowns` (match-durable), objective stuck/eval timers (mission-transient), `_debug_enabled_override` + perf/order-issue diagnostics (telemetry). |
+| **EnemyArmyCommand ready for scoped extraction?** | **Not yet.** High-risk runtime bags are match-owned, but creep-contest + objective timers + the ~7k-line facade remain. First extraction only after leftovers are non-authoritative / classified. |
+| **Files changed** | `ai_player_state.gd`, `enemy_army_command.gd`, `verify_match_composition_root.gd`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 `--import` clean. `validate_import.sh` → `VALIDATION PASS`. `verify_match_composition_root` → `PASS` (queue/reset, reinforcement owner, watchdog non-reactivation, frame caches, providers no orders). `verify_match_reset` → `PASS` (registry=27). `verify_freed_instance_regression` → `PASS`. |
+| **Next audit task** | Remaining low-risk EAC statics, then first scoped helper extraction — do not start broad god-object splits. |
+
+#### Remaining EnemyArmyCommand static classification (2026-08-05)
+
+| Group (exact vars) | Class | Survives strategic tick? | Survives match reset? | Issues / influences orders? |
+|---|---|---|---|---|
+| Identity/exec/combat/wave/formation/finishing via `_rt()` | **Match-owned durable** (AIPlayerState) | Yes | No (reset clears) | Yes (mission/mode) |
+| `pending_group_orders`, `issuing_group_order_batch` | **Command queue** (AIPlayerState) | Yes until drained | No | Yes (enqueued unit orders) |
+| `reinforcement_pool` | **Match-owned durable** (AIPlayerState) | Yes | No | Yes (hold/rally eligibility) |
+| `defense_threat_cache*`, `emergency_threat_cache*` | **TTL scratch on AIPlayerState** (not SoT) | Brief TTL (~0.35s) | No | Influences defense scoring only; recomputed from world |
+| `exec_objective_node`, `exec_last_*`, `exec_squad_ids`, `exec_watchdog_*`, `exec_last_report` | **Mission-owned transient** (AIPlayerState) | Yes while mission live | No | Watchdog can refresh/fallback active mission only |
+| `_main_army_cache`, `_combat_units_cache_frame`, `_cached_offensive_wave_units*` | **Frame-local cache** (EAC static) | No (frame key) | No (explicit clear) | Read-only discovery; not authoritative |
+| `_creep_contest_cooldowns` | Match-owned durable (**still EAC static**) | Yes | No (reset clears) | Yes (blocks contest) — next slice |
+| `_objective_*_timer`, `_objective_last_building_health`, `_objective_eval_*` | Mission-owned transient (**still EAC static**) | Yes while wave objective | No | Influences reissue/unstick |
+| `_last_issued_order_*`, `_perf_*`, `_orders_issued_since_diag`, `_debug_enabled_override` | **Debug/telemetry** | Yes | Cleared / session | Diagnostics only |
+| `_bound_player_state`, `_declared_command_authority`, `_unbound_runtime` | Binding / offline host | Session | Unbind resets host | Wiring only |
 
 ### 2026-08-05 — Wave/formation/finishing SoT + aggression intents + arbitration TTL (PHASE 2 #2/#4)
 
@@ -105,7 +137,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 | Autoload | Classification | Notes |
 |---|---|---|
-| `GameSettings` | Partial / referenced | Cast-mode getters used; Resource load is TODO |
+| `GameSettings` | Partial / referenced | Cast-mode getters used; settings Resource load is TODO |
 | `ResourceManager` | Active | Player economy; many callers |
 | `EnemyResourceManager` | Active | Enemy economy |
 | `TechTree` | Active | Unlock gates |
@@ -226,13 +258,14 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Match composition root + AIPlayerState + ArmyCommanderV2 authority | `PASS match_composition_root`; match reset + freed-instance still PASS |
 | 2026-08-05 | Exec/combat mirrors + MilitaryIntent providers (defense/creep/wave) | `PASS match_composition_root` (extended); match reset + freed-instance still PASS |
 | 2026-08-05 | Wave/formation/finishing SoT + aggression publisher + intent TTL/ownership | `VALIDATION PASS`; composition/reset/freed all PASS |
+| 2026-08-05 | EAC runtime ephemerals (threat/reinforcement/queue/watchdog) + frame-cache proof | `VALIDATION PASS`; composition/reset/freed all PASS |
 
 ## Known blockers
 
 None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed; freed-instance regression gated in CI. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
 
-Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing, declared `ArmyCommanderV2` authority, intent providers (defense/creep/wave/aggression) with TTL/cancel/ownership arbitration. Remaining EAC static ephemerals and god-object splits are next.
+Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. Remaining: creep-contest cooldowns, objective stuck timers, debug telemetry; god-object splits deferred until those are non-authoritative.
 
 ## Next task
 
-**PHASE 2 continued:** Migrate remaining EnemyArmyCommand ephemeral static bags (threat caches, reinforcement pool, pending group orders) into match-owned state, then consider the first scoped god-object split. Do not start unrelated subsystems.
+**PHASE 2 continued:** Migrate leftover low-risk EnemyArmyCommand statics (`_creep_contest_cooldowns`, objective stuck/eval timers) or start the first **scoped** helper extraction. Do not begin broad god-object splitting.

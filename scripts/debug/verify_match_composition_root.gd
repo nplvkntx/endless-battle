@@ -245,6 +245,38 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 
 	await _verify_intent_bus(failures, state)
 	await _verify_authority_and_providers(failures, root, state)
+	_verify_runtime_ephemeral_ownership(failures, state)
+
+	## Dirty high-risk bags + frame caches before prepare_new_match.
+	state.pending_group_orders = [{
+		"verify": true,
+		"target": Vector3(5.0, 0.0, 5.0),
+		"use_attack_move": true,
+	}]
+	state.issuing_group_order_batch = true
+	state.reinforcement_pool[4242] = {
+		"rally": Vector3(1.0, 0.0, 1.0),
+		"registered_msec": 1,
+	}
+	state.defense_threat_cache = {"verify_threat": 9.0}
+	state.defense_threat_cache_msec = Time.get_ticks_msec()
+	state.emergency_threat_cache = {"verify_emergency": 8.0}
+	state.emergency_threat_cache_msec = Time.get_ticks_msec()
+	state.exec_watchdog_timer = 99.0
+	state.exec_watchdog_refreshed = true
+	state.exec_last_progress_msec = Time.get_ticks_msec() - 120000
+	state.exec_squad_ids = [1, 2, 3]
+	EnemyArmyCommand.seed_frame_local_caches_for_verify()
+	_expect(
+		failures,
+		"ephemeral: pending orders seeded before reset",
+		EnemyArmyCommand.get_pending_group_order_count() == 1
+	)
+	_expect(
+		failures,
+		"ephemeral: frame caches seeded before reset",
+		int(EnemyArmyCommand.get_frame_local_cache_snapshot_for_verify()["main_army_cache_size"]) > 0
+	)
 
 	MatchSession.prepare_new_match()
 	_expect(
@@ -286,6 +318,46 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	)
 	_expect(
 		failures,
+		"queue: pending group orders cannot survive reset",
+		state.pending_group_orders.is_empty()
+		and EnemyArmyCommand.get_pending_group_order_count() == 0
+		and not state.issuing_group_order_batch
+	)
+	_expect(
+		failures,
+		"reinforcement: pool cleared; sole owner is AIPlayerState",
+		state.reinforcement_pool.is_empty()
+		and EnemyArmyCommand.get_reinforcement_pool_count() == 0
+	)
+	_expect(
+		failures,
+		"threat: TTL caches cleared on reset (not authoritative)",
+		state.defense_threat_cache.is_empty()
+		and state.emergency_threat_cache.is_empty()
+		and state.defense_threat_cache_msec == 0
+		and state.emergency_threat_cache_msec == 0
+	)
+	_expect(
+		failures,
+		"watchdog: scratch cannot survive reset",
+		state.exec_watchdog_timer == 0.0
+		and not state.exec_watchdog_refreshed
+		and state.exec_last_progress_msec == 0
+		and state.exec_squad_ids.is_empty()
+		and state.exec_objective_node == null
+	)
+	var frame_after: Dictionary = EnemyArmyCommand.get_frame_local_cache_snapshot_for_verify()
+	_expect(
+		failures,
+		"frame: caches empty or reconstructed after reset",
+		int(frame_after["combat_units_cache_frame"]) == -1
+		and int(frame_after["offensive_wave_cache_frame"]) == -1
+		and int(frame_after["main_army_cache_size"]) == 0
+		and int(frame_after["offensive_wave_cache_size"]) == 0
+		and int(frame_after["last_combat_eval_msec"]) == 0
+	)
+	_expect(
+		failures,
 		"identity: still bound after prepare",
 		EnemyArmyCommand.get_bound_ai_player_state() == state
 	)
@@ -302,6 +374,71 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		EnemyArmyCommand.get_bound_ai_player_state() == null
 		and EnemyArmyCommand.get_declared_command_authority() == null
 	)
+
+
+func _verify_runtime_ephemeral_ownership(
+	failures: PackedStringArray,
+	state: AIPlayerState
+) -> void:
+	## Reinforcement: one owner — EAC accessors share the AIPlayerState dictionary.
+	state.reinforcement_pool.clear()
+	state.reinforcement_pool[9001] = {
+		"rally": Vector3(2.0, 0.0, 2.0),
+		"registered_msec": Time.get_ticks_msec(),
+	}
+	_expect(
+		failures,
+		"reinforcement: AIPlayerState owns pool entries",
+		state.reinforcement_pool.size() == 1
+	)
+	state.reinforcement_pool[9002] = {
+		"rally": Vector3(3.0, 0.0, 3.0),
+		"registered_msec": Time.get_ticks_msec(),
+	}
+	_expect(
+		failures,
+		"reinforcement: EAC accessor sees same owner bag",
+		EnemyArmyCommand.get_reinforcement_pool_raw_count_for_verify() == 2
+		and state.reinforcement_pool.size() == 2
+	)
+
+	## Watchdog must not reactivate an expired / cleared mission.
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
+		"watchdog verify seed",
+		null,
+		Vector3(20.0, 0.0, 10.0),
+		"WatchdogCC",
+		"attack-move"
+	)
+	state.exec_watchdog_refreshed = false
+	state.exec_watchdog_timer = 99.0
+	state.exec_last_progress_msec = Time.get_ticks_msec() - 120000
+	EnemyArmyCommand.clear_executable_mission("watchdog verify expire")
+	_expect(
+		failures,
+		"watchdog: mission cleared to IDLE before tick",
+		state.exec_mission == int(EnemyArmyCommand.ExecutableMission.IDLE)
+	)
+	state.exec_watchdog_refreshed = false
+	state.exec_watchdog_timer = 99.0
+	state.exec_last_progress_msec = Time.get_ticks_msec() - 120000
+	state.pending_group_orders.clear()
+	EnemyArmyCommand.tick_mission_watchdog(get_tree(), 10.0)
+	_expect(
+		failures,
+		"watchdog: expired mission stays IDLE (no reactivation)",
+		state.exec_mission == int(EnemyArmyCommand.ExecutableMission.IDLE)
+		or state.exec_mission == int(EnemyArmyCommand.ExecutableMission.NONE)
+	)
+	_expect(
+		failures,
+		"watchdog: no attack orders after expired mission tick",
+		state.pending_group_orders.is_empty()
+	)
+	## Leave reinforcement clean for subsequent seed-before-reset assertions.
+	state.reinforcement_pool.clear()
+	EnemyArmyCommand.clear_executable_mission("watchdog verify cleanup")
 
 
 func _verify_intent_bus(failures: PackedStringArray, state: AIPlayerState) -> void:
@@ -437,3 +574,25 @@ func _verify_authority_and_providers(
 		"authority: sole executable owner name",
 		String(state.military_command_authority_name) == root.army_commander_v2.name
 	)
+	## Providers publish intents only — they must not enqueue unit orders.
+	state.pending_group_orders.clear()
+	state.publish_intent(
+		MilitaryIntent.make_defend({
+			"threatened": true,
+			"reason": &"provider_no_orders",
+			"intercept_position": Vector3.ZERO,
+			"emergency": false,
+		})
+	)
+	state.publish_intent(MilitaryIntent.make_attack(&"provider_no_orders", 50.0, &"wave"))
+	state.publish_intent(MilitaryIntent.make_creep(&"provider_no_orders", 40.0, null, &"creep"))
+	_expect(
+		failures,
+		"authority: providers publish intents without issuing orders",
+		state.pending_intent_count() >= 1
+		and state.pending_group_orders.is_empty()
+		and EnemyArmyCommand.get_pending_group_order_count() == 0
+	)
+	state.clear_intents()
+	state.clear_accepted_intent()
+	state.pending_group_orders.clear()

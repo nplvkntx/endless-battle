@@ -4,11 +4,19 @@ extends Node
 ## Match-owned enemy AI runtime (PHASE 2).
 ## Lifetime follows the match scene via MatchCompositionRoot.
 ## When EnemyArmyCommand is bound, this node is the sole authoritative store for
-## identity / exec / combat / assembly / wave / formation / finishing fields.
+## identity / exec / combat / assembly / wave / formation / finishing fields,
+## plus command-queue, reinforcement pool, TTL threat caches, and mission scratch.
 ## Unbound helpers use a private offline instance — never a second live authority.
 ##
 ## TEMPORARY dual-write removed for migrated bags: accessors on EnemyArmyCommand
 ## read/write this object directly. Intent bus is owned here; providers publish only.
+##
+## Ownership rules:
+## - pending_group_orders: sole command-queue owner (drained by ArmyCommanderV2 via EAC).
+## - reinforcement_pool: sole match owner for waiting-unit registry.
+## - defense/emergency threat caches: short TTL scratch only — never authoritative SoT.
+## - exec_* scratch / watchdog: mission-owned; cleared with mission and match reset.
+## Frame-local army unit caches stay on EnemyArmyCommand (keyed by Engine frame).
 
 ## --- Identity ---
 var army_mode: int = 0
@@ -32,6 +40,15 @@ var exec_transition_reason: String = ""
 var exec_camp_reserved: bool = false
 var exec_mission_start_msec: int = 0
 var allow_hostile_engagement: bool = false
+
+## --- Mission-owned transient (watchdog / scratch; not durable strategy) ---
+var exec_objective_node: Node3D = null
+var exec_last_progress_msec: int = 0
+var exec_last_distance: float = -1.0
+var exec_squad_ids: Array[int] = []
+var exec_watchdog_timer: float = 0.0
+var exec_watchdog_refreshed: bool = false
+var exec_last_report: String = ""
 
 ## --- Combat runtime ---
 var assembly_timer: float = 0.0
@@ -92,6 +109,19 @@ var finishing_mode_exit_cooldown: float = 0.0
 var finishing_mode_eval_timer: float = 0.0
 var last_finishing_objective: Node3D = null
 
+## --- Command queue (sole owner; lifecycle = match + drain by ArmyCommanderV2) ---
+var pending_group_orders: Array = []
+var issuing_group_order_batch: bool = false
+
+## --- Reinforcement pool (sole match owner) ---
+var reinforcement_pool: Dictionary = {}
+
+## --- TTL threat caches (scratch only; recomputed from world; never SoT) ---
+var defense_threat_cache: Dictionary = {}
+var defense_threat_cache_msec: int = 0
+var emergency_threat_cache: Dictionary = {}
+var emergency_threat_cache_msec: int = 0
+
 ## Declared sole military order issuer for this match (ArmyCommanderV2 under V2).
 var _military_command_authority: Node = null
 var military_command_authority_name: StringName = &""
@@ -125,6 +155,13 @@ func reset() -> void:
 	exec_camp_reserved = false
 	exec_mission_start_msec = 0
 	allow_hostile_engagement = false
+	exec_objective_node = null
+	exec_last_progress_msec = 0
+	exec_last_distance = -1.0
+	exec_squad_ids.clear()
+	exec_watchdog_timer = 0.0
+	exec_watchdog_refreshed = false
+	exec_last_report = ""
 	assembly_timer = 0.0
 	assembly_rally = Vector3.ZERO
 	assembly_required_count = 0
@@ -176,6 +213,13 @@ func reset() -> void:
 	finishing_mode_exit_cooldown = 0.0
 	finishing_mode_eval_timer = 0.0
 	last_finishing_objective = null
+	pending_group_orders.clear()
+	issuing_group_order_batch = false
+	reinforcement_pool.clear()
+	defense_threat_cache.clear()
+	defense_threat_cache_msec = 0
+	emergency_threat_cache.clear()
+	emergency_threat_cache_msec = 0
 	clear_accepted_intent()
 	clear_intents()
 

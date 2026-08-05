@@ -30,7 +30,11 @@ Helpers:
 | Mission payload | `MilitaryDirectorV2` publishes `ArmyMissionV2` | Commander never invents missions |
 | Main squad membership | `MilitaryDirectorV2` / `ArmySquadV2` | Commander reads; does not recruit |
 | Unit order issuance | `ArmyCommanderV2` | Attack-move, retreat, assemble slots |
-| Shared order-bus drain | `ArmyCommanderV2` | Batch + retreat cooldown + finishing score tick |
+| Shared order-bus drain | `ArmyCommanderV2` via `EnemyArmyCommand` | Queue owned by match `AIPlayerState.pending_group_orders` |
+| Reinforcement waiting registry | `AIPlayerState.reinforcement_pool` | Sole match owner; EAC accessors only |
+| TTL threat caches | `AIPlayerState` (scratch) | Recomputed from world; never authoritative SoT |
+| Mission watchdog / exec scratch | `AIPlayerState` | Cleared with mission + match reset |
+| Frame-local army unit caches | `EnemyArmyCommand` static | Keyed by `Engine` frame; cleared on reset; never SoT |
 | Hero kit micro | `AIHeroMastery` via `ArmyCommanderV2` | Abilities / local targets only |
 | Economy / workers / build / train / tech / placement | Legacy managers | Unchanged under V2 |
 | Low-level army helpers | `EnemyArmyCommand`, creep helpers, etc. | Reused; not independent mission owners |

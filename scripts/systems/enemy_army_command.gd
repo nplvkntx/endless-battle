@@ -423,7 +423,12 @@ static var _debug_enabled_override: bool = false
 static var _combat_units_cache_frame: int = -1
 static var _cached_offensive_wave_units_frame: int = -1
 static var _cached_offensive_wave_units: Array = []
-static var _pending_group_orders: Array = []
+## Command queue SoT: AIPlayerState.pending_group_orders (ArmyCommanderV2 drains).
+static var _pending_group_orders: Array:
+	get:
+		return _rt().pending_group_orders
+	set(value):
+		_rt().pending_group_orders = value
 static var _objective_eval_timer: float = 0.0
 static var _objective_stuck_check_timer: float = 0.0
 static var _perf_diag_timer: float = 0.0
@@ -501,14 +506,41 @@ static var _group_order_generation: int:
 	set(value):
 		_rt().group_order_generation = value
 
-static var _issuing_group_order_batch: bool = false
-static var _defense_threat_cache: Dictionary = {}
-static var _defense_threat_cache_msec: int = 0
-static var _emergency_threat_cache: Dictionary = {}
-static var _emergency_threat_cache_msec: int = 0
+static var _issuing_group_order_batch: bool:
+	get:
+		return _rt().issuing_group_order_batch
+	set(value):
+		_rt().issuing_group_order_batch = value
+
+## TTL threat scratch (SoT host: AIPlayerState). Recomputed from world; never authoritative.
+static var _defense_threat_cache: Dictionary:
+	get:
+		return _rt().defense_threat_cache
+	set(value):
+		_rt().defense_threat_cache = value
+static var _defense_threat_cache_msec: int:
+	get:
+		return _rt().defense_threat_cache_msec
+	set(value):
+		_rt().defense_threat_cache_msec = value
+static var _emergency_threat_cache: Dictionary:
+	get:
+		return _rt().emergency_threat_cache
+	set(value):
+		_rt().emergency_threat_cache = value
+static var _emergency_threat_cache_msec: int:
+	get:
+		return _rt().emergency_threat_cache_msec
+	set(value):
+		_rt().emergency_threat_cache_msec = value
 static var _perf_overlay_status_timer: float = 0.0
 static var _creep_contest_cooldowns: Dictionary = {}
-static var _reinforcement_pool: Dictionary = {}
+## Reinforcement waiting registry (SoT: AIPlayerState.reinforcement_pool).
+static var _reinforcement_pool: Dictionary:
+	get:
+		return _rt().reinforcement_pool
+	set(value):
+		_rt().reinforcement_pool = value
 
 static var _attack_wave_state: AttackWaveState:
 	get:
@@ -619,7 +651,11 @@ static var _exec_mission: ExecutableMission:
 	set(value):
 		_rt().exec_mission = int(value)
 
-static var _exec_objective_node: Node3D = null
+static var _exec_objective_node: Node3D:
+	get:
+		return _rt().exec_objective_node
+	set(value):
+		_rt().exec_objective_node = value
 static var _exec_objective_position: Vector3:
 	get:
 		return _rt().exec_objective_position
@@ -638,9 +674,21 @@ static var _exec_mission_start_msec: int:
 	set(value):
 		_rt().exec_mission_start_msec = value
 
-static var _exec_last_progress_msec: int = 0
-static var _exec_last_distance: float = -1.0
-static var _exec_squad_ids: Array[int] = []
+static var _exec_last_progress_msec: int:
+	get:
+		return _rt().exec_last_progress_msec
+	set(value):
+		_rt().exec_last_progress_msec = value
+static var _exec_last_distance: float:
+	get:
+		return _rt().exec_last_distance
+	set(value):
+		_rt().exec_last_distance = value
+static var _exec_squad_ids: Array[int]:
+	get:
+		return _rt().exec_squad_ids
+	set(value):
+		_rt().exec_squad_ids = value
 static var _exec_order_label: String:
 	get:
 		return _rt().exec_order_label
@@ -659,9 +707,21 @@ static var _exec_camp_reserved: bool:
 	set(value):
 		_rt().exec_camp_reserved = value
 
-static var _exec_watchdog_timer: float = 0.0
-static var _exec_watchdog_refreshed: bool = false
-static var _exec_last_report: String = ""
+static var _exec_watchdog_timer: float:
+	get:
+		return _rt().exec_watchdog_timer
+	set(value):
+		_rt().exec_watchdog_timer = value
+static var _exec_watchdog_refreshed: bool:
+	get:
+		return _rt().exec_watchdog_refreshed
+	set(value):
+		_rt().exec_watchdog_refreshed = value
+static var _exec_last_report: String:
+	get:
+		return _rt().exec_last_report
+	set(value):
+		_rt().exec_last_report = value
 static var _allow_hostile_engagement: bool:
 	get:
 		return _rt().allow_hostile_engagement
@@ -713,7 +773,8 @@ static func get_declared_command_authority() -> Node:
 
 
 static func _sync_player_state_identity() -> void:
-	## No-op: migrated identity/exec/combat/wave/formation/finishing live on _rt().
+	## No-op: migrated bags (identity/exec/combat/wave/formation/finishing/
+	## command-queue/reinforcement/threat-TTL/mission-scratch) live on _rt().
 	pass
 
 
@@ -911,6 +972,7 @@ static func reset_match_state() -> void:
 	## Match-owned SoT bags live on _rt() (bound AIPlayerState or unbound host).
 	_rt().reset()
 	_clear_executable_mission_state("match reset")
+	## Frame-local caches must not survive reset or become authoritative.
 	_last_combat_eval_msec = 0
 	_main_army_cache.clear()
 	_reset_objective_tracking()
@@ -918,16 +980,10 @@ static func reset_match_state() -> void:
 	_combat_units_cache_frame = -1
 	_cached_offensive_wave_units_frame = -1
 	_cached_offensive_wave_units.clear()
-	_pending_group_orders.clear()
 	_objective_eval_timer = 0.0
 	_objective_stuck_check_timer = 0.0
-	_issuing_group_order_batch = false
-	_defense_threat_cache.clear()
-	_defense_threat_cache_msec = 0
-	_emergency_threat_cache.clear()
-	_emergency_threat_cache_msec = 0
+	## Remaining static bags not yet on AIPlayerState.
 	_creep_contest_cooldowns.clear()
-	_reinforcement_pool.clear()
 	_perf_diag_timer = 0.0
 	_orders_issued_since_diag = 0
 	_perf_overlay_status_timer = 0.0
@@ -935,6 +991,42 @@ static func reset_match_state() -> void:
 	var bound_state: AIPlayerState = get_bound_ai_player_state()
 	if bound_state != null:
 		bound_state.set_military_command_authority(_declared_command_authority)
+
+
+## Verify/debug: seed frame-local caches so reset can prove they do not survive.
+static func seed_frame_local_caches_for_verify() -> void:
+	_combat_units_cache_frame = 42
+	_cached_offensive_wave_units_frame = 42
+	_main_army_cache = [{"verify_seed": true}]
+	_cached_offensive_wave_units = [{"verify_seed": true}]
+	_last_combat_eval_msec = 999
+
+
+## Verify/debug: snapshot of frame-local caches (never authoritative).
+static func get_frame_local_cache_snapshot_for_verify() -> Dictionary:
+	return {
+		"combat_units_cache_frame": _combat_units_cache_frame,
+		"offensive_wave_cache_frame": _cached_offensive_wave_units_frame,
+		"main_army_cache_size": _main_army_cache.size(),
+		"offensive_wave_cache_size": _cached_offensive_wave_units.size(),
+		"last_combat_eval_msec": _last_combat_eval_msec,
+	}
+
+
+## Pending group-order count (command queue owned by AIPlayerState).
+static func get_pending_group_order_count() -> int:
+	return _pending_group_orders.size()
+
+
+## Reinforcement pool entry count (sole owner: AIPlayerState when bound).
+static func get_reinforcement_pool_count() -> int:
+	purge_stale_reinforcement_pool()
+	return _reinforcement_pool.size()
+
+
+## Verify only: raw pool size without living-unit purge (ownership identity checks).
+static func get_reinforcement_pool_raw_count_for_verify() -> int:
+	return _reinforcement_pool.size()
 
 
 static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
