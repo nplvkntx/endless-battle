@@ -944,9 +944,9 @@ func _should_skip_repath_while_engaged() -> bool:
 	var attack_target: Variant = get("_attack_target")
 	if not NodeSafety.is_alive_node(attack_target) or not attack_target is Node3D:
 		return false
-	if has_method("_is_in_attack_range") and bool(call("_is_in_attack_range", attack_target)):
+	if has_method("_is_in_attack_range") and VariantUtils.to_bool(call("_is_in_attack_range", attack_target)):
 		return true
-	if "_has_active_attack_order" in self and bool(get("_has_active_attack_order")):
+	if "_has_active_attack_order" in self and VariantUtils.to_bool(get("_has_active_attack_order")):
 		return true
 	return false
 

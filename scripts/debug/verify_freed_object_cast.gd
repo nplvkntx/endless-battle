@@ -89,7 +89,7 @@ func _verify_attack_range_with_freed_target(failures: PackedStringArray) -> void
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var in_range: bool = bool(attacker.call("_is_in_attack_range", attacker.get("_attack_target")))
+	var in_range: bool = VariantUtils.to_bool(attacker.call("_is_in_attack_range", attacker.get("_attack_target")))
 	if in_range:
 		failures.append("attack range should be false after target freed")
 

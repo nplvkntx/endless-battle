@@ -28,7 +28,7 @@ func on_basic_attack_hit(target: Object, result: Dictionary, _attack_index: int)
 	if target == null or not is_instance_valid(target):
 		_reset_chain()
 		return
-	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
+	if not VariantUtils.to_bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return
 
 	var target_id: int = target.get_instance_id()

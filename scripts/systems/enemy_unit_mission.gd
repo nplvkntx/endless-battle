@@ -294,7 +294,7 @@ static func should_reissue_move_order(
 	var unit_node: Node3D = unit as Node3D
 	var is_stuck: bool = false
 	if unit_node != null and unit_node.has_method("is_confirmed_stuck"):
-		is_stuck = bool(unit_node.call("is_confirmed_stuck"))
+		is_stuck = VariantUtils.to_bool(unit_node.call("is_confirmed_stuck"))
 
 	if unit_node != null:
 		var distance_to_destination: float = EnemyArmyCommand.horizontal_distance(

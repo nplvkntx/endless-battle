@@ -217,7 +217,7 @@ func try_ai_cast_abilities(context: Dictionary) -> void:
 		return
 
 	var health_ratio: float = float(context.get("health_ratio", 1.0))
-	var retreating: bool = bool(context.get("retreating", false))
+	var retreating: bool = VariantUtils.to_bool(context.get("retreating", false))
 	var nearby_enemy_count: int = int(context.get("nearby_enemy_count", 0))
 	var aoe_needed: int = int(context.get("aoe_needed", DEFAULT_AOE_NEEDED))
 	var defensive_hp_ratio: float = float(

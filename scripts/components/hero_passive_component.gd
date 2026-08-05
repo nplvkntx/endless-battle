@@ -141,9 +141,9 @@ func try_cast() -> bool:
 func notify_damage_dealt(target: Object, result: Dictionary, is_basic_attack: bool = false) -> void:
 	if not has_passive():
 		return
-	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
+	if not VariantUtils.to_bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return
-	if bool(result.get(DamageService.RESULT_BLOCKED, false)):
+	if VariantUtils.to_bool(result.get(DamageService.RESULT_BLOCKED, false)):
 		return
 
 	_mark_combat()
@@ -160,9 +160,9 @@ func notify_damage_dealt(target: Object, result: Dictionary, is_basic_attack: bo
 func notify_damage_taken(result: Dictionary) -> void:
 	if not has_passive():
 		return
-	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
+	if not VariantUtils.to_bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return
-	if bool(result.get(DamageService.RESULT_BLOCKED, false)):
+	if VariantUtils.to_bool(result.get(DamageService.RESULT_BLOCKED, false)):
 		return
 
 	_mark_combat()

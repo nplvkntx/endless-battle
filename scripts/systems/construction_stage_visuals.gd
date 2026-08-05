@@ -243,7 +243,7 @@ func _show_original_visuals() -> void:
 	for node: Node in _original_nodes:
 		if not is_instance_valid(node):
 			continue
-		var was_visible: bool = bool(_original_visible.get(node.get_instance_id(), true))
+		var was_visible: bool = VariantUtils.to_bool(_original_visible.get(node.get_instance_id(), true))
 		if node is Node3D:
 			(node as Node3D).visible = was_visible
 

@@ -145,7 +145,7 @@ func _verify_center_preferred_first(failures: PackedStringArray) -> void:
 		town_hall.global_position,
 		context
 	)
-	_expect(failures, "should build first tower", bool(need.get("should_build", false)))
+	_expect(failures, "should build first tower", VariantUtils.to_bool(need.get("should_build", false)))
 	_expect(
 		failures,
 		"first tower lane is center",
@@ -242,7 +242,7 @@ func _verify_flank_adaptation(failures: PackedStringArray) -> void:
 		town_hall.global_position,
 		context
 	)
-	_expect(failures, "adapt builds after flank pressure", bool(need.get("should_build", false)))
+	_expect(failures, "adapt builds after flank pressure", VariantUtils.to_bool(need.get("should_build", false)))
 	_expect(
 		failures,
 		"adapts toward left lane",
@@ -293,7 +293,7 @@ func _verify_harass_and_expansion_lanes(failures: PackedStringArray) -> void:
 		main_cc.global_position,
 		context
 	)
-	_expect(failures, "expansion defense triggers", bool(need.get("should_build", false)))
+	_expect(failures, "expansion defense triggers", VariantUtils.to_bool(need.get("should_build", false)))
 	_expect(
 		failures,
 		"expansion or weak-expansion reason",
@@ -356,7 +356,7 @@ func _verify_caps_and_safeguards(failures: PackedStringArray) -> void:
 			"towers_per_lane": {},
 		}
 	)
-	_expect(failures, "food-blocked skips towers", not bool(blocked.get("should_build", false)))
+	_expect(failures, "food-blocked skips towers", not VariantUtils.to_bool(blocked.get("should_build", false)))
 
 	var capped: Dictionary = EnemyAttackPathDefense.evaluate_build_need(
 		get_tree(),
@@ -375,7 +375,7 @@ func _verify_caps_and_safeguards(failures: PackedStringArray) -> void:
 			"towers_per_lane": {},
 		}
 	)
-	_expect(failures, "hard cap blocks overbuild", not bool(capped.get("should_build", false)))
+	_expect(failures, "hard cap blocks overbuild", not VariantUtils.to_bool(capped.get("should_build", false)))
 
 
 func _verify_reject_redundant_and_interior(failures: PackedStringArray) -> void:

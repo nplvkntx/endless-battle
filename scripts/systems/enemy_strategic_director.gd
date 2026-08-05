@@ -645,9 +645,9 @@ func _set_strategic_phase(new_phase: StrategicPhase, reason: String) -> void:
 	if previous == StrategicPhase.OPENING:
 		EnemyAIDebug.log_opening_complete(
 			int(snapshot.get("workers", 0)),
-			bool(snapshot.get("has_farm", false)),
-			bool(snapshot.get("has_hero_altar", false)),
-			bool(snapshot.get("has_barracks", false))
+			VariantUtils.to_bool(snapshot.get("has_farm", false)),
+			VariantUtils.to_bool(snapshot.get("has_hero_altar", false)),
+			VariantUtils.to_bool(snapshot.get("has_barracks", false))
 		)
 
 	if previous == StrategicPhase.EARLY_ARMY:
@@ -884,7 +884,7 @@ func _build_world_snapshot() -> Dictionary:
 		main_base_heavily_damaged
 		and (
 			workers.size() < RECOVERY_MIN_WORKERS
-			or not bool(building_counts.get("has_barracks", false))
+			or not VariantUtils.to_bool(building_counts.get("has_barracks", false))
 			or army_power < 120
 		)
 	)
@@ -948,12 +948,12 @@ func _build_world_snapshot() -> Dictionary:
 		),
 		"match_elapsed_seconds": _get_match_elapsed_seconds(),
 		"recent_losses": _recent_loss_timer > 0.0,
-		"has_farm": bool(building_counts.get("has_farm", false)),
-		"has_barracks": bool(building_counts.get("has_barracks", false)),
-		"has_hero_altar": bool(building_counts.get("has_hero_altar", false)),
-		"has_blacksmith": bool(building_counts.get("has_blacksmith", false)),
-		"has_shop": bool(building_counts.get("has_shop", false)),
-		"has_stable": bool(building_counts.get("has_stable", false)),
+		"has_farm": VariantUtils.to_bool(building_counts.get("has_farm", false)),
+		"has_barracks": VariantUtils.to_bool(building_counts.get("has_barracks", false)),
+		"has_hero_altar": VariantUtils.to_bool(building_counts.get("has_hero_altar", false)),
+		"has_blacksmith": VariantUtils.to_bool(building_counts.get("has_blacksmith", false)),
+		"has_shop": VariantUtils.to_bool(building_counts.get("has_shop", false)),
+		"has_stable": VariantUtils.to_bool(building_counts.get("has_stable", false)),
 		"town_hall_tier": town_hall_tier,
 		"main_base_health_ratio": main_base_health_ratio,
 		"main_base_heavily_damaged": main_base_heavily_damaged,

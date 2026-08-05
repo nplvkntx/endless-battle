@@ -63,7 +63,7 @@ static func clean_living_units(arr: Array, is_alive_callable: Callable = Callabl
 		if not is_alive_node(entry):
 			continue
 
-		if is_alive_callable.is_valid() and not bool(is_alive_callable.call(entry)):
+		if is_alive_callable.is_valid() and not VariantUtils.to_bool(is_alive_callable.call(entry)):
 			continue
 
 		cleaned.append(entry)

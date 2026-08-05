@@ -180,14 +180,14 @@ func _select_hero() -> bool:
 	var selection_manager: Node = _get_selection_manager()
 	if selection_manager == null or not selection_manager.has_method("select_player_hero_and_focus"):
 		return false
-	return bool(selection_manager.select_player_hero_and_focus())
+	return VariantUtils.to_bool(selection_manager.select_player_hero_and_focus())
 
 
 func _select_idle_worker() -> bool:
 	var selection_manager: Node = _get_selection_manager()
 	if selection_manager == null or not selection_manager.has_method("select_next_idle_worker_and_focus"):
 		return false
-	return bool(selection_manager.select_next_idle_worker_and_focus())
+	return VariantUtils.to_bool(selection_manager.select_next_idle_worker_and_focus())
 
 
 func _sanitize_members(members: Array) -> Array:

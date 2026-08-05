@@ -91,7 +91,7 @@ func tick(now_seconds: float, target_valid: bool, in_range: bool) -> Dictionary:
 		return {"active": false, "done": true, "aborted": false}
 
 	var step: Dictionary = _steps[_index]
-	var requires_target: bool = bool(step.get("requires_target", true))
+	var requires_target: bool = VariantUtils.to_bool(step.get("requires_target", true))
 	if requires_target and not target_valid:
 		abort("target invalid")
 		return {
@@ -127,7 +127,7 @@ func tick(now_seconds: float, target_valid: bool, in_range: bool) -> Dictionary:
 		"requires_target": requires_target,
 		"range_required": range_required,
 		"waiting_for_range": false,
-		"optional": bool(step.get("optional", false)),
+		"optional": VariantUtils.to_bool(step.get("optional", false)),
 	}
 
 
@@ -150,7 +150,7 @@ func mark_step_failed(now_seconds: float, reason: String = "step failed") -> Dic
 
 
 func _advance_or_skip(step: Dictionary, now_seconds: float, reason: String) -> Dictionary:
-	var optional: bool = bool(step.get("optional", false))
+	var optional: bool = VariantUtils.to_bool(step.get("optional", false))
 	var fallback_index: int = int(step.get("fallback_index", -1))
 
 	if optional:

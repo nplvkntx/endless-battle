@@ -1244,7 +1244,7 @@ func _process_aggression_mode(_delta: float) -> void:
 		return
 
 	var retreat: Dictionary = EnemyAggression.should_retreat_aggression(get_tree())
-	if bool(retreat.get("should_retreat", false)):
+	if VariantUtils.to_bool(retreat.get("should_retreat", false)):
 		EnemyAggression.notify_attack_failed()
 		var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
 		if rally_position != Vector3.ZERO:
@@ -1284,7 +1284,7 @@ func _try_launch_aggression_attack() -> void:
 		get_tree(),
 		EnemyAggression.AGGRESSION_MIN_ARMY_UNITS
 	)
-	if not bool(wave_plan.get("can_launch", false)):
+	if not VariantUtils.to_bool(wave_plan.get("can_launch", false)):
 		return
 
 	var wave_units: Array = wave_plan.get("units", [])

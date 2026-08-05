@@ -726,7 +726,7 @@ static func _make_definition(
 	definition.bonus_max_health = int(effects.get("bonus_max_health", 0))
 	definition.heal_on_purchase = int(effects.get("heal_on_purchase", 0))
 	definition.bonus_move_speed = float(effects.get("bonus_move_speed", 0.0))
-	definition.is_unique_move_speed = bool(effects.get("is_unique_move_speed", false))
+	definition.is_unique_move_speed = VariantUtils.to_bool(effects.get("is_unique_move_speed", false))
 	definition.bonus_max_mana = int(effects.get("bonus_max_mana", 0))
 	definition.restore_mana_on_purchase = int(effects.get("restore_mana_on_purchase", 0))
 	definition.bonus_ability_power = int(effects.get("bonus_ability_power", 0))
@@ -745,5 +745,5 @@ static func _make_definition(
 	definition.aura_attack_speed_bonus = float(effects.get("aura_attack_speed_bonus", 0.0))
 	definition.aura_radius = float(effects.get("aura_radius", 0.0))
 	definition.low_hp_extra_lifesteal = float(effects.get("low_hp_extra_lifesteal", 0.0))
-	definition.has_out_of_combat_regen = bool(effects.get("has_out_of_combat_regen", false))
+	definition.has_out_of_combat_regen = VariantUtils.to_bool(effects.get("has_out_of_combat_regen", false))
 	return definition

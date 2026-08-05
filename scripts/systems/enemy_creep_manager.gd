@@ -205,7 +205,7 @@ func _can_start_group_mission(units: Array = []) -> bool:
 		units,
 		_get_phase_min_army_size()
 	)
-	return bool(validation.get("ok", false))
+	return VariantUtils.to_bool(validation.get("ok", false))
 
 
 func is_army_healthy_after_creeping() -> bool:

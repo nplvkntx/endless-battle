@@ -150,7 +150,7 @@ func _verify_retreat_logic(failures: PackedStringArray) -> void:
 
 	var retreat: Dictionary = EnemyAggression.should_retreat_aggression(get_tree())
 	## Empty army should retreat.
-	_expect(failures, "retreat when army too small", bool(retreat.get("should_retreat", false)))
+	_expect(failures, "retreat when army too small", VariantUtils.to_bool(retreat.get("should_retreat", false)))
 
 
 func _verify_objective_priority(failures: PackedStringArray) -> void:

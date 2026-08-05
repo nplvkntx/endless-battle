@@ -488,14 +488,14 @@ static func apply_damage_to_target(target: Variant, amount: float, attacker = nu
 	var damage_service: Variant = load("res://scripts/systems/damage_service.gd")
 	if damage_service == null:
 		return false
-	return bool(damage_service.call(&"apply_damage", target, amount, attacker))
+	return VariantUtils.to_bool(damage_service.call(&"apply_damage", target, amount, attacker))
 
 
 static func _call_take_damage(target: Object, amount: float, attacker = null) -> bool:
 	var damage_service: Variant = load("res://scripts/systems/damage_service.gd")
 	if damage_service == null:
 		return false
-	return bool(
+	return VariantUtils.to_bool(
 		damage_service.call(
 			&"apply_damage",
 			target,

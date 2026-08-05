@@ -19,7 +19,7 @@ static func apply_incoming(
 			DamageService.OPT_BYPASS_ARMOR: true,
 		}
 	)
-	if not bool(result.get(DamageService.RESULT_APPLIED, false)):
+	if not VariantUtils.to_bool(result.get(DamageService.RESULT_APPLIED, false)):
 		return null
 	return result.get(DamageService.RESULT_ATTACKER)
 

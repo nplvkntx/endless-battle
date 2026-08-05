@@ -1607,7 +1607,7 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	if NodeSafety.is_alive_node(target_node):
 		target_position = target_node.global_position
 
-	_attack_is_lethal = lethal or bool(objective.get("commit_town_hall", false))
+	_attack_is_lethal = lethal or VariantUtils.to_bool(objective.get("commit_town_hall", false))
 	var reason: String = String(objective.get("reason", "attack"))
 	if _attack_is_lethal and not reason.begins_with("lethal"):
 		reason = "lethal %s" % reason
@@ -1667,7 +1667,7 @@ func _maybe_exit_attack(tree: SceneTree, rally_point: Vector3, attack_army: Arra
 
 func _is_attack_army_losing(tree: SceneTree, attack_army: Array) -> bool:
 	var decision: Dictionary = _evaluate_retreat_triggers(tree, attack_army)
-	return bool(decision.get("should_retreat", false))
+	return VariantUtils.to_bool(decision.get("should_retreat", false))
 
 
 func _is_attack_army_scattered(attack_army: Array) -> bool:
@@ -3065,7 +3065,7 @@ func _is_current_objective_valid(tree: SceneTree) -> bool:
 			return _mission.get_alive_target_object() == null and _mission.target_position != Vector3.ZERO
 		State.DEFEND:
 			var threat: Dictionary = _resolve_v2_defense_threat(tree)
-			return bool(threat.get("threatened", false)) or _defend_clear_timer > 0.0
+			return VariantUtils.to_bool(threat.get("threatened", false)) or _defend_clear_timer > 0.0
 		State.RETREAT:
 			return _mission.target_position != Vector3.ZERO
 		_:
@@ -3335,7 +3335,7 @@ func _resolve_truthful_display(mission: ArmyMissionV2) -> Dictionary:
 		var defend_ok: bool = _defend_active or _defend_clear_timer > 0.0
 		if tree != null:
 			var threat: Dictionary = _resolve_v2_defense_threat(tree)
-			defend_ok = defend_ok or bool(threat.get("threatened", false))
+			defend_ok = defend_ok or VariantUtils.to_bool(threat.get("threatened", false))
 		if not defend_ok:
 			state_name = "ASSEMBLE" if _main_squad.get_size() > 0 else "IDLE"
 			mission_name = state_name

@@ -191,7 +191,7 @@ func _verify_invalid_cast_spends_nothing(failures: PackedStringArray) -> void:
 
 	var mana_before: int = assassin.current_mana
 	var cd_before: float = assassin.get_ability_cooldown_remaining(HeroAbilityProgression.ABILITY_Q)
-	var cast_ok: bool = bool(assassin.call(&"try_axe_mark"))
+	var cast_ok: bool = VariantUtils.to_bool(assassin.call(&"try_axe_mark"))
 	_expect(failures, "axe mark without target fails", not cast_ok)
 	_expect(failures, "failed axe mark spends no mana", assassin.current_mana == mana_before)
 	_expect(

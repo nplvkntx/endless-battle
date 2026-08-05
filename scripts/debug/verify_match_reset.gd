@@ -28,7 +28,7 @@ func _ready() -> void:
 			str(second_snapshot),
 		]
 		exit_code = 1
-	elif not bool(first_snapshot.get("is_clean", false)):
+	elif not VariantUtils.to_bool(first_snapshot.get("is_clean", false)):
 		msg = "FAIL: prepared state is not clean\n%s" % str(first_snapshot)
 		exit_code = 1
 	else:

@@ -307,7 +307,7 @@ func _unit_has_meaningful_order(unit: Node) -> bool:
 		if unit_ref.has_move_target:
 			return true
 
-	if bool(unit.get("_has_attack_move_destination")):
+	if VariantUtils.to_bool(unit.get("_has_attack_move_destination")):
 		return true
 
 	var attack_target: Variant = unit.get("_attack_target")

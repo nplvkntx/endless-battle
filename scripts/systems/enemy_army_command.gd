@@ -5305,7 +5305,7 @@ static func _issue_spaced_group_orders(
 				wrapped.append({
 					"unit": unit,
 					"target": target,
-					"use_attack_move": bool(order.get("use_attack_move", use_attack_move)),
+					"use_attack_move": VariantUtils.to_bool(order.get("use_attack_move", use_attack_move)),
 					"mission": order.get("mission", mission),
 					"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
 					"priority": _mission_order_priority(mission),
@@ -5335,7 +5335,7 @@ static func _issue_spaced_group_orders(
 			if slot_distance <= FORMATION_SLOT_SKIP_DISTANCE:
 				var is_stuck: bool = (
 					unit_node.has_method("is_confirmed_stuck")
-					and bool(unit_node.call("is_confirmed_stuck"))
+					and VariantUtils.to_bool(unit_node.call("is_confirmed_stuck"))
 				)
 				if not is_stuck:
 					continue
@@ -5567,7 +5567,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 		var entry: Dictionary = orders[index]
 		var unit: Variant = entry.get("unit")
 		var target: Vector3 = entry.get("target", Vector3.ZERO)
-		var use_attack_move: bool = bool(entry.get("use_attack_move", true))
+		var use_attack_move: bool = VariantUtils.to_bool(entry.get("use_attack_move", true))
 		var mission: EnemyUnitMission.Mission = entry.get(
 			"mission",
 			EnemyUnitMission.Mission.ATTACK
@@ -6177,7 +6177,7 @@ static func handle_hostile_territory_idle(
 	if destination == Vector3.ZERO:
 		return false
 
-	var lethal: bool = bool(strength.get("lethal", false))
+	var lethal: bool = VariantUtils.to_bool(strength.get("lethal", false))
 	var mission: ExecutableMission = (
 		ExecutableMission.LETHAL_PUSH if lethal else ExecutableMission.ATTACK_PLAYER
 	)

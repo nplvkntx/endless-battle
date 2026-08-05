@@ -4129,7 +4129,7 @@ func _refresh_formation_control_state() -> void:
 		selected = selection_manager.selected_units
 
 	var summary: Dictionary = FormationManager.get_selection_formation_summary(selected)
-	var has_eligible: bool = bool(summary.get("has_eligible", false))
+	var has_eligible: bool = VariantUtils.to_bool(summary.get("has_eligible", false))
 	_formation_panel.modulate = Color.WHITE if has_eligible else Color(1, 1, 1, 0.45)
 
 	for button: Variant in _formation_shape_buttons.values():

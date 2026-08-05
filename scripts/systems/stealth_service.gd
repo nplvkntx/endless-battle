@@ -11,7 +11,7 @@ static func is_combat_hidden(target: Variant) -> bool:
 	if target is Unit:
 		return (target as Unit).is_combat_hidden()
 	if target.has_method(&"is_combat_hidden"):
-		return bool(target.call(&"is_combat_hidden"))
+		return VariantUtils.to_bool(target.call(&"is_combat_hidden"))
 	return false
 
 

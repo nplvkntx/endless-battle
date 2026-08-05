@@ -158,7 +158,7 @@ func _verify_combo_planner(failures: PackedStringArray) -> void:
 	_expect(failures, "combo active after start", planner.is_active())
 
 	var waiting: Dictionary = planner.tick(0.1, true, false)
-	_expect(failures, "combo waits for range", bool(waiting.get("waiting_for_range", false)))
+	_expect(failures, "combo waits for range", VariantUtils.to_bool(waiting.get("waiting_for_range", false)))
 
 	var ready: Dictionary = planner.tick(0.2, true, true)
 	_expect(

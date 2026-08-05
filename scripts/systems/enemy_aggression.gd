@@ -215,7 +215,7 @@ static func update(tree: SceneTree, delta: float) -> void:
 		100.0
 	)
 	_confidence = _score_to_confidence(_opportunity_score)
-	_counter_pressure_active = bool(greed.get("counter_pressure", false)) and (
+	_counter_pressure_active = VariantUtils.to_bool(greed.get("counter_pressure", false)) and (
 		_opportunity_score >= STAY_MEDIUM_THRESHOLD
 	)
 
@@ -474,7 +474,7 @@ static func compute_greed_score(tree: SceneTree, rally_position: Vector3 = Vecto
 		)
 		var attack_comp: Dictionary = _count_player_composition(attackers_near_ai)
 		var attack_non_hero: int = int(attack_comp.get("non_hero", 0))
-		var attack_has_hero: bool = bool(attack_comp.get("has_hero", false))
+		var attack_has_hero: bool = VariantUtils.to_bool(attack_comp.get("has_hero", false))
 		if attack_has_hero and attack_non_hero <= 0:
 			hero_only_attack = true
 			_record_hero_rush()
@@ -755,7 +755,7 @@ static func _update_aggression_state(tree: SceneTree, lethal: Dictionary) -> voi
 
 	if _aggression_active:
 		var retreat: Dictionary = should_retreat_aggression(tree)
-		if bool(retreat.get("should_retreat", false)) and _commit_timer >= COMMIT_MIN_SECONDS * 0.45:
+		if VariantUtils.to_bool(retreat.get("should_retreat", false)) and _commit_timer >= COMMIT_MIN_SECONDS * 0.45:
 			_set_aggression_active(false, String(retreat.get("reason", &"retreat")))
 			_retreat_cooldown = RETREAT_COOLDOWN_SECONDS
 			return

@@ -59,7 +59,7 @@ static func apply(
 		return result
 
 	var target_object: Object = target as Object
-	var ignore_hostility: bool = bool(options.get(OPT_IGNORE_HOSTILITY, false))
+	var ignore_hostility: bool = VariantUtils.to_bool(options.get(OPT_IGNORE_HOSTILITY, false))
 	var safe_attacker: Node = CombatTargetValidation.sanitize_damage_attacker(attacker)
 
 	if not ignore_hostility:
@@ -91,7 +91,7 @@ static func apply(
 
 	var crit_result: Dictionary = _roll_critical(working_amount, options)
 	working_amount = float(crit_result.get("amount", working_amount))
-	var was_critical: bool = bool(crit_result.get("was_critical", false))
+	var was_critical: bool = VariantUtils.to_bool(crit_result.get("was_critical", false))
 	result[RESULT_WAS_CRITICAL] = was_critical
 
 	working_amount = _apply_damage_reduction(target_object, working_amount, damage_type, options)
@@ -131,7 +131,7 @@ static func _notify_passive_damage(
 	result: Dictionary,
 	options: Dictionary
 ) -> void:
-	var is_basic: bool = bool(options.get(OPT_IS_BASIC_ATTACK, false))
+	var is_basic: bool = VariantUtils.to_bool(options.get(OPT_IS_BASIC_ATTACK, false))
 
 	if attacker != null and is_instance_valid(attacker):
 		var attacker_passive: HeroPassiveComponent = HeroPassiveComponent.find_on(attacker)
@@ -150,7 +150,7 @@ static func apply_damage(
 	attacker = null,
 	options: Dictionary = {}
 ) -> bool:
-	return bool(apply(target, amount, attacker, options).get(RESULT_APPLIED, false))
+	return VariantUtils.to_bool(apply(target, amount, attacker, options).get(RESULT_APPLIED, false))
 
 
 static func resolve_health_component(target: Object) -> HealthComponent:
@@ -223,9 +223,9 @@ static func _can_receive_pipeline_damage(target: Object) -> bool:
 
 static func _is_damage_immune(target: Object) -> bool:
 	if target.has_method(&"is_divine_protection_active"):
-		return bool(target.call(&"is_divine_protection_active"))
+		return VariantUtils.to_bool(target.call(&"is_divine_protection_active"))
 	if target.has_method(&"is_damage_immune"):
-		return bool(target.call(&"is_damage_immune"))
+		return VariantUtils.to_bool(target.call(&"is_damage_immune"))
 	return false
 
 
@@ -253,7 +253,7 @@ static func _apply_target_buffs(
 
 static func _roll_critical(amount: float, options: Dictionary) -> Dictionary:
 	var result := {"amount": amount, "was_critical": false}
-	if not bool(options.get(OPT_CAN_CRIT, false)):
+	if not VariantUtils.to_bool(options.get(OPT_CAN_CRIT, false)):
 		return result
 
 	var chance: float = clampf(float(options.get(OPT_CRIT_CHANCE, 0.0)), 0.0, 1.0)
@@ -290,7 +290,7 @@ static func _resolve_mitigated_damage(
 	damage_type: int,
 	options: Dictionary
 ) -> int:
-	var bypass_armor: bool = bool(options.get(OPT_BYPASS_ARMOR, false))
+	var bypass_armor: bool = VariantUtils.to_bool(options.get(OPT_BYPASS_ARMOR, false))
 	if damage_type == DamageType.TRUE:
 		bypass_armor = true
 
@@ -333,19 +333,19 @@ static func _maybe_spawn_floating_number(
 	if not target is Node3D:
 		return
 
-	var emphasized: bool = bool(options.get(OPT_EMPHASIZE_FLOAT, false)) or was_critical
+	var emphasized: bool = VariantUtils.to_bool(options.get(OPT_EMPHASIZE_FLOAT, false)) or was_critical
 	FloatingDamageNumber.spawn(target as Node3D, damage_dealt, emphasized)
 
 
 static func _should_show_floating_number(target: Object, options: Dictionary) -> bool:
 	if options.has(OPT_SHOW_FLOAT):
-		return bool(options[OPT_SHOW_FLOAT])
+		return VariantUtils.to_bool(options[OPT_SHOW_FLOAT])
 	# Combat units are CharacterBody3D; buildings are StaticBody3D (no float text).
 	return target is CharacterBody3D
 
 
 static func _apply_lifesteal(attacker: Node, damage_dealt: int, options: Dictionary) -> int:
-	if not bool(options.get(OPT_CAN_LIFESTEAL, false)):
+	if not VariantUtils.to_bool(options.get(OPT_CAN_LIFESTEAL, false)):
 		return 0
 	if damage_dealt <= 0 or attacker == null:
 		return 0

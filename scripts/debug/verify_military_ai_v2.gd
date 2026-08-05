@@ -972,7 +972,7 @@ func _verify_retreat_recover_hysteresis_helpers(failures: PackedStringArray) -> 
 
 	## Empty army never falsely forces retreat.
 	var no_fight: Dictionary = director._evaluate_retreat_triggers(get_tree(), [])
-	_expect(failures, "empty army does not retreat", not bool(no_fight.get("should_retreat", true)))
+	_expect(failures, "empty army does not retreat", not VariantUtils.to_bool(no_fight.get("should_retreat", true)))
 
 	## Recover readiness requires hero + minimum squad — never perfection alone.
 	_expect(failures, "recover not ready without army", not director._is_recover_ready(get_tree()))

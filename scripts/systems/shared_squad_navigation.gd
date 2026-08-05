@@ -614,7 +614,7 @@ func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 
 	var dist_to_slot: float = _horizontal_distance(unit.global_position, slot_target)
 	if dist_to_slot <= SLOT_SKIP_DISTANCE:
-		if unit.has_method("is_confirmed_stuck") and bool(unit.call("is_confirmed_stuck")):
+		if unit.has_method("is_confirmed_stuck") and VariantUtils.to_bool(unit.call("is_confirmed_stuck")):
 			pass
 		else:
 			return
@@ -625,12 +625,12 @@ func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 			return
 
 	if unit.has_method("_should_skip_repath_while_engaged"):
-		if bool(unit.call("_should_skip_repath_while_engaged")):
+		if VariantUtils.to_bool(unit.call("_should_skip_repath_while_engaged")):
 			return
 
 	var applied := false
 	if ctx.use_attack_move and unit.has_method("command_attack_move"):
-		applied = bool(
+		applied = VariantUtils.to_bool(
 			unit.call(
 				"command_attack_move",
 				slot_target,
@@ -638,11 +638,11 @@ func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 			)
 		)
 	elif unit.has_method("request_movement_target"):
-		applied = bool(
+		applied = VariantUtils.to_bool(
 			unit.call("request_movement_target", slot_target, Unit.RepathUrgency.FORMATION)
 		)
 	elif unit.has_method("set_movement_target"):
-		applied = bool(
+		applied = VariantUtils.to_bool(
 			unit.call("set_movement_target", slot_target, Unit.RepathUrgency.FORMATION)
 		)
 

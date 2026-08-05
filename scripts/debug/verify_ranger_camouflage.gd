@@ -88,7 +88,7 @@ func _verify_camouflage_activation(failures: PackedStringArray) -> void:
 	var ranger: Node = _make_ranger(2)
 	var ok: bool = ranger.try_camouflage()
 	_expect(failures, "activate camouflage", ok)
-	_expect(failures, "camouflage active", bool(ranger.get("_camouflage_active")))
+	_expect(failures, "camouflage active", VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	_expect(failures, "combat hidden", ranger.is_combat_hidden())
 	_expect(
 		failures,
@@ -188,7 +188,7 @@ func _verify_combat_roll_preserves_and_extends(failures: PackedStringArray) -> v
 
 	var rolled: bool = ranger.try_combat_roll(Vector3(5.0, 0.0, 0.0))
 	_expect(failures, "combat roll during camo", rolled)
-	_expect(failures, "still camouflaged after Q", bool(ranger.get("_camouflage_active")))
+	_expect(failures, "still camouflaged after Q", VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	_expect(failures, "still combat hidden after Q", ranger.is_combat_hidden())
 	_expect(
 		failures,
@@ -219,7 +219,7 @@ func _verify_offensive_breaks(failures: PackedStringArray) -> void:
 	var ranger_aa: Node = _make_ranger(1)
 	ranger_aa.try_camouflage()
 	ranger_aa.call("_break_camouflage_from_action")
-	_expect(failures, "AA ends camo active", not bool(ranger_aa.get("_camouflage_active")))
+	_expect(failures, "AA ends camo active", not VariantUtils.to_bool(ranger_aa.get("_camouflage_active")))
 	_expect(failures, "AA clears remaining", is_equal_approx(float(ranger_aa.get("_camouflage_remaining")), 0.0))
 	_expect(failures, "AA removes buff", not CamouflageBuff.has_buff(ranger_aa))
 	_expect(failures, "AA clears hidden", not ranger_aa.is_combat_hidden())
@@ -230,7 +230,7 @@ func _verify_offensive_breaks(failures: PackedStringArray) -> void:
 	ranger_w.try_camouflage()
 	ranger_w.current_mana = ranger_w.max_mana
 	ranger_w.try_bear_trap(Vector3(1.0, 0.0, 0.0))
-	_expect(failures, "W ends camouflage", not bool(ranger_w.get("_camouflage_active")))
+	_expect(failures, "W ends camouflage", not VariantUtils.to_bool(ranger_w.get("_camouflage_active")))
 	_expect(failures, "W clears remaining", is_equal_approx(float(ranger_w.get("_camouflage_remaining")), 0.0))
 	ranger_w.queue_free()
 
@@ -239,7 +239,7 @@ func _verify_offensive_breaks(failures: PackedStringArray) -> void:
 	ranger_e.try_camouflage()
 	ranger_e.current_mana = ranger_e.max_mana
 	ranger_e.try_crossbow_bolt(Vector3(1.0, 0.0, 0.0))
-	_expect(failures, "E ends camouflage", not bool(ranger_e.get("_camouflage_active")))
+	_expect(failures, "E ends camouflage", not VariantUtils.to_bool(ranger_e.get("_camouflage_active")))
 	_expect(failures, "E clears remaining", is_equal_approx(float(ranger_e.get("_camouflage_remaining")), 0.0))
 	ranger_e.queue_free()
 
@@ -248,12 +248,12 @@ func _verify_move_stop_hold_preserve(failures: PackedStringArray) -> void:
 	var ranger: Node = _make_ranger(1)
 	ranger.try_camouflage()
 	ranger.set_movement_target(Vector3(4.0, 0.0, 0.0))
-	_expect(failures, "move keeps camo", bool(ranger.get("_camouflage_active")))
+	_expect(failures, "move keeps camo", VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	ranger.clear_move_target()
-	_expect(failures, "stop keeps camo", bool(ranger.get("_camouflage_active")))
+	_expect(failures, "stop keeps camo", VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	if ranger.has_method(&"command_hold_position"):
 		ranger.command_hold_position()
-	_expect(failures, "hold keeps camo", bool(ranger.get("_camouflage_active")))
+	_expect(failures, "hold keeps camo", VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	_expect(failures, "hold clears hunt bonus while still", is_equal_approx(float(ranger.get("_hunting_speed_bonus_applied")), 0.0))
 	ranger.queue_free()
 
@@ -279,7 +279,7 @@ func _verify_death_clears_state(failures: PackedStringArray) -> void:
 	var ranger: Node = _make_ranger(1)
 	ranger.try_camouflage()
 	ranger.call("_clear_camouflage_state")
-	_expect(failures, "death clear active", not bool(ranger.get("_camouflage_active")))
+	_expect(failures, "death clear active", not VariantUtils.to_bool(ranger.get("_camouflage_active")))
 	_expect(failures, "death clear remaining", is_equal_approx(float(ranger.get("_camouflage_remaining")), 0.0))
 	_expect(failures, "death clear hunt bonus", is_equal_approx(float(ranger.get("_hunting_speed_bonus_applied")), 0.0))
 	_expect(failures, "death clear buff", not CamouflageBuff.has_buff(ranger))

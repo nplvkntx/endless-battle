@@ -185,13 +185,13 @@ static func evaluate_build_need(
 	if tower_count >= tower_cap or tower_count >= MAX_TOWERS_HARD_CAP:
 		return _need_result(false)
 
-	if bool(context.get("food_blocked", false)):
+	if VariantUtils.to_bool(context.get("food_blocked", false)):
 		return _need_result(false)
-	if bool(context.get("missing_workers", false)):
+	if VariantUtils.to_bool(context.get("missing_workers", false)):
 		return _need_result(false)
-	if bool(context.get("core_army_starved", false)) and not bool(context.get("emergency", false)):
+	if VariantUtils.to_bool(context.get("core_army_starved", false)) and not VariantUtils.to_bool(context.get("emergency", false)):
 		return _need_result(false)
-	if bool(context.get("opening_core_incomplete", false)) and not bool(context.get("emergency", false)):
+	if VariantUtils.to_bool(context.get("opening_core_incomplete", false)) and not VariantUtils.to_bool(context.get("emergency", false)):
 		return _need_result(false)
 
 	update_threat_paths(tree, enemy_anchor)
@@ -201,12 +201,12 @@ static func evaluate_build_need(
 	_last_selected_lane = best_lane
 	_last_lane_score = lane_score
 
-	var emergency: bool = bool(context.get("emergency", false))
-	var early_aggression: bool = bool(context.get("early_aggression", false))
-	var weak_army_expanding: bool = bool(context.get("weak_army_expanding", false))
-	var has_production: bool = bool(context.get("has_production", false))
-	var economy_ready: bool = bool(context.get("economy_ready", false))
-	var expansion_exposed: bool = bool(context.get("expansion_exposed", false))
+	var emergency: bool = VariantUtils.to_bool(context.get("emergency", false))
+	var early_aggression: bool = VariantUtils.to_bool(context.get("early_aggression", false))
+	var weak_army_expanding: bool = VariantUtils.to_bool(context.get("weak_army_expanding", false))
+	var has_production: bool = VariantUtils.to_bool(context.get("has_production", false))
+	var economy_ready: bool = VariantUtils.to_bool(context.get("economy_ready", false))
+	var expansion_exposed: bool = VariantUtils.to_bool(context.get("expansion_exposed", false))
 	var destroyed_lane_active: bool = _has_rebuild_candidate_for_lane(best_lane)
 
 	if emergency:
@@ -273,7 +273,7 @@ static func score_lane(
 		LANE_HARASS:
 			score += 0.25
 		LANE_EXPANSION:
-			if bool(context.get("has_expansion", false)):
+			if VariantUtils.to_bool(context.get("has_expansion", false)):
 				score += 0.45
 			else:
 				score -= 0.35
@@ -286,11 +286,11 @@ static func score_lane(
 		score -= 2.5
 
 	## Prefer lanes that expose workers / production / town hall.
-	if lane == LANE_HARASS and bool(context.get("workers_exposed", true)):
+	if lane == LANE_HARASS and VariantUtils.to_bool(context.get("workers_exposed", true)):
 		score += 0.35
-	if lane in [LANE_CENTER, LANE_LEFT, LANE_RIGHT] and bool(context.get("has_production", false)):
+	if lane in [LANE_CENTER, LANE_LEFT, LANE_RIGHT] and VariantUtils.to_bool(context.get("has_production", false)):
 		score += 0.2
-	if bool(context.get("expansion_exposed", false)) and lane == LANE_EXPANSION:
+	if VariantUtils.to_bool(context.get("expansion_exposed", false)) and lane == LANE_EXPANSION:
 		score += 0.7
 
 	## Gentle pull toward player-base / map-center approach.

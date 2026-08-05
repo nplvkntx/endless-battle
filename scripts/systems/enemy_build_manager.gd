@@ -2137,7 +2137,7 @@ func _should_build_tower(emergency_only: bool = false) -> bool:
 		return false
 
 	var need: Dictionary = _evaluate_tower_build_need(emergency_only)
-	if not bool(need.get("should_build", false)):
+	if not VariantUtils.to_bool(need.get("should_build", false)):
 		return false
 
 	if not _can_afford_tower_without_starving_core():
@@ -2155,7 +2155,7 @@ func _try_place_tower(emergency_only: bool = false) -> bool:
 		return false
 
 	var need: Dictionary = _evaluate_tower_build_need(emergency_only)
-	if not bool(need.get("should_build", false)):
+	if not VariantUtils.to_bool(need.get("should_build", false)):
 		return false
 
 	_ensure_tower_reservation()
@@ -2284,12 +2284,12 @@ func _evaluate_tower_build_need(emergency_only: bool) -> Dictionary:
 	var army_count: int = _count_living_military_units()
 	var threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(get_tree())
 	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
-	var is_emergency: bool = bool(emergency_threat.get("threatened", false)) or (
-		bool(threat.get("threatened", false))
+	var is_emergency: bool = VariantUtils.to_bool(emergency_threat.get("threatened", false)) or (
+		VariantUtils.to_bool(threat.get("threatened", false))
 		and threat.get("reason", &"") in [&"town_center", &"base", &"economy"]
 	)
 	var early_aggression: bool = (
-		bool(threat.get("threatened", false))
+		VariantUtils.to_bool(threat.get("threatened", false))
 		and phase_name in ["OPENING", "EARLY_ARMY", "CREEPING"]
 	)
 	var has_expansion: bool = _count_living_command_centers() >= 2
@@ -2332,7 +2332,7 @@ func _evaluate_tower_build_need(emergency_only: bool) -> Dictionary:
 		),
 		"expansion_exposed": expansion_exposed,
 		"has_expansion": has_expansion,
-		"workers_exposed": bool(threat.get("reason", &"") == &"workers") or early_aggression,
+		"workers_exposed": VariantUtils.to_bool(threat.get("reason", &"") == &"workers") or early_aggression,
 		"lane_coverage": coverage_data.get("coverage", {}),
 		"towers_per_lane": coverage_data.get("towers_per_lane", {}),
 	}
@@ -2342,7 +2342,7 @@ func _evaluate_tower_build_need(emergency_only: bool) -> Dictionary:
 		command_center.global_position,
 		context
 	)
-	if emergency_only and not bool(need.get("should_build", false)):
+	if emergency_only and not VariantUtils.to_bool(need.get("should_build", false)):
 		return need
 	if emergency_only and not (
 		need.get("reason", &"") in [
@@ -2367,7 +2367,7 @@ func _can_afford_tower_without_starving_core() -> bool:
 
 	## Emergency defense may spend closer to the raw tower cost.
 	var threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(get_tree())
-	if bool(threat.get("threatened", false)):
+	if VariantUtils.to_bool(threat.get("threatened", false)):
 		gold_buffer = UnitStats.SWORDSMAN_GOLD_COST
 
 	return EnemyResourceManager.can_afford(
