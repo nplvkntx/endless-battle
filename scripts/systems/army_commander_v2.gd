@@ -1550,10 +1550,19 @@ func _issue_pending_defend_orders(
 
 
 func _is_critical_base_defense_emergency() -> bool:
+	## Live emergency flag is required. Director reason supplies the critical category
+	## (town_center / workers / …) without calling the fragile EAC static accessor.
 	if not EnemyArmyCommand.is_emergency_defense_active():
 		return false
+	var reason: StringName = &""
+	if _director != null:
+		reason = _director.get_defend_reason()
+	if reason == &"":
+		var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+		if state != null:
+			reason = state.emergency_reason
 	return EnemyArmyCommand.is_critical_defense_threat({
-		"reason": EnemyArmyCommand.get_emergency_defense_reason(),
+		"reason": reason,
 	})
 
 

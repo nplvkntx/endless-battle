@@ -76,6 +76,9 @@ var _watchdog_distance: float = -1.0
 var _watchdog_active_order: String = "-"
 var _watchdog_last_diag_signature: String = ""
 var _watchdog_objective_valid: bool = true
+## Last blocked offense evaluation reason (change-only telemetry).
+var _last_attack_block_reason: String = ""
+var _last_offense_diag_signature: String = ""
 ## instance_id of the Node whose tree_exiting clears the active mission target.
 var _mission_target_exit_bound_id: int = 0
 ## Provider intents drained once per strategic tick (PHASE 2 #4).
@@ -111,6 +114,8 @@ func reset_match_state() -> void:
 	_watchdog_diag_timer = 0.0
 	_watchdog_active_order = "-"
 	_watchdog_last_diag_signature = ""
+	_last_attack_block_reason = ""
+	_last_offense_diag_signature = ""
 	_publish_perf_status()
 
 
@@ -137,6 +142,8 @@ func _clear_roster_state() -> void:
 	_state_entered_msec = Time.get_ticks_msec()
 	_post_retreat_attack_cooldown = 0.0
 	_designated_recovery_point = Vector3.ZERO
+	_last_attack_block_reason = ""
+	_last_offense_diag_signature = ""
 	_unbind_mission_target_exit()
 	_reset_watchdog_state("match reset")
 
@@ -220,7 +227,16 @@ func _evaluate_strategy() -> void:
 		if _evaluate_attack_strategy(tree, rally_point):
 			return
 
+	## Healthy army must not gather forever — force creep/attack after the passive ceiling.
+	if (
+		_state == State.ASSEMBLE
+		and _state_commit_elapsed_seconds() >= MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS
+		and _force_passive_assemble_breakout(tree, rally_point)
+	):
+		return
+
 	_transition_to(State.ASSEMBLE, "gathering squad at base", rally_point)
+	_maybe_log_offense_diag(tree, rally_point, "fallback ASSEMBLE")
 
 
 func _refresh_intent_snapshot() -> void:
@@ -1657,15 +1673,27 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 				return true
 			_transition_to(State.RECOVER, "attack squad below threshold", rally_point)
 			return true
+		_note_attack_block(
+			"not attack-ready (mil=%d hero=%s lethal=%s)" % [
+				get_military_unit_count(),
+				str(_main_squad.hero_present),
+				str(lethal),
+			]
+		)
 		return false
 
 	if attack_army.is_empty():
+		_note_attack_block("attack army empty despite ready gate")
 		return false
 
 	if EnemyArmyCommand.is_defense_blocking_offense():
+		_note_attack_block("emergency defense blocking offense")
 		return false
 
 	if _state != State.ATTACK and not _can_reenter_attack(tree, rally_point):
+		_note_attack_block(
+			"post-retreat attack cooldown (%.1fs)" % _post_retreat_attack_cooldown
+		)
 		return false
 
 	var origin: Vector3 = _main_squad.center
@@ -1689,6 +1717,7 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 				return true
 			_transition_to(State.RECOVER, "no attack targets remain", rally_point)
 			return true
+		_note_attack_block("no valid attack target")
 		return false
 
 	if NodeSafety.is_alive_node(target_node):
@@ -1699,6 +1728,7 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	if _attack_is_lethal and not reason.begins_with("lethal"):
 		reason = "lethal %s" % reason
 
+	_last_attack_block_reason = ""
 	_transition_to(
 		State.ATTACK,
 		reason,
@@ -1706,6 +1736,7 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		target_node,
 		int(objective.get("priority", CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL))
 	)
+	_maybe_log_offense_diag(tree, rally_point, "accepted ATTACK: %s" % reason)
 	return true
 
 
@@ -2113,6 +2144,7 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		if _state == State.CREEP:
 			_transition_to(State.ASSEMBLE, "creep manager unavailable", rally_point)
 			return true
+		_note_attack_block("creep manager unavailable")
 		return false
 
 	var creep_army: Array = _get_creep_squad_units()
@@ -2146,6 +2178,7 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		if _state == State.CREEP:
 			_transition_to(State.ASSEMBLE, "no worthwhile camps remain", rally_point)
 			return true
+		_note_attack_block("no worthwhile creep camps")
 		return false
 
 	var score: float = _score_creep_camp(
@@ -2159,6 +2192,7 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	var reason: String = "creep %s" % creep_manager._format_camp_name(current_camp)
 	if just_cleared_camp:
 		reason = "chain %s" % creep_manager._format_camp_name(current_camp)
+	_last_attack_block_reason = ""
 	_transition_to(
 		State.CREEP,
 		reason,
@@ -2166,7 +2200,117 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		current_camp,
 		int(round(score))
 	)
+	_maybe_log_offense_diag(tree, rally_point, "accepted CREEP: %s" % reason)
 	return true
+
+
+## After a long ASSEMBLE, push a healthy grouped army into CREEP or ATTACK.
+## Never peels individuals off — uses the same squad gates as normal strategy.
+func _force_passive_assemble_breakout(tree: SceneTree, rally_point: Vector3) -> bool:
+	if tree == null:
+		return false
+	if EnemyArmyCommand.is_defense_blocking_offense():
+		_note_attack_block("assemble timeout blocked by emergency defense")
+		_maybe_log_offense_diag(tree, rally_point, "assemble timeout blocked")
+		return false
+
+	var healthy: bool = (
+		is_creep_ready()
+		or is_attack_ready()
+		or is_lethal_attack_ready()
+	)
+	if not healthy:
+		_note_attack_block(
+			"assemble timeout: army incomplete (mil=%d hero=%s pending=%d)" % [
+				get_military_unit_count(),
+				str(_main_squad.hero_present),
+				_pending_reinforcements.size(),
+			]
+		)
+		_maybe_log_offense_diag(tree, rally_point, "assemble timeout incomplete")
+		return false
+
+	## Prefer creeping so the army stays grouped and gains XP before a full push.
+	if is_creep_ready() and _evaluate_creep_strategy(tree, rally_point):
+		_maybe_log_offense_diag(tree, rally_point, "assemble timeout → CREEP")
+		return true
+
+	## Bypass early-creep preference: attack with the formed squad.
+	if is_attack_ready() or is_lethal_attack_ready():
+		## Temporarily clear post-retreat cooldown so a healthy army can leave base.
+		var previous_cooldown: float = _post_retreat_attack_cooldown
+		_post_retreat_attack_cooldown = 0.0
+		var launched: bool = _evaluate_attack_strategy(tree, rally_point)
+		if not launched:
+			_post_retreat_attack_cooldown = previous_cooldown
+			_note_attack_block("assemble timeout: attack evaluation failed")
+			_maybe_log_offense_diag(tree, rally_point, "assemble timeout attack failed")
+			return false
+		_maybe_log_offense_diag(tree, rally_point, "assemble timeout → ATTACK")
+		return true
+
+	return false
+
+
+func _note_attack_block(reason: String) -> void:
+	if reason.is_empty():
+		return
+	_last_attack_block_reason = reason
+
+
+func _maybe_log_offense_diag(tree: SceneTree, rally_point: Vector3, event: String) -> void:
+	var hero: Hero = null
+	if tree != null:
+		hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	var hero_level: int = hero.level if hero != null else 0
+	var mission_name: String = "-"
+	if _mission != null:
+		mission_name = _mission.get_mission_type_name()
+	var target_ok: bool = false
+	if _mission != null:
+		target_ok = (
+			_mission.get_alive_target_object() != null
+			or _mission.target_position != Vector3.ZERO
+		)
+	var assemble_age: float = 0.0
+	if _state == State.ASSEMBLE:
+		assemble_age = _state_commit_elapsed_seconds()
+		if assemble_age >= INF:
+			assemble_age = 0.0
+	var rally_text: String = "-"
+	if rally_point != Vector3.ZERO:
+		rally_text = "(%.0f,%.0f)" % [rally_point.x, rally_point.z]
+	var signature: String = "%s|%s|%s|%d|%d|%s|%s|%.0f|%s" % [
+		get_state_name(),
+		mission_name,
+		event,
+		get_military_unit_count(),
+		_main_squad.get_size(),
+		str(_main_squad.hero_present),
+		str(hero_level),
+		assemble_age,
+		_last_attack_block_reason,
+	]
+	if signature == _last_offense_diag_signature:
+		return
+	_last_offense_diag_signature = signature
+	EnemyAIDebug.log_once(
+		"v2_offense",
+		"[V2 Military] state=%s mission=%s event=%s mil=%d squad=%d hero=%s L%d attack_ready=%s block=%s target_ok=%s assemble=%.1fs rally=%s" % [
+			get_state_name(),
+			mission_name,
+			event,
+			get_military_unit_count(),
+			_main_squad.get_size(),
+			str(_main_squad.hero_present),
+			hero_level,
+			str(is_attack_ready()),
+			_last_attack_block_reason if not _last_attack_block_reason.is_empty() else "-",
+			str(target_ok),
+			assemble_age,
+			rally_text,
+		]
+	)
 
 
 func _get_creep_squad_units() -> Array:
@@ -2938,7 +3082,16 @@ func _publish_perf_status() -> void:
 	## Keep legacy AI status fields filled so older overlay lines stay coherent under V2.
 	PerfCounters.set_ai_status(display_state, mission_name, "MilitaryDirectorV2")
 	PerfCounters.set_ai_mission_detail(
-		"V2 %s → %s (%s)" % [display_state, objective, _last_transition_reason]
+		"V2 %s → %s (%s)%s" % [
+			display_state,
+			objective,
+			_last_transition_reason,
+			(
+				" | block=%s" % _last_attack_block_reason
+				if not _last_attack_block_reason.is_empty() and _state == State.ASSEMBLE
+				else ""
+			),
+		]
 	)
 	PerfCounters.set_combat_group_size(_main_squad.get_size())
 
@@ -3470,3 +3623,21 @@ func debug_is_watchdog_order_refreshed() -> bool:
 
 func debug_resolve_truthful_display_for_tests() -> Dictionary:
 	return _resolve_truthful_display(_mission)
+
+
+func debug_force_assemble_passive_elapsed_for_tests(seconds: float) -> void:
+	_state = State.ASSEMBLE
+	_state_entered_msec = Time.get_ticks_msec() - int(maxf(0.0, seconds) * 1000.0)
+
+
+func debug_force_passive_assemble_breakout_for_tests(rally_point: Vector3 = Vector3.ZERO) -> bool:
+	var tree: SceneTree = get_tree()
+	return _force_passive_assemble_breakout(tree, rally_point)
+
+
+func debug_get_last_attack_block_reason_for_tests() -> String:
+	return _last_attack_block_reason
+
+
+func debug_note_attack_block_for_tests(reason: String) -> void:
+	_note_attack_block(reason)

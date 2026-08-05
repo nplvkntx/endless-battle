@@ -876,7 +876,8 @@ static func allows_creep_orders() -> bool:
 	## V2 owns mission selection — legacy strategic gates must not soft-lock CREEP
 	## after ATTACK/DEFEND left strategic state stuck on a higher-priority label.
 	if MilitaryAIConfig.is_v2_enabled():
-		if _strategic_state == StrategicState.EMERGENCY_DEFENDING:
+		## Live emergency flag only — stale EMERGENCY_DEFENDING labels must not block forever.
+		if _emergency_defense_active:
 			return false
 		if _strategic_state == StrategicState.RETREATING:
 			return false
@@ -949,9 +950,12 @@ static func force_set_strategic_state_for_v2(
 		_sync_player_state_identity()
 		return
 
-	## Never yank emergency defense into offense.
+	## Never yank an ACTIVE emergency defense into offense.
+	## Once emergency flags are cleared, V2 may leave a stale EMERGENCY_DEFENDING label
+	## (otherwise ASSEMBLE/CREEP/ATTACK soft-lock forever via is_defense_blocking_offense).
 	if (
 		_strategic_state == StrategicState.EMERGENCY_DEFENDING
+		and _emergency_defense_active
 		and new_state not in [
 			StrategicState.EMERGENCY_DEFENDING,
 			StrategicState.DEFENDING,
@@ -1192,6 +1196,10 @@ static func allows_attack_wave_orders() -> bool:
 
 
 static func is_defense_blocking_offense() -> bool:
+	if MilitaryAIConfig.is_v2_enabled():
+		## V2: MilitaryDirectorV2 already prioritizes DEFEND. Only a live emergency
+		## flag may block offense — stale DEFENDING/EMERGENCY_DEFENDING labels must not.
+		return _emergency_defense_active
 	return _strategic_state in [
 		StrategicState.EMERGENCY_DEFENDING,
 		StrategicState.DEFENDING,
@@ -2053,11 +2061,12 @@ static func is_emergency_defense_active() -> bool:
 
 
 static func get_emergency_defense_reason() -> StringName:
-	return _emergency_reason
+	## Read SoT directly so callers do not depend on the static property getter chain.
+	return _rt().emergency_reason
 
 
 static func get_emergency_defense_objective() -> Vector3:
-	return _emergency_threat_position
+	return _rt().emergency_threat_position
 
 
 static func activate_emergency_defense(threat: Dictionary) -> void:
@@ -2129,7 +2138,12 @@ static func deactivate_emergency_defense() -> void:
 		if tree != null and blocks_player_offense(tree)
 		else StrategicState.RECOVERING
 	)
-	request_strategic_state(recover_state, "emergency ended")
+	## V2: force-clear the strategic label immediately. Pending request_strategic_state
+	## can be rejected by MIN_STATE_DURATION, leaving EMERGENCY_DEFENDING stuck.
+	if MilitaryAIConfig.is_v2_enabled():
+		force_set_strategic_state_for_v2(recover_state, "emergency ended")
+	else:
+		request_strategic_state(recover_state, "emergency ended")
 	EnemyAIDebug.log_event("Threat cleared, regrouping")
 
 

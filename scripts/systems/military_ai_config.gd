@@ -58,6 +58,8 @@ const V2_ASSEMBLE_RALLY_MIN_RADIUS: float = 8.0
 const V2_ASSEMBLE_RALLY_MAX_RADIUS: float = 15.0
 const V2_ASSEMBLE_PRODUCTION_EXIT_CLEARANCE: float = 4.0
 const V2_ASSEMBLE_ATTACK_MOVE_DISTANCE: float = 6.0
+## Hard ceiling so a healthy army cannot remain gathered forever.
+const V2_ASSEMBLE_MAX_PASSIVE_SECONDS: float = 45.0
 
 ## V2 DEFEND behavior tuning.
 const V2_DEFEND_LEASH_RADIUS: float = 42.0

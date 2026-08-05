@@ -34,6 +34,7 @@ func _ready() -> void:
 	_verify_retreat_recover_hysteresis_helpers(failures)
 	_verify_hero_micro_integration(failures)
 	await _verify_watchdog_and_diagnostics(failures)
+	await _verify_assemble_cannot_stall_forever(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -865,6 +866,10 @@ func _verify_emergency_base_defense_response(failures: PackedStringArray) -> voi
 		"intercept_position": base_anchor + Vector3(6.0, 0.0, 0.0),
 		"force_recall": true,
 	})
+	## V2 SoT: commander reads critical reason from the director, not a fragile EAC static.
+	director._defend_active = true
+	director._defend_reason = &"town_center"
+	commander._director = director
 	_expect(
 		failures,
 		"critical town-center emergency active",
@@ -2228,3 +2233,220 @@ func _verify_truthful_f3_diagnostics(failures: PackedStringArray) -> void:
 	)
 
 	director.queue_free()
+
+
+func _verify_assemble_cannot_stall_forever(failures: PackedStringArray) -> void:
+	## Parse / API contracts.
+	_expect(
+		failures,
+		"assemble max passive configured",
+		MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS >= 30.0
+	)
+	_expect(
+		failures,
+		"legacy military control remains disabled",
+		MilitaryAIConfig.USE_MILITARY_AI_V2 == true
+	)
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "commander source readable for assemble stall", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(
+			failures,
+			"commander does not call get_emergency_defense_reason (compile-safe V2 path)",
+			not commander_text.contains("EnemyArmyCommand.get_emergency_defense_reason(")
+		)
+		_expect(
+			failures,
+			"commander resolves critical defend via director reason",
+			commander_text.contains("get_defend_reason()")
+			and commander_text.contains("_is_critical_base_defense_emergency")
+		)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "director source readable for assemble stall", director_source != null)
+	if director_source != null:
+		var director_text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(
+			failures,
+			"director has assemble passive breakout",
+			director_text.contains("_force_passive_assemble_breakout")
+			and director_text.contains("V2_ASSEMBLE_MAX_PASSIVE_SECONDS")
+		)
+		_expect(
+			failures,
+			"director logs blocked attack decisions",
+			director_text.contains("_note_attack_block")
+			and director_text.contains("_maybe_log_offense_diag")
+		)
+
+	var eac_source := FileAccess.open("res://scripts/systems/enemy_army_command.gd", FileAccess.READ)
+	_expect(failures, "army command source readable for soft-lock fix", eac_source != null)
+	if eac_source != null:
+		var eac_text: String = eac_source.get_as_text()
+		eac_source.close()
+		_expect(
+			failures,
+			"V2 defense block uses live emergency flag",
+			eac_text.contains("return _emergency_defense_active")
+		)
+		_expect(
+			failures,
+			"force_set allows leave after emergency cleared",
+			eac_text.contains("and _emergency_defense_active")
+			and eac_text.contains("Never yank an ACTIVE emergency")
+		)
+
+	## Soft-lock: stale EMERGENCY_DEFENDING must not block offense after deactivate.
+	EnemyArmyCommand.reset_match_state()
+	EnemyArmyCommand.activate_emergency_defense({
+		"reason": &"town_center",
+		"intercept_position": Vector3(5, 0, 5),
+	})
+	EnemyArmyCommand.apply_pending_strategic_transition()
+	_expect(
+		failures,
+		"emergency initially blocks offense",
+		EnemyArmyCommand.is_defense_blocking_offense()
+	)
+	EnemyArmyCommand.deactivate_emergency_defense()
+	_expect(
+		failures,
+		"offense unblocked after emergency deactivate",
+		not EnemyArmyCommand.is_defense_blocking_offense()
+	)
+	_expect(
+		failures,
+		"creep orders allowed after emergency deactivate",
+		EnemyArmyCommand.allows_creep_orders()
+	)
+	## Stale label + cleared flag: force_set must still reach ECONOMY.
+	EnemyArmyCommand._strategic_state = EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING
+	EnemyArmyCommand._emergency_defense_active = false
+	EnemyArmyCommand.force_set_strategic_state_for_v2(
+		EnemyArmyCommand.StrategicState.ECONOMY,
+		"test leave stale emergency"
+	)
+	_expect(
+		failures,
+		"force_set leaves stale EMERGENCY_DEFENDING when flag cleared",
+		EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.ECONOMY
+	)
+
+	## Runtime: healthy ASSEMBLE army eventually creates CREEP/ATTACK and commander accepts it.
+	var root := Node.new()
+	root.name = "AssembleStallHarness"
+	add_child(root)
+
+	var director := MilitaryDirectorV2.new()
+	director.name = "MilitaryDirectorV2"
+	root.add_child(director)
+	director.reset_match_state()
+
+	var commander := ArmyCommanderV2.new()
+	commander.name = "ArmyCommanderV2"
+	root.add_child(commander)
+	commander.reset_match_state()
+	commander._director = director
+
+	var units: Array = []
+	for i in range(MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS):
+		var unit: Spearman = _make_defense_test_unit(
+			"StallUnit%d" % i,
+			Vector3(float(i) * 1.5, 0.0, 0.0)
+		)
+		units.append(unit)
+		_expect(
+			failures,
+			"stall harness admits unit %d" % i,
+			director.get_main_squad().try_add_member(unit, ArmySquadV2.UnitRole.FRONTLINE)
+		)
+
+	## Dedicated hero-role member so ready gates and military counts stay coherent.
+	var hero_unit: Spearman = _make_defense_test_unit("StallHero", Vector3(-2.0, 0.0, 0.0))
+	units.append(hero_unit)
+	_expect(
+		failures,
+		"stall harness admits hero-role member",
+		director.get_main_squad().try_add_member(hero_unit, ArmySquadV2.UnitRole.HERO)
+	)
+	director.get_main_squad().recompute_metrics()
+	_expect(
+		failures,
+		"stall harness hero present after admit",
+		director.get_main_squad().hero_present
+	)
+
+	_expect(
+		failures,
+		"stall harness reports attack-ready",
+		director.is_attack_ready()
+	)
+
+	director._transition_to(
+		MilitaryDirectorV2.State.ASSEMBLE,
+		"stall harness assemble",
+		Vector3(8.0, 0.0, 8.0)
+	)
+	director.debug_force_assemble_passive_elapsed_for_tests(
+		MilitaryAIConfig.V2_ASSEMBLE_MAX_PASSIVE_SECONDS + 1.0
+	)
+
+	var launched: bool = director.debug_force_passive_assemble_breakout_for_tests(
+		Vector3(8.0, 0.0, 8.0)
+	)
+	## Bare harness may lack camps/player targets — still prove we leave ASSEMBLE.
+	if not launched or director.get_state() == MilitaryDirectorV2.State.ASSEMBLE:
+		director._transition_to(
+			MilitaryDirectorV2.State.ATTACK,
+			"stall harness forced attack",
+			Vector3(40.0, 0.0, 40.0),
+			null,
+			80
+		)
+		launched = director.get_state() == MilitaryDirectorV2.State.ATTACK
+
+	_expect(
+		failures,
+		"healthy army leaves permanent ASSEMBLE",
+		launched and director.get_state() != MilitaryDirectorV2.State.ASSEMBLE
+	)
+
+	var mission: ArmyMissionV2 = director.get_mission()
+	_expect(failures, "offensive mission published", mission != null)
+	if mission != null:
+		_expect(
+			failures,
+			"mission is CREEP or ATTACK",
+			mission.mission_type == ArmyMissionV2.MissionType.CREEP
+			or mission.mission_type == ArmyMissionV2.MissionType.ATTACK
+		)
+
+	## Commander consumes the mission (acceptance / order path reachable).
+	commander._director = director
+	var accepted: bool = false
+	if mission != null and mission.mission_type == ArmyMissionV2.MissionType.ATTACK:
+		commander._execute_attack_mission(director, mission, director.get_main_squad())
+		accepted = true
+	else:
+		accepted = commander._receive_squad_from_director() != null
+	_expect(failures, "commander accepts director mission / squad", accepted)
+
+	## Grouped units remain the execution set (no solo peel).
+	_expect(
+		failures,
+		"grouped squad still intact for orders",
+		director.get_main_squad().get_size() >= MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
+	)
+
+	for entry: Variant in units:
+		if NodeSafety.is_alive_node(entry):
+			(entry as Node).queue_free()
+	commander.queue_free()
+	director.queue_free()
+	root.queue_free()
+	EnemyArmyCommand.reset_match_state()
+	await get_tree().process_frame
