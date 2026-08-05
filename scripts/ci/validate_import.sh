@@ -10,7 +10,20 @@ HEADLESS_SMOKE_SCENE="res://scenes/debug/verify_match_reset.tscn"
 
 fail() {
 	echo "VALIDATION FAIL: $1" >&2
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+		echo "::error::$1"
+	fi
 	FAIL=1
+}
+
+summarize_log() {
+	local log="$1"
+	local summary
+	summary="$(grep -Ei '(SCRIPT ERROR|Parse Error|Failed to load|Cannot open file|Compile Error|FAIL:|ERROR:)' "$log" | tail -n 5 | tr '\n' ' ' || true)"
+	if [[ -z "$summary" ]]; then
+		summary="$(tail -n 20 "$log" | tr '\n' ' ' || true)"
+	fi
+	echo "$summary" | cut -c1-500
 }
 
 require_godot() {
@@ -90,7 +103,7 @@ check_headless_import() {
 	trap 'rm -f "$log"' RETURN
 	if ! "$GODOT" --headless --path "$ROOT" --import >"$log" 2>&1; then
 		cat "$log" >&2
-		fail "Godot headless import exited non-zero"
+		fail "Godot headless import exited non-zero. $(summarize_log "$log")"
 		return
 	fi
 	scan_godot_log "$log" "Godot import/parse reported script or resource errors"
@@ -102,7 +115,7 @@ check_headless_smoke_scene() {
 	trap 'rm -f "$log"' RETURN
 	if ! "$GODOT" --headless --path "$ROOT" --scene "$HEADLESS_SMOKE_SCENE" >"$log" 2>&1; then
 		cat "$log" >&2
-		fail "Headless smoke scene exited non-zero"
+		fail "Headless smoke scene exited non-zero. $(summarize_log "$log")"
 		return
 	fi
 	scan_godot_log "$log" "Headless smoke scene reported script or resource errors"
