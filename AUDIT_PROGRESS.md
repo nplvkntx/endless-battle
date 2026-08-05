@@ -8,7 +8,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #2 (blocked on green CI):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not start until CI gate from #1 is green on main.
+**PHASE 1 #2 (ready):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). CI import gate is green on main.
 
 ## Completed tasks
 
@@ -19,8 +19,8 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | **Audit phase** | PHASE 1 — Project Stability |
 | **Dead asset root cause** | Unused legacy Quaternius candidate packs shipped FBX/glTF materials that reference missing textures never present in the repo. Primary CI failure: `modular_worker_ranger_candidates` FBXs → `T_Regular_Male_Dark_BaseColor.png` / `T_Regular_Male_Normal.png` (and female/roughness siblings). After that removal, CI/fresh import next exposed unused `props/` (`Anvil`/`Barrel`/`Coin` → missing `T_Trim_Metal_*` / `T_Trim_Furniture_*`) and unused `characters/worker_peasant/` (same missing `T_Regular_Male_*` base textures). No active gameplay scene, unit, worker, ranger, preload, or exported property depended on any of these folders — live units use `ranger_warrior_candidates/Warrior.gltf` and `Ranger.gltf`. |
 | **Files removed or repaired** | Deleted unused folders: `characters/modular_worker_ranger_candidates/` (64 files), `props/` (9 files), `characters/worker_peasant/` (18 files). Removed 46 obsolete lines from `assets/art/quaternius/MANIFEST.txt`. Stripped accidental UTF-8 BOM from `scenes/debug/verify_match_reset.tscn` (caused Godot `Parse Error: Expected '['` on fresh import). No scene/material/script replacements required for units. |
-| **Validation result** | Repo-wide Quaternius texture URI/FBX scan: zero missing textures. Fresh `.godot` Godot 4.7.stable headless `--import`: zero `Can't open` / `ERROR` / `Parse Error` lines. `scripts/ci/validate_import.sh` → `VALIDATION PASS`. GitHub Actions confirmation pending. |
-| **Next audit task** | PHASE 1 #2 — deterministic match-reset / ObjectDB leak elimination (audit #11), only after CI is green. |
+| **Validation result** | Repo-wide Quaternius texture URI/FBX scan: zero missing textures. Fresh `.godot` Godot 4.7.stable headless `--import`: zero `Can't open` / `ERROR` / `Parse Error` lines. `scripts/ci/validate_import.sh` → `VALIDATION PASS`. GitHub Actions `godot-import-check` on `c6c7e1f` → **success** ([run 30998409960](https://github.com/nplvkntx/endless-battle/actions/runs/30998409960)). |
+| **Next audit task** | PHASE 1 #2 — deterministic match-reset / ObjectDB leak elimination (audit #11). CI gate is green; safe to begin. |
 
 ### 2026-08-05 — Add headless import/parse CI (audit PHASE 1 #1, #10)
 
@@ -78,11 +78,13 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Autoload / scene script path scan | All paths present |
 | 2026-08-05 | Remove unused `modular_worker_ranger_candidates` | Local import + `validate_import.sh` PASS |
 | 2026-08-05 | Search for `T_Regular_Male_*` missing textures | Only historical AUDIT note remains |
+| 2026-08-05 | Also remove unused `props/` + `worker_peasant/` | Fresh import clean; CI green on `c6c7e1f` |
+| 2026-08-05 | GitHub Actions `godot-import-check` (`c6c7e1f`) | **success** |
 
 ## Known blockers
 
-CI green confirmation for the obsolete Quaternius cleanup is required before PHASE 1 #2.
+None for Phase 1 stability baseline — import CI is green.
 
 ## Next task
 
-**PHASE 1 #2 (blocked until CI green):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not begin until `godot-import-check` is green on main.
+**PHASE 1 #2:** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not expand scope into gameplay refactors.
