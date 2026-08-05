@@ -8,9 +8,19 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #2 (auto-selected next):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not start until CI gate from #1 is green on main.
+**PHASE 1 #2 (blocked on green CI):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not start until CI gate from #1 is green on main.
 
 ## Completed tasks
+
+### 2026-08-05 — Remove obsolete Quaternius modular worker/ranger candidates (audit PHASE 1 #1)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Dead asset root cause** | Unused legacy Quaternius candidate pack `assets/art/quaternius/characters/modular_worker_ranger_candidates/` contained FBX materials that reference missing base-character textures (`T_Regular_Male_Dark_BaseColor.png`, `T_Regular_Male_Normal.png`, plus female/roughness siblings). Godot 4.7 headless import correctly failed while importing those FBXs. No active gameplay scene, unit, worker, ranger, preload, or exported property depended on the folder — live units use `ranger_warrior_candidates/Warrior.gltf` and `Ranger.gltf`. |
+| **Files removed or repaired** | Deleted entire unused folder (64 files: FBX/PNG + `.import` sidecars). Removed 46 obsolete lines from `assets/art/quaternius/MANIFEST.txt`. No scene/material/script replacements required. |
+| **Validation result** | Repo search: missing texture filenames only remain in this historical CI-failure note. Local Godot 4.7.stable headless `--import` exit 0 with no `ERROR`/`Can't open`/`T_Regular_Male` lines. `scripts/ci/validate_import.sh` → `VALIDATION PASS`. GitHub Actions confirmation pending push. |
+| **Next audit task** | PHASE 1 #2 — deterministic match-reset / ObjectDB leak elimination (audit #11), only after CI is green. |
 
 ### 2026-08-05 — Add headless import/parse CI (audit PHASE 1 #1, #10)
 
@@ -66,11 +76,13 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | `verify_unit_navigation.tscn` | `PASS unit_navigation` |
 | 2026-08-05 | `verify_match_reset.tscn` | `PASS` — 26 match resetters, clean state |
 | 2026-08-05 | Autoload / scene script path scan | All paths present |
+| 2026-08-05 | Remove unused `modular_worker_ranger_candidates` | Local import + `validate_import.sh` PASS |
+| 2026-08-05 | Search for `T_Regular_Male_*` missing textures | Only historical AUDIT note remains |
 
 ## Known blockers
 
-None for Phase 1 stability baseline.
+CI green confirmation for the obsolete Quaternius cleanup is required before PHASE 1 #2.
 
 ## Next task
 
-**PHASE 1 #2 (auto-selected):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). CI import gate (#1) must stay green; do not expand scope into gameplay refactors.
+**PHASE 1 #2 (blocked until CI green):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not begin until `godot-import-check` is green on main.

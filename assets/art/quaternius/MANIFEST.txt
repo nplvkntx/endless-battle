@@ -83,52 +83,6 @@ characters/knight_candidates/Sword.fbx <- Knight by @Quaternius/FBX/Sword.fbx
 characters/knight_candidates/KnightCharacter.fbx <- Knight by @Quaternius/FBX/KnightCharacter.fbx
 characters/knight_candidates/Helmet3.fbx <- Knight by @Quaternius/FBX/Helmet3.fbx
 characters/knight_candidates/ShoulderPads.fbx <- Knight by @Quaternius/FBX/ShoulderPads.fbx
-characters/modular_worker_ranger_candidates/Female_Peasant_Arms.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Peasant_Arms.fbx
-characters/modular_worker_ranger_candidates/Female_Peasant_Body.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Peasant_Body.fbx
-characters/modular_worker_ranger_candidates/Female_Peasant_Feet.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Peasant_Feet.fbx
-characters/modular_worker_ranger_candidates/Female_Peasant_Legs.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Peasant_Legs.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Acc_Pauldrons.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Acc_Pauldrons.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Arms.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Arms.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Body.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Body.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Feet.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Feet.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Head_Hood.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Head_Hood.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger_Legs.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Female_Ranger_Legs.fbx
-characters/modular_worker_ranger_candidates/Male_Peasant_Arms.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Arms.fbx
-characters/modular_worker_ranger_candidates/Male_Peasant_Body.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Body.fbx
-characters/modular_worker_ranger_candidates/Male_Peasant_Feet.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Feet.fbx
-characters/modular_worker_ranger_candidates/Male_Peasant_Legs.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Peasant_Legs.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Acc_Pauldron.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Acc_Pauldron.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Arms.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Arms.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Body.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Body.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Feet_Boots.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Feet_Boots.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Head_Hood.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Head_Hood.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger_Legs.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Modular Parts/Male_Ranger_Legs.fbx
-characters/modular_worker_ranger_candidates/Female_Peasant.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Outfits/Female_Peasant.fbx
-characters/modular_worker_ranger_candidates/Female_Ranger.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Outfits/Female_Ranger.fbx
-characters/modular_worker_ranger_candidates/Male_Peasant.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Outfits/Male_Peasant.fbx
-characters/modular_worker_ranger_candidates/Male_Ranger.fbx <- Modular Character Outfits - Fantasy[Standard]/Exports/FBX (Unity)/Outfits/Male_Ranger.fbx
-characters/modular_worker_ranger_candidates/T_Peasant_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Peasant_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_Normal.png
-characters/modular_worker_ranger_candidates/T_Peasant_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Peasant_ORM.png
-characters/modular_worker_ranger_candidates/T_Ranger_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Ranger_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Ranger_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Ranger_Normal.png
-characters/modular_worker_ranger_candidates/T_Ranger_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Modular Parts/T_Ranger_ORM.png
-characters/modular_worker_ranger_candidates/T_Peasant_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Peasant_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_Normal.png
-characters/modular_worker_ranger_candidates/T_Peasant_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Peasant_ORM.png
-characters/modular_worker_ranger_candidates/T_Ranger_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Ranger_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_Normal.png
-characters/modular_worker_ranger_candidates/T_Ranger_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Exports/glTF (Godot-Unreal)/Outfits/T_Ranger_ORM.png
-characters/modular_worker_ranger_candidates/T_Peasant_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/Normals-UnrealEngine/T_Peasant_Normal.png
-characters/modular_worker_ranger_candidates/T_Peasant_2_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_2_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Peasant_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Peasant_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_Normal.png
-characters/modular_worker_ranger_candidates/T_Peasant_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Peasant/T_Peasant_ORM.png
-characters/modular_worker_ranger_candidates/T_Ranger_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Ranger/Normals-UnrealEngine/T_Ranger_Normal.png
-characters/modular_worker_ranger_candidates/T_Ranger_3_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Ranger/T_Ranger_3_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Ranger_BaseColor.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Ranger/T_Ranger_BaseColor.png
-characters/modular_worker_ranger_candidates/T_Ranger_Normal.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Ranger/T_Ranger_Normal.png
-characters/modular_worker_ranger_candidates/T_Ranger_ORM.png <- Modular Character Outfits - Fantasy[Standard]/Textures/Ranger/T_Ranger_ORM.png
 weapons/Shield_Round_2.fbx <- Medieval Weapons Pack by @Quaternius/FBX/Shield_Round_2.fbx
 weapons/Bow_Wooden2.fbx <- Medieval Weapons Pack by @Quaternius/FBX/Bow_Wooden2.fbx
 weapons/Bow_Evil.fbx <- Medieval Weapons Pack by @Quaternius/FBX/Bow_Evil.fbx
