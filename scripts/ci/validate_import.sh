@@ -93,7 +93,7 @@ scan_godot_log() {
 	local label="$2"
 	if grep -Eiq '(SCRIPT ERROR|Parse Error|Failed to load|Cannot open file|Compile Error|ERROR:.*\.gd)' "$log"; then
 		cat "$log" >&2
-		fail "$label"
+		fail "$label. $(summarize_log "$log")"
 	fi
 }
 
