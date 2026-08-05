@@ -8,9 +8,23 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #2 (ready):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). CI import gate is green on main.
+**PHASE 1 #3 (ready):** Remove or disable stub autoloads (audit #12). Match-reset verification is deterministic and `EnemyAttackPathDefense` is registered with `MatchSession`.
 
 ## Completed tasks
+
+### 2026-08-05 — Deterministic match-reset verification + AttackPathDefense reset leak (audit PHASE 1 #2 / #11)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Exact leak / stale-state defect** | `EnemyAttackPathDefense` match-scoped static state (`_lane_threat`, `_failed_sites`, `_destroyed_sites`, lane selection metadata) and `EnemyBuildPlacement.preferred_tower_lane` survived `MatchSession.prepare_new_match()`. Reset existed but was only invoked from scene-owned `EnemyStrategicDirector`, which is destroyed on menu/teardown and never runs on the next match bootstrap. |
+| **Evidence before the fix** | Strengthened `verify_match_reset.tscn`: after dirtying via `notify_tower_destroyed` / `remember_failed_site` / `set_tower_lane_preference` and calling `prepare_new_match()`, lane threat stayed elevated (`left` 0.2→1.0→1.8 across two cycles) and `preferred_tower_lane` remained `"right"`. Other registered resetters (resources, upgrades, control groups, FX active counts, EntityRegistry) already cleaned. |
+| **Root cause** | Match-scoped static defense memory had no `MatchSession` reset owner; scene teardown was incorrectly treated as sufficient. |
+| **Fix** | Registered `EnemyAttackPathDefense.reset_match_state` with `MatchSession` (also clears tower lane preference). Extended debug `_verify_clean_match_state` to assert default lane threats + empty preferred lane. Strengthened `verify_match_reset.gd` to capture a pre-match baseline, run two in-process lifecycle cycles, and assert semantic registries / orphan+node monitors. |
+| **Files changed** | `autoloads/match_session.gd`, `scripts/debug/verify_match_reset.gd`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless `--import`: clean. `verify_match_reset.tscn` ×3 separate processes: each `PASS` with 2 lifecycle cycles (registry=27). `scripts/ci/validate_import.sh`: `VALIDATION PASS`. |
+| **Remaining uncertainty** | Absolute `Performance.OBJECT_COUNT` still drifts (~+23/cycle) when CommandFeedback/Death/Impact FX are dirtied; node count and orphan count stay flat and resource monitor stable. Godot does not expose a reliable ObjectDB inventory for attributing those RefCounted/Tween graphs, so they are logged as notes rather than hard fails. Full `main.tscn` load → menu → rematch scene changes are not exercised (would destroy the harness); the harness validates the `prepare_new_match` contract MatchBootstrap uses. RID/navigation map ownership is not directly enumerable via safe public APIs here. |
+| **Next audit task** | PHASE 1 #3 — Remove or disable stub autoloads (audit #12). |
 
 ### 2026-08-05 — Remove obsolete Quaternius modular worker/ranger candidates (audit PHASE 1 #1)
 
@@ -80,11 +94,14 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Search for `T_Regular_Male_*` missing textures | Only historical AUDIT note remains |
 | 2026-08-05 | Also remove unused `props/` + `worker_peasant/` | Fresh import clean; CI green on `c6c7e1f` |
 | 2026-08-05 | GitHub Actions `godot-import-check` (`c6c7e1f`) | **success** |
+| 2026-08-05 | Strengthened `verify_match_reset` (2 lifecycle cycles, baseline compare) | `PASS` ×3 processes; registry=27 |
+| 2026-08-05 | Register `EnemyAttackPathDefense` match reset | Confirmed leak cleared (lane threat + preferred lane) |
+| 2026-08-05 | `validate_import.sh` after PHASE 1 #2 | `VALIDATION PASS` |
 
 ## Known blockers
 
-None for Phase 1 stability baseline — import CI is green.
+None for Phase 1 stability baseline — import CI is green; match-reset contract covers AttackPathDefense.
 
 ## Next task
 
-**PHASE 1 #2:** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not expand scope into gameplay refactors.
+**PHASE 1 #3:** Remove or disable stub autoloads (audit #12). Do not expand scope into gameplay refactors.
