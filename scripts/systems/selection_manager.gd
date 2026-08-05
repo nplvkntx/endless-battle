@@ -611,6 +611,23 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 		CommandFeedback.show_move_marker(ground_position)
 		return
 
+	# Ordinary unformed multi-select: one shared strategic corridor + unique slots.
+	if (
+		commandable_units.size() > 1
+		and SharedSquadNavigation.is_shared_navigation_enabled()
+	):
+		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+			commandable_units,
+			ground_position,
+			&"move",
+			queued
+		)
+		if shared_result.get("handled", false):
+			CommandFeedback.show_move_marker(
+				shared_result.get("accepted_destination", ground_position) as Vector3
+			)
+			return
+
 	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
@@ -680,6 +697,32 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 		CommandFeedback.show_attack_move_marker(ground_position)
 		return
 
+	if (
+		commandable_units.size() > 1
+		and SharedSquadNavigation.is_shared_navigation_enabled()
+	):
+		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+			commandable_units,
+			ground_position,
+			&"attack_move",
+			queued
+		)
+		if shared_result.get("handled", false):
+			var any_combat := false
+			for unit: Unit in commandable_units:
+				if _is_combat_order_unit(unit):
+					any_combat = true
+					break
+			if any_combat:
+				CommandFeedback.show_attack_move_marker(
+					shared_result.get("accepted_destination", ground_position) as Vector3
+				)
+			else:
+				CommandFeedback.show_move_marker(
+					shared_result.get("accepted_destination", ground_position) as Vector3
+				)
+			return
+
 	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
@@ -717,6 +760,23 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 	):
 		CommandFeedback.show_patrol_marker(ground_position)
 		return
+
+	if (
+		commandable_units.size() > 1
+		and SharedSquadNavigation.is_shared_navigation_enabled()
+		and not queued
+	):
+		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+			commandable_units,
+			ground_position,
+			&"patrol",
+			false
+		)
+		if shared_result.get("handled", false):
+			CommandFeedback.show_patrol_marker(
+				shared_result.get("accepted_destination", ground_position) as Vector3
+			)
+			return
 
 	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
@@ -858,15 +918,25 @@ func _play_construction_target_feedback(building: Building) -> void:
 
 func _dispatch_gold_mine_gather_command(gold_mine: GoldMine, queued: bool = false) -> void:
 	_purge_invalid_selected_units()
-	var dispatched_to_worker := false
+	var workers: Array[Worker] = []
 	for unit_ref: Variant in selected_units:
 		if not _is_commandable_unit(unit_ref):
 			continue
 		if unit_ref is Worker:
-			(unit_ref as Worker).issue_order(UnitOrder.gather(gold_mine), queued)
-			dispatched_to_worker = true
-	if dispatched_to_worker:
-		_play_gather_target_feedback(gold_mine)
+			workers.append(unit_ref as Worker)
+
+	if workers.is_empty():
+		return
+
+	workers.sort_custom(
+		func(a: Worker, b: Worker) -> bool:
+			return a.get_instance_id() < b.get_instance_id()
+	)
+	# Unique approach slots for multi-worker mine orders — not military formation spacing.
+	for index: int in workers.size():
+		workers[index].set_gather_approach_slot_hint(index)
+		workers[index].issue_order(UnitOrder.gather(gold_mine), queued)
+	_play_gather_target_feedback(gold_mine)
 
 
 func _play_gather_target_feedback(resource: GatherableResource) -> void:

@@ -98,13 +98,15 @@ static func _apply_velocity(
 ) -> void:
 	# Authoritative Unit path — no second independent velocity writer.
 	if worker is Unit and (worker as Unit).has_method("apply_steered_velocity"):
-		# Workers on task paths: no soft separation; allow motion even without has_move_target.
+		# Light UnitSeparation on task paths prevents TH/mine packing freezes.
+		# Keep blend low so gather packing stays tighter than combat movement.
+		const TASK_SEPARATION_BLEND := 0.35
 		var unit := worker as Unit
 		if unit.has_move_target:
-			unit.apply_steered_velocity(desired_velocity, -1.0, 0.0, true, false)
+			unit.apply_steered_velocity(desired_velocity, -1.0, TASK_SEPARATION_BLEND, true, false)
 		else:
 			# Gather/build often moves without a Unit move-target flag.
-			unit.apply_steered_velocity(desired_velocity, -1.0, 0.0, true, true)
+			unit.apply_steered_velocity(desired_velocity, -1.0, TASK_SEPARATION_BLEND, true, true)
 		return
 
 	worker.velocity = desired_velocity

@@ -1454,7 +1454,19 @@ func _advance_stuck_recovery(distance: float) -> void:
 			if detour_forward.length_squared() > 0.0001:
 				_begin_detour(detour_forward.normalized(), distance)
 		_:
-			# Stage 4+: cancel only as final fallback — never teleport.
+			# Stage 4+: prefer shared-route refresh over cancel while in a squad.
+			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(self)
+			if squad_ctx != null:
+				_stuck_recovery_stage = 1
+				SharedSquadNavigation.notify_member_confirmed_stall(self)
+				var resume_shared: Vector3 = (
+					_original_move_destination
+					if _original_move_destination.length_squared() > 0.0001
+					else _movement_target
+				)
+				request_movement_target(resume_shared, RepathUrgency.STUCK_RECOVERY)
+				return
+			# Final fallback — never teleport.
 			_stuck_recovery_stage = 0
 			_original_move_destination = Vector3.ZERO
 			if _arrival_completed_generation == _movement_generation:

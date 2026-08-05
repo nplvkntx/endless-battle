@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://bq8displaysettings1"]
+[gd_scene format=3 uid="uid://cpw8dgo7neb6m"]
 
 [ext_resource type="Script" path="res://scripts/ui/display_settings_panel.gd" id="1_panel"]
 

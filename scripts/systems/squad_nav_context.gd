@@ -11,16 +11,19 @@ var command_type: StringName = &""
 var mission: int = 0
 var use_attack_move: bool = true
 var strategic_destination: Vector3 = Vector3.ZERO
+var requested_destination: Vector3 = Vector3.ZERO
 var route_waypoints: PackedVector3Array = PackedVector3Array()
 var waypoint_index: int = 0
+var route_valid: bool = false
 var formation_forward: Vector3 = Vector3(0.0, 0.0, 1.0)
 var anchor_position: Vector3 = Vector3.ZERO
 var member_ids: Array[int] = []
-## unit_instance_id -> local formation offset (stable for command lifetime)
+## unit_instance_id -> local offset (stable for command lifetime; simple grid or formation)
 var slot_locals: Dictionary = {}
 var route_created_msec: int = 0
 var last_progress_msec: int = 0
 var last_progress_position: Vector3 = Vector3.ZERO
+var last_route_refresh_msec: int = 0
 var compressed_passage: bool = false
 var spacing_scale: float = 1.0
 var stagger_cursor: int = 0
@@ -29,7 +32,11 @@ var shared_threat_target: Node3D = null
 ## unit_instance_id -> assigned threat (may equal shared target)
 var member_threats: Dictionary = {}
 var last_issued_slots: Dictionary = {}
+## Members that exhausted local recovery and need a shared-route refresh.
+var stalled_member_ids: Dictionary = {}
 var is_player_squad: bool = false
+## True when slots came from a persistent FormationGroup (player formation).
+var uses_formation_layout: bool = false
 var formation_shape: int = int(FormationLayout.Shape.SQUARE)
 var formation_size: int = 15
 
@@ -64,6 +71,9 @@ func purge_dead_members() -> bool:
 	for key: Variant in last_issued_slots.keys():
 		if not valid.has(int(key)):
 			last_issued_slots.erase(key)
+	for key: Variant in stalled_member_ids.keys():
+		if not valid.has(int(key)):
+			stalled_member_ids.erase(key)
 	return true
 
 

@@ -18,6 +18,20 @@ const TARGET_SEARCH_JITTER := 0.35
 const NARROW_PASSAGE_WIDTH := 5.5
 const COMPRESSED_SPACING_SCALE := 0.55
 const FORMATION_SPACING := 2.0
+const SIMPLE_SLOT_BASE_SPACING := 1.6
+const ROUTE_SNAP_ACCEPT_DISTANCE := 8.0
+const ROUTE_FALLBACK_RING_STEPS := 8
+const ROUTE_FALLBACK_RING_COUNT := 4
+const ROUTE_FALLBACK_RING_RADIUS := 2.5
+const MEMBER_STALL_REFRESH_RATIO := 0.45
+const MAX_INITIAL_ORDERS := 12
+
+## Stall recovery ownership (escalation order):
+## 1. Local steering / UnitSeparation while progress exists
+## 2. Per-unit confirmed stall → local repath / waypoint / yield+detour
+## 3. Shared strategic route refresh (this system) when group is stalled
+## 4. Cancel / finish only as final per-unit fallback when not in a squad
+## Worker gather/build keep specialized task recovery; do not add extra nudges.
 
 var _squads: Dictionary = {} ## squad_id -> SquadNavContext
 var _unit_to_squad: Dictionary = {} ## unit_instance_id -> squad_id
@@ -26,6 +40,7 @@ var _global_command_generation: int = 0
 var _anchor_accum: float = 0.0
 var _diag_member_count: int = 0
 var _diag_stalls: int = 0
+var _diag_route_failures: int = 0
 
 
 func _ready() -> void:
@@ -51,6 +66,7 @@ func clear_all() -> void:
 	_global_command_generation = 0
 	_diag_member_count = 0
 	_diag_stalls = 0
+	_diag_route_failures = 0
 	_publish_diag()
 
 
@@ -82,8 +98,24 @@ func release_unit(unit: Variant) -> void:
 	ctx.slot_locals.erase(unit_id)
 	ctx.member_threats.erase(unit_id)
 	ctx.last_issued_slots.erase(unit_id)
+	ctx.stalled_member_ids.erase(unit_id)
 	if ctx.member_count() <= 0:
 		_squads.erase(squad_id)
+
+
+## Called by Unit local recovery when a squad member exhausted local stages.
+## Shared route refresh is owned here — units must not cancel while still in a squad.
+func notify_member_confirmed_stall(unit: Variant) -> bool:
+	var ctx: SquadNavContext = get_squad_for_unit(unit)
+	if ctx == null or unit == null or not is_instance_valid(unit):
+		return false
+	var unit_id: int = (unit as Node).get_instance_id()
+	ctx.stalled_member_ids[unit_id] = true
+	var stalled: int = ctx.stalled_member_ids.size()
+	var threshold: int = maxi(1, int(ceil(float(ctx.member_count()) * MEMBER_STALL_REFRESH_RATIO)))
+	if stalled >= threshold or _detect_squad_stall(ctx):
+		_recover_stalled_squad(ctx)
+	return true
 
 
 func try_get_assigned_target(unit: Variant) -> Node3D:
@@ -235,7 +267,8 @@ func issue_formation_command(
 	return result
 
 
-## Player unformed multi-unit selection: shared route + immediate slot orders.
+## Player unformed multi-unit selection (workers + military): one shared route + slots.
+## Queued orders only store spaced destinations — live squad activates on current commands.
 func issue_player_group_command(
 	units: Array,
 	destination: Vector3,
@@ -245,67 +278,103 @@ func issue_player_group_command(
 	var result: Dictionary = {
 		"handled": false,
 		"equivalent_skip": false,
+		"route_valid": false,
+		"accepted_destination": destination,
 	}
-	if not is_shared_navigation_enabled() or units.size() <= 1:
+	if not is_shared_navigation_enabled():
+		return result
+
+	var ordered_units: Array = _order_units_for_formation(_filter_movable_units(units))
+	if ordered_units.size() <= 1 or destination == Vector3.ZERO:
+		return result
+
+	# Shift-queued: stable unique slots only. Do not start a live shared route yet.
+	if queued:
+		result["handled"] = true
+		var spacing: float = _compute_member_spacing(ordered_units)
+		var slot_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+			destination, ordered_units.size(), spacing
+		)
+		for index: int in ordered_units.size():
+			var unit: Variant = ordered_units[index]
+			if not NodeSafety.is_alive_node(unit) or not unit is Unit:
+				continue
+			var target: Vector3 = GroupMoveSpacing.resolve_nearby_walkable_position(
+				slot_targets[index], unit as Node3D, destination, spacing
+			)
+			_issue_unit_ground_order(unit as Unit, target, order_kind, true)
 		return result
 
 	var use_attack_move: bool = order_kind == &"attack_move"
 	var mission: int = 0 if order_kind == &"move" else 1
-	var squad_result: Dictionary = issue_group_command(
-		units,
+	var member_ids: Array[int] = _collect_unit_ids(ordered_units)
+	var equiv_signature: String = _build_equivalence_signature(
+		member_ids, destination, mission, use_attack_move
+	)
+
+	var existing: SquadNavContext = _find_reusable_squad(equiv_signature)
+	if existing != null:
+		result["handled"] = true
+		result["equivalent_skip"] = true
+		result["route_valid"] = existing.route_valid
+		result["accepted_destination"] = existing.strategic_destination
+		_bind_members(existing, ordered_units)
+		PerfCounters.record_squad_route_cache_hit()
+		_publish_diag()
+		return result
+
+	_global_command_generation += 1
+	var signature: String = "player_group|%d|%s" % [
+		_global_command_generation, equiv_signature
+	]
+	var ctx: SquadNavContext = _create_squad_context(
+		ordered_units,
 		destination,
 		use_attack_move,
-		mission
+		mission,
+		_global_command_generation,
+		signature,
+		true,
+		null
 	)
-	if not squad_result.get("handled", false):
+	if ctx == null:
 		return result
 
 	result["handled"] = true
-	result["equivalent_skip"] = squad_result.get("equivalent_skip", false)
-	if result["equivalent_skip"]:
-		return result
-
-	var ordered_units: Array = _filter_military_units(units)
-	var ctx: SquadNavContext = get_squad_for_unit(ordered_units[0] if not ordered_units.is_empty() else null)
-	if ctx == null:
-		result["handled"] = false
-		return result
-
-	for unit: Variant in ordered_units:
-		if not NodeSafety.is_alive_node(unit) or not unit is Unit:
-			continue
-		var target: Vector3 = ctx.get_slot_world_position((unit as Node).get_instance_id())
-		target = GroupMoveSpacing.resolve_formation_position(target, destination)
-		if unit is Worker and not queued:
-			(unit as Worker).cancel_gathering()
-		if queued:
-			match order_kind:
-				&"attack_move":
-					if (unit as Unit).supports_combat_orders():
-						(unit as Unit).issue_order(UnitOrder.attack_move(target), true)
-					else:
-						(unit as Unit).issue_order(UnitOrder.move(target), true)
-				_:
-					(unit as Unit).issue_order(UnitOrder.move(target), true)
-		else:
-			match order_kind:
-				&"attack_move":
-					if (unit as Unit).supports_combat_orders():
-						(unit as Unit).issue_order(UnitOrder.attack_move(target), false)
-					else:
-						(unit as Unit).issue_order(UnitOrder.move(target), false)
-				&"patrol":
-					if (unit as Unit).supports_patrol():
-						(unit as Unit).issue_order(
-							UnitOrder.patrol([(unit as Node3D).global_position, target]),
-							false
-						)
-					else:
-						(unit as Unit).issue_order(UnitOrder.move(target), false)
-				_:
-					(unit as Unit).issue_order(UnitOrder.move(target), false)
-		ctx.last_issued_slots[(unit as Node).get_instance_id()] = target
+	result["route_valid"] = ctx.route_valid
+	result["accepted_destination"] = ctx.strategic_destination
+	_issue_player_orders(ctx, ordered_units, order_kind)
+	_publish_diag()
 	return result
+
+
+func _issue_unit_ground_order(
+	unit: Unit,
+	target: Vector3,
+	order_kind: StringName,
+	queued: bool
+) -> void:
+	if unit is Worker and not queued:
+		(unit as Worker).cancel_gathering()
+	match order_kind:
+		&"attack_move":
+			if unit.supports_combat_orders():
+				unit.issue_order(UnitOrder.attack_move(target), queued)
+			else:
+				unit.issue_order(UnitOrder.move(target), queued)
+		&"patrol":
+			if unit.supports_patrol():
+				if queued and unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.PATROL:
+					unit.append_patrol_point(target)
+				else:
+					unit.issue_order(
+						UnitOrder.patrol([unit.global_position, target]),
+						queued
+					)
+			else:
+				unit.issue_order(UnitOrder.move(target), queued)
+		_:
+			unit.issue_order(UnitOrder.move(target), queued)
 
 
 func _create_squad_context(
@@ -328,10 +397,13 @@ func _create_squad_context(
 	)
 	ctx.mission = mission
 	ctx.use_attack_move = use_attack_move
+	ctx.requested_destination = destination
 	ctx.strategic_destination = destination
 	ctx.is_player_squad = is_player
+	ctx.uses_formation_layout = group != null
 	ctx.route_created_msec = Time.get_ticks_msec()
 	ctx.last_progress_msec = ctx.route_created_msec
+	ctx.last_route_refresh_msec = ctx.route_created_msec
 
 	for unit: Variant in ordered_units:
 		if NodeSafety.is_alive_node(unit):
@@ -357,6 +429,7 @@ func _assign_stable_slots(
 		group.ensure_slots_assigned()
 		ctx.formation_shape = int(group.shape)
 		ctx.formation_size = group.size_preset
+		ctx.uses_formation_layout = true
 		for unit: Variant in ordered_units:
 			if not NodeSafety.is_alive_node(unit):
 				continue
@@ -375,30 +448,105 @@ func _assign_stable_slots(
 					ctx.slot_locals[unit_id] = slots[slot_index]["local"]
 		return
 
-	var transient := FormationGroup.new()
-	transient.shape = FormationLayout.choose_ai_shape(&"ATTACKING", _has_siege(ordered_units), false)
-	transient.size_preset = FormationLayout.choose_ai_size(ordered_units.size())
-	transient.members = ordered_units.duplicate()
-	transient.assign_roles_to_slots()
-	ctx.formation_shape = int(transient.shape)
-	ctx.formation_size = transient.size_preset
-	for unit: Variant in ordered_units:
+	# Ordinary unformed groups: simple stable grid — not player formation shapes.
+	_assign_simple_group_slots(ctx, ordered_units)
+
+
+func _assign_simple_group_slots(ctx: SquadNavContext, ordered_units: Array) -> void:
+	ctx.uses_formation_layout = false
+	ctx.formation_shape = int(FormationLayout.Shape.SQUARE)
+	ctx.formation_size = ordered_units.size()
+	var spacing: float = _compute_member_spacing(ordered_units)
+	var locals: Array[Vector3] = GroupMoveSpacing.compute_targets(
+		Vector3.ZERO, ordered_units.size(), spacing
+	)
+	for index: int in ordered_units.size():
+		var unit: Variant = ordered_units[index]
 		if not NodeSafety.is_alive_node(unit):
 			continue
 		var unit_id: int = (unit as Node).get_instance_id()
-		var local_index: int = transient.members.find(unit)
-		if local_index >= 0 and local_index < transient.assigned_locals.size():
-			ctx.slot_locals[unit_id] = transient.assigned_locals[local_index]
+		if index < locals.size():
+			ctx.slot_locals[unit_id] = locals[index]
+		else:
+			ctx.slot_locals[unit_id] = Vector3.ZERO
+
+
+func _compute_member_spacing(units: Array) -> float:
+	var max_radius: float = 0.55
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit) or not unit is CollisionObject3D:
+			continue
+		max_radius = maxf(max_radius, _estimate_unit_radius(unit as CollisionObject3D))
+	return maxf(SIMPLE_SLOT_BASE_SPACING, max_radius * 2.25)
+
+
+func _estimate_unit_radius(body: CollisionObject3D) -> float:
+	var collision_shape: CollisionShape3D = body.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision_shape == null or collision_shape.shape == null:
+		return 0.55
+	if collision_shape.shape is CapsuleShape3D:
+		return (collision_shape.shape as CapsuleShape3D).radius
+	if collision_shape.shape is CylinderShape3D:
+		return (collision_shape.shape as CylinderShape3D).radius
+	if collision_shape.shape is SphereShape3D:
+		return (collision_shape.shape as SphereShape3D).radius
+	if collision_shape.shape is BoxShape3D:
+		var box := collision_shape.shape as BoxShape3D
+		return maxf(box.size.x, box.size.z) * 0.5
+	return 0.55
 
 
 func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void:
 	var nav_map: RID = _resolve_nav_map(ordered_units)
+	ctx.route_valid = false
+	var requested: Vector3 = ctx.requested_destination
+	if requested == Vector3.ZERO:
+		requested = ctx.strategic_destination
+
+	if not nav_map.is_valid() or not NavigationServer3D.map_is_active(nav_map):
+		ctx.strategic_destination = requested
+		ctx.route_waypoints = PackedVector3Array([ctx.anchor_position, requested])
+		ctx.waypoint_index = 0
+		# Allow movement to begin; local agents will path once the map is ready.
+		ctx.route_valid = true
+		PerfCounters.record_squad_strategic_route()
+		return
+
 	var from: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, ctx.anchor_position)
-	var to: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, ctx.strategic_destination)
+	var to: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, requested)
+
+	# Reject absurd snaps far from the click when a closer reachable point exists.
+	if _horizontal_distance(requested, to) > ROUTE_SNAP_ACCEPT_DISTANCE:
+		var nearest: Vector3 = _find_nearest_reachable_destination(nav_map, from, requested)
+		if nearest != Vector3.ZERO:
+			to = nearest
+		else:
+			to = GroupMoveSpacing.clamp_to_map_bounds(requested)
+
 	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, from, to, true)
 	PerfCounters.record_squad_strategic_route()
-	if path.is_empty():
+
+	if path.is_empty() or path.size() < 2:
+		var fallback: Vector3 = _find_nearest_reachable_destination(nav_map, from, to)
+		if fallback != Vector3.ZERO:
+			to = fallback
+			path = NavigationServer3D.map_get_path(nav_map, from, to, true)
+
+	if path.is_empty() or path.size() < 2:
+		# Keep the intended destination rather than collapsing to world origin.
+		if _horizontal_distance(to, Vector3.ZERO) < 0.5 and requested.length() > 1.0:
+			to = GroupMoveSpacing.clamp_to_map_bounds(requested)
 		path = PackedVector3Array([from, to])
+		_diag_route_failures += 1
+		push_warning(
+			"SharedSquadNavigation: empty path; using direct fallback to (%.1f, %.1f)"
+			% [to.x, to.z]
+		)
+		ctx.route_valid = true
+	else:
+		ctx.route_valid = true
+
+	ctx.strategic_destination = to
 	ctx.route_waypoints = path
 	ctx.waypoint_index = 0
 	var face: Vector3 = ctx.strategic_destination - ctx.anchor_position
@@ -412,6 +560,32 @@ func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void
 			ctx.formation_forward = segment.normalized()
 
 
+func _find_nearest_reachable_destination(
+	nav_map: RID,
+	from: Vector3,
+	desired: Vector3
+) -> Vector3:
+	var direct: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, desired)
+	var probe_path: PackedVector3Array = NavigationServer3D.map_get_path(
+		nav_map, from, direct, true
+	)
+	if not probe_path.is_empty() and probe_path.size() >= 2:
+		return direct
+
+	for ring: int in range(1, ROUTE_FALLBACK_RING_COUNT + 1):
+		var radius: float = ROUTE_FALLBACK_RING_RADIUS * float(ring)
+		for step: int in ROUTE_FALLBACK_RING_STEPS:
+			var angle: float = TAU * float(step) / float(ROUTE_FALLBACK_RING_STEPS)
+			var candidate: Vector3 = desired + Vector3(cos(angle), 0.0, sin(angle)) * radius
+			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, candidate)
+			var path: PackedVector3Array = NavigationServer3D.map_get_path(
+				nav_map, from, snapped, true
+			)
+			if not path.is_empty() and path.size() >= 2:
+				return snapped
+	return Vector3.ZERO
+
+
 func _refresh_shared_route(ctx: SquadNavContext) -> void:
 	var members: Array = ctx.get_living_members()
 	if members.is_empty():
@@ -421,6 +595,8 @@ func _refresh_shared_route(ctx: SquadNavContext) -> void:
 	ctx.waypoint_index = 0
 	ctx.compressed_passage = false
 	ctx.spacing_scale = 1.0
+	ctx.stalled_member_ids.clear()
+	ctx.last_route_refresh_msec = Time.get_ticks_msec()
 	ctx.note_progress(ctx.anchor_position)
 
 
@@ -602,9 +778,6 @@ func _collect_initial_orders(
 	return orders
 
 
-const MAX_INITIAL_ORDERS := 12
-
-
 func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 	var unit_id: int = unit.get_instance_id()
 	var slot_target: Vector3 = ctx.get_slot_world_position(unit_id)
@@ -653,30 +826,14 @@ func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 
 
 func _issue_player_orders(ctx: SquadNavContext, members: Array, order_kind: StringName) -> void:
+	var accepted: Vector3 = ctx.strategic_destination
 	for index: int in members.size():
 		var unit: Variant = members[index]
 		if not NodeSafety.is_alive_node(unit) or not unit is Unit:
 			continue
 		var target: Vector3 = ctx.get_slot_world_position((unit as Node).get_instance_id())
-		target = GroupMoveSpacing.resolve_formation_position(
-			target, ctx.strategic_destination
-		)
-		match order_kind:
-			&"attack_move":
-				if (unit as Unit).supports_combat_orders():
-					(unit as Unit).issue_order(UnitOrder.attack_move(target), false)
-				else:
-					(unit as Unit).issue_order(UnitOrder.move(target), false)
-			&"patrol":
-				if (unit as Unit).supports_patrol():
-					(unit as Unit).issue_order(
-						UnitOrder.patrol([(unit as Node3D).global_position, target]),
-						false
-					)
-				else:
-					(unit as Unit).issue_order(UnitOrder.move(target), false)
-			_:
-				(unit as Unit).issue_order(UnitOrder.move(target), false)
+		target = GroupMoveSpacing.resolve_formation_position(target, accepted)
+		_issue_unit_ground_order(unit as Unit, target, order_kind, false)
 		ctx.last_issued_slots[(unit as Node).get_instance_id()] = target
 
 
@@ -689,12 +846,24 @@ func _detect_squad_stall(ctx: SquadNavContext) -> bool:
 
 
 func _recover_stalled_squad(ctx: SquadNavContext) -> void:
-	var age_sec: float = float(Time.get_ticks_msec() - ctx.route_created_msec) / 1000.0
-	if age_sec < ROUTE_RECALC_COOLDOWN_SECONDS:
+	var now_msec: int = Time.get_ticks_msec()
+	var since_refresh: float = float(now_msec - ctx.last_route_refresh_msec) / 1000.0
+	if since_refresh < ROUTE_RECALC_COOLDOWN_SECONDS:
+		return
+	var age_sec: float = float(now_msec - ctx.route_created_msec) / 1000.0
+	if age_sec < ROUTE_RECALC_COOLDOWN_SECONDS * 0.5:
 		return
 	_diag_stalls += 1
 	PerfCounters.record_squad_stall()
 	_refresh_shared_route(ctx)
+	# Re-issue a bounded batch of local slot targets after strategic refresh.
+	var members: Array = ctx.get_living_members()
+	var budget: int = mini(members.size(), UNIT_UPDATE_BUDGET_PER_SQUAD)
+	for index: int in budget:
+		var unit: Variant = members[index]
+		if NodeSafety.is_alive_node(unit) and unit is Node3D:
+			ctx.last_issued_slots.erase((unit as Node).get_instance_id())
+			_issue_slot_order_for_unit(ctx, unit as Node3D)
 
 
 func _find_reusable_squad(equiv_signature: String) -> SquadNavContext:
@@ -729,6 +898,7 @@ func _remove_unit_from_squad(unit_id: int, squad_id: int) -> void:
 	ctx.slot_locals.erase(unit_id)
 	ctx.member_threats.erase(unit_id)
 	ctx.last_issued_slots.erase(unit_id)
+	ctx.stalled_member_ids.erase(unit_id)
 	if ctx.member_count() <= 0:
 		_squads.erase(squad_id)
 
@@ -798,15 +968,34 @@ func _filter_military_units(units: Array) -> Array:
 	return result
 
 
+## All movable units for ordinary player group ground commands (includes workers).
+func _filter_movable_units(units: Array) -> Array:
+	var result: Array = []
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		if unit is Unit:
+			result.append(unit)
+	return result
+
+
 func _order_units_for_formation(units: Array) -> Array:
-	var copy: Array = units.duplicate()
-	copy.sort_custom(
+	var keyed: Array = []
+	for unit: Variant in units:
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		keyed.append({
+			"id": (unit as Node).get_instance_id(),
+			"unit": unit,
+		})
+	keyed.sort_custom(
 		func(a: Variant, b: Variant) -> bool:
-			if not NodeSafety.is_alive_node(a) or not NodeSafety.is_alive_node(b):
-				return false
-			return (a as Node).get_instance_id() < (b as Node).get_instance_id()
+			return int(a["id"]) < int(b["id"])
 	)
-	return copy
+	var result: Array = []
+	for entry: Variant in keyed:
+		result.append(entry["unit"])
+	return result
 
 
 func _collect_unit_ids(units: Array) -> Array[int]:
@@ -864,3 +1053,11 @@ func get_active_squad_count() -> int:
 
 func get_active_member_count() -> int:
 	return _diag_member_count
+
+
+func get_route_failure_count() -> int:
+	return _diag_route_failures
+
+
+func get_stall_count() -> int:
+	return _diag_stalls

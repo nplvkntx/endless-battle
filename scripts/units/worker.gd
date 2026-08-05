@@ -40,6 +40,7 @@ var _gather_source: GatherableResource = null
 var _assigned_resource_id: StringName = &""
 var _carried_amount: int = 0
 var _source_approach_candidate_index: int = 0
+var _gather_approach_slot_hint: int = -1
 var _last_reported_idle: bool = true
 var _dropoff_candidate_index: int = 0
 var _assigned_dropoff: CommandCenter = null
@@ -827,6 +828,11 @@ func command_gather_gold_mine(gold_mine: GoldMine, player_ordered: bool = true) 
 	_debug_log_ai_gather_state("command_gather_gold_mine")
 
 
+## Selection-order hint so multi-worker mine clicks get unique approach angles.
+func set_gather_approach_slot_hint(slot_index: int) -> void:
+	_gather_approach_slot_hint = maxi(slot_index, 0)
+
+
 func command_gather_tree(tree: WoodTree, player_ordered: bool = true) -> void:
 	if not _is_alive():
 		return
@@ -931,6 +937,7 @@ func cancel_gathering() -> void:
 	_assigned_resource_id = &""
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
+	_gather_approach_slot_hint = -1
 	_dropoff_candidate_index = 0
 	_assigned_dropoff = null
 	_return_dropoff = null
@@ -1087,6 +1094,17 @@ func _update_gather_trip() -> void:
 			if _attempt_source_proximity_resolve():
 				return
 			if not has_move_target:
+				# Premature arrival near spawn/TH must not abandon the mine trip.
+				if (
+					_has_valid_gather_source()
+					and not _is_near_resource_for_gather(_get_valid_gather_source())
+					and not _is_near_collision_target(
+						_get_valid_gather_source(),
+						GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS
+					)
+				):
+					_set_movement_to_gather_source(_get_valid_gather_source())
+					return
 				_handle_arrived_at_source()
 		GatherTripState.TO_COMMAND_CENTER:
 			if _task_nudge_active or (
@@ -1741,7 +1759,8 @@ func _handle_arrived_at_source() -> void:
 		elif not _is_near_collision_target(
 			source, GatheringConfig.GATHER_LAST_RESORT_REACH_BONUS
 		):
-			_handle_gather_source_lost()
+			# Still far from the mine/tree — retry approach instead of abandoning.
+			_handle_arrived_at_source_far_retry(source)
 			return
 
 	_source_approach_candidate_index = 0
@@ -1757,6 +1776,16 @@ func _handle_arrived_at_source() -> void:
 		_begin_return_to_command_center()
 	else:
 		_begin_gather_wait()
+
+
+func _handle_arrived_at_source_far_retry(source: GatherableResource) -> void:
+	_gather_loop_failures += 1
+	if _gather_loop_failures >= GatheringConfig.GATHER_LOOP_FAILURE_LIMIT:
+		if not _try_reassign_gather_source():
+			_finish_gathering_idle()
+		return
+	_source_approach_candidate_index = 0
+	_set_movement_to_gather_source(source)
 
 
 func _handle_command_center_arrival() -> void:
@@ -2877,6 +2906,8 @@ func _is_wood_chop_spot_reachable(chop_spot: Vector3) -> bool:
 
 
 func _get_gather_approach_base_slot() -> int:
+	if _gather_approach_slot_hint >= 0:
+		return _gather_approach_slot_hint % GatheringConfig.GATHER_APPROACH_BASE_SLOT_COUNT
 	return absi(get_instance_id()) % GatheringConfig.GATHER_APPROACH_BASE_SLOT_COUNT
 
 
@@ -3037,13 +3068,14 @@ func _compute_command_center_dropoff_position(command_center: CommandCenter) -> 
 
 	if direction.length_squared() < 0.001:
 		direction = Vector3.FORWARD
-
-	if _dropoff_candidate_index > 0:
-		direction = _apply_approach_candidate_offset(direction, _dropoff_candidate_index)
 	else:
 		direction = direction.normalized()
 
-	var ring: int = _dropoff_candidate_index / GatheringConfig.APPROACH_CANDIDATES_PER_RING
+	# Diversify dropoff slots by worker identity so groups do not stack on spawn offset.
+	var effective_index: int = _get_gather_approach_base_slot() + _dropoff_candidate_index
+	direction = _apply_approach_candidate_offset(direction, effective_index)
+
+	var ring: int = effective_index / GatheringConfig.APPROACH_CANDIDATES_PER_RING
 	var stand_off_distance: float = (
 		_get_collision_xz_radius(command_center)
 		+ _get_collision_xz_radius(self)
