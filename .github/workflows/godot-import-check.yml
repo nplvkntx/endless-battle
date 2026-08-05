@@ -1,0 +1,29 @@
+name: Godot Import Check
+
+# Validates GDScript parse/import, resource references, autoload paths, and main-menu startup.
+# Engine: Godot 4.7-stable (matches project.godot config/features=4.7).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot 4.7-stable
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip"
+          unzip -q Godot_v4.7-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7-stable_linux.x86_64
+          ./Godot_v4.7-stable_linux.x86_64 --version
+          echo "GODOT=$PWD/Godot_v4.7-stable_linux.x86_64" >> "$GITHUB_ENV"
+
+      - name: Validate import, references, and startup
+        run: bash scripts/ci/validate_import.sh

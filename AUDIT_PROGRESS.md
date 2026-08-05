@@ -8,9 +8,20 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-Document stability baseline and push validated parser fix (no new code changes in this session beyond this tracker).
+**PHASE 1 #2 (auto-selected next):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). Do not start until CI gate from #1 is green on main.
 
 ## Completed tasks
+
+### 2026-08-05 — Add headless import/parse CI (audit PHASE 1 #1, #10)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Root cause** | No automated gate rejected parse/import failures on push; historical verify logs contained unresolved compile errors. |
+| **Fix** | Added `.github/workflows/godot-import-check.yml` and `scripts/ci/validate_import.sh`: static autoload / scene reference checks, Godot 4.7-stable headless editor import, and main-menu startup (`--quit-after 3`). Workflow fails on non-zero exit or script/parse error patterns. |
+| **Files changed** | `.github/workflows/godot-import-check.yml`, `scripts/ci/validate_import.sh`, `AUDIT_PROGRESS.md` |
+| **Validation performed** | Workflow YAML reviewed; static checks runnable without Godot; CI uses official `Godot_v4.7-stable_linux.x86_64` (matches `project.godot` `4.7`). |
+| **Remaining uncertainty** | CI does not run full verify harnesses, match gameplay, or leak/ObjectDB regression suites (PHASE 1 #2). Nav-mesh bake runtime warnings are not treated as failures. |
 
 ### 2026-08-05 — Fix AIHeroMastery parser / compile failures (audit #39, #10)
 
@@ -21,7 +32,7 @@ Document stability baseline and push validated parser fix (no new code changes i
 | **Fix** | Introduced `VariantUtils.to_bool()` (`scripts/systems/variant_utils.gd`) and replaced invalid `bool(...)` conversions across AI hero mastery and related hot paths. |
 | **Files changed** | `scripts/systems/ai_hero_mastery.gd`, `scripts/systems/variant_utils.gd` (+ `.uid`), `autoloads/control_group_manager.gd`, and related verify / systems / UI call sites (see commit `6d562aa`). |
 | **Validation performed** | Godot 4.7 headless: `--import` (all autoloads + global classes, no parse errors); `scenes/ui/main_menu.tscn` startup; `scenes/main.tscn` 3s run; `scenes/debug/verify_unit_navigation.tscn` → `PASS unit_navigation`; `scenes/debug/verify_match_reset.tscn` → `PASS` (26 resetters); static checks: all 21 `project.godot` autoload paths exist; all `.tscn` `ext_resource` script paths resolve; `run/main_scene` = `res://scenes/ui/main_menu.tscn` matches `MatchSession.MAIN_MENU_SCENE`. |
-| **Remaining uncertainty** | No Godot parse CI on push yet (PHASE 1 #1). Runtime nav-mesh warnings during verify harness baking are performance warnings, not parse failures. Full leak / ObjectDB regression suite not re-run in this session. |
+| **Remaining uncertainty** | Runtime nav-mesh warnings during verify harness baking are performance warnings, not parse failures. Full leak / ObjectDB regression suite not re-run in this session. |
 
 ## Skipped or outdated audit findings
 
@@ -36,6 +47,7 @@ Document stability baseline and push validated parser fix (no new code changes i
 
 | Date | Check | Result |
 |---|---|---|
+| 2026-08-05 | CI `godot-import-check` (static + headless import + main menu) | Added — gates push/PR on Godot 4.7-stable |
 | 2026-08-05 | Headless `--import` | Clean — registered `SquadNavContext`, `VariantUtils`; no `SCRIPT ERROR` / `Parse Error` |
 | 2026-08-05 | `main_menu.tscn` headless | Clean startup |
 | 2026-08-05 | `main.tscn` headless (3 frames) | Boots; nav bake runtime warnings only |
@@ -45,8 +57,8 @@ Document stability baseline and push validated parser fix (no new code changes i
 
 ## Known blockers
 
-None for Phase 1 stability baseline. Working tree was clean (only untracked audit doc) at session start.
+None for Phase 1 stability baseline.
 
 ## Next task
 
-**PHASE 1 #1 (auto-selected):** Add clean headless import/parse CI and make any script error fatal on push (audit #10 recommended solution). Do not start PHASE 1 #2 (match-reset leak tests) until CI gate exists.
+**PHASE 1 #2 (auto-selected):** Build a deterministic match-reset test and eliminate leaked ObjectDB/RID/resources (audit #11). CI import gate (#1) must stay green; do not expand scope into gameplay refactors.
