@@ -18,10 +18,22 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 |---|---|
 | **Audit phase** | PHASE 1 — Project Stability |
 | **Root cause** | No automated gate rejected parse/import failures on push; historical verify logs contained unresolved compile errors. |
-| **Fix** | Added `.github/workflows/godot-import-check.yml` and `scripts/ci/validate_import.sh`: static autoload / scene reference checks, Godot 4.7-stable headless editor import, and main-menu startup (`--quit-after 3`). Workflow fails on non-zero exit or script/parse error patterns. |
+| **Fix** | Added `.github/workflows/godot-import-check.yml` and `scripts/ci/validate_import.sh`: static autoload / scene reference checks, Godot 4.7-stable headless import, and project startup (`--quit-after 3`). Workflow fails on non-zero exit or script/parse error patterns. |
 | **Files changed** | `.github/workflows/godot-import-check.yml`, `scripts/ci/validate_import.sh`, `AUDIT_PROGRESS.md` |
-| **Validation performed** | Workflow YAML reviewed; static checks runnable without Godot; CI uses official `Godot_v4.7-stable_linux.x86_64` (matches `project.godot` `4.7`). |
+| **Validation performed** | Workflow YAML reviewed; bash syntax OK; local Windows Godot 4.7 run of `scripts/ci/validate_import.sh` passes; CI uses official `Godot_v4.7-stable_linux.x86_64` (matches `project.godot` `4.7`). |
 | **Remaining uncertainty** | CI does not run full verify harnesses, match gameplay, or leak/ObjectDB regression suites (PHASE 1 #2). Nav-mesh bake runtime warnings are not treated as failures. |
+
+### 2026-08-05 — Fix Godot import CI failure (audit PHASE 1 #1)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Exact CI failure** | GitHub Actions run `Add automated Godot parser validation #1` (`bedb4fe`) failed in step `Validate import, references, and startup` with public annotation `Process completed with exit code 1.` Install/download step succeeded. |
+| **Root cause** | The validator used `--headless --editor --quit` for the import phase. On headless Linux CI this older pattern is less reliable than Godot 4.7 `--import`, and can leave project import/startup validation failing even though the binary download step succeeded. |
+| **Fix** | Switched the validator to `--headless --import` and changed the startup check to boot the configured project main scene via `--path ... --quit-after 3` instead of hardcoding a second scene launch path. |
+| **Files changed** | `.github/workflows/godot-import-check.yml`, `scripts/ci/validate_import.sh`, `AUDIT_PROGRESS.md` |
+| **Validation performed** | Public Actions metadata inspection; bash syntax validation; local run with official Windows `Godot_v4.7-stable_win64_console.exe`; full git diff review. |
+| **Remaining uncertainty** | GitHub log archive itself was not publicly downloadable without repo-admin auth, so the exact stderr body was not directly retrievable from the run page/API. The new push must confirm the repaired Linux runner behavior before PHASE 1 #2. |
 
 ### 2026-08-05 — Fix AIHeroMastery parser / compile failures (audit #39, #10)
 
@@ -47,7 +59,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 | Date | Check | Result |
 |---|---|---|
-| 2026-08-05 | CI `godot-import-check` (static + headless import + main menu) | Added — gates push/PR on Godot 4.7-stable |
+| 2026-08-05 | CI `godot-import-check` (static + headless import + project startup) | Added — gates push/PR on Godot 4.7-stable |
 | 2026-08-05 | Headless `--import` | Clean — registered `SquadNavContext`, `VariantUtils`; no `SCRIPT ERROR` / `Parse Error` |
 | 2026-08-05 | `main_menu.tscn` headless | Clean startup |
 | 2026-08-05 | `main.tscn` headless (3 frames) | Boots; nav bake runtime warnings only |

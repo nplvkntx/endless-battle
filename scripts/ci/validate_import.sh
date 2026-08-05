@@ -87,7 +87,7 @@ check_headless_import() {
 	local log
 	log="$(mktemp)"
 	trap 'rm -f "$log"' RETURN
-	if ! "$GODOT" --headless --editor --path "$ROOT" --quit >"$log" 2>&1; then
+	if ! "$GODOT" --headless --path "$ROOT" --import >"$log" 2>&1; then
 		cat "$log" >&2
 		fail "Godot headless import exited non-zero"
 		return
@@ -95,16 +95,16 @@ check_headless_import() {
 	scan_godot_log "$log" "Godot import/parse reported script or resource errors"
 }
 
-check_main_menu_startup() {
+check_project_startup() {
 	local log
 	log="$(mktemp)"
 	trap 'rm -f "$log"' RETURN
-	if ! "$GODOT" --headless --path "$ROOT" --scene res://scenes/ui/main_menu.tscn --quit-after 3 >"$log" 2>&1; then
+	if ! "$GODOT" --headless --path "$ROOT" --quit-after 3 >"$log" 2>&1; then
 		cat "$log" >&2
-		fail "Main menu headless startup exited non-zero"
+		fail "Project headless startup exited non-zero"
 		return
 	fi
-	scan_godot_log "$log" "Main menu startup reported script or resource errors"
+	scan_godot_log "$log" "Project startup reported script or resource errors"
 }
 
 echo "== Static checks =="
@@ -116,11 +116,11 @@ echo "== Godot headless import/parse =="
 require_godot
 check_headless_import
 
-echo "== Godot main menu startup =="
-check_main_menu_startup
+echo "== Godot project startup =="
+check_project_startup
 
 if [[ "$FAIL" -ne 0 ]]; then
 	exit 1
 fi
 
-echo "VALIDATION PASS: import, references, autoloads, and main menu startup"
+echo "VALIDATION PASS: import, references, autoloads, and project startup"
