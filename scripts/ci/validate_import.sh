@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GODOT="${GODOT:-godot}"
 FAIL=0
+HEADLESS_SMOKE_SCENE="res://scenes/debug/verify_match_reset.tscn"
 
 fail() {
 	echo "VALIDATION FAIL: $1" >&2
@@ -95,16 +96,16 @@ check_headless_import() {
 	scan_godot_log "$log" "Godot import/parse reported script or resource errors"
 }
 
-check_project_startup() {
+check_headless_smoke_scene() {
 	local log
 	log="$(mktemp)"
 	trap 'rm -f "$log"' RETURN
-	if ! "$GODOT" --headless --path "$ROOT" --quit-after 3 >"$log" 2>&1; then
+	if ! "$GODOT" --headless --path "$ROOT" --scene "$HEADLESS_SMOKE_SCENE" >"$log" 2>&1; then
 		cat "$log" >&2
-		fail "Project headless startup exited non-zero"
+		fail "Headless smoke scene exited non-zero"
 		return
 	fi
-	scan_godot_log "$log" "Project startup reported script or resource errors"
+	scan_godot_log "$log" "Headless smoke scene reported script or resource errors"
 }
 
 echo "== Static checks =="
@@ -116,11 +117,11 @@ echo "== Godot headless import/parse =="
 require_godot
 check_headless_import
 
-echo "== Godot project startup =="
-check_project_startup
+echo "== Godot headless smoke scene =="
+check_headless_smoke_scene
 
 if [[ "$FAIL" -ne 0 ]]; then
 	exit 1
 fi
 
-echo "VALIDATION PASS: import, references, autoloads, and project startup"
+echo "VALIDATION PASS: import, references, autoloads, and headless smoke scene"

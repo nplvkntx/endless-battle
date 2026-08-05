@@ -1,6 +1,6 @@
 name: Godot Import Check
 
-# Validates GDScript parse/import, resource references, autoload paths, and project startup.
+# Validates GDScript parse/import, resource references, autoload paths, and a headless-safe smoke scene.
 # Engine: Godot 4.7-stable (matches project.godot config/features=4.7).
 
 on:
