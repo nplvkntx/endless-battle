@@ -78,6 +78,11 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	## Raw queue_free (without destroy_building) must still release builders/slots
+	## so workers and ConstructionReservations never keep freed building handles.
+	ConstructionReservations.release_build_slots_for_building(self)
+	if not _registered_builders.is_empty():
+		_release_registered_builders_on_destroy()
 	_unregister_with_entity_registry()
 
 

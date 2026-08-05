@@ -128,16 +128,18 @@ Hero strategic participation is “fight with the squad on the published mission
 
 ## Prohibited competing mission owners
 
-When `USE_MILITARY_AI_V2` is `true`, these legacy subsystems **must not** issue main-army military orders. Each early-returns from its military tick path:
+When `USE_MILITARY_AI_V2` is `true`, these legacy subsystems **must not** issue main-army military orders. Each runs as an **intent provider** (publishes `MilitaryIntent` onto match-owned `AIPlayerState`) and early-returns from order-issuing paths:
 
-| Legacy subsystem | Role that is disabled | Gate location |
-|------------------|----------------------|---------------|
-| `EnemyCreepManager` | Legacy creep mission owner | `_process` |
-| `EnemyWaveManager` | Attack-wave / finishing / competing lethal mission owner | `_process` |
-| `EnemyCombatController` | Legacy regroup + retreat + combat mission owner | `_process` |
-| `EnemyDefenseManager` | Competing defense mission owner | `_process` |
+| Legacy subsystem | Role under V2 | Gate location |
+|------------------|---------------|---------------|
+| `EnemyCreepManager` | Publishes `CREEP` / `SUSPEND_CREEP` intents | `_process` → `_publish_creep_intents` |
+| `EnemyWaveManager` | Publishes `ATTACK` / `FINISH` intents | `_process` → `_publish_offense_intents` |
+| `EnemyDefenseManager` | Publishes `DEFEND` intents | `_process` → `_publish_defense_intents` |
+| `EnemyCombatController` | Legacy regroup + retreat + combat mission owner (still gated off) | `_process` |
 | `EnemyStrategicDirector._set_main_mission` | Competing main-army mission owner | method gate |
 | `EnemyStrategicDirector._run_recovery_checks` | Legacy recovery / idle-army owner | method gate |
+
+`MilitaryDirectorV2` drains the intent bus once per strategic tick, prefers provider `DEFEND` payloads when present, and uses offense/creep intents as arbitration hints. Fallback evaluators remain if the bus is empty.
 
 **Preserved for V2 reuse (not deleted):**
 
@@ -166,12 +168,18 @@ Checklist for new work:
 
 ## Scene wiring
 
-`scenes/match/match_systems.tscn` includes:
+`scenes/match/match_systems.tscn` is a `MatchCompositionRoot`:
+
+- Owns match-scoped `AIPlayerState` (army / strategic / exec / combat mirrors from `EnemyArmyCommand` + `MilitaryIntent` bus)
+- Declares the sole military command authority (`ArmyCommanderV2` when V2 is enabled)
+- Resolves director / commander / legacy managers for sibling lookup
+
+Child systems still include:
 
 - `MilitaryDirectorV2`
 - `ArmyCommanderV2`
 
-alongside the gated legacy military nodes (kept for helpers + legacy switch) and the always-on economy managers.
+alongside legacy military nodes (intent providers under V2 + legacy switch) and the always-on economy managers.
 
 ---
 

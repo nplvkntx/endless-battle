@@ -236,6 +236,15 @@ static func count_build_slot_claims(building: Building) -> int:
 	return (_build_slot_owners[building_id] as Dictionary).size()
 
 
+## Diagnostic for freed-building cleanup: claims keyed by instance id after free.
+static func has_build_slot_owners_for_id(building_instance_id: int) -> bool:
+	if building_instance_id == 0:
+		return false
+	if not _build_slot_owners.has(building_instance_id):
+		return false
+	return not (_build_slot_owners[building_instance_id] as Dictionary).is_empty()
+
+
 static func _purge_stale_build_slots_for_building(building_id: int, now_msec: int) -> void:
 	if not _build_slot_owners.has(building_id):
 		return

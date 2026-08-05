@@ -4,13 +4,64 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current phase
 
-**PHASE 1 — Project Stability**
+**PHASE 2 — Architecture**
 
 ## Current task
 
-**PHASE 1 #4 complete.** Next: PHASE 1 #5 — crash/freed-instance regression tests around orders, construction, hero casting and match restart.
+**PHASE 2 military ownership migration slice complete** (wave/formation/finishing SoT + aggression publisher + intent TTL/ownership). Next Phase 2 milestone: migrate remaining EnemyArmyCommand ephemerals (threat caches, reinforcement pool, pending order bus) or begin scoped god-object splits only after those bags are match-owned.
 
 ## Completed tasks
+
+### 2026-08-05 — Wave/formation/finishing SoT + aggression intents + arbitration TTL (PHASE 2 #2/#4)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **State migrated** | Attack-wave bag, formation/group-order cache, finishing/endgame, plus prior identity/exec/combat/assembly — all owned by match `AIPlayerState`. `EnemyArmyCommand` static names are property accessors into `_rt()` (bound state, or private unbound host offline). |
+| **Old authority** | Dual-write sync removed for migrated bags (`_sync_player_state_identity` is a documented no-op). No second live authoritative copy while bound. |
+| **Remaining static EnemyArmyCommand state** | Ephemeral/frame caches: `_main_army_cache`, combat/wave unit frame caches, `_pending_group_orders`, objective stuck timers, threat caches, `_creep_contest_cooldowns`, `_reinforcement_pool`, exec watchdog/squad-id/objective-node scratch, order-issue diagnostics, `_issuing_group_order_batch`. |
+| **Intent providers completed** | Defense / creep / wave (prior) + **EnemyAggression** as first-class publisher (`ATTACK` / `FINISH` / `SUSPEND_CREEP`). Wave no longer duplicates aggression scoring intents. |
+| **Arbitration behavior** | Intents carry explicit priority, TTL (`DEFAULT_TTL_MSEC`), cancel flag, and `mission_owner=ArmyCommanderV2`. Bus purges expired/cancelled. Director filters non-actionable / wrong owner, accepts ownership for DEFEND/offense interrupts, clears accepted intent on leave-DEFEND / expiry. Providers still issue no unit orders under V2. |
+| **Files changed** | `ai_player_state.gd`, `military_intent.gd`, `enemy_army_command.gd`, `enemy_aggression.gd`, `enemy_wave_manager.gd`, `military_director_v2.gd`, `verify_match_composition_root.gd`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 `--import` clean. `validate_import.sh` → `VALIDATION PASS`. `verify_match_composition_root` → `PASS` (SoT reset + TTL/cancel + authority). `verify_match_reset` → `PASS` (registry=27). `verify_freed_instance_regression` → `PASS`. |
+| **Next audit task** | Remaining EAC static ephemerals → AIPlayerState, or first scoped god-object split after ownership is complete. |
+
+### 2026-08-05 — Exec/combat AIPlayerState mirrors + MilitaryIntent providers (audit PHASE 2 #2 / #4)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Related issues covered** | (1) Continue replacing EnemyArmyCommand static match state with match-owned `AIPlayerState` mirrors — executable mission + combat runtime (assembly / retreat / fight / rebuilding / player army memory / hostile engagement). (2) Convert wave/creep/defense into intent-only providers under V2 (roadmap #4). (3) Director consumes intents for DEFEND / offense interrupt / early-creep arbitration. |
+| **Exact change** | Expanded `AIPlayerState` with exec + combat mirrors and a `MilitaryIntent` bus (`publish` / `consume` / peek). `EnemyArmyCommand` dual-writes the new fields via `_sync_player_state_identity`. New `MilitaryIntent` DTO. Under V2, `EnemyDefenseManager` / `EnemyCreepManager` / `EnemyWaveManager` publish intents instead of early-returning idle. `MilitaryDirectorV2` drains the bus each strategic tick. Composition verify covers exec/combat sync + intent bus. |
+| **Not done (intentional)** | Attack-wave / formation / finishing / threat-cache statics still on `EnemyArmyCommand`. Aggression remains a static scorer (wave provider wraps its scores). Providers do not yet own camp/target selection end-to-end — director still selects camps/objectives. |
+| **Files changed** | `scripts/systems/military_intent.gd`, `scripts/systems/ai_player_state.gd`, `scripts/systems/enemy_army_command.gd`, `scripts/systems/enemy_defense_manager.gd`, `scripts/systems/enemy_creep_manager.gd`, `scripts/systems/enemy_wave_manager.gd`, `scripts/systems/military_director_v2.gd`, `scripts/systems/match_composition_root.gd`, `scripts/debug/verify_match_composition_root.gd`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless `--import`: registered `MilitaryIntent` + updated classes. `verify_match_composition_root.tscn` → `PASS`. `verify_match_reset.tscn` → `PASS` (registry=27). `verify_freed_instance_regression.tscn` → `PASS`. |
+| **Next audit task** | PHASE 2 continued — migrate wave/formation/finishing static caches; optionally make EnemyAggression a direct intent publisher; defer god-object file splits. |
+
+### 2026-08-05 — Match composition root + AIPlayerState + command authority (audit PHASE 2 #1–#3)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Related issues covered** | (1) Match-owned composition root on `MatchSystems`. (2) Instantiated `AIPlayerState` for army/strategic identity (replaces pure-static lifetime for those fields). (3) Declared sole military command authority (`ArmyCommanderV2` under V2). |
+| **Exact change** | `MatchCompositionRoot` resolves match systems, owns/binds `AIPlayerState`, declares authority, and binds `EnemyArmyCommand`. Identity writers sync into the match-owned state; scene exit unbinds. Director/commander/strategic director prefer composition lookup. CI runs `verify_match_composition_root.tscn`. |
+| **Not done (intentional)** | Remaining ~90 EnemyArmyCommand static caches (waves, formation caches, etc.) still static — next migration slices. Legacy managers still exist for helpers / V2-off switch; they remain gated from issuing main-army orders under V2. |
+| **Files changed** | `scripts/systems/match_composition_root.gd`, `scripts/systems/ai_player_state.gd`, `scenes/match/match_systems.tscn`, `scripts/systems/enemy_army_command.gd`, `scripts/systems/army_commander_v2.gd`, `scripts/systems/military_director_v2.gd`, `scripts/systems/enemy_strategic_director.gd`, `scripts/systems/match_bootstrap.gd`, `scripts/debug/verify_match_composition_root.gd`, `scenes/debug/verify_match_composition_root.tscn`, `scripts/ci/validate_import.sh`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless: `verify_match_composition_root.tscn` → `PASS`; `verify_match_reset.tscn` → `PASS` (registry=27); `verify_freed_instance_regression.tscn` → `PASS`. Import registered new global classes. |
+| **Next audit task** | PHASE 2 #2 continued — migrate more EnemyArmyCommand static match state into AIPlayerState; then #4 intent providers. |
+
+### 2026-08-05 — Crash/freed-instance regression suite (audit PHASE 1 #5 / #22 related)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Related issues covered** | (1) Orders with freed attack/queue targets. (2) Construction: destroy + raw `queue_free` must release workers/slots. (3) Hero casting / targeting / move-to-cast with freed targets + match restart clearing stale refs. |
+| **Bugs found and fixed** | `Building._exit_tree` did not release construction slots or notify builders on raw free. `HeroAbilityTargetingController._process` left armed definition after hero free because `is_targeting()` went false before cancel. Hero kit casts used `target is Node3D` on freed Variants (throws in Godot 4.7) — fixed in paladin E/R, assassin Q/R, ranger bolt aim, splash position resolve. Worker `face_work_target` no longer `look_at` coincident positions. |
+| **Exact change** | Added `verify_freed_instance_regression.tscn` (8 scenarios). `ConstructionReservations.has_build_slot_owners_for_id` diagnostic. CI `validate_import.sh` runs the suite after match-reset smoke and requires `PASS freed_instance_regression`. |
+| **Files changed** | `scripts/debug/verify_freed_instance_regression.gd`, `scenes/debug/verify_freed_instance_regression.tscn`, `scripts/base/building.gd`, `scripts/systems/construction_reservations.gd`, `autoloads/hero_ability_targeting_controller.gd`, `scripts/units/hero.gd`, `scripts/units/shadow_assassin.gd`, `scripts/units/ranger.gd`, `scripts/systems/splash_damage.gd`, `scripts/units/worker.gd`, `scripts/ci/validate_import.sh`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless: `verify_freed_instance_regression.tscn` → `PASS`; `verify_match_reset.tscn` → `PASS` (registry=27). Import clean. |
+| **Remaining uncertainty** | Occasional engine `Lambda capture … was freed` on process exit with no GDScript backtrace (not treated as fail). Full `main.tscn` rematch scene-change path still not exercised by this harness. |
+| **Next audit task** | PHASE 2 — Create a match-owned composition root (roadmap). Phase 1 leftovers: `GameSettings` Resource TODO; optional separate debug test project (#50). |
 
 ### 2026-08-05 — Canonical main scene + clean stale verify artifacts (audit PHASE 1 #4 / #50 / #51)
 
@@ -143,6 +194,8 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **Mostly resolved** — `FogOfWarManager` and `ProjectileManager` unregistered 2026-08-05. `GameSettings` remains as partial/referenced (cast-mode API); not a pure stub. |
 | **#50** Debug verification scripts in project | **Partially resolved** — release export now excludes `scenes/debug/*` and `scripts/debug/*`. Separate test project deferred (packaging rewrite). |
 | **#51** Stored verification logs include stale failures | **Resolved** — root historical logs deleted; gitignore + CI gate + harnesses no longer write `res://` reports. |
+| **#22** Excessive validity / weak lifetime ownership | **Partially mitigated** — EntityHandle/NodeSafety paths covered by entity-handle + freed-instance regression suites; full handle adoption still Phase 2. |
+| **PHASE 1 #5** Crash/freed-instance regressions | **Resolved** — consolidated suite + CI gate; construction exit_tree + targeting cancel + freed `is` cast crashes fixed. |
 | **#63–64** Debug perf autoloads in production | **Deferred** — `PerfDebugOverlay` gates input on `OS.is_debug_build()`; not a parser/startup failure. |
 
 ## Validation history
@@ -168,11 +221,18 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Unregister `ProjectileManager` stub | Import clean; `validate_import.sh` PASS; `verify_match_reset` PASS |
 | 2026-08-05 | Search `ProjectileManager` after removal | Only docs / progress tracker; not in `project.godot` |
 | 2026-08-05 | Canonical scenes + remove 23 root verify logs | Import clean; `validate_import.sh` PASS (new gates); `verify_match_reset` PASS |
+| 2026-08-05 | Freed-instance regression suite (orders/construction/cast/restart) | `PASS freed_instance_regression`; match reset still PASS |
+| 2026-08-05 | Fix Building exit_tree + targeting cancel + freed `is` casts | Confirmed by regression suite (no SCRIPT ERROR) |
+| 2026-08-05 | Match composition root + AIPlayerState + ArmyCommanderV2 authority | `PASS match_composition_root`; match reset + freed-instance still PASS |
+| 2026-08-05 | Exec/combat mirrors + MilitaryIntent providers (defense/creep/wave) | `PASS match_composition_root` (extended); match reset + freed-instance still PASS |
+| 2026-08-05 | Wave/formation/finishing SoT + aggression publisher + intent TTL/ownership | `VALIDATION PASS`; composition/reset/freed all PASS |
 
 ## Known blockers
 
-None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
+None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed; freed-instance regression gated in CI. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
+
+Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing, declared `ArmyCommanderV2` authority, intent providers (defense/creep/wave/aggression) with TTL/cancel/ownership arbitration. Remaining EAC static ephemerals and god-object splits are next.
 
 ## Next task
 
-**PHASE 1 #5:** Add crash/freed-instance regression tests around orders, construction, hero casting and match restart. Do not expand scope into gameplay refactors.
+**PHASE 2 continued:** Migrate remaining EnemyArmyCommand ephemeral static bags (threat caches, reinforcement pool, pending group orders) into match-owned state, then consider the first scoped god-object split. Do not start unrelated subsystems.

@@ -197,12 +197,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
+	## is_targeting() is false when the hero was freed, but armed definition may remain.
+	## Clear that stale arming before disabling process.
 	if not is_targeting():
-		set_process(false)
-		return
-
-	if not NodeSafety.is_alive_node(_active_hero):
-		cancel_targeting()
+		if _active_definition != null or _active_hero != null:
+			cancel_targeting()
+		else:
+			set_process(false)
 		return
 
 	_refresh_aim(get_viewport().get_mouse_position())

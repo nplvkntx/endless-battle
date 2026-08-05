@@ -654,8 +654,10 @@ func try_crossbow_bolt(target: Variant = null) -> bool:
 
 
 func _resolve_bolt_direction(target: Variant) -> Vector3:
-	if target is Node3D and NodeSafety.is_alive_node(target):
-		var to_unit: Vector3 = (target as Node3D).global_position - global_position
+	## Never use `target is Node3D` before validity — freed Variants throw on `is`.
+	var living: Node3D = NodeSafety.safe_node(target) as Node3D
+	if living != null:
+		var to_unit: Vector3 = living.global_position - global_position
 		to_unit.y = 0.0
 		if to_unit.length_squared() > 0.001:
 			return to_unit.normalized()

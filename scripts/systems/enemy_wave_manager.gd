@@ -60,9 +60,10 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (attack-wave / competing lethal mission owner).
-		## Offense, finishing, and aggression commits move to MilitaryDirectorV2.
-		## Hero kit micro is ticked by ArmyCommanderV2 instead of this manager.
+		## Intent provider under Military AI V2 (no wave launches / hero micro).
+		## Publishes ATTACK / FINISH intents from aggression + finishing signals.
+		## EnemyAggression scoring is ticked by ArmyCommanderV2 via update_finishing_mode.
+		_publish_offense_intents(delta)
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()
@@ -112,6 +113,24 @@ func _process(delta: float) -> void:
 	if _regroup_timer >= ARMY_REGROUP_INTERVAL_SECONDS:
 		_regroup_timer = 0.0
 		_enforce_army_regroup_when_waiting()
+
+
+func _publish_offense_intents(delta: float) -> void:
+	_offensive_monitor_timer += delta
+	if _offensive_monitor_timer < OFFENSIVE_MONITOR_INTERVAL_SECONDS:
+		return
+	_offensive_monitor_timer = 0.0
+
+	## Aggression owns ATTACK / FINISH / SUSPEND_CREEP publishing under V2.
+	## Wave manager only surfaces finishing-mode as a redundant safety publish when
+	## finishing state flipped without an aggression eval tick.
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null:
+		return
+	if EnemyArmyCommand.is_finishing_mode_active():
+		state.publish_intent(
+			MilitaryIntent.make_finish(&"finishing_mode", 95.0, &"wave")
+		)
 
 
 func _process_attack_wave_advance() -> void:

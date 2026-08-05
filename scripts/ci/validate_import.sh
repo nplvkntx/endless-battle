@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GODOT="${GODOT:-godot}"
 FAIL=0
 HEADLESS_SMOKE_SCENE="res://scenes/debug/verify_match_reset.tscn"
+HEADLESS_FREED_SCENE="res://scenes/debug/verify_freed_instance_regression.tscn"
+HEADLESS_COMPOSITION_SCENE="res://scenes/debug/verify_match_composition_root.tscn"
 
 fail() {
 	echo "VALIDATION FAIL: $1" >&2
@@ -159,6 +161,38 @@ check_headless_smoke_scene() {
 	scan_godot_log "$log" "Headless smoke scene reported script or resource errors"
 }
 
+check_headless_freed_instance_scene() {
+	local log
+	log="$(mktemp)"
+	trap 'rm -f "$log"' RETURN
+	if ! "$GODOT" --headless --path "$ROOT" --scene "$HEADLESS_FREED_SCENE" >"$log" 2>&1; then
+		cat "$log" >&2
+		fail "Freed-instance regression scene exited non-zero. $(summarize_log "$log")"
+		return
+	fi
+	scan_godot_log "$log" "Freed-instance regression scene reported script or resource errors"
+	if ! grep -q "PASS freed_instance_regression" "$log"; then
+		cat "$log" >&2
+		fail "Freed-instance regression scene did not report PASS"
+	fi
+}
+
+check_headless_composition_root_scene() {
+	local log
+	log="$(mktemp)"
+	trap 'rm -f "$log"' RETURN
+	if ! "$GODOT" --headless --path "$ROOT" --scene "$HEADLESS_COMPOSITION_SCENE" >"$log" 2>&1; then
+		cat "$log" >&2
+		fail "Match composition root scene exited non-zero. $(summarize_log "$log")"
+		return
+	fi
+	scan_godot_log "$log" "Match composition root scene reported script or resource errors"
+	if ! grep -q "PASS match_composition_root" "$log"; then
+		cat "$log" >&2
+		fail "Match composition root scene did not report PASS"
+	fi
+}
+
 echo "== Static checks =="
 check_autoload_paths
 check_main_scene
@@ -173,8 +207,14 @@ check_headless_import
 echo "== Godot headless smoke scene =="
 check_headless_smoke_scene
 
+echo "== Godot freed-instance regression =="
+check_headless_freed_instance_scene
+
+echo "== Godot match composition root =="
+check_headless_composition_root_scene
+
 if [[ "$FAIL" -ne 0 ]]; then
 	exit 1
 fi
 
-echo "VALIDATION PASS: import, references, autoloads, and headless smoke scene"
+echo "VALIDATION PASS: import, references, autoloads, headless smoke, freed-instance, and composition root"

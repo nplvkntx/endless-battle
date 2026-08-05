@@ -233,6 +233,44 @@ static func update(tree: SceneTree, delta: float) -> void:
 
 	_update_aggression_state(tree, lethal)
 	_maybe_escalate_finishing(tree)
+	_publish_military_intents_v2()
+
+
+## First-class MilitaryIntent publisher under V2 (no unit orders).
+static func _publish_military_intents_v2() -> void:
+	if not MilitaryAIConfig.is_v2_enabled():
+		return
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null:
+		return
+
+	if should_suspend_creeping():
+		state.publish_intent(
+			MilitaryIntent.make_suspend_creep(&"aggression_suspend", &"aggression")
+		)
+
+	if EnemyArmyCommand.is_finishing_mode_active():
+		state.publish_intent(
+			MilitaryIntent.make_finish(&"finishing_mode", 95.0, &"aggression")
+		)
+		return
+
+	if _lethal_score >= MilitaryAIConfig.V2_ATTACK_LETHAL_SCORE_THRESHOLD:
+		state.publish_intent(
+			MilitaryIntent.make_attack(&"lethal_score", _lethal_score, &"aggression")
+		)
+		return
+
+	if _aggression_active:
+		state.publish_intent(
+			MilitaryIntent.make_attack(&"aggression_mode", _opportunity_score, &"aggression")
+		)
+		return
+
+	if _greed_score >= MilitaryAIConfig.V2_CREEP_GREED_INTERRUPT_SCORE:
+		state.publish_intent(
+			MilitaryIntent.make_attack(&"greed_window", _greed_score, &"aggression")
+		)
 
 
 static func compute_lethal_score(tree: SceneTree, rally_position: Vector3 = Vector3.ZERO) -> Dictionary:

@@ -234,44 +234,191 @@ const ATTACK_WAVE_MISSION_LOCK_SECONDS := 6.0
 const EXPOSED_PLAYER_ARMY_SEARCH_RANGE := 90.0
 const EXPOSED_PLAYER_ARMY_MIN_UNITS := 3
 
-static var _army_mode: ArmyMode = ArmyMode.IDLE
-static var _mode_claim_msec: int = 0
-static var _strategic_state: StrategicState = StrategicState.ECONOMY
-static var _strategic_state_msec: int = 0
-static var _pending_strategic_state: StrategicState = StrategicState.ECONOMY
-static var _pending_strategic_reason: String = ""
-static var _has_pending_strategic_transition: bool = false
-static var _orders_authorized: bool = false
-static var _assembly_timer: float = 0.0
-static var _assembly_rally: Vector3 = Vector3.ZERO
-static var _assembly_required_count: int = 0
-static var _retreat_cooldown: float = 0.0
-static var _fight_start_strength: float = 0.0
-static var _fight_anchor_position: Vector3 = Vector3.ZERO
-static var _fight_start_msec: int = 0
+## Match-owned runtime host. When bound, this is the composition AIPlayerState
+## (single authority). When unbound, a private offline instance is used so helpers
+## never create a second live match authority.
+static var _unbound_runtime: AIPlayerState = null
+
+static func _rt() -> AIPlayerState:
+	var bound: AIPlayerState = get_bound_ai_player_state()
+	if bound != null:
+		return bound
+	if _unbound_runtime == null or not is_instance_valid(_unbound_runtime):
+		_unbound_runtime = AIPlayerState.new()
+		_unbound_runtime.name = "AIPlayerState_Unbound"
+	return _unbound_runtime
+
+
+## --- Identity / strategic (SoT: AIPlayerState) ---
+static var _army_mode: ArmyMode:
+	get:
+		return _rt().army_mode as ArmyMode
+	set(value):
+		_rt().army_mode = int(value)
+
+static var _mode_claim_msec: int:
+	get:
+		return _rt().mode_claim_msec
+	set(value):
+		_rt().mode_claim_msec = value
+
+static var _strategic_state: StrategicState:
+	get:
+		return _rt().strategic_state as StrategicState
+	set(value):
+		_rt().strategic_state = int(value)
+
+static var _strategic_state_msec: int:
+	get:
+		return _rt().strategic_state_msec
+	set(value):
+		_rt().strategic_state_msec = value
+
+static var _pending_strategic_state: StrategicState:
+	get:
+		return _rt().pending_strategic_state as StrategicState
+	set(value):
+		_rt().pending_strategic_state = int(value)
+
+static var _pending_strategic_reason: String:
+	get:
+		return _rt().pending_strategic_reason
+	set(value):
+		_rt().pending_strategic_reason = value
+
+static var _has_pending_strategic_transition: bool:
+	get:
+		return _rt().has_pending_strategic_transition
+	set(value):
+		_rt().has_pending_strategic_transition = value
+
+static var _orders_authorized: bool:
+	get:
+		return _rt().orders_authorized
+	set(value):
+		_rt().orders_authorized = value
+
+static var _assembly_timer: float:
+	get:
+		return _rt().assembly_timer
+	set(value):
+		_rt().assembly_timer = value
+
+static var _assembly_rally: Vector3:
+	get:
+		return _rt().assembly_rally
+	set(value):
+		_rt().assembly_rally = value
+
+static var _assembly_required_count: int:
+	get:
+		return _rt().assembly_required_count
+	set(value):
+		_rt().assembly_required_count = value
+
+static var _retreat_cooldown: float:
+	get:
+		return _rt().retreat_cooldown
+	set(value):
+		_rt().retreat_cooldown = value
+
+static var _fight_start_strength: float:
+	get:
+		return _rt().fight_start_strength
+	set(value):
+		_rt().fight_start_strength = value
+
+static var _fight_anchor_position: Vector3:
+	get:
+		return _rt().fight_anchor_position
+	set(value):
+		_rt().fight_anchor_position = value
+
+static var _fight_start_msec: int:
+	get:
+		return _rt().fight_start_msec
+	set(value):
+		_rt().fight_start_msec = value
+
 static var _last_combat_eval_msec: int = 0
 static var _main_army_cache: Array = []
-static var _player_army_memory: Dictionary = {
-	"strength": 0.0,
-	"position": Vector3.ZERO,
-	"hero_level": 0,
-	"timestamp_msec": 0,
-	"unit_count": 0,
-}
-static var _is_rebuilding_army: bool = false
-static var _active_wave_start_unit_count: int = 0
-static var _active_wave_objective: Node3D = null
-static var _active_wave_objective_position: Vector3 = Vector3.ZERO
+
+static var _player_army_memory: Dictionary:
+	get:
+		return _rt().player_army_memory
+	set(value):
+		_rt().player_army_memory = value
+
+static var _is_rebuilding_army: bool:
+	get:
+		return _rt().is_rebuilding_army
+	set(value):
+		_rt().is_rebuilding_army = value
+
+static var _active_wave_start_unit_count: int:
+	get:
+		return _rt().active_wave_start_unit_count
+	set(value):
+		_rt().active_wave_start_unit_count = value
+
+static var _active_wave_objective: Node3D:
+	get:
+		return _rt().active_wave_objective
+	set(value):
+		_rt().active_wave_objective = value
+
+static var _active_wave_objective_position: Vector3:
+	get:
+		return _rt().active_wave_objective_position
+	set(value):
+		_rt().active_wave_objective_position = value
+
 static var _objective_reissue_timer: float = 0.0
 static var _objective_stuck_timer: float = 0.0
 static var _objective_last_building_health: int = -1
-static var _finishing_mode_active: bool = false
-static var _finishing_mode_exit_cooldown: float = 0.0
-static var _finishing_mode_eval_timer: float = 0.0
-static var _last_finishing_objective: Node3D = null
-static var _emergency_defense_active: bool = false
-static var _emergency_threat_position: Vector3 = Vector3.ZERO
-static var _emergency_reason: StringName = &""
+
+static var _finishing_mode_active: bool:
+	get:
+		return _rt().finishing_mode_active
+	set(value):
+		_rt().finishing_mode_active = value
+
+static var _finishing_mode_exit_cooldown: float:
+	get:
+		return _rt().finishing_mode_exit_cooldown
+	set(value):
+		_rt().finishing_mode_exit_cooldown = value
+
+static var _finishing_mode_eval_timer: float:
+	get:
+		return _rt().finishing_mode_eval_timer
+	set(value):
+		_rt().finishing_mode_eval_timer = value
+
+static var _last_finishing_objective: Node3D:
+	get:
+		return _rt().last_finishing_objective
+	set(value):
+		_rt().last_finishing_objective = value
+
+static var _emergency_defense_active: bool:
+	get:
+		return _rt().emergency_defense_active
+	set(value):
+		_rt().emergency_defense_active = value
+
+static var _emergency_threat_position: Vector3:
+	get:
+		return _rt().emergency_threat_position
+	set(value):
+		_rt().emergency_threat_position = value
+
+static var _emergency_reason: StringName:
+	get:
+		return _rt().emergency_reason
+	set(value):
+		_rt().emergency_reason = value
+
 static var _debug_enabled_override: bool = false
 static var _combat_units_cache_frame: int = -1
 static var _cached_offensive_wave_units_frame: int = -1
@@ -281,18 +428,79 @@ static var _objective_eval_timer: float = 0.0
 static var _objective_stuck_check_timer: float = 0.0
 static var _perf_diag_timer: float = 0.0
 static var _orders_issued_since_diag: int = 0
-static var _formation_cache_unit_ids: Array[int] = []
-static var _formation_cache_center: Vector3 = Vector3.ZERO
-static var _formation_cache_use_attack_move: bool = false
-static var _formation_cache_targets: Array[Vector3] = []
-static var _formation_cache_msec: int = 0
-static var _formation_cache_army_mode: int = -1
-static var _active_group_order_signature: String = ""
-static var _active_group_order_dest: Vector3 = Vector3.ZERO
-static var _active_group_order_mission: int = -1
-static var _active_group_order_generation: int = 0
-static var _active_group_order_msec: int = 0
-static var _group_order_generation: int = 0
+
+static var _formation_cache_unit_ids: Array[int]:
+	get:
+		return _rt().formation_cache_unit_ids
+	set(value):
+		_rt().formation_cache_unit_ids = value
+
+static var _formation_cache_center: Vector3:
+	get:
+		return _rt().formation_cache_center
+	set(value):
+		_rt().formation_cache_center = value
+
+static var _formation_cache_use_attack_move: bool:
+	get:
+		return _rt().formation_cache_use_attack_move
+	set(value):
+		_rt().formation_cache_use_attack_move = value
+
+static var _formation_cache_targets: Array[Vector3]:
+	get:
+		return _rt().formation_cache_targets
+	set(value):
+		_rt().formation_cache_targets = value
+
+static var _formation_cache_msec: int:
+	get:
+		return _rt().formation_cache_msec
+	set(value):
+		_rt().formation_cache_msec = value
+
+static var _formation_cache_army_mode: int:
+	get:
+		return _rt().formation_cache_army_mode
+	set(value):
+		_rt().formation_cache_army_mode = value
+
+static var _active_group_order_signature: String:
+	get:
+		return _rt().active_group_order_signature
+	set(value):
+		_rt().active_group_order_signature = value
+
+static var _active_group_order_dest: Vector3:
+	get:
+		return _rt().active_group_order_dest
+	set(value):
+		_rt().active_group_order_dest = value
+
+static var _active_group_order_mission: int:
+	get:
+		return _rt().active_group_order_mission
+	set(value):
+		_rt().active_group_order_mission = value
+
+static var _active_group_order_generation: int:
+	get:
+		return _rt().active_group_order_generation
+	set(value):
+		_rt().active_group_order_generation = value
+
+static var _active_group_order_msec: int:
+	get:
+		return _rt().active_group_order_msec
+	set(value):
+		_rt().active_group_order_msec = value
+
+static var _group_order_generation: int:
+	get:
+		return _rt().group_order_generation
+	set(value):
+		_rt().group_order_generation = value
+
 static var _issuing_group_order_batch: bool = false
 static var _defense_threat_cache: Dictionary = {}
 static var _defense_threat_cache_msec: int = 0
@@ -301,44 +509,212 @@ static var _emergency_threat_cache_msec: int = 0
 static var _perf_overlay_status_timer: float = 0.0
 static var _creep_contest_cooldowns: Dictionary = {}
 static var _reinforcement_pool: Dictionary = {}
-static var _attack_wave_state: AttackWaveState = AttackWaveState.NONE
-static var _attack_wave_state_msec: int = 0
-static var _attack_wave_units: Array = []
-static var _attack_wave_staging_point: Vector3 = Vector3.ZERO
-static var _attack_wave_target_position: Vector3 = Vector3.ZERO
-static var _attack_wave_target_node: Node3D = null
-static var _attack_wave_target_committed_until_msec: int = 0
-static var _attack_wave_gather_pull_timer: float = 0.0
-static var _attack_wave_hero_wait_timer: float = 0.0
-static var _attack_wave_regroup_timer: float = 0.0
-static var _attack_wave_recovery_timer: float = 0.0
-static var _attack_wave_command_refresh_timer: float = 0.0
-static var _attack_wave_hero_unreachable_retries: int = 0
-static var _attack_wave_min_non_hero_units: int = 0
-static var _attack_wave_ready_to_advance: bool = false
-static var _attack_wave_pending_transition: AttackWaveState = AttackWaveState.NONE
-static var _attack_wave_pending_transition_reason: String = ""
 
-## Authoritative executable army mission (owned here; managers write via set_executable_mission).
-static var _exec_mission: ExecutableMission = ExecutableMission.NONE
+static var _attack_wave_state: AttackWaveState:
+	get:
+		return _rt().attack_wave_state as AttackWaveState
+	set(value):
+		_rt().attack_wave_state = int(value)
+
+static var _attack_wave_state_msec: int:
+	get:
+		return _rt().attack_wave_state_msec
+	set(value):
+		_rt().attack_wave_state_msec = value
+
+static var _attack_wave_units: Array:
+	get:
+		return _rt().attack_wave_units
+	set(value):
+		_rt().attack_wave_units = value
+
+static var _attack_wave_staging_point: Vector3:
+	get:
+		return _rt().attack_wave_staging_point
+	set(value):
+		_rt().attack_wave_staging_point = value
+
+static var _attack_wave_target_position: Vector3:
+	get:
+		return _rt().attack_wave_target_position
+	set(value):
+		_rt().attack_wave_target_position = value
+
+static var _attack_wave_target_node: Node3D:
+	get:
+		return _rt().attack_wave_target_node
+	set(value):
+		_rt().attack_wave_target_node = value
+
+static var _attack_wave_target_committed_until_msec: int:
+	get:
+		return _rt().attack_wave_target_committed_until_msec
+	set(value):
+		_rt().attack_wave_target_committed_until_msec = value
+
+static var _attack_wave_gather_pull_timer: float:
+	get:
+		return _rt().attack_wave_gather_pull_timer
+	set(value):
+		_rt().attack_wave_gather_pull_timer = value
+
+static var _attack_wave_hero_wait_timer: float:
+	get:
+		return _rt().attack_wave_hero_wait_timer
+	set(value):
+		_rt().attack_wave_hero_wait_timer = value
+
+static var _attack_wave_regroup_timer: float:
+	get:
+		return _rt().attack_wave_regroup_timer
+	set(value):
+		_rt().attack_wave_regroup_timer = value
+
+static var _attack_wave_recovery_timer: float:
+	get:
+		return _rt().attack_wave_recovery_timer
+	set(value):
+		_rt().attack_wave_recovery_timer = value
+
+static var _attack_wave_command_refresh_timer: float:
+	get:
+		return _rt().attack_wave_command_refresh_timer
+	set(value):
+		_rt().attack_wave_command_refresh_timer = value
+
+static var _attack_wave_hero_unreachable_retries: int:
+	get:
+		return _rt().attack_wave_hero_unreachable_retries
+	set(value):
+		_rt().attack_wave_hero_unreachable_retries = value
+
+static var _attack_wave_min_non_hero_units: int:
+	get:
+		return _rt().attack_wave_min_non_hero_units
+	set(value):
+		_rt().attack_wave_min_non_hero_units = value
+
+static var _attack_wave_ready_to_advance: bool:
+	get:
+		return _rt().attack_wave_ready_to_advance
+	set(value):
+		_rt().attack_wave_ready_to_advance = value
+
+static var _attack_wave_pending_transition: AttackWaveState:
+	get:
+		return _rt().attack_wave_pending_transition as AttackWaveState
+	set(value):
+		_rt().attack_wave_pending_transition = int(value)
+
+static var _attack_wave_pending_transition_reason: String:
+	get:
+		return _rt().attack_wave_pending_transition_reason
+	set(value):
+		_rt().attack_wave_pending_transition_reason = value
+
+## Authoritative executable army mission (SoT: AIPlayerState when bound).
+static var _exec_mission: ExecutableMission:
+	get:
+		return _rt().exec_mission as ExecutableMission
+	set(value):
+		_rt().exec_mission = int(value)
+
 static var _exec_objective_node: Node3D = null
-static var _exec_objective_position: Vector3 = Vector3.ZERO
-static var _exec_objective_name: String = ""
-static var _exec_mission_start_msec: int = 0
+static var _exec_objective_position: Vector3:
+	get:
+		return _rt().exec_objective_position
+	set(value):
+		_rt().exec_objective_position = value
+
+static var _exec_objective_name: String:
+	get:
+		return _rt().exec_objective_name
+	set(value):
+		_rt().exec_objective_name = value
+
+static var _exec_mission_start_msec: int:
+	get:
+		return _rt().exec_mission_start_msec
+	set(value):
+		_rt().exec_mission_start_msec = value
+
 static var _exec_last_progress_msec: int = 0
 static var _exec_last_distance: float = -1.0
 static var _exec_squad_ids: Array[int] = []
-static var _exec_order_label: String = ""
-static var _exec_transition_reason: String = ""
-static var _exec_camp_reserved: bool = false
+static var _exec_order_label: String:
+	get:
+		return _rt().exec_order_label
+	set(value):
+		_rt().exec_order_label = value
+
+static var _exec_transition_reason: String:
+	get:
+		return _rt().exec_transition_reason
+	set(value):
+		_rt().exec_transition_reason = value
+
+static var _exec_camp_reserved: bool:
+	get:
+		return _rt().exec_camp_reserved
+	set(value):
+		_rt().exec_camp_reserved = value
+
 static var _exec_watchdog_timer: float = 0.0
 static var _exec_watchdog_refreshed: bool = false
 static var _exec_last_report: String = ""
-static var _allow_hostile_engagement: bool = false
+static var _allow_hostile_engagement: bool:
+	get:
+		return _rt().allow_hostile_engagement
+	set(value):
+		_rt().allow_hostile_engagement = value
+
 ## Last successfully issued group/unit move order (for V2 idle diagnostics).
 static var _last_issued_order_msec: int = 0
 static var _last_issued_order_label: String = ""
 static var _last_issued_order_destination: Vector3 = Vector3.ZERO
+
+## Match composition binding. Null outside an active MatchCompositionRoot.
+## Migrated bags are SoT on AIPlayerState via _rt() — no dual-write.
+static var _bound_player_state: AIPlayerState = null
+static var _declared_command_authority: Node = null
+
+
+
+static func bind_match_composition(state: AIPlayerState, authority: Node) -> void:
+	_bound_player_state = state
+	_declared_command_authority = authority
+	## SoT is the bound AIPlayerState via _rt() — no dual-write copy.
+	if state != null:
+		state.set_military_command_authority(authority)
+
+
+static func unbind_match_composition() -> void:
+	_bound_player_state = null
+	_declared_command_authority = null
+	## Fresh unbound host so offline helpers cannot observe the last match.
+	if _unbound_runtime != null and is_instance_valid(_unbound_runtime):
+		_unbound_runtime.reset()
+	else:
+		_unbound_runtime = null
+
+
+static func get_bound_ai_player_state() -> AIPlayerState:
+	if _bound_player_state != null and is_instance_valid(_bound_player_state):
+		return _bound_player_state
+	_bound_player_state = null
+	return null
+
+
+static func get_declared_command_authority() -> Node:
+	if _declared_command_authority != null and is_instance_valid(_declared_command_authority):
+		return _declared_command_authority
+	_declared_command_authority = null
+	return null
+
+
+static func _sync_player_state_identity() -> void:
+	## No-op: migrated identity/exec/combat/wave/formation/finishing live on _rt().
+	pass
 
 
 static func get_army_mode() -> ArmyMode:
@@ -406,6 +782,7 @@ static func request_strategic_state(new_state: StrategicState, reason: String = 
 	_pending_strategic_state = new_state
 	_pending_strategic_reason = reason
 	_has_pending_strategic_transition = true
+	_sync_player_state_identity()
 	return true
 
 
@@ -419,6 +796,7 @@ static func apply_pending_strategic_transition() -> void:
 	_has_pending_strategic_transition = false
 	_log_strategic_state_change(previous_state, _strategic_state, _pending_strategic_reason)
 	_pending_strategic_reason = ""
+	_sync_player_state_identity()
 
 
 static func allows_offensive_orders() -> bool:
@@ -505,6 +883,7 @@ static func force_set_strategic_state_for_v2(
 	if new_state == _strategic_state:
 		_has_pending_strategic_transition = false
 		_pending_strategic_reason = ""
+		_sync_player_state_identity()
 		return
 
 	## Never yank emergency defense into offense.
@@ -524,63 +903,24 @@ static func force_set_strategic_state_for_v2(
 	_has_pending_strategic_transition = false
 	_pending_strategic_reason = ""
 	_log_strategic_state_change(previous_state, new_state, reason)
+	_sync_player_state_identity()
 
 
 ## Clear static army ownership between matches. Class-level state otherwise persists in-editor.
 static func reset_match_state() -> void:
-	_army_mode = ArmyMode.IDLE
-	_mode_claim_msec = 0
-	_strategic_state = StrategicState.ECONOMY
-	_strategic_state_msec = 0
-	_pending_strategic_state = StrategicState.ECONOMY
-	_pending_strategic_reason = ""
-	_has_pending_strategic_transition = false
-	_orders_authorized = false
-	_assembly_timer = 0.0
-	_assembly_rally = Vector3.ZERO
-	_assembly_required_count = 0
-	_retreat_cooldown = 0.0
-	_fight_start_strength = 0.0
-	_fight_anchor_position = Vector3.ZERO
-	_fight_start_msec = 0
+	## Match-owned SoT bags live on _rt() (bound AIPlayerState or unbound host).
+	_rt().reset()
+	_clear_executable_mission_state("match reset")
 	_last_combat_eval_msec = 0
 	_main_army_cache.clear()
-	_player_army_memory = {
-		"strength": 0.0,
-		"position": Vector3.ZERO,
-		"hero_level": 0,
-		"timestamp_msec": 0,
-		"unit_count": 0,
-	}
-	_is_rebuilding_army = false
-	_active_wave_start_unit_count = 0
 	_reset_objective_tracking()
-	_finishing_mode_active = false
-	_finishing_mode_exit_cooldown = 0.0
-	_finishing_mode_eval_timer = 0.0
-	_last_finishing_objective = null
 	EnemyAggression.reset_match_state()
-	_emergency_defense_active = false
-	_emergency_threat_position = Vector3.ZERO
-	_emergency_reason = &""
 	_combat_units_cache_frame = -1
 	_cached_offensive_wave_units_frame = -1
 	_cached_offensive_wave_units.clear()
 	_pending_group_orders.clear()
 	_objective_eval_timer = 0.0
 	_objective_stuck_check_timer = 0.0
-	_formation_cache_unit_ids.clear()
-	_formation_cache_center = Vector3.ZERO
-	_formation_cache_use_attack_move = false
-	_formation_cache_targets.clear()
-	_formation_cache_msec = 0
-	_formation_cache_army_mode = -1
-	_active_group_order_signature = ""
-	_active_group_order_dest = Vector3.ZERO
-	_active_group_order_mission = -1
-	_active_group_order_generation = 0
-	_active_group_order_msec = 0
-	_group_order_generation = 0
 	_issuing_group_order_batch = false
 	_defense_threat_cache.clear()
 	_defense_threat_cache_msec = 0
@@ -588,33 +928,22 @@ static func reset_match_state() -> void:
 	_emergency_threat_cache_msec = 0
 	_creep_contest_cooldowns.clear()
 	_reinforcement_pool.clear()
-	_attack_wave_state = AttackWaveState.NONE
-	_attack_wave_state_msec = 0
-	_attack_wave_units.clear()
-	_attack_wave_staging_point = Vector3.ZERO
-	_attack_wave_target_position = Vector3.ZERO
-	_attack_wave_target_node = null
-	_attack_wave_target_committed_until_msec = 0
-	_attack_wave_gather_pull_timer = 0.0
-	_attack_wave_hero_wait_timer = 0.0
-	_attack_wave_regroup_timer = 0.0
-	_attack_wave_recovery_timer = 0.0
-	_attack_wave_command_refresh_timer = 0.0
-	_attack_wave_hero_unreachable_retries = 0
-	_attack_wave_min_non_hero_units = 0
-	_attack_wave_ready_to_advance = false
-	_attack_wave_pending_transition = AttackWaveState.NONE
-	_attack_wave_pending_transition_reason = ""
-	_clear_executable_mission_state("match reset")
 	_perf_diag_timer = 0.0
 	_orders_issued_since_diag = 0
 	_perf_overlay_status_timer = 0.0
 	EnemyUnitMission.reset_match_state()
+	var bound_state: AIPlayerState = get_bound_ai_player_state()
+	if bound_state != null:
+		bound_state.set_military_command_authority(_declared_command_authority)
 
 
 static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
 	if tree == null:
 		return null
+
+	var composition: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(tree)
+	if composition != null and composition.enemy_strategic_director != null:
+		return composition.enemy_strategic_director
 
 	var root: Node = tree.root
 	if root == null:
@@ -825,6 +1154,7 @@ static func is_retreat_on_cooldown() -> bool:
 static func tick_retreat_cooldown(delta: float) -> void:
 	if _retreat_cooldown > 0.0:
 		_retreat_cooldown = maxf(0.0, _retreat_cooldown - delta)
+		_sync_player_state_identity()
 
 
 static func get_phase_min_army_size(match_elapsed_seconds: float) -> int:
@@ -879,8 +1209,10 @@ static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
 
 static func with_authorized_orders(callback: Callable) -> void:
 	_orders_authorized = true
+	_sync_player_state_identity()
 	callback.call()
 	_orders_authorized = false
+	_sync_player_state_identity()
 
 
 static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
@@ -1078,6 +1410,7 @@ static func record_player_army_observation(tree: SceneTree, position: Vector3, r
 		"timestamp_msec": Time.get_ticks_msec(),
 		"unit_count": player_units.size(),
 	}
+	_sync_player_state_identity()
 
 
 static func get_effective_player_strength_at(tree: SceneTree, position: Vector3, radius: float) -> float:
@@ -1107,6 +1440,7 @@ static func begin_fight_tracking(units: Array, anchor_position: Vector3) -> void
 	_fight_start_strength = estimate_combat_strength(units)
 	_fight_anchor_position = anchor_position
 	_fight_start_msec = Time.get_ticks_msec()
+	_sync_player_state_identity()
 
 
 static func should_retreat_from_fight(tree: SceneTree) -> bool:
@@ -1311,6 +1645,7 @@ static func begin_assembly(
 		1,
 		int(ceil(float(required_units.size()) * ASSEMBLY_REQUIRED_PERCENT))
 	)
+	_sync_player_state_identity()
 	_debug_state_change(previous_mode, ArmyMode.ASSEMBLING)
 
 	## Keep creep/attack ownership during assemble — RALLY lets wave regroup steal the squad.
@@ -1332,6 +1667,7 @@ static func is_assembly_ready(tree: SceneTree, delta: float) -> bool:
 		return false
 
 	_assembly_timer += delta
+	_sync_player_state_identity()
 	var army: Array = collect_living_combat_units(tree)
 	var assembled: Array = filter_units_near_rally(army, _assembly_rally, ASSEMBLY_RADIUS)
 	var assembled_count: int = assembled.size()
@@ -1647,6 +1983,7 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 	if _emergency_defense_active:
 		_emergency_reason = reason
 		_emergency_threat_position = intercept_position
+		_sync_player_state_identity()
 		set_executable_mission(
 			ExecutableMission.EMERGENCY_DEFEND,
 			String(reason),
@@ -1662,6 +1999,7 @@ static func activate_emergency_defense(threat: Dictionary) -> void:
 	_emergency_defense_active = true
 	_emergency_reason = reason
 	_emergency_threat_position = intercept_position
+	_sync_player_state_identity()
 	EnemyUnitMission.set_main_army_mission(
 		EnemyUnitMission.Mission.DEFEND,
 		"emergency defense"
@@ -1686,6 +2024,7 @@ static func update_emergency_defense_threat(threat: Dictionary) -> void:
 
 	_emergency_reason = threat.get("reason", &"")
 	_emergency_threat_position = threat.get("intercept_position", Vector3.ZERO)
+	_sync_player_state_identity()
 
 
 static func deactivate_emergency_defense() -> void:
@@ -1695,6 +2034,7 @@ static func deactivate_emergency_defense() -> void:
 	_emergency_defense_active = false
 	_emergency_threat_position = Vector3.ZERO
 	_emergency_reason = &""
+	_sync_player_state_identity()
 	EnemyUnitMission.set_main_army_mission(
 		EnemyUnitMission.Mission.RALLY,
 		"emergency ended"
@@ -1749,6 +2089,7 @@ static func update_finishing_mode(tree: SceneTree, delta: float) -> void:
 
 static func set_rebuilding_army(rebuilding: bool) -> void:
 	_is_rebuilding_army = rebuilding
+	_sync_player_state_identity()
 
 
 static func get_attack_wave_state() -> AttackWaveState:
@@ -3110,6 +3451,7 @@ static func _set_army_mode(requested_mode: ArmyMode, previous_mode: ArmyMode) ->
 	_active_group_order_msec = 0
 	_formation_cache_msec = 0
 	_debug_state_change(previous_mode, requested_mode)
+	_sync_player_state_identity()
 
 
 static func release_army_mode(mode: ArmyMode) -> bool:
@@ -3124,6 +3466,7 @@ static func release_army_mode(mode: ArmyMode) -> bool:
 	_active_group_order_mission = -1
 	_active_group_order_msec = 0
 	_debug_state_change(previous_mode, ArmyMode.IDLE)
+	_sync_player_state_identity()
 	return true
 
 
@@ -5769,6 +6112,7 @@ static func set_executable_mission(
 			"exec_mission",
 			"MISSION: %s | Reason: %s" % [executable_mission_to_label(mission), reason]
 		)
+	_sync_player_state_identity()
 
 
 static func clear_executable_mission(reason: String = "") -> void:
@@ -5803,6 +6147,7 @@ static func _clear_executable_mission_state(reason: String) -> void:
 	_last_issued_order_msec = 0
 	_last_issued_order_label = ""
 	_last_issued_order_destination = Vector3.ZERO
+	_sync_player_state_identity()
 
 
 static func note_mission_order(order_label: String, destination: Vector3 = Vector3.ZERO) -> void:
@@ -5819,6 +6164,7 @@ static func note_mission_order(order_label: String, destination: Vector3 = Vecto
 	elif _exec_objective_position != Vector3.ZERO:
 		_last_issued_order_destination = _exec_objective_position
 	_log_issued_order(_last_issued_order_label, _last_issued_order_destination)
+	_sync_player_state_identity()
 
 
 static func get_seconds_since_last_order() -> float:
@@ -6213,6 +6559,7 @@ static func handle_hostile_territory_idle(
 			"Hostile territory attack -> %s (%s)" % [objective_name, reason]
 		)
 	_allow_hostile_engagement = false
+	_sync_player_state_identity()
 	return issued
 
 
@@ -6267,6 +6614,7 @@ static func refresh_stalled_mission_order(tree: SceneTree) -> bool:
 		_allow_hostile_engagement
 	)
 	_allow_hostile_engagement = false
+	_sync_player_state_identity()
 	if ok:
 		note_mission_order("%s-refresh" % _exec_order_label, _exec_objective_position)
 	return ok

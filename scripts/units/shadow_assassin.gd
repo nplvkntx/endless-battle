@@ -376,9 +376,10 @@ func try_axe_mark(target: Variant = null) -> bool:
 
 	var cast_range: float = get_ability_range(HeroAbilityProgression.ABILITY_Q)
 	var resolved: Node3D = null
-	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
-		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
-		if clicked != null and _horizontal_distance_to(clicked) <= cast_range:
+	## Never use `target is Node3D` on a Variant that may be freed — that throws.
+	var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+	if clicked != null and CombatTargetValidation.is_hero_unit_ability_target(self, clicked):
+		if _horizontal_distance_to(clicked) <= cast_range:
 			resolved = clicked
 	else:
 		resolved = _resolve_axe_mark_target(cast_range)
@@ -761,9 +762,10 @@ func try_dash(target: Variant = null) -> bool:
 
 	var cast_range: float = get_ability_range(HeroAbilityProgression.ABILITY_R)
 	var resolved: Node3D = null
-	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
-		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
-		if clicked != null and _horizontal_distance_to(clicked) <= cast_range:
+	## Never use `target is Node3D` on a Variant that may be freed — that throws.
+	var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+	if clicked != null and CombatTargetValidation.is_hero_unit_ability_target(self, clicked):
+		if _horizontal_distance_to(clicked) <= cast_range:
 			resolved = clicked
 	else:
 		resolved = _resolve_dash_target(cast_range)

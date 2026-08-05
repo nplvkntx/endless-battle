@@ -417,8 +417,10 @@ func try_power_strike(target: Variant = null) -> bool:
 		return false
 
 	var resolved: Node3D = null
-	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
-		resolved = NodeSafety.safe_node(target) as Node3D
+	## Never use `target is Node3D` on a Variant that may be freed — that throws.
+	var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+	if clicked != null and CombatTargetValidation.is_hero_unit_ability_target(self, clicked):
+		resolved = clicked
 	else:
 		resolved = _resolve_power_strike_target(ATTACK_MOVE_ENGAGEMENT_RANGE)
 
@@ -670,9 +672,10 @@ func try_execute(target: Variant = null) -> bool:
 		return false
 
 	var resolved: Node3D = null
-	if target is Node3D and CombatTargetValidation.is_hero_unit_ability_target(self, target):
-		var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
-		if clicked != null and _can_execute_target(clicked):
+	## Never use `target is Node3D` on a Variant that may be freed — that throws.
+	var clicked: Node3D = NodeSafety.safe_node(target) as Node3D
+	if clicked != null and CombatTargetValidation.is_hero_unit_ability_target(self, clicked):
+		if _can_execute_target(clicked):
 			resolved = clicked
 	else:
 		resolved = _resolve_execute_target(ATTACK_MOVE_ENGAGEMENT_RANGE)

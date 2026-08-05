@@ -29,8 +29,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (competing defense mission owner).
-		## Emergency base defense is owned by MilitaryDirectorV2 DEFEND state.
+		## Intent provider under Military AI V2 (no unit orders).
+		## Publishes DEFEND intents; MilitaryDirectorV2 arbitrates and ArmyCommanderV2 executes.
+		_publish_defense_intents(delta)
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()
@@ -43,6 +44,36 @@ func _process(delta: float) -> void:
 	_update_defense()
 	PerfCounters.end_section("Defense update", start_usec)
 	PerfCounters.record_ai_decision_update()
+
+
+func _publish_defense_intents(delta: float) -> void:
+	_tick_timer += delta
+	if _tick_timer < DEFENSE_TICK_INTERVAL_SECONDS:
+		return
+	_tick_timer = 0.0
+
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null:
+		return
+
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var emergency_threat: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
+	if emergency_threat.get("threatened", false):
+		var emergency_payload: Dictionary = emergency_threat.duplicate(true)
+		emergency_payload["emergency"] = true
+		state.publish_intent(MilitaryIntent.make_defend(emergency_payload, &"defense"))
+		return
+
+	var standard_threat: Dictionary = EnemyArmyCommand.evaluate_defense_threat(tree)
+	if not standard_threat.get("threatened", false):
+		return
+
+	var standard_payload: Dictionary = standard_threat.duplicate(true)
+	standard_payload["emergency"] = false
+	state.publish_intent(MilitaryIntent.make_defend(standard_payload, &"defense"))
 
 
 func _get_match_elapsed_seconds() -> float:

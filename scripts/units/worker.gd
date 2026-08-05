@@ -211,6 +211,10 @@ func face_work_target(target: Node3D) -> void:
 
 	var target_position: Vector3 = target.global_position
 	target_position.y = global_position.y
+	var offset: Vector3 = target_position - global_position
+	offset.y = 0.0
+	if offset.length_squared() < 0.0001:
+		return
 	look_at(target_position, Vector3.UP)
 
 	if _visual_pivot != null and is_instance_valid(_visual_pivot):

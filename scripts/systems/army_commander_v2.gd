@@ -50,9 +50,14 @@ var _last_force_order_msec: int = 0
 
 
 func _ready() -> void:
-	_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+	var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+	if composition != null:
+		_director = composition.military_director_v2
+		_creep_manager = composition.enemy_creep_manager
+	else:
+		_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+		_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_hero_micro_timer = HERO_MICRO_INTERVAL_SECONDS * 0.4
-	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	set_process(MilitaryAIConfig.is_v2_enabled())
 
 
@@ -65,7 +70,11 @@ func reset_match_state() -> void:
 	_creep_focus_reissue_timer = EnemyCreepManager.FOCUS_REISSUE_SECONDS
 	_creep_regroup_hold_timer = 0.0
 	_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
-	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+	if composition != null:
+		_creep_manager = composition.enemy_creep_manager
+	else:
+		_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_defend_order_reissue_timer = MilitaryAIConfig.V2_DEFEND_ORDER_REISSUE_SECONDS
 	_defend_focus_reissue_timer = MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
 	_defend_focus_target = null
@@ -137,7 +146,11 @@ func _process(delta: float) -> void:
 
 func _resolve_director() -> MilitaryDirectorV2:
 	if _director == null:
-		_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+		var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+		if composition != null:
+			_director = composition.military_director_v2
+		else:
+			_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
 	return _director
 
 
@@ -726,7 +739,11 @@ func _should_use_attack_move_for_assemble(unit: Node3D, distance_to_slot: float)
 
 func _resolve_creep_manager() -> EnemyCreepManager:
 	if _creep_manager == null:
-		_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+		var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+		if composition != null:
+			_creep_manager = composition.enemy_creep_manager
+		else:
+			_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	return _creep_manager
 
 

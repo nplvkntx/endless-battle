@@ -88,17 +88,22 @@ func _ready() -> void:
 	EnemyArmyCommand.reset_match_state()
 	EnemyAIDebug.reset_match_state()
 	EnemyAttackPathDefense.reset_match_state()
-	var creep_manager: EnemyCreepManager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+	var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+	var creep_manager: EnemyCreepManager = null
+	var military_director_v2: MilitaryDirectorV2 = null
+	var army_commander_v2: ArmyCommanderV2 = null
+	if composition != null:
+		creep_manager = composition.enemy_creep_manager
+		military_director_v2 = composition.military_director_v2
+		army_commander_v2 = composition.army_commander_v2
+	else:
+		creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+		military_director_v2 = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+		army_commander_v2 = get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
 	if creep_manager != null:
 		creep_manager.reset_match_state()
-	var military_director_v2: MilitaryDirectorV2 = (
-		get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
-	)
 	if military_director_v2 != null:
 		military_director_v2.reset_match_state()
-	var army_commander_v2: ArmyCommanderV2 = (
-		get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
-	)
 	if army_commander_v2 != null:
 		army_commander_v2.reset_match_state()
 	_match_start_msec = Time.get_ticks_msec()

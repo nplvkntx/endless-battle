@@ -45,6 +45,7 @@ static func apply_radial_damage(
 
 
 static func _resolve_target_position(target: Variant) -> Vector3:
-	if target is Node3D:
-		return (target as Node3D).global_position
+	var node: Node3D = NodeSafety.safe_node(target) as Node3D
+	if node != null:
+		return node.global_position
 	return Vector3.ZERO

@@ -78,12 +78,18 @@ var _watchdog_last_diag_signature: String = ""
 var _watchdog_objective_valid: bool = true
 ## instance_id of the Node whose tree_exiting clears the active mission target.
 var _mission_target_exit_bound_id: int = 0
+## Provider intents drained once per strategic tick (PHASE 2 #4).
+var _intent_snapshot: Array = []
 
 
 func _ready() -> void:
 	_match_start_msec = Time.get_ticks_msec()
 	_tick_timer = TICK_SECONDS * 0.25
-	_commander = get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
+	var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+	if composition != null:
+		_commander = composition.army_commander_v2
+	else:
+		_commander = get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
 	reset_match_state()
 	set_process(MilitaryAIConfig.is_v2_enabled())
 	_publish_perf_status()
@@ -158,6 +164,8 @@ func _evaluate_strategy() -> void:
 	if tree == null:
 		return
 
+	_refresh_intent_snapshot()
+
 	if _post_retreat_attack_cooldown > 0.0:
 		_post_retreat_attack_cooldown = maxf(
 			0.0,
@@ -209,6 +217,66 @@ func _evaluate_strategy() -> void:
 			return
 
 	_transition_to(State.ASSEMBLE, "gathering squad at base", rally_point)
+
+
+func _refresh_intent_snapshot() -> void:
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null:
+		_intent_snapshot.clear()
+		return
+	## Drop expired accepted ownership before arbitration.
+	if not state.has_live_accepted_intent():
+		state.clear_accepted_intent()
+	var raw: Array = state.consume_intents()
+	_intent_snapshot.clear()
+	for entry: Variant in raw:
+		if not entry is MilitaryIntent:
+			continue
+		var intent: MilitaryIntent = entry as MilitaryIntent
+		if not intent.is_actionable():
+			continue
+		## Providers may only nominate ArmyCommanderV2 as executable owner.
+		if intent.mission_owner != MilitaryIntent.MISSION_OWNER_COMMANDER:
+			continue
+		_intent_snapshot.append(intent)
+
+
+func _find_intent(kind: int) -> MilitaryIntent:
+	var best: MilitaryIntent = null
+	for entry: Variant in _intent_snapshot:
+		if not entry is MilitaryIntent:
+			continue
+		var intent: MilitaryIntent = entry as MilitaryIntent
+		if not intent.is_actionable():
+			continue
+		if intent.kind != kind:
+			continue
+		if best == null:
+			best = intent
+			continue
+		if (
+			intent.priority > best.priority
+			or (intent.priority == best.priority and intent.score > best.score)
+		):
+			best = intent
+	return best
+
+
+func _has_intent(kind: int) -> bool:
+	return _find_intent(kind) != null
+
+
+func _accept_intent_for_mission(intent: MilitaryIntent) -> void:
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null or intent == null:
+		return
+	state.accept_intent(intent)
+
+
+func _clear_accepted_intent() -> void:
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state != null:
+		state.clear_accepted_intent()
 
 
 func get_state() -> State:
@@ -477,6 +545,7 @@ func _transition_to(
 
 	if previous_state == State.DEFEND and next_state != State.DEFEND:
 		_deactivate_v2_defend("left defend: %s" % reason)
+		_clear_accepted_intent()
 
 	if previous_state == State.ATTACK and next_state != State.ATTACK:
 		_clear_attack_tracking()
@@ -1024,6 +1093,19 @@ func _soft_update_defend_mission(
 
 
 func _resolve_v2_defense_threat(tree: SceneTree) -> Dictionary:
+	## Prefer provider intents when present; fall back to shared evaluators.
+	var defend_intent: MilitaryIntent = _find_intent(MilitaryIntent.Kind.DEFEND)
+	if defend_intent != null and not defend_intent.payload.is_empty():
+		_accept_intent_for_mission(defend_intent)
+		var payload: Dictionary = defend_intent.payload.duplicate(true)
+		if not payload.has("threatened"):
+			payload["threatened"] = true
+		if not payload.has("intercept_position") and defend_intent.target_position != Vector3.ZERO:
+			payload["intercept_position"] = defend_intent.target_position
+		if not payload.has("reason") and defend_intent.reason != &"":
+			payload["reason"] = defend_intent.reason
+		return payload
+
 	var emergency: Dictionary = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
 	if emergency.get("threatened", false):
 		return emergency
@@ -1127,6 +1209,7 @@ func _exit_defend_after_clear(tree: SceneTree, rally_point: Vector3) -> void:
 		_mission.completion_condition = ArmyMissionV2.CompletionCondition.THREAT_CLEARED
 
 	_deactivate_v2_defend("threat cleared")
+	_clear_accepted_intent()
 	_defend_clear_timer = 0.0
 	_defend_reason = &""
 
@@ -2102,6 +2185,10 @@ func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> boo
 		return false
 	if _should_interrupt_creeping_for_attack(tree, rally_point):
 		return false
+	if _has_intent(MilitaryIntent.Kind.SUSPEND_CREEP):
+		return false
+	if _has_intent(MilitaryIntent.Kind.FINISH):
+		return false
 	if not is_creep_ready():
 		return false
 
@@ -2147,6 +2234,18 @@ func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> boo
 func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3) -> bool:
 	if tree == null:
 		return false
+
+	## Provider intents: finishing / suspend-creep / strong attack suggestions.
+	if _has_intent(MilitaryIntent.Kind.FINISH):
+		_accept_intent_for_mission(_find_intent(MilitaryIntent.Kind.FINISH))
+		return is_attack_ready() or is_lethal_attack_ready()
+	if _has_intent(MilitaryIntent.Kind.SUSPEND_CREEP):
+		_accept_intent_for_mission(_find_intent(MilitaryIntent.Kind.SUSPEND_CREEP))
+		return is_attack_ready() or is_lethal_attack_ready()
+	var attack_intent: MilitaryIntent = _find_intent(MilitaryIntent.Kind.ATTACK)
+	if attack_intent != null and attack_intent.score >= MilitaryAIConfig.V2_ATTACK_LETHAL_SCORE_THRESHOLD:
+		_accept_intent_for_mission(attack_intent)
+		return is_attack_ready() or is_lethal_attack_ready()
 
 	## Town Hall / workers are handled by DEFEND before this path.
 	if EnemyAggression.should_suspend_creeping():

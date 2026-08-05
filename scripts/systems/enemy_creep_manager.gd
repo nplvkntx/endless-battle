@@ -97,9 +97,9 @@ func reset_match_state() -> void:
 
 func _process(delta: float) -> void:
 	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (legacy creep mission owner).
-		## Creep camp selection / clearance is owned by MilitaryDirectorV2;
-		## ArmyCommanderV2 executes CREEP orders and may call low-level helpers here.
+		## Intent provider under Military AI V2 (no unit orders / creep mission ownership).
+		## Publishes CREEP / SUSPEND_CREEP intents for MilitaryDirectorV2 arbitration.
+		_publish_creep_intents(delta)
 		return
 
 	_track_phase_entry()
@@ -117,6 +117,36 @@ func _process(delta: float) -> void:
 	var start_usec: int = PerfCounters.begin_section()
 	_update_creeping()
 	PerfCounters.end_section("Creep update", start_usec)
+
+
+func _publish_creep_intents(delta: float) -> void:
+	_tick_timer += delta
+	if _tick_timer < CREEP_TICK_INTERVAL_SECONDS:
+		return
+	_tick_timer = 0.0
+
+	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()
+	if state == null:
+		return
+
+	if EnemyAggression.should_suspend_creeping():
+		state.publish_intent(
+			MilitaryIntent.make_suspend_creep(&"aggression_suspend", &"creep")
+		)
+		return
+
+	if should_abandon_creep_phase():
+		state.publish_intent(
+			MilitaryIntent.make_suspend_creep(&"creep_setbacks", &"creep")
+		)
+		return
+
+	if not has_safe_creep_camp_available():
+		return
+
+	state.publish_intent(
+		MilitaryIntent.make_creep(&"safe_camp_available", 55.0, null, &"creep")
+	)
 
 
 func should_abandon_creep_phase() -> bool:

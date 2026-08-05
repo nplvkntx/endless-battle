@@ -13,8 +13,14 @@
 [ext_resource type="Script" path="res://scripts/systems/enemy_combat_controller.gd" id="11_enemy_combat_controller"]
 [ext_resource type="Script" path="res://scripts/systems/military_director_v2.gd" id="12_military_director_v2"]
 [ext_resource type="Script" path="res://scripts/systems/army_commander_v2.gd" id="13_army_commander_v2"]
+[ext_resource type="Script" path="res://scripts/systems/match_composition_root.gd" id="14_match_composition_root"]
+[ext_resource type="Script" path="res://scripts/systems/ai_player_state.gd" id="15_ai_player_state"]
 
 [node name="MatchSystems" type="Node"]
+script = ExtResource("14_match_composition_root")
+
+[node name="AIPlayerState" type="Node" parent="."]
+script = ExtResource("15_ai_player_state")
 
 [node name="EnemyStrategicDirector" type="Node" parent="."]
 script = ExtResource("10_enemy_strategic_director")

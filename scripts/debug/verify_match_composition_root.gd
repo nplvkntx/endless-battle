@@ -1,0 +1,439 @@
+extends Node
+
+## Headless verification for PHASE 2 match composition root / AIPlayerState /
+## declared military command authority.
+## Godot --headless --path <project> --scene res://scenes/debug/verify_match_composition_root.tscn
+
+const REPORT_PATH := "user://match_composition_root_verify_result.txt"
+
+
+func _ready() -> void:
+	var failures: PackedStringArray = []
+
+	_verify_scene_wiring(failures)
+	await _verify_runtime_binding(failures)
+	await _verify_authority_declaration(failures)
+	await _verify_identity_sync_and_unbind(failures)
+
+	var report: String
+	if failures.is_empty():
+		report = "PASS match_composition_root\n"
+	else:
+		report = "FAIL match_composition_root\n" + "\n".join(failures) + "\n"
+
+	_write_report(report)
+	print(report)
+	await get_tree().process_frame
+	get_tree().quit(0 if failures.is_empty() else 1)
+
+
+func _expect(failures: PackedStringArray, label: String, ok: bool) -> void:
+	if not ok:
+		failures.append("- %s" % label)
+
+
+func _write_report(report: String) -> void:
+	var file := FileAccess.open(REPORT_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(report)
+		file.close()
+
+
+func _make_minimal_composition() -> MatchCompositionRoot:
+	## Avoid full match_systems (MatchManager / BuildManager need map CC nodes).
+	var root := MatchCompositionRoot.new()
+	root.name = "MatchSystems"
+
+	var state := AIPlayerState.new()
+	state.name = "AIPlayerState"
+	root.add_child(state)
+
+	var director := MilitaryDirectorV2.new()
+	director.name = "MilitaryDirectorV2"
+	root.add_child(director)
+
+	var commander := ArmyCommanderV2.new()
+	commander.name = "ArmyCommanderV2"
+	root.add_child(commander)
+
+	var combat := EnemyCombatController.new()
+	combat.name = "EnemyCombatController"
+	root.add_child(combat)
+
+	var strategic := EnemyStrategicDirector.new()
+	strategic.name = "EnemyStrategicDirector"
+	strategic.debug_enabled = false
+	root.add_child(strategic)
+
+	return root
+
+
+func _free_composition(root: Node) -> void:
+	if root == null:
+		return
+	root.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _verify_scene_wiring(failures: PackedStringArray) -> void:
+	var packed: PackedScene = load("res://scenes/match/match_systems.tscn") as PackedScene
+	_expect(failures, "match_systems.tscn loads", packed != null)
+	if packed == null:
+		return
+
+	var systems: Node = packed.instantiate()
+	_expect(failures, "MatchSystems is MatchCompositionRoot", systems is MatchCompositionRoot)
+	var root: MatchCompositionRoot = systems as MatchCompositionRoot
+	_expect(
+		failures,
+		"AIPlayerState child present in packed scene",
+		root != null and root.get_node_or_null("AIPlayerState") is AIPlayerState
+	)
+	_expect(
+		failures,
+		"ArmyCommanderV2 child present",
+		root != null and root.get_node_or_null("ArmyCommanderV2") is ArmyCommanderV2
+	)
+	_expect(
+		failures,
+		"MilitaryDirectorV2 child present",
+		root != null and root.get_node_or_null("MilitaryDirectorV2") is MilitaryDirectorV2
+	)
+	systems.free()
+
+
+func _verify_runtime_binding(failures: PackedStringArray) -> void:
+	var root: MatchCompositionRoot = _make_minimal_composition()
+	add_child(root)
+	await get_tree().process_frame
+
+	_expect(failures, "runtime: composition root typed", root != null)
+	_expect(failures, "runtime: ai_player_state resolved", root.ai_player_state != null)
+	_expect(
+		failures,
+		"runtime: EnemyArmyCommand bound to AIPlayerState",
+		EnemyArmyCommand.get_bound_ai_player_state() == root.ai_player_state
+	)
+	_expect(
+		failures,
+		"runtime: find_from_tree finds MatchSystems",
+		MatchCompositionRoot.find_from_tree(get_tree()) == root
+	)
+	_expect(
+		failures,
+		"runtime: strategic director via composition",
+		EnemyArmyCommand.find_strategic_director(get_tree()) == root.enemy_strategic_director
+	)
+
+	await _free_composition(root)
+	_expect(
+		failures,
+		"runtime: unbind after free",
+		EnemyArmyCommand.get_bound_ai_player_state() == null
+	)
+
+
+func _verify_authority_declaration(failures: PackedStringArray) -> void:
+	var root: MatchCompositionRoot = _make_minimal_composition()
+	add_child(root)
+	await get_tree().process_frame
+
+	_expect(failures, "authority: V2 enabled in production config", MilitaryAIConfig.is_v2_enabled())
+	_expect(
+		failures,
+		"authority: declared ArmyCommanderV2",
+		root.military_command_authority is ArmyCommanderV2
+	)
+	_expect(
+		failures,
+		"authority: EnemyArmyCommand sees same issuer",
+		EnemyArmyCommand.get_declared_command_authority() == root.army_commander_v2
+	)
+	_expect(
+		failures,
+		"authority: AIPlayerState records commander name",
+		root.ai_player_state != null
+		and root.ai_player_state.military_command_authority_name == &"ArmyCommanderV2"
+	)
+	_expect(failures, "authority: is_v2_military_active", root.is_v2_military_active())
+
+	await _free_composition(root)
+
+
+func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
+	var root: MatchCompositionRoot = _make_minimal_composition()
+	add_child(root)
+	await get_tree().process_frame
+
+	if root.ai_player_state == null:
+		_expect(failures, "identity: root + state", false)
+		await _free_composition(root)
+		return
+
+	var state: AIPlayerState = root.ai_player_state
+	_expect(failures, "identity: starts IDLE/ECONOMY", state.army_mode == 0 and state.strategic_state == 0)
+
+	EnemyArmyCommand.force_set_strategic_state_for_v2(
+		EnemyArmyCommand.StrategicState.ATTACKING,
+		"composition verify"
+	)
+	_expect(
+		failures,
+		"identity: strategic sync to AIPlayerState",
+		state.strategic_state == int(EnemyArmyCommand.StrategicState.ATTACKING)
+	)
+
+	var claimed: bool = EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING, true)
+	_expect(failures, "identity: claim ATTACKING", claimed)
+	_expect(
+		failures,
+		"identity: army mode sync to AIPlayerState",
+		state.army_mode == int(EnemyArmyCommand.ArmyMode.ATTACKING)
+	)
+
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
+		"composition verify exec",
+		null,
+		Vector3(12.0, 0.0, 8.0),
+		"VerifyCC",
+		"attack-move"
+	)
+	_expect(
+		failures,
+		"exec: mission sync to AIPlayerState",
+		state.exec_mission == int(EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER)
+	)
+	_expect(
+		failures,
+		"exec: objective position sync",
+		state.exec_objective_position.is_equal_approx(Vector3(12.0, 0.0, 8.0))
+	)
+	_expect(
+		failures,
+		"exec: order label sync",
+		state.exec_order_label == "attack-move"
+	)
+
+	EnemyArmyCommand.set_rebuilding_army(true)
+	_expect(failures, "combat: rebuilding SoT", state.is_rebuilding_army)
+	EnemyArmyCommand.begin_fight_tracking([], Vector3(3.0, 0.0, 1.0))
+	_expect(
+		failures,
+		"combat: fight anchor SoT",
+		state.fight_anchor_position.is_equal_approx(Vector3(3.0, 0.0, 1.0))
+	)
+
+	## Wave / formation / finishing SoT (no duplicate authority).
+	state.attack_wave_state = int(EnemyArmyCommand.AttackWaveState.ADVANCING)
+	state.attack_wave_staging_point = Vector3(9.0, 0.0, 4.0)
+	state.finishing_mode_active = true
+	state.formation_cache_center = Vector3(2.0, 0.0, 2.0)
+	state.formation_cache_army_mode = int(EnemyArmyCommand.ArmyMode.ATTACKING)
+	_expect(
+		failures,
+		"wave: SoT readable via EnemyArmyCommand accessors",
+		EnemyArmyCommand.get_attack_wave_state() == EnemyArmyCommand.AttackWaveState.ADVANCING
+	)
+	_expect(failures, "finishing: SoT active", EnemyArmyCommand.is_finishing_mode_active())
+	_expect(
+		failures,
+		"formation: SoT center shared",
+		state.formation_cache_center.is_equal_approx(Vector3(2.0, 0.0, 2.0))
+	)
+
+	await _verify_intent_bus(failures, state)
+	await _verify_authority_and_providers(failures, root, state)
+
+	MatchSession.prepare_new_match()
+	_expect(
+		failures,
+		"identity: prepare_new_match clears AIPlayerState mode",
+		state.army_mode == 0 and state.strategic_state == 0
+	)
+	_expect(
+		failures,
+		"exec: prepare_new_match clears exec mission",
+		state.exec_mission == 0 and state.exec_order_label.is_empty()
+	)
+	_expect(
+		failures,
+		"combat: prepare_new_match clears rebuilding/fight",
+		not state.is_rebuilding_army and state.fight_start_msec == 0
+	)
+	_expect(
+		failures,
+		"wave: prepare_new_match clears attack wave",
+		state.attack_wave_state == 0
+		and state.attack_wave_staging_point == Vector3.ZERO
+	)
+	_expect(
+		failures,
+		"formation: prepare_new_match clears formation cache",
+		state.formation_cache_army_mode == -1
+		and state.formation_cache_center == Vector3.ZERO
+	)
+	_expect(
+		failures,
+		"finishing: prepare_new_match clears finishing mode",
+		not state.finishing_mode_active
+	)
+	_expect(
+		failures,
+		"intent: prepare_new_match clears bus + accepted",
+		state.pending_intent_count() == 0 and not state.has_live_accepted_intent()
+	)
+	_expect(
+		failures,
+		"identity: still bound after prepare",
+		EnemyArmyCommand.get_bound_ai_player_state() == state
+	)
+	_expect(
+		failures,
+		"identity: authority name preserved across reset",
+		state.military_command_authority_name == &"ArmyCommanderV2"
+	)
+
+	await _free_composition(root)
+	_expect(
+		failures,
+		"identity: unbound after composition free",
+		EnemyArmyCommand.get_bound_ai_player_state() == null
+		and EnemyArmyCommand.get_declared_command_authority() == null
+	)
+
+
+func _verify_intent_bus(failures: PackedStringArray, state: AIPlayerState) -> void:
+	state.clear_intents()
+	state.clear_accepted_intent()
+	_expect(failures, "intent: starts empty", state.pending_intent_count() == 0)
+
+	var defend := MilitaryIntent.make_defend({
+		"threatened": true,
+		"reason": &"verify_base",
+		"intercept_position": Vector3(1.0, 0.0, 2.0),
+		"emergency": true,
+	})
+	_expect(
+		failures,
+		"intent: defend nominates ArmyCommanderV2 owner",
+		defend.mission_owner == MilitaryIntent.MISSION_OWNER_COMMANDER
+	)
+	state.publish_intent(defend)
+	state.publish_intent(
+		MilitaryIntent.make_creep(&"verify_camp", 40.0, null, &"creep")
+	)
+	state.publish_intent(
+		MilitaryIntent.make_attack(&"verify_push", 75.0, &"wave")
+	)
+	_expect(failures, "intent: three kinds pending", state.pending_intent_count() == 3)
+	_expect(
+		failures,
+		"intent: has DEFEND",
+		state.has_intent_kind(MilitaryIntent.Kind.DEFEND)
+	)
+
+	## Same kind+source replaces rather than stacking.
+	state.publish_intent(
+		MilitaryIntent.make_attack(&"verify_push_stronger", 90.0, &"wave")
+	)
+	_expect(failures, "intent: attack replaced not stacked", state.pending_intent_count() == 3)
+	var best_attack: MilitaryIntent = state.peek_best_intent(MilitaryIntent.Kind.ATTACK)
+	_expect(
+		failures,
+		"intent: peek keeps higher attack score",
+		best_attack != null and best_attack.score >= 90.0
+	)
+
+	## Cancelled intents cannot republish / reactivate.
+	var cancelled := MilitaryIntent.make_attack(&"cancelled", 99.0, &"wave")
+	cancelled.cancel()
+	state.publish_intent(cancelled)
+	_expect(
+		failures,
+		"intent: cancelled publish ignored",
+		state.pending_intent_count() == 3
+	)
+
+	## Expired intents are purged and cannot survive consume.
+	var expired := MilitaryIntent.make_creep(&"expired", 10.0, null, &"creep_expired")
+	expired.expires_msec = Time.get_ticks_msec() - 10
+	state.publish_intent(expired)
+	_expect(
+		failures,
+		"intent: expired publish ignored",
+		not state.has_intent_kind(MilitaryIntent.Kind.CREEP)
+		or state.peek_best_intent(MilitaryIntent.Kind.CREEP).source != &"creep_expired"
+	)
+
+	var snapshot: Array = state.consume_intents()
+	_expect(failures, "intent: consume drains bus", state.pending_intent_count() == 0)
+	_expect(failures, "intent: consume returns three actionable", snapshot.size() == 3)
+	for entry: Variant in snapshot:
+		_expect(
+			failures,
+			"intent: consumed entries actionable",
+			entry is MilitaryIntent and (entry as MilitaryIntent).is_actionable()
+		)
+
+	## Director arbitration helpers see drained snapshot shape + accept ownership.
+	var director: MilitaryDirectorV2 = MilitaryDirectorV2.new()
+	director.name = "IntentProbeDirector"
+	add_child(director)
+	await get_tree().process_frame
+	director._intent_snapshot = snapshot
+	var found_defend: MilitaryIntent = director._find_intent(MilitaryIntent.Kind.DEFEND)
+	_expect(
+		failures,
+		"intent: director finds DEFEND payload",
+		found_defend != null
+		and found_defend.payload.get("reason", &"") == &"verify_base"
+	)
+	director._accept_intent_for_mission(found_defend)
+	_expect(failures, "intent: accepted ownership live", state.has_live_accepted_intent())
+	_expect(
+		failures,
+		"intent: accepted owner is commander",
+		state.accepted_intent_mission_owner == MilitaryIntent.MISSION_OWNER_COMMANDER
+	)
+	## Force expiry of accepted ownership.
+	state.accepted_intent_expires_msec = Time.get_ticks_msec() - 1
+	_expect(
+		failures,
+		"intent: expired accepted cannot reactivate",
+		not state.has_live_accepted_intent()
+	)
+	director.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _verify_authority_and_providers(
+	failures: PackedStringArray,
+	root: MatchCompositionRoot,
+	state: AIPlayerState
+) -> void:
+	_expect(failures, "authority: V2 enabled", MilitaryAIConfig.is_v2_enabled())
+	_expect(
+		failures,
+		"authority: declared ArmyCommanderV2",
+		root.military_command_authority is ArmyCommanderV2
+		and EnemyArmyCommand.get_declared_command_authority() == root.army_commander_v2
+	)
+	_expect(
+		failures,
+		"authority: AIPlayerState records commander",
+		state.military_command_authority_name == &"ArmyCommanderV2"
+	)
+	_expect(
+		failures,
+		"authority: is_v2_military_active",
+		root.is_v2_military_active()
+	)
+	## Under V2, only the declared commander is the executable military authority.
+	_expect(
+		failures,
+		"authority: sole executable owner name",
+		String(state.military_command_authority_name) == root.army_commander_v2.name
+	)
