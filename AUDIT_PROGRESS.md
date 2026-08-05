@@ -8,9 +8,20 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #3 (in progress):** Remove unused `ProjectileManager` stub next (same pattern as Fog). `GameSettings` stays until cast-mode ownership is relocated.
+**PHASE 1 #3 complete for removable stubs.** Remaining: `GameSettings` is partial/referenced — do not remove without relocating cast-mode ownership. Next phase task selected below.
 
 ## Completed tasks
+
+### 2026-08-05 — Remove obsolete ProjectileManager stub autoload (audit PHASE 1 #3 / #12)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Evidence it was safe** | Fresh repo search: `ProjectileManager` / `projectile_manager.gd` appear only in docs, `AUDIT_PROGRESS.md`, and the former `project.godot` line — **zero** `.gd`/`.tscn`/`.tres`/`.yml`/`.sh` callers. Stub is `_ready() → pass` with unused signals; no match state, no `MatchSession` resetter, no preload/NodePath/exported dependency. Live projectiles spawn via unit/scene `PackedScene.instantiate()` (e.g. `ranger.gd` → `ranger_basic_arrow.tscn` / `crossbow_bolt.tscn`); trails/impacts go through `ImpactEffects`. |
+| **Exact change** | Removed `ProjectileManager="*res://autoloads/projectile_manager.gd"` from `project.godot`. Kept `autoloads/projectile_manager.gd` as documentation-only placeholder (notes ImpactEffects ownership). No gameplay/projectile scripts touched. |
+| **Validation** | Godot 4.7 headless `--import`: clean. `scripts/ci/validate_import.sh`: `VALIDATION PASS`. `verify_match_reset.tscn`: `PASS` (2 lifecycle cycles, registry=27). Post-change search: `ProjectileManager` only in docs/progress (not in `project.godot`). |
+| **Remaining partial autoloads** | `GameSettings` — cast-mode API used by `HeroAbilityTargetingController` + `verify_hero_ability_targeting.gd`; settings Resource load still TODO. Not a removable stub. |
+| **Next audit task** | PHASE 1 #4 — Establish one canonical main scene and clean test artifacts (audit roadmap item 4). |
 
 ### 2026-08-05 — Remove obsolete FogOfWarManager stub autoload (audit PHASE 1 #3 / #12)
 
@@ -43,7 +54,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | `DeathEffects` | Active | Death FX pooling |
 | `ImpactEffects` | Active | Impact/trail FX (owns projectile VFX path) |
 | `FogOfWarManager` | **Removed (was stub)** | Unregistered; file kept for docs only |
-| `ProjectileManager` | Stub / unused | `_ready` pass; 0 callers — next removal |
+| `ProjectileManager` | **Removed (was stub)** | Unregistered; file kept for docs only |
 | `MatchSession` | Active | Match lifecycle + reset registry |
 | `EntityRegistry` | Active | Entity indexing |
 | `AIHeroMastery` | Active | Hero AI mastery |
@@ -116,7 +127,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 |---|---|
 | **#10** Navigation verify log parse failures (`UnitNavigation`, `Unit`) | **Outdated** — `scripts/systems/unit_navigation.gd` has `class_name UnitNavigation`; headless verify passes in current tree. |
 | **#39** AIHeroMastery parser errors | **Resolved** in `6d562aa` (validated 2026-08-05). |
-| **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **In progress** — `FogOfWarManager` unregistered 2026-08-05. `ProjectileManager` still registered (unused stub). `GameSettings` is partial and referenced by hero ability targeting. |
+| **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **Mostly resolved** — `FogOfWarManager` and `ProjectileManager` unregistered 2026-08-05. `GameSettings` remains as partial/referenced (cast-mode API); not a pure stub. |
 | **#63–64** Debug perf autoloads in production | **Deferred** — `PerfDebugOverlay` gates input on `OS.is_debug_build()`; not a parser/startup failure. |
 
 ## Validation history
@@ -139,11 +150,13 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | `validate_import.sh` after PHASE 1 #2 | `VALIDATION PASS` |
 | 2026-08-05 | Unregister `FogOfWarManager` stub | Import clean; `validate_import.sh` PASS; `verify_match_reset` PASS |
 | 2026-08-05 | Search `FogOfWarManager` after removal | Only docs / progress tracker; not in `project.godot` |
+| 2026-08-05 | Unregister `ProjectileManager` stub | Import clean; `validate_import.sh` PASS; `verify_match_reset` PASS |
+| 2026-08-05 | Search `ProjectileManager` after removal | Only docs / progress tracker; not in `project.godot` |
 
 ## Known blockers
 
-None for Phase 1 stability baseline — import CI is green; match-reset contract covers AttackPathDefense. Remaining stub: `ProjectileManager`.
+None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared. Remaining partial: `GameSettings` (referenced).
 
 ## Next task
 
-**PHASE 1 #3 (continue):** Remove unused `ProjectileManager` stub autoload. Do not remove `GameSettings` without relocating cast-mode ownership. Do not expand scope into gameplay refactors.
+**PHASE 1 #4:** Establish one canonical main scene and clean test artifacts. Do not expand scope into gameplay refactors.
