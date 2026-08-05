@@ -269,7 +269,7 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	state.exec_squad_ids = [1, 2, 3]
 	EnemyArmyCommand.seed_frame_local_caches_for_verify()
 	EnemyArmyCommand.seed_leftover_runtime_state_for_verify()
-	EnemyArmyCommand.seed_telemetry_for_verify()
+	EnemyArmyCommandTelemetry.seed_for_verify()
 	_expect(
 		failures,
 		"ephemeral: pending orders seeded before reset",
@@ -381,7 +381,7 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		and int(frame_after["offensive_wave_cache_size"]) == 0
 		and int(frame_after["last_combat_eval_msec"]) == 0
 	)
-	var telemetry_after: Dictionary = EnemyArmyCommand.get_telemetry_snapshot_for_verify()
+	var telemetry_after: Dictionary = EnemyArmyCommandTelemetry.snapshot_for_verify()
 	_expect(
 		failures,
 		"telemetry: cleared on reset (non-authoritative)",
@@ -390,6 +390,8 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		and float(telemetry_after["perf_overlay_status_timer"]) == 0.0
 		and int(telemetry_after["last_issued_order_msec"]) == 0
 		and str(telemetry_after["last_issued_order_label"]).is_empty()
+		and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "-"
+		and EnemyArmyCommandTelemetry.get_seconds_since_last_order() == INF
 	)
 	_expect(
 		failures,
@@ -516,7 +518,7 @@ func _verify_final_static_state_ownership(
 		and state.objective_eval_timer == 0.0
 	)
 
-	## Telemetry must not alter mission selection or enqueue orders.
+	## Telemetry lives on EnemyArmyCommandTelemetry — must not alter mission/orders.
 	state.army_mode = 0
 	state.strategic_state = 0
 	state.exec_mission = int(EnemyArmyCommand.ExecutableMission.NONE)
@@ -526,14 +528,18 @@ func _verify_final_static_state_ownership(
 	var mode_before: int = state.army_mode
 	var mission_before: int = state.exec_mission
 	var contest_before: int = state.creep_contest_cooldowns.size()
-	EnemyArmyCommand.seed_telemetry_for_verify()
-	var telemetry: Dictionary = EnemyArmyCommand.get_telemetry_snapshot_for_verify()
+	EnemyArmyCommandTelemetry.seed_for_verify()
+	var telemetry: Dictionary = EnemyArmyCommandTelemetry.snapshot_for_verify()
 	_expect(
 		failures,
 		"telemetry: seed succeeds without becoming SoT",
 		bool(telemetry["debug_enabled_override"])
 		and str(telemetry["last_issued_order_label"]) == "verify-telemetry-order"
 		and int(telemetry["orders_issued_since_diag"]) == 42
+		and is_equal_approx(float(telemetry["perf_diag_timer"]), 9.0)
+		and is_equal_approx(float(telemetry["perf_overlay_status_timer"]), 0.2)
+		and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "verify-telemetry-order"
+		and EnemyArmyCommandTelemetry.get_last_issued_order_destination() == Vector3(99.0, 0.0, 99.0)
 	)
 	_expect(
 		failures,
@@ -549,9 +555,28 @@ func _verify_final_static_state_ownership(
 		and state.creep_contest_cooldowns.size() == contest_before
 		and EnemyArmyCommand.get_pending_group_order_count() == 0
 	)
+	## note_issued_order / record_order_issued are bookkeeping only.
+	var orders_before_note: int = state.pending_group_orders.size()
+	EnemyArmyCommandTelemetry.note_issued_order("verify-note", Vector3(1.0, 0.0, 2.0))
+	EnemyArmyCommandTelemetry.record_order_issued()
+	_expect(
+		failures,
+		"telemetry: note/record do not issue orders or change missions",
+		state.pending_group_orders.size() == orders_before_note
+		and state.exec_mission == mission_before
+		and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "verify-note"
+		and int(EnemyArmyCommandTelemetry.snapshot_for_verify()["orders_issued_since_diag"]) == 43
+	)
+	## Extracted helper must not be an autoload / global singleton node.
+	_expect(
+		failures,
+		"telemetry: not registered as project autoload",
+		not ProjectSettings.has_setting("autoload/EnemyArmyCommandTelemetry")
+		and Engine.get_main_loop().root.get_node_or_null("/root/EnemyArmyCommandTelemetry") == null
+	)
 
 	## No remaining static authoritative military bags outside AIPlayerState.
-	## Remaining EAC statics are frame-local caches, telemetry, or binding only.
+	## Remaining EAC statics are frame-local caches or composition binding only.
 	_expect(
 		failures,
 		"authority: creep contest + objective timers live on AIPlayerState",
@@ -566,7 +591,8 @@ func _verify_final_static_state_ownership(
 	state.creep_contest_cooldowns.clear()
 	EnemyArmyCommand.clear_offensive_wave_tracking()
 	EnemyArmyCommand.clear_executable_mission("final ownership cleanup")
-
+	EnemyArmyCommandTelemetry.reset_match_state()
+	EnemyArmyCommandTelemetry.set_debug_override(false)
 
 func _verify_intent_bus(failures: PackedStringArray, state: AIPlayerState) -> void:
 	state.clear_intents()

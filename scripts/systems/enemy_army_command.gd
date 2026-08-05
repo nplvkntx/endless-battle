@@ -106,7 +106,6 @@ const ATTACK_OBJECTIVE_REISSUE_SECONDS := 2.5
 const OBJECTIVE_EVAL_INTERVAL_SECONDS := 1.0
 const OBJECTIVE_STUCK_CHECK_INTERVAL_SECONDS := 0.5
 const MAX_GROUP_ORDERS_PER_FRAME := 12
-const PERF_DIAG_INTERVAL_SECONDS := 5.0
 const FORMATION_CACHE_DEST_THRESHOLD := 3.0
 const FORMATION_SLOT_SKIP_DISTANCE := 1.5
 ## Keep formation slots for the life of an order — do not reshuffle every AI tick.
@@ -431,7 +430,6 @@ static var _emergency_reason: StringName:
 	set(value):
 		_rt().emergency_reason = value
 
-static var _debug_enabled_override: bool = false  ## Telemetry / debug gate only.
 static var _combat_units_cache_frame: int = -1
 static var _cached_offensive_wave_units_frame: int = -1
 static var _cached_offensive_wave_units: Array = []
@@ -452,10 +450,6 @@ static var _objective_stuck_check_timer: float:
 		return _rt().objective_stuck_check_timer
 	set(value):
 		_rt().objective_stuck_check_timer = value
-## Pure telemetry — not match SoT; never influences mission selection / orders.
-static var _perf_diag_timer: float = 0.0
-static var _orders_issued_since_diag: int = 0
-
 static var _formation_cache_unit_ids: Array[int]:
 	get:
 		return _rt().formation_cache_unit_ids
@@ -555,7 +549,6 @@ static var _emergency_threat_cache_msec: int:
 		return _rt().emergency_threat_cache_msec
 	set(value):
 		_rt().emergency_threat_cache_msec = value
-static var _perf_overlay_status_timer: float = 0.0
 ## Creep contest cooldowns (SoT: AIPlayerState.creep_contest_cooldowns).
 static var _creep_contest_cooldowns: Dictionary:
 	get:
@@ -754,12 +747,6 @@ static var _allow_hostile_engagement: bool:
 		return _rt().allow_hostile_engagement
 	set(value):
 		_rt().allow_hostile_engagement = value
-
-## Last successfully issued group/unit move order (telemetry / F3 / watchdog labels only).
-## Not authoritative for mission selection or order execution.
-static var _last_issued_order_msec: int = 0
-static var _last_issued_order_label: String = ""
-static var _last_issued_order_destination: Vector3 = Vector3.ZERO
 
 ## Match composition binding. Null outside an active MatchCompositionRoot.
 ## Migrated bags are SoT on AIPlayerState via _rt() — no dual-write.
@@ -1008,10 +995,8 @@ static func reset_match_state() -> void:
 	_combat_units_cache_frame = -1
 	_cached_offensive_wave_units_frame = -1
 	_cached_offensive_wave_units.clear()
-	## Telemetry only — never match SoT.
-	_perf_diag_timer = 0.0
-	_orders_issued_since_diag = 0
-	_perf_overlay_status_timer = 0.0
+	## Telemetry lives on EnemyArmyCommandTelemetry — never match SoT.
+	EnemyArmyCommandTelemetry.reset_match_state()
 	EnemyUnitMission.reset_match_state()
 	var bound_state: AIPlayerState = get_bound_ai_player_state()
 	if bound_state != null:
@@ -1057,30 +1042,6 @@ static func get_leftover_runtime_snapshot_for_verify() -> Dictionary:
 		"objective_last_building_health": _objective_last_building_health,
 		"objective_eval_timer": _objective_eval_timer,
 		"objective_stuck_check_timer": _objective_stuck_check_timer,
-	}
-
-
-## Verify/debug: seed pure telemetry (must not alter mission / orders).
-static func seed_telemetry_for_verify() -> void:
-	_debug_enabled_override = true
-	_perf_diag_timer = 9.0
-	_orders_issued_since_diag = 42
-	_perf_overlay_status_timer = 0.2
-	_last_issued_order_msec = Time.get_ticks_msec()
-	_last_issued_order_label = "verify-telemetry-order"
-	_last_issued_order_destination = Vector3(99.0, 0.0, 99.0)
-
-
-## Verify/debug: telemetry bag (non-authoritative).
-static func get_telemetry_snapshot_for_verify() -> Dictionary:
-	return {
-		"debug_enabled_override": _debug_enabled_override,
-		"perf_diag_timer": _perf_diag_timer,
-		"orders_issued_since_diag": _orders_issued_since_diag,
-		"perf_overlay_status_timer": _perf_overlay_status_timer,
-		"last_issued_order_msec": _last_issued_order_msec,
-		"last_issued_order_label": _last_issued_order_label,
-		"last_issued_order_destination": _last_issued_order_destination,
 	}
 
 
@@ -1440,12 +1401,12 @@ static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:
 
 
 static func set_debug_enabled(enabled: bool) -> void:
-	_debug_enabled_override = enabled
+	EnemyArmyCommandTelemetry.set_debug_override(enabled)
 	EnemyAIDebug.set_enabled(enabled)
 
 
 static func _debug_combat(message: String) -> void:
-	if DEBUG_COMBAT_AI or _debug_enabled_override:
+	if DEBUG_COMBAT_AI or EnemyArmyCommandTelemetry.is_debug_override_enabled():
 		print("[AI Combat] %s" % message)
 
 
@@ -4465,7 +4426,7 @@ static func log_ai_order(
 	target: Variant,
 	reason: String
 ) -> void:
-	if not DEBUG_AI_ORDERS and not _debug_enabled_override:
+	if not DEBUG_AI_ORDERS and not EnemyArmyCommandTelemetry.is_debug_override_enabled():
 		return
 
 	if not NodeSafety.is_alive_node(unit):
@@ -6101,7 +6062,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				_command_unit_focus_attack(unit, focus_objective)
 				EnemyUnitMission.try_set_mission(unit as Node, mission)
 				EnemyUnitMission.record_move_order(unit as Node, target, mission)
-				_orders_issued_since_diag += 1
+				EnemyArmyCommandTelemetry.record_order_issued()
 				PerfCounters.record_ai_order()
 				issued += 1
 				continue
@@ -6116,7 +6077,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				_command_unit_focus_attack(unit, wave_objective_ref as Node3D)
 				EnemyUnitMission.try_set_mission(unit as Node, mission)
 				EnemyUnitMission.record_move_order(unit as Node, target, mission)
-				_orders_issued_since_diag += 1
+				EnemyArmyCommandTelemetry.record_order_issued()
 				PerfCounters.record_ai_order()
 				issued += 1
 				continue
@@ -6136,7 +6097,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 		EnemyUnitMission.try_set_mission(unit as Node, mission)
 		EnemyUnitMission.record_move_order(unit as Node, target, mission)
-		_orders_issued_since_diag += 1
+		EnemyArmyCommandTelemetry.record_order_issued()
 		PerfCounters.record_ai_order()
 		issued += 1
 
@@ -6145,19 +6106,12 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
 	tick_mission_watchdog(tree, delta)
-	_perf_overlay_status_timer += delta
-	if _perf_overlay_status_timer >= 0.25:
-		_perf_overlay_status_timer = 0.0
+	if EnemyArmyCommandTelemetry.tick_overlay_timer(delta):
 		_refresh_perf_overlay_status(tree)
 
-	if not DEBUG_COMBAT_AI and not _debug_enabled_override:
+	if not EnemyArmyCommandTelemetry.tick_perf_diag_timer(delta, DEBUG_COMBAT_AI):
 		return
 
-	_perf_diag_timer += delta
-	if _perf_diag_timer < PERF_DIAG_INTERVAL_SECONDS:
-		return
-
-	_perf_diag_timer = 0.0
 	_refresh_combat_units_cache_if_needed(tree)
 	var worker_count: int = CombatTargetValidation.get_cached_group_nodes(
 		tree,
@@ -6167,6 +6121,7 @@ static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
 		tree,
 		BUILDINGS_GROUP
 	).size()
+	var orders_interval: int = EnemyArmyCommandTelemetry.take_orders_issued_since_diag()
 
 	print(
 		(
@@ -6180,11 +6135,10 @@ static func tick_perf_diagnostics(tree: SceneTree, delta: float) -> void:
 			CombatTargetValidation.get_cached_group_nodes(tree, ENEMY_COMBAT_GROUP).size(),
 			0,
 			_pending_group_orders.size(),
-			_orders_issued_since_diag,
+			orders_interval,
 			ArmyMode.keys()[_army_mode],
 		]
 	)
-	_orders_issued_since_diag = 0
 
 
 static func get_executable_mission() -> ExecutableMission:
@@ -6314,9 +6268,7 @@ static func _clear_executable_mission_state(reason: String) -> void:
 	_exec_watchdog_refreshed = false
 	_exec_last_report = ""
 	_allow_hostile_engagement = false
-	_last_issued_order_msec = 0
-	_last_issued_order_label = ""
-	_last_issued_order_destination = Vector3.ZERO
+	EnemyArmyCommandTelemetry.clear_issued_order()
 	_sync_player_state_identity()
 
 
@@ -6327,39 +6279,13 @@ static func note_mission_order(order_label: String, destination: Vector3 = Vecto
 		_exec_objective_position = destination
 	var now_msec: int = Time.get_ticks_msec()
 	_exec_last_progress_msec = now_msec
-	_last_issued_order_msec = now_msec
-	_last_issued_order_label = order_label if not order_label.is_empty() else _exec_order_label
-	if destination != Vector3.ZERO:
-		_last_issued_order_destination = destination
-	elif _exec_objective_position != Vector3.ZERO:
-		_last_issued_order_destination = _exec_objective_position
-	_log_issued_order(_last_issued_order_label, _last_issued_order_destination)
-	_sync_player_state_identity()
-
-
-static func get_seconds_since_last_order() -> float:
-	if _last_issued_order_msec <= 0:
-		return INF
-	return float(Time.get_ticks_msec() - _last_issued_order_msec) / 1000.0
-
-
-static func get_last_issued_order_label() -> String:
-	return _last_issued_order_label if not _last_issued_order_label.is_empty() else "-"
-
-
-static func get_last_issued_order_destination() -> Vector3:
-	return _last_issued_order_destination
-
-
-static func _log_issued_order(order_label: String, destination: Vector3) -> void:
-	var label: String = order_label if not order_label.is_empty() else "order"
-	var dest_text: String = "-"
-	if destination != Vector3.ZERO:
-		dest_text = "(%.1f, %.1f)" % [destination.x, destination.z]
-	EnemyAIDebug.log_once(
-		"ai_order_%s_%s" % [label, dest_text],
-		"[AI Order] %s -> %s" % [label, dest_text]
+	EnemyArmyCommandTelemetry.note_issued_order(
+		order_label,
+		destination,
+		_exec_order_label,
+		_exec_objective_position
 	)
+	_sync_player_state_identity()
 
 
 static func note_mission_progress(

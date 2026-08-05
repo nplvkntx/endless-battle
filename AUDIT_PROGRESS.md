@@ -8,9 +8,25 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 2 EnemyArmyCommand state-ownership cleanup complete.** Match/mission leftovers (creep-contest cooldowns, objective timers) live on `AIPlayerState`. Remaining EAC statics are frame-local caches, pure telemetry, or composition binding. Next Phase 2 milestone: first **scoped** helper extraction from `EnemyArmyCommand` (do not begin broad god-object splits).
+**PHASE 2 first scoped EnemyArmyCommand extraction complete** (`EnemyArmyCommandTelemetry`). Next Phase 2 milestone: second scoped extraction (order-agnostic military math/scoring helpers) — do not begin a second extraction in the same pass; do not start broad god-object splits.
 
 ## Completed tasks
+
+### 2026-08-05 — EnemyArmyCommand telemetry extraction (first scoped helper)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Responsibility extracted** | Non-authoritative order-issue / perf / debug bookkeeping (F3, AI PERF prints, verify seeds). Never mission selection or order execution. |
+| **New type** | `EnemyArmyCommandTelemetry` (`scripts/systems/enemy_army_command_telemetry.gd`) — `RefCounted` + static methods; **not** an autoload. |
+| **Functions / variables moved** | Vars: `debug_enabled_override`, `perf_diag_timer`, `orders_issued_since_diag`, `perf_overlay_status_timer`, `last_issued_order_*`. Const: `PERF_DIAG_INTERVAL_SECONDS` (+ overlay interval). Methods: `reset_match_state`, `seed_for_verify` / `snapshot_for_verify`, `set_debug_override` / `is_debug_override_enabled`, `record_order_issued` / `take_orders_issued_since_diag`, `tick_overlay_timer` / `tick_perf_diag_timer`, `note_issued_order` / `clear_issued_order`, `get_seconds_since_last_order`, `get_last_issued_order_label` / `destination`, `_log_issued_order`. |
+| **Coupling removed** | EAC no longer owns diagnostic bags; F3 readers (`MilitaryDirectorV2`) call telemetry directly; verify seeds/snapshots hit the helper. EAC still orchestrates `tick_perf_diagnostics` (mission watchdog + overlay push that reads army SoT). |
+| **Remaining EnemyArmyCommand responsibilities** | Match binding; `_rt()` accessors into `AIPlayerState`; frame-local unit caches; command/order APIs; mission watchdog orchestration; formation/scoring/army helpers; overlay status push into `PerfCounters`. |
+| **Authority unchanged** | `AIPlayerState` SoT; `MilitaryDirectorV2` selects missions; `ArmyCommanderV2` sole executable authority; intent providers issue no orders. |
+| **Next extraction safe?** | **Yes**, for another narrow seam (order-agnostic math/scoring). Do **not** extract command execution, mission transitions, order queues, or state ownership next. |
+| **Files changed** | `enemy_army_command_telemetry.gd` (new), `enemy_army_command.gd`, `military_director_v2.gd`, `verify_match_composition_root.gd`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 `--import` clean. `validate_import.sh` → `VALIDATION PASS`. `verify_match_composition_root` → `PASS` (telemetry isolation, no autoload, reset clears bags). `verify_match_reset` → `PASS`. `verify_freed_instance_regression` → `PASS`. |
+| **Next audit task** | Second scoped EAC helper extraction (pure military math/scoring) or leave facade intact until a clean seam appears. |
 
 ### 2026-08-05 — EnemyArmyCommand final static-state ownership cleanup
 
@@ -323,13 +339,14 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Wave/formation/finishing SoT + aggression publisher + intent TTL/ownership | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | EAC runtime ephemerals (threat/reinforcement/queue/watchdog) + frame-cache proof | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | EAC final static ownership (creep contest + objective timers; telemetry isolated) | `VALIDATION PASS`; composition/reset/freed all PASS |
+| 2026-08-05 | First scoped EAC extraction → `EnemyArmyCommandTelemetry` | `VALIDATION PASS`; composition/reset/freed all PASS |
 
 ## Known blockers
 
 None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed; freed-instance regression gated in CI. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
 
-Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. Remaining EAC statics are frame-local caches + pure telemetry + binding only. Scoped helper extraction is now allowed; broad god-object splits still deferred.
+Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. First scoped EAC extraction complete (`EnemyArmyCommandTelemetry`). Remaining EAC statics are frame-local caches + binding only. Further scoped helper extractions allowed; broad god-object splits still deferred.
 
 ## Next task
 
-**PHASE 2 continued:** First **scoped** `EnemyArmyCommand` helper extraction (telemetry isolate or order-agnostic math). Do not begin broad god-object splitting.
+**PHASE 2 continued:** Second **scoped** `EnemyArmyCommand` helper extraction (order-agnostic military math/scoring) when a clean seam is chosen. Do not begin broad god-object splitting.

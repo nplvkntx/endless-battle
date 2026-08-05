@@ -37,7 +37,7 @@ Helpers:
 | TTL threat caches | `AIPlayerState` (scratch) | Recomputed from world; never authoritative SoT |
 | Mission watchdog / exec scratch | `AIPlayerState` | Cleared with mission + match reset |
 | Frame-local army unit caches | `EnemyArmyCommand` static | Keyed by `Engine` frame; cleared on reset; never SoT |
-| Order-issue / perf telemetry | `EnemyArmyCommand` static | F3 / diagnostics only; never mission or order authority |
+| Order-issue / perf telemetry | `EnemyArmyCommandTelemetry` | F3 / diagnostics only; never mission or order authority |
 | Hero kit micro | `AIHeroMastery` via `ArmyCommanderV2` | Abilities / local targets only |
 | Economy / workers / build / train / tech / placement | Legacy managers | Unchanged under V2 |
 | Low-level army helpers | `EnemyArmyCommand`, creep helpers, etc. | Reused; not independent mission owners |
@@ -181,17 +181,18 @@ Checklist for new work:
 - Declares the sole military command authority (`ArmyCommanderV2` when V2 is enabled)
 - Resolves director / commander / legacy managers for sibling lookup
 
-### EnemyArmyCommand state ownership (final)
+### EnemyArmyCommand state ownership (post telemetry extraction)
 
 Authoritative military runtime lives on match-owned `AIPlayerState` (accessed via `EnemyArmyCommand._rt()`). Remaining EAC class statics are only:
 
 | Bag | Role |
 |-----|------|
 | Frame-local unit caches | Discovery scratch keyed by `Engine` frame |
-| Perf / last-issued / debug-override | Telemetry — never mission selection or order execution |
 | `_bound_player_state` / `_declared_command_authority` / `_unbound_runtime` | Composition binding |
 
-`EnemyArmyCommand` is ready for a **scoped** helper extraction (telemetry isolate or pure math/helpers). Do not begin a broad god-object split until a narrow seam is chosen.
+**Extracted (2026-08-05):** `EnemyArmyCommandTelemetry` owns debug-override, perf/overlay cadence timers, orders-issued counter, and last-issued order labels. It does not select missions or enqueue orders. Not an autoload.
+
+`EnemyArmyCommand` remains the shared order-bus / army-helper facade. Further scoped extractions (pure math/scoring) are allowed; do not begin a broad god-object split until a narrow seam is chosen.
 
 Child systems still include:
 

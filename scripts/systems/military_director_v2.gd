@@ -2910,12 +2910,12 @@ func _publish_perf_status() -> void:
 		_watchdog_status
 	)
 	var destination_text: String = _format_destination_label(mission)
-	var last_order_age: float = EnemyArmyCommand.get_seconds_since_last_order()
+	var last_order_age: float = EnemyArmyCommandTelemetry.get_seconds_since_last_order()
 	var last_order_text: String = "-"
 	if last_order_age < INF:
 		last_order_text = "%.1fs ago (%s)" % [
 			last_order_age,
-			EnemyArmyCommand.get_last_issued_order_label(),
+			EnemyArmyCommandTelemetry.get_last_issued_order_label(),
 		]
 	var last_mission_change: String = "%.1fs ago (%s)" % [
 		age_seconds,
@@ -2948,7 +2948,7 @@ func _format_destination_label(mission: ArmyMissionV2) -> String:
 		return "(%.0f, %.0f)" % [pos.x, pos.z]
 	if mission.target_position != Vector3.ZERO:
 		return "(%.0f, %.0f)" % [mission.target_position.x, mission.target_position.z]
-	var order_dest: Vector3 = EnemyArmyCommand.get_last_issued_order_destination()
+	var order_dest: Vector3 = EnemyArmyCommandTelemetry.get_last_issued_order_destination()
 	if order_dest != Vector3.ZERO:
 		return "(%.0f, %.0f)" % [order_dest.x, order_dest.z]
 	return "-"
@@ -3072,12 +3072,12 @@ func _publish_watchdog_snapshot_only() -> void:
 	var commander: ArmyCommanderV2 = _resolve_commander()
 	if commander != null:
 		idle_time = commander.get_squad_idle_seconds()
-	var last_order_age: float = EnemyArmyCommand.get_seconds_since_last_order()
+	var last_order_age: float = EnemyArmyCommandTelemetry.get_seconds_since_last_order()
 	var last_order_text: String = "-"
 	if last_order_age < INF:
 		last_order_text = "%.1fs ago (%s)" % [
 			last_order_age,
-			EnemyArmyCommand.get_last_issued_order_label(),
+			EnemyArmyCommandTelemetry.get_last_issued_order_label(),
 		]
 	PerfCounters.set_military_ai_v2_execution_status(
 		_format_destination_label(_mission),
@@ -3115,9 +3115,9 @@ func _resolve_active_order_label() -> String:
 	var order: String = EnemyArmyCommand.get_executable_order_label()
 	if not order.is_empty():
 		return order
-	var last_issued: String = EnemyArmyCommand.get_last_issued_order_label()
+	var last_issued: String = EnemyArmyCommandTelemetry.get_last_issued_order_label()
 	if last_issued != "-" and not last_issued.is_empty():
-		var age: float = EnemyArmyCommand.get_seconds_since_last_order()
+		var age: float = EnemyArmyCommandTelemetry.get_seconds_since_last_order()
 		if age < MilitaryAIConfig.V2_SQUAD_IDLE_SECONDS:
 			return last_issued
 	match _state:
