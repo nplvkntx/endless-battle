@@ -458,10 +458,12 @@ func _issue_stall_recovery_orders(
 				if squad != null:
 					_issue_defend_squad_orders(
 						squad,
+						director,
 						director.get_assemble_rally_point(),
 						destination,
 						alive_target,
-						false
+						false,
+						_is_critical_base_defense_emergency()
 					)
 					issued = true
 				else:
@@ -1041,10 +1043,6 @@ func _execute_defend_mission(
 		return
 
 	squad.ensure_tactical_squads()
-	var defense_army: Array = _collect_defend_army(squad)
-	if defense_army.is_empty():
-		return
-
 	var rally_point: Vector3 = director.get_assemble_rally_point()
 	var intercept: Vector3 = mission.target_position
 	if intercept == Vector3.ZERO:
@@ -1059,6 +1057,12 @@ func _execute_defend_mission(
 		base_anchor = EnemyArmyCommand.resolve_enemy_rally_position(tree)
 	if base_anchor == Vector3.ZERO:
 		base_anchor = intercept
+
+	## Emergency DEFEND may temporarily command nearby pending reinforcements
+	## without permanently mutating main-squad membership.
+	var defense_army: Array = _collect_defend_army(squad, director, base_anchor)
+	if defense_army.is_empty():
+		return
 
 	var focus: Node3D = null
 	var mission_focus: Node3D = mission.get_alive_target_object()
@@ -1083,6 +1087,7 @@ func _execute_defend_mission(
 		EnemyArmyCommand.horizontal_distance(base_anchor, chase_point)
 		> MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS
 	)
+	var critical_emergency: bool = _is_critical_base_defense_emergency()
 
 	EnemyArmyCommand.set_executable_mission(
 		(
@@ -1104,10 +1109,12 @@ func _execute_defend_mission(
 		_defend_order_reissue_timer = 0.0
 		_issue_defend_squad_orders(
 			squad,
+			director,
 			base_anchor,
 			leashed_point,
 			focus,
-			beyond_leash
+			beyond_leash,
+			critical_emergency
 		)
 		EnemyArmyCommand.note_mission_progress(
 			EnemyArmyCommand.compute_army_center(defense_army),
@@ -1115,15 +1122,20 @@ func _execute_defend_mission(
 			defense_army.size()
 		)
 
-	## Connect attacks on the priority target, but never past the leash.
-	## Only active (non-reserve) squads focus-fire to avoid order storms.
+	## Hard focus only when the threat is inside the leash and still valid.
+	## Ordinary DEFEND attack-move stays formation-based (no focus_objective).
 	if (
 		not beyond_leash
 		and focus != null
 		and _defend_focus_reissue_timer >= MilitaryAIConfig.V2_DEFEND_FOCUS_REISSUE_SECONDS
 	):
 		_defend_focus_reissue_timer = 0.0
-		var focus_units: Array = _collect_active_defend_focus_units(squad)
+		var focus_units: Array = _collect_active_defend_focus_units(
+			squad,
+			director,
+			base_anchor,
+			critical_emergency
+		)
 		if not focus_units.is_empty():
 			EnemyArmyCommand.with_authorized_orders(func() -> void:
 				EnemyArmyCommand.command_focus_attack(
@@ -1142,10 +1154,12 @@ func _execute_defend_mission(
 
 func _issue_defend_squad_orders(
 	squad: ArmySquadV2,
+	director: MilitaryDirectorV2,
 	base_anchor: Vector3,
 	leashed_point: Vector3,
 	focus: Node3D,
-	beyond_leash: bool
+	beyond_leash: bool,
+	critical_emergency: bool = false
 ) -> void:
 	var forward: Vector3 = leashed_point - base_anchor
 	forward.y = 0.0
@@ -1160,7 +1174,12 @@ func _issue_defend_squad_orders(
 		## Fallback: role split of the whole army (pre-partition edge case).
 		var melee_units: Array = []
 		var ranged_units: Array = []
-		_split_defend_roles(squad, _collect_defend_army(squad), melee_units, ranged_units)
+		_split_defend_roles(
+			squad,
+			_collect_defend_army(squad, director, base_anchor),
+			melee_units,
+			ranged_units
+		)
 		var melee_destination: Vector3 = (
 			leashed_point + forward * MilitaryAIConfig.V2_DEFEND_MELEE_INTERCEPT_OFFSET
 		)
@@ -1192,6 +1211,7 @@ func _issue_defend_squad_orders(
 	var active_cap: int = MilitaryAIConfig.V2_DEFEND_ACTIVE_SQUAD_CAP
 	var active_issued: int = 0
 	var reserve_index: int = 0
+	var ordered_ids: Dictionary = {}
 	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.DEFENDING)
 
 	for entry: Variant in tactical:
@@ -1208,6 +1228,8 @@ func _issue_defend_squad_orders(
 			role == int(ArmySquadV2.TacticalRole.RESERVE)
 			or active_issued >= active_cap
 		)
+		## Critical TC/base emergency: reserves still attack-move toward the threat
+		## (role standoff preserved) instead of idle-holding while the TC burns.
 		var destination: Vector3 = _compute_defend_hold_position(
 			role,
 			base_anchor,
@@ -1215,7 +1237,7 @@ func _issue_defend_squad_orders(
 			forward,
 			right,
 			reserve_index,
-			is_reserve
+			is_reserve and not critical_emergency
 		)
 		if is_reserve:
 			reserve_index += 1
@@ -1226,10 +1248,14 @@ func _issue_defend_squad_orders(
 
 		## Skip equivalent Attack-Move refreshes for this tactical squad.
 		if _is_equivalent_defend_order(squad_id, destination, focus):
+			for member: Variant in members:
+				if NodeSafety.is_alive_node(member):
+					ordered_ids[(member as Node).get_instance_id()] = true
 			continue
 
-		## Reserves hold intercept posts; only leave when a nearby hostile exists.
-		if is_reserve and not beyond_leash:
+		## Ordinary defense: reserves hold posts unless a hostile is already close.
+		## Critical emergency: fall through to attack-move so nearby reserves engage.
+		if is_reserve and not beyond_leash and not critical_emergency:
 			var reserve_should_engage: bool = (
 				focus != null
 				and EnemyArmyCommand.horizontal_distance(destination, focus.global_position) <= 16.0
@@ -1243,6 +1269,9 @@ func _issue_defend_squad_orders(
 					)
 				)
 				_record_defend_order(squad_id, destination, focus)
+				for member: Variant in members:
+					if NodeSafety.is_alive_node(member):
+						ordered_ids[(member as Node).get_instance_id()] = true
 				continue
 
 		EnemyArmyCommand.with_authorized_orders(func() -> void:
@@ -1253,6 +1282,20 @@ func _issue_defend_squad_orders(
 			)
 		)
 		_record_defend_order(squad_id, destination, focus)
+		for member: Variant in members:
+			if NodeSafety.is_alive_node(member):
+				ordered_ids[(member as Node).get_instance_id()] = true
+
+	## Nearby pending reinforcements are not in tactical squads yet — order them
+	## as temporary defenders without admitting them into the main squad.
+	_issue_pending_defend_orders(
+		squad,
+		director,
+		base_anchor,
+		leashed_point,
+		forward,
+		ordered_ids
+	)
 
 
 func _defend_squad_priority(entry: Variant) -> int:
@@ -1329,7 +1372,16 @@ func _record_defend_order(squad_id: int, destination: Vector3, focus: Node3D) ->
 	}
 
 
-func _collect_active_defend_focus_units(squad: ArmySquadV2) -> Array:
+func _collect_active_defend_focus_units(
+	squad: ArmySquadV2,
+	director: MilitaryDirectorV2 = null,
+	base_anchor: Vector3 = Vector3.ZERO,
+	critical_emergency: bool = false
+) -> Array:
+	## Critical TC/base emergency: commit nearby reserves + pending defenders too.
+	if critical_emergency:
+		return _collect_defend_army(squad, director, base_anchor)
+
 	var units: Array = []
 	var active_cap: int = MilitaryAIConfig.V2_DEFEND_ACTIVE_SQUAD_CAP
 	var active_count: int = 0
@@ -1350,19 +1402,159 @@ func _collect_active_defend_focus_units(squad: ArmySquadV2) -> Array:
 			if NodeSafety.is_alive_node(member) and EnemyArmyCommand.is_living_combat_unit(member as Node):
 				units.append(member)
 	if units.is_empty():
-		return _collect_defend_army(squad)
+		return _collect_defend_army(squad, director, base_anchor)
+	## Still fold in nearby pending so RALLY/IDLE reinforcements focus with the army.
+	if EnemyArmyCommand.is_emergency_defense_active():
+		for entry: Variant in _collect_nearby_pending_defenders(director, base_anchor):
+			if NodeSafety.is_alive_node(entry):
+				units.append(entry)
 	return NodeSafety.clean_node_array(units)
 
 
-func _collect_defend_army(squad: ArmySquadV2) -> Array:
+func _collect_defend_army(
+	squad: ArmySquadV2,
+	director: MilitaryDirectorV2 = null,
+	base_anchor: Vector3 = Vector3.ZERO
+) -> Array:
 	var units: Array = []
+	var seen_ids: Dictionary = {}
 	for entry: Variant in squad.get_members_copy():
 		if not NodeSafety.is_alive_node(entry) or not entry is Node:
 			continue
 		if not EnemyArmyCommand.is_living_combat_unit(entry as Node):
 			continue
-		units.append(entry)
+		var unit: Node = entry as Node
+		seen_ids[unit.get_instance_id()] = true
+		units.append(unit)
+
+	## Temporary emergency defenders: eligible pending near the base only.
+	## Does not admit them into the main squad (preserves normal membership).
+	for entry: Variant in _collect_nearby_pending_defenders(director, base_anchor):
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		var pending: Node = entry as Node
+		var pending_id: int = pending.get_instance_id()
+		if seen_ids.has(pending_id):
+			continue
+		seen_ids[pending_id] = true
+		units.append(pending)
+
 	return NodeSafety.clean_node_array(units)
+
+
+## Nearby living pending reinforcements available for emergency DEFEND execution.
+## Reuses the director's pending list — no whole-map scan.
+func _collect_nearby_pending_defenders(
+	director: MilitaryDirectorV2,
+	base_anchor: Vector3
+) -> Array:
+	if director == null:
+		return []
+	if not EnemyArmyCommand.is_emergency_defense_active():
+		return []
+	if base_anchor == Vector3.ZERO:
+		return []
+
+	var units: Array = []
+	for entry: Variant in director.get_pending_reinforcements_copy():
+		if not _is_eligible_emergency_pending_defender(entry):
+			continue
+		var unit: Node3D = entry as Node3D
+		if (
+			EnemyArmyCommand.horizontal_distance(unit.global_position, base_anchor)
+			> MilitaryAIConfig.V2_DEFEND_LEASH_RADIUS
+		):
+			continue
+		units.append(unit)
+	return NodeSafety.clean_node_array(units)
+
+
+func _is_eligible_emergency_pending_defender(entry: Variant) -> bool:
+	if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+		return false
+	var unit: Node = entry as Node
+	if not unit.is_inside_tree():
+		return false
+	if unit is Worker or unit is Building or unit is NeutralCreep:
+		return false
+	if not EnemyArmyCommand.is_combat_unit(unit):
+		return false
+	## Heroes must be living/combat-ready (not dead or reviving).
+	if unit is Hero:
+		return EnemyArmyCommand.is_living_combat_unit(unit)
+	## Non-heroes already sit on the director pending list; require positive HP.
+	## Combat-group registration may lag one frame behind spawn.
+	return EnemyArmyForceMath.has_positive_health(unit)
+
+
+func _issue_pending_defend_orders(
+	_squad: ArmySquadV2,
+	director: MilitaryDirectorV2,
+	base_anchor: Vector3,
+	leashed_point: Vector3,
+	forward: Vector3,
+	already_ordered_ids: Dictionary
+) -> void:
+	var pending: Array = _collect_nearby_pending_defenders(director, base_anchor)
+	if pending.is_empty():
+		return
+
+	var melee_units: Array = []
+	var ranged_units: Array = []
+	for entry: Variant in pending:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node:
+			continue
+		var unit_id: int = (entry as Node).get_instance_id()
+		if already_ordered_ids.has(unit_id):
+			continue
+		## Leave RALLY/IDLE immediately so combat micro and DEFEND focus can run.
+		EnemyUnitMission.try_set_mission(entry as Node, EnemyUnitMission.Mission.DEFEND)
+		if not entry is Node3D:
+			melee_units.append(entry)
+			continue
+		var role: ArmySquadV2.UnitRole = ArmySquadV2.classify_role(entry as Node)
+		if role == ArmySquadV2.UnitRole.RANGED or role == ArmySquadV2.UnitRole.SIEGE:
+			ranged_units.append(entry)
+		elif role == ArmySquadV2.UnitRole.HERO:
+			var hero_role: UnitFormationRole.Role = UnitFormationRole.get_role(entry as Node3D)
+			if UnitFormationRole.is_ranged_role(hero_role) or UnitFormationRole.is_siege_role(hero_role):
+				ranged_units.append(entry)
+			else:
+				melee_units.append(entry)
+		else:
+			melee_units.append(entry)
+
+	if melee_units.is_empty() and ranged_units.is_empty():
+		return
+
+	var melee_destination: Vector3 = (
+		leashed_point + forward * MilitaryAIConfig.V2_DEFEND_MELEE_INTERCEPT_OFFSET
+	)
+	var ranged_destination: Vector3 = (
+		leashed_point - forward * MilitaryAIConfig.V2_DEFEND_RANGED_STANDOFF
+	)
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		if not melee_units.is_empty():
+			EnemyArmyCommand.command_attack_move(
+				melee_units,
+				melee_destination,
+				EnemyUnitMission.Mission.DEFEND
+			)
+		if not ranged_units.is_empty():
+			EnemyArmyCommand.command_attack_move(
+				ranged_units,
+				ranged_destination,
+				EnemyUnitMission.Mission.DEFEND
+			)
+	)
+
+
+func _is_critical_base_defense_emergency() -> bool:
+	if not EnemyArmyCommand.is_emergency_defense_active():
+		return false
+	return EnemyArmyCommand.is_critical_defense_threat({
+		"reason": EnemyArmyCommand.get_emergency_defense_reason(),
+	})
 
 
 func _split_defend_roles(
@@ -1375,7 +1567,10 @@ func _split_defend_roles(
 		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
 			continue
 		var unit: Node3D = entry as Node3D
-		var role: ArmySquadV2.UnitRole = squad.get_role(unit)
+		var role: ArmySquadV2.UnitRole = (
+			squad.get_role(unit) if squad != null and squad.has_member(unit)
+			else ArmySquadV2.classify_role(unit)
+		)
 		if role == ArmySquadV2.UnitRole.RANGED or role == ArmySquadV2.UnitRole.SIEGE:
 			ranged_units.append(unit)
 			continue

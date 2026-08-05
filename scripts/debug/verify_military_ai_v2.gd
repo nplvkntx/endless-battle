@@ -4,6 +4,8 @@ extends Node
 ## Godot_v4.7-stable_win64.exe --headless --path <project> res://scenes/debug/verify_military_ai_v2.tscn
 
 const REPORT_PATH := "user://military_ai_v2_verify_result.txt"
+const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
+const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
 
 
 func _ready() -> void:
@@ -22,6 +24,7 @@ func _ready() -> void:
 	_verify_defend_priority_order(failures)
 	_verify_defend_leash_helper(failures)
 	_verify_defense_storm_guards(failures)
+	await _verify_emergency_base_defense_response(failures)
 	_verify_attack_config_and_source(failures)
 	_verify_attack_priority_order(failures)
 	_verify_attack_chase_leash_helper(failures)
@@ -568,6 +571,21 @@ func _verify_defense_storm_guards(failures: PackedStringArray) -> void:
 		_expect(failures, "commander issues defend by squad", commander_text.contains("_issue_defend_squad_orders"))
 		_expect(failures, "commander dedups defend orders", commander_text.contains("_is_equivalent_defend_order"))
 		_expect(failures, "commander computes hold positions", commander_text.contains("_compute_defend_hold_position"))
+		_expect(
+			failures,
+			"commander collects nearby pending defenders",
+			commander_text.contains("_collect_nearby_pending_defenders")
+		)
+		_expect(
+			failures,
+			"commander issues pending defend orders",
+			commander_text.contains("_issue_pending_defend_orders")
+		)
+		_expect(
+			failures,
+			"commander commits reserves on critical emergency",
+			commander_text.contains("_is_critical_base_defense_emergency")
+		)
 
 	var squad_source := FileAccess.open("res://scripts/systems/army_squad_v2.gd", FileAccess.READ)
 	_expect(failures, "squad source readable", squad_source != null)
@@ -673,6 +691,294 @@ func _verify_defend_leash_helper(failures: PackedStringArray) -> void:
 		clamped.x > base.x
 	)
 	commander.queue_free()
+
+
+func _make_defense_test_unit(unit_name: String, position: Vector3) -> Spearman:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	unit.name = unit_name
+	unit.position = position
+	unit.add_to_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	add_child(unit)
+	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
+	if health != null:
+		health.current_health = health.max_health
+	return unit
+
+
+func _make_defense_test_archer(unit_name: String, position: Vector3) -> Archer:
+	var unit: Archer = ARCHER_SCENE.instantiate() as Archer
+	unit.name = unit_name
+	unit.position = position
+	unit.add_to_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	add_child(unit)
+	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
+	if health != null:
+		health.current_health = health.max_health
+	return unit
+
+
+func _verify_emergency_base_defense_response(failures: PackedStringArray) -> void:
+	## Source contracts: focus batch, ownership, and lifecycle helpers.
+	var command_source := FileAccess.open("res://scripts/systems/enemy_army_command.gd", FileAccess.READ)
+	_expect(failures, "army command source readable for defend focus", command_source != null)
+	if command_source != null:
+		var command_text: String = command_source.get_as_text()
+		command_source.close()
+		_expect(
+			failures,
+			"DEFEND focus attacks execute through hard-focus batch path",
+			command_text.contains("EnemyUnitMission.Mission.DEFEND")
+			and command_text.contains("focus_objective")
+			and command_text.contains("_command_unit_focus_attack")
+		)
+		_expect(
+			failures,
+			"focus path claims mission before combat micro gate",
+			command_text.contains("Claim DEFEND/ATTACK/CREEP before micro gates")
+			or command_text.contains("Mission first so allows_combat_micro")
+		)
+		_expect(
+			failures,
+			"order rate budget safeguard remains",
+			command_text.contains("MAX_GROUP_ORDERS_PER_FRAME")
+		)
+		_expect(
+			failures,
+			"emergency reason accessor exists",
+			command_text.contains("get_emergency_defense_reason")
+		)
+
+	var director_source := FileAccess.open("res://scripts/systems/military_director_v2.gd", FileAccess.READ)
+	_expect(failures, "director source readable for order ownership", director_source != null)
+	if director_source != null:
+		var director_text: String = director_source.get_as_text()
+		director_source.close()
+		_expect(
+			failures,
+			"MilitaryDirectorV2 does not issue direct unit orders",
+			not director_text.contains("command_attack_move(")
+			and not director_text.contains("command_focus_attack(")
+			and not director_text.contains("command_hold_at_rally(")
+			and not director_text.contains("_issue_attack_move(")
+		)
+		_expect(
+			failures,
+			"DEFEND overrides other states",
+			director_text.contains("DEFEND always wins")
+		)
+		_expect(
+			failures,
+			"DEFEND ends cleanly after clear",
+			director_text.contains("_exit_defend_after_clear")
+		)
+
+	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
+	_expect(failures, "commander source readable for emergency defend", commander_source != null)
+	if commander_source != null:
+		var commander_text: String = commander_source.get_as_text()
+		commander_source.close()
+		_expect(
+			failures,
+			"melee defenders close on threat",
+			commander_text.contains("V2_DEFEND_MELEE_INTERCEPT_OFFSET")
+		)
+		_expect(
+			failures,
+			"ranged defenders use standoff",
+			commander_text.contains("V2_DEFEND_RANGED_STANDOFF")
+		)
+		_expect(
+			failures,
+			"tactical reserves engage during critical emergency",
+			commander_text.contains("critical_emergency")
+			and commander_text.contains("_is_critical_base_defense_emergency")
+		)
+		_expect(
+			failures,
+			"dedup / reissue anti-spam preserved",
+			commander_text.contains("_is_equivalent_defend_order")
+			and commander_text.contains("V2_DEFEND_ORDER_REISSUE_SECONDS")
+			and commander_text.contains("V2_DEFEND_FOCUS_REISSUE_SECONDS")
+		)
+
+	_expect(
+		failures,
+		"no legacy military controller while V2 enabled",
+		MilitaryAIConfig.USE_MILITARY_AI_V2 == true
+		and MilitaryAIConfig.is_v2_enabled() == true
+	)
+
+	## Runtime: main-squad + nearby pending defend; far pending excluded; leash; restart clear.
+	EnemyArmyCommand.reset_match_state()
+	var director := MilitaryDirectorV2.new()
+	director.name = "EmergencyDefendDirector"
+	add_child(director)
+	director.reset_match_state()
+
+	var commander := ArmyCommanderV2.new()
+	commander.name = "EmergencyDefendCommander"
+	add_child(commander)
+	commander.reset_match_state()
+
+	var base_anchor := Vector3(10.0, 0.0, 10.0)
+	var squad_unit: Spearman = _make_defense_test_unit("DefendSquadSpear", base_anchor + Vector3(2.0, 0.0, 0.0))
+	var pending_near: Spearman = _make_defense_test_unit("DefendPendingNear", base_anchor + Vector3(4.0, 0.0, 1.0))
+	var pending_far: Spearman = _make_defense_test_unit("DefendPendingFar", base_anchor + Vector3(120.0, 0.0, 0.0))
+	var pending_archer: Archer = _make_defense_test_archer("DefendPendingArcher", base_anchor + Vector3(3.0, 0.0, -2.0))
+
+	var squad: ArmySquadV2 = director.get_main_squad()
+	squad.try_add_member(squad_unit, ArmySquadV2.UnitRole.FRONTLINE)
+	_expect(
+		failures,
+		"main-squad unit admitted for defend test",
+		squad.has_member(squad_unit)
+	)
+
+	EnemyUnitMission.try_set_mission(pending_near, EnemyUnitMission.Mission.RALLY)
+	EnemyUnitMission.try_set_mission(pending_archer, EnemyUnitMission.Mission.IDLE)
+	_expect(
+		failures,
+		"director enqueues nearby pending defender",
+		director.debug_enqueue_pending_for_tests(pending_near)
+	)
+	_expect(
+		failures,
+		"director enqueues far pending unit",
+		director.debug_enqueue_pending_for_tests(pending_far)
+	)
+	_expect(
+		failures,
+		"director enqueues ranged pending defender",
+		director.debug_enqueue_pending_for_tests(pending_archer)
+	)
+
+	## Without emergency, pending stay out of the executable defend army.
+	var idle_army: Array = commander._collect_defend_army(squad, director, base_anchor)
+	_expect(
+		failures,
+		"pending excluded before emergency",
+		idle_army.has(squad_unit) and not idle_army.has(pending_near)
+	)
+
+	EnemyArmyCommand.activate_emergency_defense({
+		"reason": &"town_center",
+		"intercept_position": base_anchor + Vector3(6.0, 0.0, 0.0),
+		"force_recall": true,
+	})
+	_expect(
+		failures,
+		"critical town-center emergency active",
+		EnemyArmyCommand.is_emergency_defense_active()
+		and commander._is_critical_base_defense_emergency()
+	)
+
+	var defense_army: Array = commander._collect_defend_army(squad, director, base_anchor)
+	_expect(
+		failures,
+		"main-squad units defend the Town Center",
+		defense_army.has(squad_unit)
+	)
+	_expect(
+		failures,
+		"eligible pending reinforcements near the base also defend",
+		defense_army.has(pending_near) and defense_army.has(pending_archer)
+	)
+	_expect(
+		failures,
+		"far pending excluded by defensive leash distance",
+		not defense_army.has(pending_far)
+	)
+	_expect(
+		failures,
+		"pending defenders not permanently admitted to main squad",
+		not squad.has_member(pending_near) and not squad.has_member(pending_archer)
+	)
+
+	var nearby: Array = commander._collect_nearby_pending_defenders(director, base_anchor)
+	_expect(
+		failures,
+		"nearby pending helper returns eligible defenders",
+		nearby.has(pending_near) and nearby.has(pending_archer) and not nearby.has(pending_far)
+	)
+
+	var focus_units: Array = commander._collect_active_defend_focus_units(
+		squad,
+		director,
+		base_anchor,
+		true
+	)
+	_expect(
+		failures,
+		"critical focus set includes squad and nearby pending",
+		focus_units.has(squad_unit)
+		and focus_units.has(pending_near)
+		and focus_units.has(pending_archer)
+	)
+
+	## Pending RALLY/IDLE must be claimable to DEFEND so they do not stay idle.
+	_expect(
+		failures,
+		"DEFEND overrides RALLY for pending defender",
+		EnemyUnitMission.can_override_mission(pending_near, EnemyUnitMission.Mission.DEFEND)
+	)
+	_expect(
+		failures,
+		"DEFEND overrides IDLE for pending defender",
+		EnemyUnitMission.can_override_mission(pending_archer, EnemyUnitMission.Mission.DEFEND)
+	)
+	EnemyUnitMission.try_set_mission(pending_near, EnemyUnitMission.Mission.DEFEND)
+	EnemyUnitMission.try_set_mission(pending_archer, EnemyUnitMission.Mission.DEFEND)
+	_expect(
+		failures,
+		"pending defenders leave RALLY/IDLE during active Town Center attack",
+		EnemyUnitMission.get_unit_mission(pending_near) == EnemyUnitMission.Mission.DEFEND
+		and EnemyUnitMission.get_unit_mission(pending_archer) == EnemyUnitMission.Mission.DEFEND
+	)
+
+	## Role split: melee closes, ranged stands off.
+	var melee_units: Array = []
+	var ranged_units: Array = []
+	commander._split_defend_roles(squad, [squad_unit, pending_archer], melee_units, ranged_units)
+	_expect(failures, "melee defender classified for intercept", melee_units.has(squad_unit))
+	_expect(failures, "ranged defender classified for standoff", ranged_units.has(pending_archer))
+
+	## Threat removed → deactivate; match restart clears defense state.
+	EnemyArmyCommand.deactivate_emergency_defense()
+	_expect(
+		failures,
+		"DEFEND ends cleanly when threat removed",
+		not EnemyArmyCommand.is_emergency_defense_active()
+		and not commander._is_critical_base_defense_emergency()
+	)
+	_expect(
+		failures,
+		"pending no longer collected after emergency ends",
+		commander._collect_nearby_pending_defenders(director, base_anchor).is_empty()
+	)
+
+	EnemyArmyCommand.activate_emergency_defense({
+		"reason": &"town_center",
+		"intercept_position": base_anchor,
+	})
+	director.reset_match_state()
+	commander.reset_match_state()
+	EnemyArmyCommand.reset_match_state()
+	_expect(
+		failures,
+		"match restart clears defense state",
+		not EnemyArmyCommand.is_emergency_defense_active()
+		and director.get_pending_reinforcements_copy().is_empty()
+		and director.get_main_squad().get_size() == 0
+		and director.get_state() == MilitaryDirectorV2.State.IDLE
+	)
+
+	squad_unit.queue_free()
+	pending_near.queue_free()
+	pending_far.queue_free()
+	pending_archer.queue_free()
+	commander.queue_free()
+	director.queue_free()
+	await get_tree().process_frame
 
 
 func _verify_attack_config_and_source(failures: PackedStringArray) -> void:

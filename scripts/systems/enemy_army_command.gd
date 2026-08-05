@@ -2052,6 +2052,10 @@ static func is_emergency_defense_active() -> bool:
 	return _emergency_defense_active
 
 
+static func get_emergency_defense_reason() -> StringName:
+	return _emergency_reason
+
+
 static func get_emergency_defense_objective() -> Vector3:
 	return _emergency_threat_position
 
@@ -3236,6 +3240,10 @@ static func _command_focus_attack_objective(
 	for unit: Variant in units:
 		if not NodeSafety.is_alive_node(unit):
 			continue
+
+		## Claim DEFEND/ATTACK/CREEP before micro gates so RALLY/IDLE pending
+		## defenders can focus the emergency threat instead of staying idle.
+		EnemyUnitMission.try_set_mission(unit as Node, mission)
 
 		if not _should_focus_unit_on_objective(unit as Node3D, objective):
 			continue
@@ -5947,14 +5955,19 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 		if (
 			use_attack_move
-			and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
+			and mission in [
+				EnemyUnitMission.Mission.ATTACK,
+				EnemyUnitMission.Mission.CREEP,
+				EnemyUnitMission.Mission.DEFEND,
+			]
 			and entry.has("focus_objective")
 		):
 			var focus_objective_ref: Variant = entry.get("focus_objective")
 			if NodeSafety.is_alive_node(focus_objective_ref) and focus_objective_ref is Node3D:
 				var focus_objective: Node3D = focus_objective_ref as Node3D
-				_command_unit_focus_attack(unit, focus_objective)
+				## Mission first so allows_combat_micro permits the hard focus path.
 				EnemyUnitMission.try_set_mission(unit as Node, mission)
+				_command_unit_focus_attack(unit, focus_objective)
 				EnemyUnitMission.record_move_order(unit as Node, target, mission)
 				EnemyArmyCommandTelemetry.record_order_issued()
 				PerfCounters.record_ai_order()
