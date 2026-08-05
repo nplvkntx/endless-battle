@@ -130,6 +130,11 @@ var _blocked_arrival_time: float = 0.0
 var _movement_generation: int = 0
 var _nav_velocity_request_generation: int = -1
 var _arrival_completed_generation: int = -1
+## Authoritative player group-command token from SharedSquadNavigation.
+var _player_squad_command_generation: int = -1
+var _player_squad_clicked_destination: Vector3 = Vector3.ZERO
+var _player_squad_final_arrival: Vector3 = Vector3.ZERO
+var _player_squad_command_type: StringName = &""
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -592,6 +597,41 @@ func get_move_separation_blend() -> float:
 
 func get_movement_generation() -> int:
 	return _movement_generation
+
+
+func bind_player_squad_command(
+	generation: int,
+	clicked_destination: Vector3,
+	final_arrival: Vector3,
+	command_type: StringName
+) -> void:
+	_player_squad_command_generation = generation
+	_player_squad_clicked_destination = clicked_destination
+	_player_squad_final_arrival = final_arrival
+	_player_squad_command_type = command_type
+
+
+func clear_player_squad_command() -> void:
+	_player_squad_command_generation = -1
+	_player_squad_clicked_destination = Vector3.ZERO
+	_player_squad_final_arrival = Vector3.ZERO
+	_player_squad_command_type = &""
+
+
+func matches_player_squad_command(generation: int) -> bool:
+	return generation >= 0 and _player_squad_command_generation == generation
+
+
+func get_player_squad_command_generation() -> int:
+	return _player_squad_command_generation
+
+
+func get_player_squad_final_arrival() -> Vector3:
+	return _player_squad_final_arrival
+
+
+func get_player_squad_clicked_destination() -> Vector3:
+	return _player_squad_clicked_destination
 
 
 func _invalidate_movement_generation() -> void:
@@ -1457,12 +1497,25 @@ func _advance_stuck_recovery(distance: float) -> void:
 			# Stage 4+: prefer shared-route refresh over cancel while in a squad.
 			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(self)
 			if squad_ctx != null:
+				## Stale player-command callbacks must not retake control after a newer click.
+				if squad_ctx.is_player_squad and not matches_player_squad_command(
+					squad_ctx.command_generation
+				):
+					_stuck_recovery_stage = 0
+					return
 				_stuck_recovery_stage = 1
 				SharedSquadNavigation.notify_member_confirmed_stall(self)
 				var resume_shared: Vector3 = (
-					_original_move_destination
-					if _original_move_destination.length_squared() > 0.0001
-					else _movement_target
+					_player_squad_final_arrival
+					if (
+						squad_ctx.is_player_squad
+						and _player_squad_final_arrival.length_squared() > 0.0001
+					)
+					else (
+						_original_move_destination
+						if _original_move_destination.length_squared() > 0.0001
+						else _movement_target
+					)
 				)
 				request_movement_target(resume_shared, RepathUrgency.STUCK_RECOVERY)
 				return

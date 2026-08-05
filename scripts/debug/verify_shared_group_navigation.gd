@@ -32,6 +32,9 @@ func _ready() -> void:
 	await _verify_direct_attack_not_group_route(failures)
 	await _verify_route_fallback(failures)
 	await _verify_temp_block_no_repath_storm(failures)
+	await _verify_player_stable_destinations(failures)
+	await _verify_player_no_continuous_formation_steering(failures)
+	await _verify_new_click_overrides_previous(failures)
 	await _verify_arrival_clears(failures)
 	await _verify_match_reset_clears(failures)
 	await _verify_ai_and_player_share_foundation(failures)
@@ -408,10 +411,260 @@ func _verify_temp_block_no_repath_storm(failures: PackedStringArray) -> void:
 		units, Vector3(10.0, 0.0, 0.0), &"move", false
 	)
 	var routes_before: int = int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_STRATEGIC_ROUTES, 0))
+	var local_before: int = int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_LOCAL_REPATHS, 0))
 	for _i: int in 20:
 		await get_tree().physics_frame
 	var routes_after: int = int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_STRATEGIC_ROUTES, 0))
+	var local_after: int = int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_LOCAL_REPATHS, 0))
 	_expect(failures, "temp block: no strategic repath storm", routes_after == routes_before)
+	_expect(
+		failures,
+		"temp block: no continuous formation local repaths",
+		local_after == local_before
+	)
+	await _free_harness(harness)
+
+
+func _verify_player_stable_destinations(failures: PackedStringArray) -> void:
+	print("verify: player move freezes clicked destination and arrival slots once")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var units: Array = []
+	for index: int in 40:
+		var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+		harness["root"].add_child(unit)
+		unit.global_position = Vector3(
+			float(index % 8) * 1.15 - 4.0,
+			0.0,
+			float(index / 8) * 1.15 - 4.0
+		)
+		units.append(unit)
+	await _wait_nav_ready(units[0] as Unit)
+
+	SharedSquadNavigation.clear_all()
+	SharedSquadNavigation.reset_player_move_telemetry()
+	PerfCounters.reset_all()
+	var clicked: Vector3 = Vector3(18.0, 0.0, 12.0)
+	var start_positions: Dictionary = {}
+	for unit: Variant in units:
+		start_positions[(unit as Node).get_instance_id()] = (unit as Node3D).global_position
+	var result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		units, clicked, &"move", false
+	)
+	_expect(failures, "stable: handled", result.get("handled", false))
+
+	var ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(units[0])
+	_expect(failures, "stable: context", ctx != null)
+	if ctx == null:
+		await _free_harness(harness)
+		return
+
+	var original_click: Vector3 = ctx.requested_destination
+	var original_slots: Dictionary = ctx.final_arrival_slots.duplicate()
+	var original_forward: Vector3 = ctx.formation_forward
+	_expect(failures, "stable: slots frozen once", ctx.arrival_slots_frozen)
+	_expect(failures, "stable: slot count", original_slots.size() == units.size())
+
+	var telemetry: Dictionary = SharedSquadNavigation.get_player_move_telemetry()
+	_expect(failures, "stable: slot generation == 1", int(telemetry.get("slot_generation_count", 0)) == 1)
+	_expect(failures, "stable: orders issued once", int(telemetry.get("orders_issued", 0)) == units.size())
+	_expect(failures, "stable: shared route == 1", int(telemetry.get("shared_route_count", 0)) == 1)
+	_expect(
+		failures,
+		"stable: strategic routes == 1",
+		int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_STRATEGIC_ROUTES, 0)) == 1
+	)
+
+	## Let the continuous tick run; player destinations must not drift.
+	for _i: int in 24:
+		await get_tree().physics_frame
+
+	_expect(
+		failures,
+		"stable: clicked destination unchanged",
+		_horizontal_distance(ctx.requested_destination, original_click) < 0.01
+	)
+	_expect(
+		failures,
+		"stable: formation forward unchanged",
+		ctx.formation_forward.distance_to(original_forward) < 0.001
+	)
+	var slots_unchanged := true
+	for unit_id: Variant in original_slots.keys():
+		if not ctx.final_arrival_slots.has(unit_id):
+			slots_unchanged = false
+			break
+		if _horizontal_distance(
+			ctx.final_arrival_slots[unit_id] as Vector3,
+			original_slots[unit_id] as Vector3
+		) > 0.01:
+			slots_unchanged = false
+			break
+	_expect(failures, "stable: arrival slots never recomputed", slots_unchanged)
+
+	telemetry = SharedSquadNavigation.get_player_move_telemetry()
+	_expect(
+		failures,
+		"stable: no continuous formation refreshes",
+		int(telemetry.get("formation_refresh_count", 0)) == 0
+	)
+	_expect(
+		failures,
+		"stable: no continuous target replacements",
+		int(telemetry.get("target_replacements", 0)) == 0
+	)
+	_expect(
+		failures,
+		"stable: no local formation repaths",
+		int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_LOCAL_REPATHS, 0)) == 0
+	)
+
+	var progressed: int = 0
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		var start_pos: Vector3 = start_positions[u.get_instance_id()] as Vector3
+		var toward: Vector3 = ctx.strategic_destination - start_pos
+		toward.y = 0.0
+		var moved: Vector3 = u.global_position - start_pos
+		moved.y = 0.0
+		if toward.length_squared() > 0.01 and moved.dot(toward.normalized()) > 0.35:
+			progressed += 1
+	_expect(failures, "stable: most units progress toward route", progressed >= 28)
+
+	await _free_harness(harness)
+
+
+func _verify_player_no_continuous_formation_steering(failures: PackedStringArray) -> void:
+	print("verify: player squads do not chase moving virtual slots")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var units: Array = []
+	for index: int in 10:
+		var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+		harness["root"].add_child(unit)
+		unit.global_position = Vector3(float(index) * 1.2, 0.0, 0.0)
+		units.append(unit)
+	await _wait_nav_ready(units[0] as Unit)
+
+	SharedSquadNavigation.clear_all()
+	PerfCounters.reset_all()
+	SharedSquadNavigation.issue_player_group_command(
+		units, Vector3(14.0, 0.0, 6.0), &"move", false
+	)
+	var ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(units[0])
+	_expect(failures, "no-steer: context", ctx != null)
+	if ctx == null:
+		await _free_harness(harness)
+		return
+
+	var issued_before: Dictionary = ctx.last_issued_slots.duplicate()
+	var targets_before: Dictionary = {}
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		targets_before[u.get_instance_id()] = u._movement_target
+
+	## Simulate ~2 seconds of squad ticks without issuing new player clicks.
+	for _i: int in 40:
+		await get_tree().physics_frame
+
+	var targets_changed: int = 0
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		var before: Vector3 = targets_before[u.get_instance_id()] as Vector3
+		if _horizontal_distance(before, u._movement_target) > 0.15:
+			targets_changed += 1
+	_expect(
+		failures,
+		"no-steer: unit movement targets stay at initial arrival slots",
+		targets_changed == 0
+	)
+
+	var issued_changed: int = 0
+	for unit_id: Variant in issued_before.keys():
+		if not ctx.last_issued_slots.has(unit_id):
+			issued_changed += 1
+			continue
+		if _horizontal_distance(
+			issued_before[unit_id] as Vector3,
+			ctx.last_issued_slots[unit_id] as Vector3
+		) > 0.01:
+			issued_changed += 1
+	_expect(failures, "no-steer: last_issued_slots unchanged", issued_changed == 0)
+	_expect(
+		failures,
+		"no-steer: zero continuous formation local repaths",
+		int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_LOCAL_REPATHS, 0)) == 0
+	)
+	await _free_harness(harness)
+
+
+func _verify_new_click_overrides_previous(failures: PackedStringArray) -> void:
+	print("verify: newer player click immediately overrides previous command")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var units: Array = []
+	for index: int in 8:
+		var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+		harness["root"].add_child(unit)
+		unit.global_position = Vector3(float(index) * 1.15, 0.0, 0.0)
+		units.append(unit)
+	await _wait_nav_ready(units[0] as Unit)
+
+	SharedSquadNavigation.clear_all()
+	SharedSquadNavigation.reset_player_move_telemetry()
+	var first: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		units, Vector3(10.0, 0.0, 0.0), &"move", false
+	)
+	_expect(failures, "override: first handled", first.get("handled", false))
+	var first_gen: int = int(
+		SharedSquadNavigation.get_player_move_telemetry().get("command_generation", 0)
+	)
+	var first_slots: Dictionary = {}
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		first_slots[u.get_instance_id()] = u.get_player_squad_final_arrival()
+
+	await get_tree().physics_frame
+	var second: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		units, Vector3(4.0, 0.0, 12.0), &"move", false
+	)
+	_expect(failures, "override: second handled", second.get("handled", false))
+	var telemetry: Dictionary = SharedSquadNavigation.get_player_move_telemetry()
+	var second_gen: int = int(telemetry.get("command_generation", 0))
+	_expect(failures, "override: generation advanced", second_gen > first_gen)
+	_expect(failures, "override: stale callbacks blocked == 0", int(telemetry.get("stale_callback_blocks", -1)) == 0)
+
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		_expect(
+			failures,
+			"override: unit bound to new generation",
+			u.matches_player_squad_command(second_gen)
+		)
+		var old_slot: Vector3 = first_slots[u.get_instance_id()] as Vector3
+		_expect(
+			failures,
+			"override: final arrival replaced",
+			_horizontal_distance(old_slot, u.get_player_squad_final_arrival()) > 0.5
+		)
+		_expect(
+			failures,
+			"override: movement target matches new arrival",
+			_horizontal_distance(u._movement_target, u.get_player_squad_final_arrival()) < 0.35
+		)
+
+	## Ensure first-command slot values are not restored by a later tick.
+	for _i: int in 16:
+		await get_tree().physics_frame
+	for unit: Variant in units:
+		var u: Unit = unit as Unit
+		_expect(
+			failures,
+			"override: first command did not retake targets",
+			u.matches_player_squad_command(second_gen)
+		)
+		_expect(
+			failures,
+			"override: targets still match second arrival",
+			_horizontal_distance(u._movement_target, u.get_player_squad_final_arrival()) < 0.35
+		)
 	await _free_harness(harness)
 
 

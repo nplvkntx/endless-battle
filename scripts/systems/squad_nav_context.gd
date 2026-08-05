@@ -20,6 +20,9 @@ var anchor_position: Vector3 = Vector3.ZERO
 var member_ids: Array[int] = []
 ## unit_instance_id -> local offset (stable for command lifetime; simple grid or formation)
 var slot_locals: Dictionary = {}
+## unit_instance_id -> frozen world arrival (player squads only; never moves with anchor)
+var final_arrival_slots: Dictionary = {}
+var arrival_slots_frozen: bool = false
 var route_created_msec: int = 0
 var last_progress_msec: int = 0
 var last_progress_position: Vector3 = Vector3.ZERO
@@ -74,6 +77,9 @@ func purge_dead_members() -> bool:
 	for key: Variant in stalled_member_ids.keys():
 		if not valid.has(int(key)):
 			stalled_member_ids.erase(key)
+	for key: Variant in final_arrival_slots.keys():
+		if not valid.has(int(key)):
+			final_arrival_slots.erase(key)
 	return true
 
 
@@ -105,12 +111,21 @@ func is_route_finished() -> bool:
 
 
 func get_slot_world_position(unit_id: int) -> Vector3:
+	## Player squads chase frozen arrival slots, never a moving virtual anchor.
+	if is_player_squad and arrival_slots_frozen and final_arrival_slots.has(unit_id):
+		return final_arrival_slots[unit_id] as Vector3
 	if not slot_locals.has(unit_id):
 		return anchor_position
 	var local: Vector3 = slot_locals[unit_id] as Vector3
 	if compressed_passage:
 		local *= spacing_scale
 	return FormationLayout.world_from_local(local, anchor_position, formation_forward)
+
+
+func get_final_arrival_slot(unit_id: int) -> Vector3:
+	if final_arrival_slots.has(unit_id):
+		return final_arrival_slots[unit_id] as Vector3
+	return get_slot_world_position(unit_id)
 
 
 func recompute_anchor_median() -> void:

@@ -41,6 +41,22 @@ var _anchor_accum: float = 0.0
 var _diag_member_count: int = 0
 var _diag_stalls: int = 0
 var _diag_route_failures: int = 0
+## Temporary player-move telemetry for one selected group command.
+var _player_diag: Dictionary = {
+	"command_generation": 0,
+	"clicked_position": Vector3.ZERO,
+	"accepted_destination": Vector3.ZERO,
+	"stable_slot_count": 0,
+	"shared_route_count": 0,
+	"route_waypoint_count": 0,
+	"orders_issued": 0,
+	"slot_generation_count": 0,
+	"formation_refresh_count": 0,
+	"target_replacements": 0,
+	"repath_count": 0,
+	"stall_recovery_count": 0,
+	"stale_callback_blocks": 0,
+}
 
 
 func _ready() -> void:
@@ -67,7 +83,34 @@ func clear_all() -> void:
 	_diag_member_count = 0
 	_diag_stalls = 0
 	_diag_route_failures = 0
+	_reset_player_move_telemetry()
 	_publish_diag()
+
+
+func reset_player_move_telemetry() -> void:
+	_reset_player_move_telemetry()
+
+
+func get_player_move_telemetry() -> Dictionary:
+	return _player_diag.duplicate()
+
+
+func _reset_player_move_telemetry() -> void:
+	_player_diag = {
+		"command_generation": 0,
+		"clicked_position": Vector3.ZERO,
+		"accepted_destination": Vector3.ZERO,
+		"stable_slot_count": 0,
+		"shared_route_count": 0,
+		"route_waypoint_count": 0,
+		"orders_issued": 0,
+		"slot_generation_count": 0,
+		"formation_refresh_count": 0,
+		"target_replacements": 0,
+		"repath_count": 0,
+		"stall_recovery_count": 0,
+		"stale_callback_blocks": 0,
+	}
 
 
 func is_shared_navigation_enabled() -> bool:
@@ -91,11 +134,14 @@ func release_unit(unit: Variant) -> void:
 		return
 	var squad_id: int = int(_unit_to_squad[unit_id])
 	_unit_to_squad.erase(unit_id)
+	if unit is Unit:
+		(unit as Unit).clear_player_squad_command()
 	var ctx: SquadNavContext = _squads.get(squad_id) as SquadNavContext
 	if ctx == null:
 		return
 	ctx.member_ids.erase(unit_id)
 	ctx.slot_locals.erase(unit_id)
+	ctx.final_arrival_slots.erase(unit_id)
 	ctx.member_threats.erase(unit_id)
 	ctx.last_issued_slots.erase(unit_id)
 	ctx.stalled_member_ids.erase(unit_id)
@@ -109,12 +155,20 @@ func notify_member_confirmed_stall(unit: Variant) -> bool:
 	var ctx: SquadNavContext = get_squad_for_unit(unit)
 	if ctx == null or unit == null or not is_instance_valid(unit):
 		return false
+	## Stale callbacks from a superseded player click must never retake control.
+	if ctx.is_player_squad and unit is Unit:
+		if not (unit as Unit).matches_player_squad_command(ctx.command_generation):
+			_player_diag["stale_callback_blocks"] = int(_player_diag["stale_callback_blocks"]) + 1
+			return false
 	var unit_id: int = (unit as Node).get_instance_id()
 	ctx.stalled_member_ids[unit_id] = true
 	var stalled: int = ctx.stalled_member_ids.size()
 	var threshold: int = maxi(1, int(ceil(float(ctx.member_count()) * MEMBER_STALL_REFRESH_RATIO)))
 	if stalled >= threshold or _detect_squad_stall(ctx):
-		_recover_stalled_squad(ctx)
+		if ctx.is_player_squad:
+			_recover_player_squad_stall(ctx)
+		else:
+			_recover_stalled_squad(ctx)
 	return true
 
 
@@ -204,6 +258,7 @@ func issue_group_command(
 
 
 ## Player / formation-manager entry: one squad per formation group.
+## Uses stable final arrival slots — no continuous formation steering while travelling.
 func issue_formation_command(
 	formation_id: int,
 	members: Array,
@@ -236,18 +291,6 @@ func issue_formation_command(
 		formation_id, _global_command_generation, equiv_signature
 	]
 
-	var ctx_existing: SquadNavContext = _find_reusable_squad(equiv_signature)
-	if (
-		ctx_existing != null
-		and ctx_existing.is_player_squad
-		and ctx_existing.command_signature.begins_with("player|%d|" % formation_id)
-	):
-		_bind_members(ctx_existing, ordered_units)
-		result["equivalent_skip"] = true
-		PerfCounters.record_squad_route_cache_hit()
-		_publish_diag()
-		return result
-
 	var ctx: SquadNavContext = _create_squad_context(
 		ordered_units,
 		destination,
@@ -262,12 +305,15 @@ func issue_formation_command(
 		result["handled"] = false
 		return result
 
+	ctx.command_type = order_kind
+	_freeze_player_arrival_slots(ctx)
 	_issue_player_orders(ctx, ordered_units, order_kind)
 	_publish_diag()
 	return result
 
 
-## Player unformed multi-unit selection (workers + military): one shared route + slots.
+## Player unformed multi-unit selection (workers + military): one shared route +
+## stable final arrival slots issued once. No continuous anchor-slot following.
 ## Queued orders only store spaced destinations — live squad activates on current commands.
 func issue_player_group_command(
 	units: Array,
@@ -312,21 +358,15 @@ func issue_player_group_command(
 		member_ids, destination, mission, use_attack_move
 	)
 
-	var existing: SquadNavContext = _find_reusable_squad(equiv_signature)
-	if existing != null:
-		result["handled"] = true
-		result["equivalent_skip"] = true
-		result["route_valid"] = existing.route_valid
-		result["accepted_destination"] = existing.strategic_destination
-		_bind_members(existing, ordered_units)
-		PerfCounters.record_squad_route_cache_hit()
-		_publish_diag()
-		return result
-
+	## Every fresh click is authoritative — do not soft-skip equivalent destinations.
 	_global_command_generation += 1
 	var signature: String = "player_group|%d|%s" % [
 		_global_command_generation, equiv_signature
 	]
+	_reset_player_move_telemetry()
+	_player_diag["command_generation"] = _global_command_generation
+	_player_diag["clicked_position"] = destination
+
 	var ctx: SquadNavContext = _create_squad_context(
 		ordered_units,
 		destination,
@@ -340,9 +380,14 @@ func issue_player_group_command(
 	if ctx == null:
 		return result
 
+	ctx.command_type = order_kind
+	_freeze_player_arrival_slots(ctx)
 	result["handled"] = true
 	result["route_valid"] = ctx.route_valid
 	result["accepted_destination"] = ctx.strategic_destination
+	_player_diag["accepted_destination"] = ctx.strategic_destination
+	_player_diag["shared_route_count"] = 1
+	_player_diag["route_waypoint_count"] = ctx.route_waypoints.size()
 	_issue_player_orders(ctx, ordered_units, order_kind)
 	_publish_diag()
 	return result
@@ -469,6 +514,43 @@ func _assign_simple_group_slots(ctx: SquadNavContext, ordered_units: Array) -> v
 			ctx.slot_locals[unit_id] = locals[index]
 		else:
 			ctx.slot_locals[unit_id] = Vector3.ZERO
+
+
+## Freeze each unit's final world arrival once at the click destination.
+## These positions never move with the virtual anchor and are never rotated mid-travel.
+func _freeze_player_arrival_slots(ctx: SquadNavContext) -> void:
+	ctx.final_arrival_slots.clear()
+	ctx.arrival_slots_frozen = false
+	var accepted: Vector3 = ctx.strategic_destination
+	var face: Vector3 = accepted - ctx.anchor_position
+	face.y = 0.0
+	if face.length_squared() >= 0.01:
+		ctx.formation_forward = face.normalized()
+
+	var saved_anchor: Vector3 = ctx.anchor_position
+	var saved_compressed: bool = ctx.compressed_passage
+	var saved_scale: float = ctx.spacing_scale
+	ctx.anchor_position = accepted
+	ctx.compressed_passage = false
+	ctx.spacing_scale = 1.0
+
+	for unit_id: int in ctx.member_ids:
+		var world: Vector3 = FormationLayout.world_from_local(
+			ctx.slot_locals.get(unit_id, Vector3.ZERO) as Vector3,
+			accepted,
+			ctx.formation_forward
+		)
+		world = GroupMoveSpacing.resolve_formation_position(world, accepted)
+		ctx.final_arrival_slots[unit_id] = world
+
+	ctx.anchor_position = saved_anchor
+	ctx.compressed_passage = saved_compressed
+	ctx.spacing_scale = saved_scale
+	ctx.arrival_slots_frozen = true
+
+	if ctx.is_player_squad:
+		_player_diag["stable_slot_count"] = ctx.final_arrival_slots.size()
+		_player_diag["slot_generation_count"] = int(_player_diag["slot_generation_count"]) + 1
 
 
 func _compute_member_spacing(units: Array) -> float:
@@ -616,19 +698,131 @@ func _tick_squads(delta: float) -> void:
 			continue
 
 		total_members += ctx.member_count()
-		_advance_anchor(ctx, delta)
-		_update_passage_compression(ctx)
-		_tick_target_search(ctx, delta)
-		_issue_staggered_slot_orders(ctx)
-
-		if _detect_squad_stall(ctx):
-			_recover_stalled_squad(ctx)
+		if ctx.is_player_squad:
+			## Player squads: no continuous formation steering.
+			## Units keep their one-shot stable arrival destinations.
+			_tick_player_squad(ctx, delta)
+		else:
+			_advance_anchor(ctx, delta)
+			_update_passage_compression(ctx)
+			_tick_target_search(ctx, delta)
+			_issue_staggered_slot_orders(ctx)
+			if _detect_squad_stall(ctx):
+				_recover_stalled_squad(ctx)
 
 	for squad_id: int in remove_ids:
 		_dissolve_squad(squad_id)
 
 	_diag_member_count = total_members
 	_publish_diag()
+
+
+## Attack-move threat search + real-unit progress tracking. Never reissues formation targets.
+func _tick_player_squad(ctx: SquadNavContext, delta: float) -> void:
+	_tick_target_search(ctx, delta)
+	_note_player_squad_progress(ctx)
+	if _detect_player_squad_stall(ctx):
+		_recover_player_squad_stall(ctx)
+
+
+func _note_player_squad_progress(ctx: SquadNavContext) -> void:
+	var members: Array = ctx.get_living_members()
+	if members.is_empty():
+		return
+	var median: Vector3 = _compute_members_median(members)
+	if _horizontal_distance(median, ctx.last_progress_position) >= PROGRESS_EPSILON:
+		ctx.note_progress(median)
+
+
+func _compute_members_median(members: Array) -> Vector3:
+	var xs: Array[float] = []
+	var zs: Array[float] = []
+	var y_sum: float = 0.0
+	for unit: Variant in members:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+		var pos: Vector3 = (unit as Node3D).global_position
+		xs.append(pos.x)
+		zs.append(pos.z)
+		y_sum += pos.y
+	if xs.is_empty():
+		return Vector3.ZERO
+	xs.sort()
+	zs.sort()
+	var mid: int = xs.size() / 2
+	return Vector3(xs[mid], y_sum / float(xs.size()), zs[mid])
+
+
+func _detect_player_squad_stall(ctx: SquadNavContext) -> bool:
+	if ctx.arrival_slots_frozen and _player_squad_mostly_arrived(ctx):
+		return false
+	if ctx.seconds_since_progress() < STALL_TIMEOUT_SECONDS:
+		return false
+	var members: Array = ctx.get_living_members()
+	if members.is_empty():
+		return false
+	var median: Vector3 = _compute_members_median(members)
+	return _horizontal_distance(median, ctx.last_progress_position) < PROGRESS_EPSILON
+
+
+func _player_squad_mostly_arrived(ctx: SquadNavContext) -> bool:
+	var members: Array = ctx.get_living_members()
+	if members.is_empty():
+		return true
+	var arrived: int = 0
+	for unit: Variant in members:
+		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+			continue
+		var unit_id: int = (unit as Node).get_instance_id()
+		var slot: Vector3 = ctx.get_final_arrival_slot(unit_id)
+		if _horizontal_distance((unit as Node3D).global_position, slot) <= 4.0:
+			arrived += 1
+	return arrived >= maxi(1, int(ceil(float(members.size()) * 0.7)))
+
+
+## Player stall: refresh strategic route metadata, re-issue original frozen slots only.
+## Never regenerates or rotates arrival slots. Never whole-group reshuffle for one blocker.
+func _recover_player_squad_stall(ctx: SquadNavContext) -> void:
+	var now_msec: int = Time.get_ticks_msec()
+	var since_refresh: float = float(now_msec - ctx.last_route_refresh_msec) / 1000.0
+	if since_refresh < ROUTE_RECALC_COOLDOWN_SECONDS:
+		return
+	var age_sec: float = float(now_msec - ctx.route_created_msec) / 1000.0
+	if age_sec < ROUTE_RECALC_COOLDOWN_SECONDS * 0.5:
+		return
+
+	_diag_stalls += 1
+	_player_diag["stall_recovery_count"] = int(_player_diag["stall_recovery_count"]) + 1
+	_player_diag["repath_count"] = int(_player_diag["repath_count"]) + 1
+	PerfCounters.record_squad_stall()
+
+	## Preserve frozen arrival slots and original click across strategic refresh.
+	var frozen_slots: Dictionary = ctx.final_arrival_slots.duplicate()
+	var frozen_forward: Vector3 = ctx.formation_forward
+	var requested: Vector3 = ctx.requested_destination
+	var accepted: Vector3 = ctx.strategic_destination
+	_refresh_shared_route(ctx)
+	ctx.final_arrival_slots = frozen_slots
+	ctx.arrival_slots_frozen = true
+	ctx.formation_forward = frozen_forward
+	ctx.requested_destination = requested
+	ctx.strategic_destination = accepted
+
+	var stalled_ids: Dictionary = ctx.stalled_member_ids.duplicate()
+	ctx.stalled_member_ids.clear()
+	for unit_id: Variant in stalled_ids.keys():
+		var node: Object = instance_from_id(int(unit_id))
+		if node == null or not is_instance_valid(node) or not node is Unit:
+			continue
+		var unit: Unit = node as Unit
+		if not unit.matches_player_squad_command(ctx.command_generation):
+			_player_diag["stale_callback_blocks"] = int(_player_diag["stale_callback_blocks"]) + 1
+			continue
+		var target: Vector3 = ctx.get_final_arrival_slot(int(unit_id))
+		if unit.request_movement_target(target, Unit.RepathUrgency.STUCK_RECOVERY):
+			ctx.last_issued_slots[int(unit_id)] = target
+			_player_diag["target_replacements"] = int(_player_diag["target_replacements"]) + 1
+			PerfCounters.record_squad_local_repath()
 
 
 func _advance_anchor(ctx: SquadNavContext, delta: float) -> void:
@@ -740,6 +934,8 @@ func _distribute_threats(ctx: SquadNavContext, threat: Node3D, members: Array) -
 
 
 func _issue_staggered_slot_orders(ctx: SquadNavContext) -> void:
+	if ctx.is_player_squad:
+		return
 	var members: Array = ctx.get_living_members()
 	if members.is_empty():
 		return
@@ -779,6 +975,10 @@ func _collect_initial_orders(
 
 
 func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
+	## Player squads never chase live formation slots.
+	if ctx.is_player_squad:
+		return
+
 	var unit_id: int = unit.get_instance_id()
 	var slot_target: Vector3 = ctx.get_slot_world_position(unit_id)
 	slot_target = GroupMoveSpacing.resolve_formation_position(
@@ -826,15 +1026,32 @@ func _issue_slot_order_for_unit(ctx: SquadNavContext, unit: Node3D) -> void:
 
 
 func _issue_player_orders(ctx: SquadNavContext, members: Array, order_kind: StringName) -> void:
-	var accepted: Vector3 = ctx.strategic_destination
+	if not ctx.arrival_slots_frozen:
+		_freeze_player_arrival_slots(ctx)
+
+	var issued: int = 0
 	for index: int in members.size():
 		var unit: Variant = members[index]
 		if not NodeSafety.is_alive_node(unit) or not unit is Unit:
 			continue
-		var target: Vector3 = ctx.get_slot_world_position((unit as Node).get_instance_id())
-		target = GroupMoveSpacing.resolve_formation_position(target, accepted)
-		_issue_unit_ground_order(unit as Unit, target, order_kind, false)
-		ctx.last_issued_slots[(unit as Node).get_instance_id()] = target
+		var unit_typed: Unit = unit as Unit
+		var unit_id: int = unit_typed.get_instance_id()
+		var target: Vector3 = ctx.get_final_arrival_slot(unit_id)
+		unit_typed.bind_player_squad_command(
+			ctx.command_generation,
+			ctx.requested_destination,
+			target,
+			order_kind
+		)
+		_issue_unit_ground_order(unit_typed, target, order_kind, false)
+		ctx.last_issued_slots[unit_id] = target
+		issued += 1
+
+	if ctx.is_player_squad:
+		_player_diag["orders_issued"] = issued
+		## Initial issue is not a continuous formation refresh.
+		_player_diag["formation_refresh_count"] = 0
+		_player_diag["target_replacements"] = 0
 
 
 func _detect_squad_stall(ctx: SquadNavContext) -> bool:
@@ -896,6 +1113,7 @@ func _remove_unit_from_squad(unit_id: int, squad_id: int) -> void:
 		return
 	ctx.member_ids.erase(unit_id)
 	ctx.slot_locals.erase(unit_id)
+	ctx.final_arrival_slots.erase(unit_id)
 	ctx.member_threats.erase(unit_id)
 	ctx.last_issued_slots.erase(unit_id)
 	ctx.stalled_member_ids.erase(unit_id)
@@ -921,6 +1139,9 @@ func _dissolve_squad(squad_id: int) -> void:
 		return
 	for unit_id: int in ctx.member_ids:
 		_unit_to_squad.erase(unit_id)
+		var node: Object = instance_from_id(unit_id)
+		if node != null and is_instance_valid(node) and node is Unit:
+			(node as Unit).clear_player_squad_command()
 	_squads.erase(squad_id)
 
 
