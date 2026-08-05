@@ -8,9 +8,26 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 2 first scoped EnemyArmyCommand extraction complete** (`EnemyArmyCommandTelemetry`). Next Phase 2 milestone: second scoped extraction (order-agnostic military math/scoring helpers) — do not begin a second extraction in the same pass; do not start broad god-object splits.
+**PHASE 2 second scoped EnemyArmyCommand extraction complete** (`EnemyArmyForceMath`). Further Phase 2 extractions are diminishing returns unless a fresh re-audit finds a cleaner seam — do not begin a third extraction in the same pass.
 
 ## Completed tasks
+
+### 2026-08-05 — EnemyArmyCommand force-math extraction (second scoped helper)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 2 — Architecture |
+| **Responsibility extracted** | Pure squad strength / military-power scoring (type weights, combat strength, defense power) plus the classification/health helpers those sums require. Never mission selection or order execution. |
+| **New type** | `EnemyArmyForceMath` (`scripts/systems/enemy_army_force_math.gd`) — `RefCounted` + static methods; **not** an autoload. |
+| **Functions / constants moved** | Consts: `STRENGTH_*`, `DEFENSE_POWER_*`, `ENEMY_COMBAT_GROUP` (scoring filter). Methods: `is_combat_unit`, `is_living_combat_unit`, `has_positive_health`, `get_health_ratio`, `get_unit_type_strength_weight`, `estimate_combat_strength`, `estimate_military_power`. |
+| **Callers updated** | `EnemyArmyCommand` thin facades; `ArmySquadV2._estimate_unit_value` calls ForceMath directly; composition verify exercises helper + facade parity. |
+| **Coupling removed** | Force tables + scoring no longer live inside the order-bus god object. Callers that only need strength math can depend on ForceMath without pulling command APIs. |
+| **Remaining EnemyArmyCommand responsibilities** | Match binding; `_rt()` accessors into `AIPlayerState`; frame-local unit caches; command/order APIs; mission watchdog orchestration; world/discovery helpers (`estimate_local_fight_balance`, threat collection, formation/assembly, objective eval); overlay status push. |
+| **Authority unchanged** | `AIPlayerState` SoT; `MilitaryDirectorV2` selects missions; `ArmyCommanderV2` sole executable authority; intent providers issue no orders; telemetry remains non-authoritative. |
+| **Further extraction?** | **Diminishing returns** for more pure-math slices. Next high-value work needs a fresh re-audit or a clearly bounded discovery/formation seam — do **not** extract order issuing, mission transitions, queues, or state ownership next. |
+| **Recommendation** | Prefer a **fresh re-audit** of remaining EAC surface before a third extraction; optional continue Phase 2 only if a narrow non-authoritative seam is re-confirmed. |
+| **Files changed** | `enemy_army_force_math.gd` (new), `enemy_army_command.gd`, `army_squad_v2.gd`, `verify_match_composition_root.gd`, `docs/MILITARY_AI_V2.md`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 `--import` clean (registered `EnemyArmyForceMath`). `validate_import.sh` → `VALIDATION PASS`. `verify_match_composition_root` → `PASS` (force-math determinism, facade parity, no orders/mutation, no autoload, reset unchanged). `verify_match_reset` → `PASS`. `verify_freed_instance_regression` → `PASS`. |
 
 ### 2026-08-05 — EnemyArmyCommand telemetry extraction (first scoped helper)
 
@@ -340,13 +357,14 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | EAC runtime ephemerals (threat/reinforcement/queue/watchdog) + frame-cache proof | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | EAC final static ownership (creep contest + objective timers; telemetry isolated) | `VALIDATION PASS`; composition/reset/freed all PASS |
 | 2026-08-05 | First scoped EAC extraction → `EnemyArmyCommandTelemetry` | `VALIDATION PASS`; composition/reset/freed all PASS |
+| 2026-08-05 | Second scoped EAC extraction → `EnemyArmyForceMath` | `VALIDATION PASS`; composition/reset/freed all PASS |
 
 ## Known blockers
 
 None for Phase 1 stability baseline — import CI is green; removable stub autoloads cleared; canonical entry scene enforced; stale root verify logs removed; freed-instance regression gated in CI. Remaining partial: `GameSettings` (referenced). Separate debug test project (#50 remainder) deferred past Phase 1.
 
-Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. First scoped EAC extraction complete (`EnemyArmyCommandTelemetry`). Remaining EAC statics are frame-local caches + binding only. Further scoped helper extractions allowed; broad god-object splits still deferred.
+Phase 2 military ownership: composition root, AIPlayerState SoT for identity/exec/combat/assembly/wave/formation/finishing **plus** command queue / reinforcement / TTL threat scratch / mission watchdog / creep-contest cooldowns / attack-objective timers, declared `ArmyCommanderV2` authority, intent providers with TTL/cancel/ownership. Scoped EAC extractions complete: `EnemyArmyCommandTelemetry` + `EnemyArmyForceMath`. Remaining EAC statics are frame-local caches + binding only. Further pure-math extractions are diminishing returns — prefer a fresh re-audit before another split.
 
 ## Next task
 
-**PHASE 2 continued:** Second **scoped** `EnemyArmyCommand` helper extraction (order-agnostic military math/scoring) when a clean seam is chosen. Do not begin broad god-object splitting.
+**PHASE 2 / re-audit:** Prefer a **fresh technical re-audit** of remaining `EnemyArmyCommand` surface before a third extraction. Optional Phase 2 continuation only if a narrow non-authoritative seam is re-confirmed. Do not begin broad god-object splitting.

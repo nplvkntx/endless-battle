@@ -247,6 +247,7 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	await _verify_authority_and_providers(failures, root, state)
 	_verify_runtime_ephemeral_ownership(failures, state)
 	_verify_final_static_state_ownership(failures, state)
+	_verify_force_math_extraction(failures, state)
 
 	## Dirty high-risk bags + frame caches before prepare_new_match.
 	state.pending_group_orders = [{
@@ -593,6 +594,127 @@ func _verify_final_static_state_ownership(
 	EnemyArmyCommand.clear_executable_mission("final ownership cleanup")
 	EnemyArmyCommandTelemetry.reset_match_state()
 	EnemyArmyCommandTelemetry.set_debug_override(false)
+
+
+func _verify_force_math_extraction(failures: PackedStringArray, state: AIPlayerState) -> void:
+	## Pure force scoring lives on EnemyArmyForceMath — identical results via facade,
+	## no orders / mission mutation, no autoload / global dependency.
+	var mode_before: int = state.army_mode
+	var mission_before: int = state.exec_mission
+	var orders_before: int = state.pending_group_orders.size()
+	var contest_before: int = state.creep_contest_cooldowns.size()
+	var strategic_before: int = state.strategic_state
+
+	_expect(
+		failures,
+		"force math: empty inputs are deterministic zeros",
+		is_equal_approx(EnemyArmyForceMath.estimate_combat_strength([]), 0.0)
+		and EnemyArmyForceMath.estimate_military_power([]) == 0
+		and is_equal_approx(EnemyArmyForceMath.get_unit_type_strength_weight(null), 0.0)
+		and is_equal_approx(EnemyArmyForceMath.get_health_ratio(null), 0.0)
+	)
+	_expect(
+		failures,
+		"force math: EAC facade matches helper on empty inputs",
+		is_equal_approx(
+			EnemyArmyCommand.estimate_combat_strength([]),
+			EnemyArmyForceMath.estimate_combat_strength([])
+		)
+		and EnemyArmyCommand.estimate_military_power([])
+			== EnemyArmyForceMath.estimate_military_power([])
+		and is_equal_approx(
+			EnemyArmyCommand.get_unit_type_strength_weight(null),
+			EnemyArmyForceMath.get_unit_type_strength_weight(null)
+		)
+		and is_equal_approx(
+			EnemyArmyCommand.get_health_ratio(null),
+			EnemyArmyForceMath.get_health_ratio(null)
+		)
+	)
+
+	var spearman: Spearman = Spearman.new()
+	spearman.name = "ForceMathVerifySpearman"
+	## Keep out of the SceneTree so MilitaryUnit._ready (HealthBar) is not required.
+	spearman.add_to_group(EnemyArmyForceMath.ENEMY_COMBAT_GROUP)
+	var health: HealthComponent = HealthComponent.new()
+	health.name = "HealthComponent"
+	health.max_health = 100
+	## Orphan nodes never run _ready, so current_health is not reset to max.
+	health.current_health = 50
+	spearman.add_child(health)
+
+	var expected_weight: float = EnemyArmyForceMath.STRENGTH_SPEARMAN
+	var expected_strength: float = expected_weight * 0.5 * 100.0
+	var expected_power: int = (
+		int(50.0 * EnemyArmyForceMath.DEFENSE_POWER_MELEE_HEALTH)
+		+ int(spearman.attack_damage) * int(EnemyArmyForceMath.DEFENSE_POWER_DAMAGE_MULTIPLIER)
+	)
+	var units: Array = [spearman]
+	var strength_a: float = EnemyArmyForceMath.estimate_combat_strength(units)
+	var strength_b: float = EnemyArmyForceMath.estimate_combat_strength(units)
+	var power_a: int = EnemyArmyForceMath.estimate_military_power(units)
+	var power_b: int = EnemyArmyForceMath.estimate_military_power(units)
+
+	_expect(
+		failures,
+		"force math: representative spearman strength/power are deterministic",
+		is_equal_approx(EnemyArmyForceMath.get_unit_type_strength_weight(spearman), expected_weight)
+		and is_equal_approx(EnemyArmyForceMath.get_health_ratio(spearman), 0.5)
+		and is_equal_approx(strength_a, expected_strength)
+		and is_equal_approx(strength_b, strength_a)
+		and power_a == expected_power
+		and power_b == power_a
+	)
+	_expect(
+		failures,
+		"force math: EAC facade returns identical representative results",
+		is_equal_approx(
+			EnemyArmyCommand.estimate_combat_strength(units),
+			strength_a
+		)
+		and EnemyArmyCommand.estimate_military_power(units) == power_a
+		and is_equal_approx(
+			EnemyArmyCommand.get_unit_type_strength_weight(spearman),
+			expected_weight
+		)
+		and is_equal_approx(EnemyArmyCommand.get_health_ratio(spearman), 0.5)
+		and EnemyArmyCommand.is_living_combat_unit(spearman)
+		and EnemyArmyForceMath.is_living_combat_unit(spearman)
+	)
+
+	## Scoring must not enqueue orders or mutate military SoT.
+	_expect(
+		failures,
+		"force math: cannot issue orders or mutate military state",
+		state.army_mode == mode_before
+		and state.exec_mission == mission_before
+		and state.strategic_state == strategic_before
+		and state.pending_group_orders.size() == orders_before
+		and state.creep_contest_cooldowns.size() == contest_before
+		and EnemyArmyCommand.get_pending_group_order_count() == orders_before
+	)
+	_expect(
+		failures,
+		"force math: not registered as project autoload",
+		not ProjectSettings.has_setting("autoload/EnemyArmyForceMath")
+		and Engine.get_main_loop().root.get_node_or_null("/root/EnemyArmyForceMath") == null
+	)
+
+	## Match reset must still clear SoT independently of force-math calls.
+	state.army_mode = 3
+	state.pending_group_orders = [{"force_math_verify": true}]
+	MatchSession.prepare_new_match()
+	_expect(
+		failures,
+		"force math: match reset behavior remains unchanged",
+		state.army_mode == 0
+		and state.pending_group_orders.is_empty()
+		and EnemyArmyCommand.get_pending_group_order_count() == 0
+	)
+
+	if is_instance_valid(spearman):
+		spearman.free()
+
 
 func _verify_intent_bus(failures: PackedStringArray, state: AIPlayerState) -> void:
 	state.clear_intents()

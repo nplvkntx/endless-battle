@@ -476,8 +476,8 @@ static func _read_current_hp(unit: Node) -> int:
 
 
 static func _estimate_unit_value(unit: Node) -> float:
-	var weight: float = EnemyArmyCommand.get_unit_type_strength_weight(unit)
-	var health_ratio: float = EnemyArmyCommand.get_health_ratio(unit)
+	var weight: float = EnemyArmyForceMath.get_unit_type_strength_weight(unit)
+	var health_ratio: float = EnemyArmyForceMath.get_health_ratio(unit)
 	return weight * health_ratio * 100.0
 
 

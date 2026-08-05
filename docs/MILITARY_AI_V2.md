@@ -38,6 +38,7 @@ Helpers:
 | Mission watchdog / exec scratch | `AIPlayerState` | Cleared with mission + match reset |
 | Frame-local army unit caches | `EnemyArmyCommand` static | Keyed by `Engine` frame; cleared on reset; never SoT |
 | Order-issue / perf telemetry | `EnemyArmyCommandTelemetry` | F3 / diagnostics only; never mission or order authority |
+| Squad strength / military power math | `EnemyArmyForceMath` | Pure scoring; never issues orders or owns SoT |
 | Hero kit micro | `AIHeroMastery` via `ArmyCommanderV2` | Abilities / local targets only |
 | Economy / workers / build / train / tech / placement | Legacy managers | Unchanged under V2 |
 | Low-level army helpers | `EnemyArmyCommand`, creep helpers, etc. | Reused; not independent mission owners |
@@ -151,7 +152,7 @@ When `USE_MILITARY_AI_V2` is `true`, these legacy subsystems **must not** issue 
 **Preserved for V2 reuse (not deleted):**
 
 - Camp queries / regroup helpers on `EnemyCreepManager`
-- Strength, formation, order-bus, and scoring helpers on `EnemyArmyCommand`
+- Strength, formation, order-bus, and scoring helpers on `EnemyArmyCommand` / `EnemyArmyForceMath`
 - Lethal / greed score math on `EnemyAggression` (scored by V2; not an independent order issuer under V2)
 - Spawn → rally / `assign_reinforcement_regroup` unit routing into the director’s pending pool
 
@@ -165,7 +166,7 @@ Checklist for new work:
 
 1. **Strategy change?** Add a director evaluation / transition. Publish a new or updated `ArmyMissionV2`. Do not call `EnemyArmyCommand.command_*` from a new manager’s `_process`.
 2. **Tactical / formation change?** Implement inside `ArmyCommanderV2` (or a helper it calls), reading the current mission + squad only.
-3. **Shared math?** Prefer `EnemyArmyCommand` / existing helpers; keep them order-agnostic.
+3. **Shared math?** Prefer `EnemyArmyForceMath` for strength/power scoring; keep other helpers order-agnostic on `EnemyArmyCommand` / existing modules.
 4. **Hero kit change?** Stay inside `AIHeroMastery` boundaries above.
 5. **Economy / production change?** Use the legacy economy managers — out of V2 scope.
 6. **Never** add a parallel timer that issues attack-move / regroup / retreat to `enemy_combat_units` while V2 is enabled.
@@ -181,7 +182,7 @@ Checklist for new work:
 - Declares the sole military command authority (`ArmyCommanderV2` when V2 is enabled)
 - Resolves director / commander / legacy managers for sibling lookup
 
-### EnemyArmyCommand state ownership (post telemetry extraction)
+### EnemyArmyCommand state ownership (post force-math extraction)
 
 Authoritative military runtime lives on match-owned `AIPlayerState` (accessed via `EnemyArmyCommand._rt()`). Remaining EAC class statics are only:
 
@@ -190,9 +191,14 @@ Authoritative military runtime lives on match-owned `AIPlayerState` (accessed vi
 | Frame-local unit caches | Discovery scratch keyed by `Engine` frame |
 | `_bound_player_state` / `_declared_command_authority` / `_unbound_runtime` | Composition binding |
 
-**Extracted (2026-08-05):** `EnemyArmyCommandTelemetry` owns debug-override, perf/overlay cadence timers, orders-issued counter, and last-issued order labels. It does not select missions or enqueue orders. Not an autoload.
+**Extracted helpers (not autoloads):**
 
-`EnemyArmyCommand` remains the shared order-bus / army-helper facade. Further scoped extractions (pure math/scoring) are allowed; do not begin a broad god-object split until a narrow seam is chosen.
+| Helper | Responsibility |
+|--------|----------------|
+| `EnemyArmyCommandTelemetry` | Debug-override, perf/overlay cadence, last-issued order labels — diagnostics only |
+| `EnemyArmyForceMath` | Pure squad strength / military-power scoring + combat-unit classification/health used by those scores |
+
+`EnemyArmyCommand` remains the shared order-bus / army-helper facade. Further pure-math extractions are diminishing returns; prefer a fresh re-audit before another god-object split.
 
 Child systems still include:
 

@@ -64,15 +64,6 @@ const PHASE_MID_MIN_ARMY := 12
 const PHASE_LATE_MIN_ARMY := 20
 const GROUP_MISSION_COHESION_RATIO := 0.75
 const GROUP_MISSION_HERO_MAX_DISTANCE := 16.0
-const STRENGTH_SPEARMAN := 1.0
-const STRENGTH_SWORDSMAN := 1.2
-const STRENGTH_ARCHER := 1.2
-const STRENGTH_LIGHT_CAVALRY := 1.6
-const STRENGTH_HEAVY_CAVALRY := 2.2
-const STRENGTH_CAVALRY_ARCHER := 1.8
-const STRENGTH_CANNON := 2.0
-const STRENGTH_HERO_BASE := 3.0
-const STRENGTH_HERO_PER_LEVEL := 0.5
 const KNOWN_PLAYER_SCOUT_RANGE := 55.0
 const ARMY_GROUP_MAX_RADIUS := 24.0
 const WAVE_REINFORCEMENT_WAIT_SECONDS := 5.0
@@ -95,10 +86,6 @@ const EMERGENCY_CLEAR_SECONDS := 5.0
 const EMERGENCY_SERIOUS_THREAT_POWER := 120
 const EMERGENCY_SCOUT_IGNORE_BUILDING_DISTANCE := 28.0
 const EMERGENCY_HERO_JOIN_HP_RATIO := 0.35
-const DEFENSE_POWER_HERO_BASE := 220
-const DEFENSE_POWER_MELEE_HEALTH := 1.0
-const DEFENSE_POWER_RANGED_HEALTH := 0.85
-const DEFENSE_POWER_DAMAGE_MULTIPLIER := 8.0
 const HERO_AOE_PLAYER_COUNT := 3
 const HERO_AOE_CHECK_RANGE := 10.0
 const HERO_POWER_STRIKE_SEARCH_RANGE := 14.0
@@ -1453,47 +1440,11 @@ static func _army_mode_label(mode: ArmyMode) -> String:
 
 
 static func get_unit_type_strength_weight(unit) -> float:
-	if unit == null or not is_instance_valid(unit):
-		return 0.0
-
-	if unit is Hero:
-		var level: int = int(unit.get("level")) if "level" in unit else 1
-		return STRENGTH_HERO_BASE + float(level) * STRENGTH_HERO_PER_LEVEL
-
-	if unit is Spearman:
-		return STRENGTH_SPEARMAN
-	if unit is Swordsman:
-		return STRENGTH_SWORDSMAN
-	if unit is Archer:
-		return STRENGTH_ARCHER
-	if unit is LightCavalry:
-		return STRENGTH_LIGHT_CAVALRY
-	if unit is HeavyCavalry:
-		return STRENGTH_HEAVY_CAVALRY
-	if unit is CavalryArcher:
-		return STRENGTH_CAVALRY_ARCHER
-	if unit is Cannon:
-		return STRENGTH_CANNON
-
-	return 1.0
+	return EnemyArmyForceMath.get_unit_type_strength_weight(unit)
 
 
 static func estimate_combat_strength(units: Array) -> float:
-	var strength: float = 0.0
-
-	for unit: Variant in NodeSafety.clean_node_array(units):
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		if not is_living_combat_unit(unit as Node):
-			continue
-		if unit is Worker:
-			continue
-
-		var base_weight: float = get_unit_type_strength_weight(unit as Node)
-		var health_ratio: float = get_health_ratio(unit as Node)
-		strength += base_weight * health_ratio * 100.0
-
-	return strength
+	return EnemyArmyForceMath.estimate_combat_strength(units)
 
 
 static func estimate_local_fight_balance(
@@ -4267,10 +4218,7 @@ static func _enemy_has_archer_capability(tree: SceneTree) -> bool:
 
 
 static func is_combat_unit(node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	return node is Spearman or node is Swordsman or node is Archer or node is HeavyCavalry or node is LightCavalry or node is CavalryArcher or node is Cannon or node is Hero
+	return EnemyArmyForceMath.is_combat_unit(node)
 
 
 static func is_hero_unit(node) -> bool:
@@ -4285,16 +4233,7 @@ static func is_non_hero_combat_unit(node) -> bool:
 
 
 static func is_living_combat_unit(node) -> bool:
-	if not NodeSafety.is_alive_node(node):
-		return false
-
-	if not is_combat_unit(node):
-		return false
-
-	if not node.is_in_group(ENEMY_COMBAT_GROUP):
-		return false
-
-	return _has_positive_health(node)
+	return EnemyArmyForceMath.is_living_combat_unit(node)
 
 
 static func register_combat_unit(unit) -> void:
@@ -5349,40 +5288,7 @@ static func resolve_defense_intercept_position(
 
 
 static func estimate_military_power(units: Array) -> int:
-	var power: int = 0
-
-	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit):
-			continue
-
-		if not is_living_combat_unit(unit as Node):
-			continue
-
-		var health_component: HealthComponent = (unit as Node).get_node_or_null(
-			"HealthComponent"
-		) as HealthComponent
-		var current_health: int = (
-			health_component.current_health
-			if health_component != null
-			else 0
-		)
-
-		if unit is Hero:
-			power += DEFENSE_POWER_HERO_BASE + current_health
-			continue
-
-		var damage: int = (
-			int((unit as Object).get("attack_damage"))
-			if "attack_damage" in unit
-			else 0
-		)
-		if unit is Archer or unit is CavalryArcher or unit is Cannon:
-			power += int(float(current_health) * DEFENSE_POWER_RANGED_HEALTH)
-		else:
-			power += int(float(current_health) * DEFENSE_POWER_MELEE_HEALTH)
-		power += damage * int(DEFENSE_POWER_DAMAGE_MULTIPLIER)
-
-	return power
+	return EnemyArmyForceMath.estimate_military_power(units)
 
 
 static func estimate_player_threat_power_near(
@@ -5606,19 +5512,7 @@ static func is_hero_healthy_enough_for_creep(hero) -> bool:
 
 
 static func get_health_ratio(node) -> float:
-	if not NodeSafety.is_alive_node(node):
-		return 0.0
-
-	if not node is Node:
-		return 0.0
-
-	var health_component: HealthComponent = (node as Node).get_node_or_null(
-		"HealthComponent"
-	) as HealthComponent
-	if health_component == null or health_component.max_health <= 0:
-		return 1.0
-
-	return float(health_component.current_health) / float(health_component.max_health)
+	return EnemyArmyForceMath.get_health_ratio(node)
 
 
 static func command_retreat_hero(hero, rally_position: Vector3) -> void:
@@ -7837,19 +7731,7 @@ static func _is_living_building(building) -> bool:
 
 
 static func _has_positive_health(node) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
-
-	if not node is Node:
-		return false
-
-	var health_component: HealthComponent = (node as Node).get_node_or_null(
-		"HealthComponent"
-	) as HealthComponent
-	if health_component != null:
-		return health_component.current_health > 0
-
-	return true
+	return EnemyArmyForceMath.has_positive_health(node)
 
 
 static func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
