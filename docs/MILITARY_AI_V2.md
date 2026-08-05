@@ -32,9 +32,12 @@ Helpers:
 | Unit order issuance | `ArmyCommanderV2` | Attack-move, retreat, assemble slots |
 | Shared order-bus drain | `ArmyCommanderV2` via `EnemyArmyCommand` | Queue owned by match `AIPlayerState.pending_group_orders` |
 | Reinforcement waiting registry | `AIPlayerState.reinforcement_pool` | Sole match owner; EAC accessors only |
+| Creep contest cooldowns | `AIPlayerState.creep_contest_cooldowns` | Match-durable; blocks camp contest only |
+| Attack-objective timers | `AIPlayerState.objective_*` | Mission/wave-owned; cleared on objective cancel + reset |
 | TTL threat caches | `AIPlayerState` (scratch) | Recomputed from world; never authoritative SoT |
 | Mission watchdog / exec scratch | `AIPlayerState` | Cleared with mission + match reset |
 | Frame-local army unit caches | `EnemyArmyCommand` static | Keyed by `Engine` frame; cleared on reset; never SoT |
+| Order-issue / perf telemetry | `EnemyArmyCommand` static | F3 / diagnostics only; never mission or order authority |
 | Hero kit micro | `AIHeroMastery` via `ArmyCommanderV2` | Abilities / local targets only |
 | Economy / workers / build / train / tech / placement | Legacy managers | Unchanged under V2 |
 | Low-level army helpers | `EnemyArmyCommand`, creep helpers, etc. | Reused; not independent mission owners |
@@ -174,9 +177,21 @@ Checklist for new work:
 
 `scenes/match/match_systems.tscn` is a `MatchCompositionRoot`:
 
-- Owns match-scoped `AIPlayerState` (army / strategic / exec / combat mirrors from `EnemyArmyCommand` + `MilitaryIntent` bus)
+- Owns match-scoped `AIPlayerState` (army / strategic / exec / combat mirrors from `EnemyArmyCommand` + creep-contest / objective timers + `MilitaryIntent` bus)
 - Declares the sole military command authority (`ArmyCommanderV2` when V2 is enabled)
 - Resolves director / commander / legacy managers for sibling lookup
+
+### EnemyArmyCommand state ownership (final)
+
+Authoritative military runtime lives on match-owned `AIPlayerState` (accessed via `EnemyArmyCommand._rt()`). Remaining EAC class statics are only:
+
+| Bag | Role |
+|-----|------|
+| Frame-local unit caches | Discovery scratch keyed by `Engine` frame |
+| Perf / last-issued / debug-override | Telemetry — never mission selection or order execution |
+| `_bound_player_state` / `_declared_command_authority` / `_unbound_runtime` | Composition binding |
+
+`EnemyArmyCommand` is ready for a **scoped** helper extraction (telemetry isolate or pure math/helpers). Do not begin a broad god-object split until a narrow seam is chosen.
 
 Child systems still include:
 

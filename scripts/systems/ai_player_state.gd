@@ -5,7 +5,8 @@ extends Node
 ## Lifetime follows the match scene via MatchCompositionRoot.
 ## When EnemyArmyCommand is bound, this node is the sole authoritative store for
 ## identity / exec / combat / assembly / wave / formation / finishing fields,
-## plus command-queue, reinforcement pool, TTL threat caches, and mission scratch.
+## plus command-queue, reinforcement pool, TTL threat caches, mission scratch,
+## creep-contest cooldowns, and attack-objective timers.
 ## Unbound helpers use a private offline instance — never a second live authority.
 ##
 ## TEMPORARY dual-write removed for migrated bags: accessors on EnemyArmyCommand
@@ -14,9 +15,11 @@ extends Node
 ## Ownership rules:
 ## - pending_group_orders: sole command-queue owner (drained by ArmyCommanderV2 via EAC).
 ## - reinforcement_pool: sole match owner for waiting-unit registry.
+## - creep_contest_cooldowns: match-durable camp cooldown map (blocks contest only).
+## - objective_* timers: mission/wave-owned; cleared with objective cancel + match reset.
 ## - defense/emergency threat caches: short TTL scratch only — never authoritative SoT.
 ## - exec_* scratch / watchdog: mission-owned; cleared with mission and match reset.
-## Frame-local army unit caches stay on EnemyArmyCommand (keyed by Engine frame).
+## Frame-local army unit caches and pure telemetry stay on EnemyArmyCommand.
 
 ## --- Identity ---
 var army_mode: int = 0
@@ -122,6 +125,16 @@ var defense_threat_cache_msec: int = 0
 var emergency_threat_cache: Dictionary = {}
 var emergency_threat_cache_msec: int = 0
 
+## --- Creep contest cooldowns (match-durable; blocks camp contest eligibility) ---
+var creep_contest_cooldowns: Dictionary = {}
+
+## --- Attack-objective timers (mission/wave-owned; not durable strategy) ---
+var objective_reissue_timer: float = 0.0
+var objective_stuck_timer: float = 0.0
+var objective_last_building_health: int = -1
+var objective_eval_timer: float = 0.0
+var objective_stuck_check_timer: float = 0.0
+
 ## Declared sole military order issuer for this match (ArmyCommanderV2 under V2).
 var _military_command_authority: Node = null
 var military_command_authority_name: StringName = &""
@@ -220,6 +233,12 @@ func reset() -> void:
 	defense_threat_cache_msec = 0
 	emergency_threat_cache.clear()
 	emergency_threat_cache_msec = 0
+	creep_contest_cooldowns.clear()
+	objective_reissue_timer = 0.0
+	objective_stuck_timer = 0.0
+	objective_last_building_health = -1
+	objective_eval_timer = 0.0
+	objective_stuck_check_timer = 0.0
 	clear_accepted_intent()
 	clear_intents()
 

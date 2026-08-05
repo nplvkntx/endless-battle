@@ -373,9 +373,21 @@ static var _active_wave_objective_position: Vector3:
 	set(value):
 		_rt().active_wave_objective_position = value
 
-static var _objective_reissue_timer: float = 0.0
-static var _objective_stuck_timer: float = 0.0
-static var _objective_last_building_health: int = -1
+static var _objective_reissue_timer: float:
+	get:
+		return _rt().objective_reissue_timer
+	set(value):
+		_rt().objective_reissue_timer = value
+static var _objective_stuck_timer: float:
+	get:
+		return _rt().objective_stuck_timer
+	set(value):
+		_rt().objective_stuck_timer = value
+static var _objective_last_building_health: int:
+	get:
+		return _rt().objective_last_building_health
+	set(value):
+		_rt().objective_last_building_health = value
 
 static var _finishing_mode_active: bool:
 	get:
@@ -419,7 +431,7 @@ static var _emergency_reason: StringName:
 	set(value):
 		_rt().emergency_reason = value
 
-static var _debug_enabled_override: bool = false
+static var _debug_enabled_override: bool = false  ## Telemetry / debug gate only.
 static var _combat_units_cache_frame: int = -1
 static var _cached_offensive_wave_units_frame: int = -1
 static var _cached_offensive_wave_units: Array = []
@@ -429,8 +441,18 @@ static var _pending_group_orders: Array:
 		return _rt().pending_group_orders
 	set(value):
 		_rt().pending_group_orders = value
-static var _objective_eval_timer: float = 0.0
-static var _objective_stuck_check_timer: float = 0.0
+## Attack-objective cadence (SoT: AIPlayerState; cleared with objective cancel).
+static var _objective_eval_timer: float:
+	get:
+		return _rt().objective_eval_timer
+	set(value):
+		_rt().objective_eval_timer = value
+static var _objective_stuck_check_timer: float:
+	get:
+		return _rt().objective_stuck_check_timer
+	set(value):
+		_rt().objective_stuck_check_timer = value
+## Pure telemetry — not match SoT; never influences mission selection / orders.
 static var _perf_diag_timer: float = 0.0
 static var _orders_issued_since_diag: int = 0
 
@@ -534,7 +556,12 @@ static var _emergency_threat_cache_msec: int:
 	set(value):
 		_rt().emergency_threat_cache_msec = value
 static var _perf_overlay_status_timer: float = 0.0
-static var _creep_contest_cooldowns: Dictionary = {}
+## Creep contest cooldowns (SoT: AIPlayerState.creep_contest_cooldowns).
+static var _creep_contest_cooldowns: Dictionary:
+	get:
+		return _rt().creep_contest_cooldowns
+	set(value):
+		_rt().creep_contest_cooldowns = value
 ## Reinforcement waiting registry (SoT: AIPlayerState.reinforcement_pool).
 static var _reinforcement_pool: Dictionary:
 	get:
@@ -728,7 +755,8 @@ static var _allow_hostile_engagement: bool:
 	set(value):
 		_rt().allow_hostile_engagement = value
 
-## Last successfully issued group/unit move order (for V2 idle diagnostics).
+## Last successfully issued group/unit move order (telemetry / F3 / watchdog labels only).
+## Not authoritative for mission selection or order execution.
 static var _last_issued_order_msec: int = 0
 static var _last_issued_order_label: String = ""
 static var _last_issued_order_destination: Vector3 = Vector3.ZERO
@@ -980,10 +1008,7 @@ static func reset_match_state() -> void:
 	_combat_units_cache_frame = -1
 	_cached_offensive_wave_units_frame = -1
 	_cached_offensive_wave_units.clear()
-	_objective_eval_timer = 0.0
-	_objective_stuck_check_timer = 0.0
-	## Remaining static bags not yet on AIPlayerState.
-	_creep_contest_cooldowns.clear()
+	## Telemetry only — never match SoT.
 	_perf_diag_timer = 0.0
 	_orders_issued_since_diag = 0
 	_perf_overlay_status_timer = 0.0
@@ -1013,6 +1038,52 @@ static func get_frame_local_cache_snapshot_for_verify() -> Dictionary:
 	}
 
 
+## Verify/debug: seed creep-contest + objective timers on match SoT.
+static func seed_leftover_runtime_state_for_verify() -> void:
+	_creep_contest_cooldowns[7777] = Time.get_ticks_msec() + 60000
+	_objective_reissue_timer = 11.0
+	_objective_stuck_timer = 22.0
+	_objective_last_building_health = 55
+	_objective_eval_timer = 3.5
+	_objective_stuck_check_timer = 1.25
+
+
+## Verify/debug: snapshot of match/mission leftovers now owned by AIPlayerState.
+static func get_leftover_runtime_snapshot_for_verify() -> Dictionary:
+	return {
+		"creep_contest_count": _creep_contest_cooldowns.size(),
+		"objective_reissue_timer": _objective_reissue_timer,
+		"objective_stuck_timer": _objective_stuck_timer,
+		"objective_last_building_health": _objective_last_building_health,
+		"objective_eval_timer": _objective_eval_timer,
+		"objective_stuck_check_timer": _objective_stuck_check_timer,
+	}
+
+
+## Verify/debug: seed pure telemetry (must not alter mission / orders).
+static func seed_telemetry_for_verify() -> void:
+	_debug_enabled_override = true
+	_perf_diag_timer = 9.0
+	_orders_issued_since_diag = 42
+	_perf_overlay_status_timer = 0.2
+	_last_issued_order_msec = Time.get_ticks_msec()
+	_last_issued_order_label = "verify-telemetry-order"
+	_last_issued_order_destination = Vector3(99.0, 0.0, 99.0)
+
+
+## Verify/debug: telemetry bag (non-authoritative).
+static func get_telemetry_snapshot_for_verify() -> Dictionary:
+	return {
+		"debug_enabled_override": _debug_enabled_override,
+		"perf_diag_timer": _perf_diag_timer,
+		"orders_issued_since_diag": _orders_issued_since_diag,
+		"perf_overlay_status_timer": _perf_overlay_status_timer,
+		"last_issued_order_msec": _last_issued_order_msec,
+		"last_issued_order_label": _last_issued_order_label,
+		"last_issued_order_destination": _last_issued_order_destination,
+	}
+
+
 ## Pending group-order count (command queue owned by AIPlayerState).
 static func get_pending_group_order_count() -> int:
 	return _pending_group_orders.size()
@@ -1027,6 +1098,11 @@ static func get_reinforcement_pool_count() -> int:
 ## Verify only: raw pool size without living-unit purge (ownership identity checks).
 static func get_reinforcement_pool_raw_count_for_verify() -> int:
 	return _reinforcement_pool.size()
+
+
+## Verify only: creep-contest cooldown count (SoT: AIPlayerState).
+static func get_creep_contest_cooldown_count_for_verify() -> int:
+	return _creep_contest_cooldowns.size()
 
 
 static func find_strategic_director(tree: SceneTree) -> EnemyStrategicDirector:
@@ -3366,6 +3442,8 @@ static func _reset_objective_tracking() -> void:
 	_objective_reissue_timer = 0.0
 	_objective_stuck_timer = 0.0
 	_objective_last_building_health = -1
+	_objective_eval_timer = 0.0
+	_objective_stuck_check_timer = 0.0
 
 
 ## Returns true when the requested mode owns the army for issuing orders.

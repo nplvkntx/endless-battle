@@ -246,6 +246,7 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	await _verify_intent_bus(failures, state)
 	await _verify_authority_and_providers(failures, root, state)
 	_verify_runtime_ephemeral_ownership(failures, state)
+	_verify_final_static_state_ownership(failures, state)
 
 	## Dirty high-risk bags + frame caches before prepare_new_match.
 	state.pending_group_orders = [{
@@ -267,6 +268,8 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	state.exec_last_progress_msec = Time.get_ticks_msec() - 120000
 	state.exec_squad_ids = [1, 2, 3]
 	EnemyArmyCommand.seed_frame_local_caches_for_verify()
+	EnemyArmyCommand.seed_leftover_runtime_state_for_verify()
+	EnemyArmyCommand.seed_telemetry_for_verify()
 	_expect(
 		failures,
 		"ephemeral: pending orders seeded before reset",
@@ -276,6 +279,13 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		failures,
 		"ephemeral: frame caches seeded before reset",
 		int(EnemyArmyCommand.get_frame_local_cache_snapshot_for_verify()["main_army_cache_size"]) > 0
+	)
+	_expect(
+		failures,
+		"leftover: creep contest + objective timers seeded before reset",
+		EnemyArmyCommand.get_creep_contest_cooldown_count_for_verify() == 1
+		and state.objective_reissue_timer > 0.0
+		and state.objective_eval_timer > 0.0
 	)
 
 	MatchSession.prepare_new_match()
@@ -346,6 +356,21 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		and state.exec_squad_ids.is_empty()
 		and state.exec_objective_node == null
 	)
+	_expect(
+		failures,
+		"creep contest: cooldowns cannot survive reset",
+		state.creep_contest_cooldowns.is_empty()
+		and EnemyArmyCommand.get_creep_contest_cooldown_count_for_verify() == 0
+	)
+	_expect(
+		failures,
+		"objective timers: cannot survive reset",
+		state.objective_reissue_timer == 0.0
+		and state.objective_stuck_timer == 0.0
+		and state.objective_last_building_health == -1
+		and state.objective_eval_timer == 0.0
+		and state.objective_stuck_check_timer == 0.0
+	)
 	var frame_after: Dictionary = EnemyArmyCommand.get_frame_local_cache_snapshot_for_verify()
 	_expect(
 		failures,
@@ -355,6 +380,16 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 		and int(frame_after["main_army_cache_size"]) == 0
 		and int(frame_after["offensive_wave_cache_size"]) == 0
 		and int(frame_after["last_combat_eval_msec"]) == 0
+	)
+	var telemetry_after: Dictionary = EnemyArmyCommand.get_telemetry_snapshot_for_verify()
+	_expect(
+		failures,
+		"telemetry: cleared on reset (non-authoritative)",
+		float(telemetry_after["perf_diag_timer"]) == 0.0
+		and int(telemetry_after["orders_issued_since_diag"]) == 0
+		and float(telemetry_after["perf_overlay_status_timer"]) == 0.0
+		and int(telemetry_after["last_issued_order_msec"]) == 0
+		and str(telemetry_after["last_issued_order_label"]).is_empty()
 	)
 	_expect(
 		failures,
@@ -439,6 +474,98 @@ func _verify_runtime_ephemeral_ownership(
 	## Leave reinforcement clean for subsequent seed-before-reset assertions.
 	state.reinforcement_pool.clear()
 	EnemyArmyCommand.clear_executable_mission("watchdog verify cleanup")
+
+
+func _verify_final_static_state_ownership(
+	failures: PackedStringArray,
+	state: AIPlayerState
+) -> void:
+	## Creep contest: match-owned on AIPlayerState; EAC accessors share the same bag.
+	state.creep_contest_cooldowns.clear()
+	state.creep_contest_cooldowns[5555] = Time.get_ticks_msec() + 30000
+	_expect(
+		failures,
+		"creep contest: AIPlayerState owns cooldown map",
+		state.creep_contest_cooldowns.size() == 1
+		and EnemyArmyCommand.get_creep_contest_cooldown_count_for_verify() == 1
+	)
+	EnemyArmyCommand.seed_leftover_runtime_state_for_verify()
+	_expect(
+		failures,
+		"creep contest: EAC accessor writes same SoT bag",
+		state.creep_contest_cooldowns.has(7777)
+		and state.objective_reissue_timer == 11.0
+		and state.objective_stuck_timer == 22.0
+		and state.objective_last_building_health == 55
+		and is_equal_approx(state.objective_eval_timer, 3.5)
+		and is_equal_approx(state.objective_stuck_check_timer, 1.25)
+	)
+
+	## Objective timers must die with wave/objective cancel — cannot reactivate later work.
+	EnemyArmyCommand.clear_offensive_wave_tracking()
+	var after_cancel: Dictionary = EnemyArmyCommand.get_leftover_runtime_snapshot_for_verify()
+	_expect(
+		failures,
+		"objective timers: cleared on wave/objective cancel",
+		float(after_cancel["objective_reissue_timer"]) == 0.0
+		and float(after_cancel["objective_stuck_timer"]) == 0.0
+		and int(after_cancel["objective_last_building_health"]) == -1
+		and float(after_cancel["objective_eval_timer"]) == 0.0
+		and float(after_cancel["objective_stuck_check_timer"]) == 0.0
+		and state.objective_reissue_timer == 0.0
+		and state.objective_eval_timer == 0.0
+	)
+
+	## Telemetry must not alter mission selection or enqueue orders.
+	state.army_mode = 0
+	state.strategic_state = 0
+	state.exec_mission = int(EnemyArmyCommand.ExecutableMission.NONE)
+	state.exec_order_label = ""
+	state.pending_group_orders.clear()
+	state.creep_contest_cooldowns.clear()
+	var mode_before: int = state.army_mode
+	var mission_before: int = state.exec_mission
+	var contest_before: int = state.creep_contest_cooldowns.size()
+	EnemyArmyCommand.seed_telemetry_for_verify()
+	var telemetry: Dictionary = EnemyArmyCommand.get_telemetry_snapshot_for_verify()
+	_expect(
+		failures,
+		"telemetry: seed succeeds without becoming SoT",
+		bool(telemetry["debug_enabled_override"])
+		and str(telemetry["last_issued_order_label"]) == "verify-telemetry-order"
+		and int(telemetry["orders_issued_since_diag"]) == 42
+	)
+	_expect(
+		failures,
+		"telemetry: cannot alter mission selection or army mode",
+		state.army_mode == mode_before
+		and state.exec_mission == mission_before
+		and state.exec_order_label.is_empty()
+	)
+	_expect(
+		failures,
+		"telemetry: cannot enqueue orders or invent contest cooldowns",
+		state.pending_group_orders.is_empty()
+		and state.creep_contest_cooldowns.size() == contest_before
+		and EnemyArmyCommand.get_pending_group_order_count() == 0
+	)
+
+	## No remaining static authoritative military bags outside AIPlayerState.
+	## Remaining EAC statics are frame-local caches, telemetry, or binding only.
+	_expect(
+		failures,
+		"authority: creep contest + objective timers live on AIPlayerState",
+		typeof(state.creep_contest_cooldowns) == TYPE_DICTIONARY
+		and typeof(state.objective_reissue_timer) == TYPE_FLOAT
+		and typeof(state.objective_eval_timer) == TYPE_FLOAT
+		and typeof(state.objective_stuck_timer) == TYPE_FLOAT
+		and typeof(state.objective_stuck_check_timer) == TYPE_FLOAT
+		and typeof(state.objective_last_building_health) == TYPE_INT
+	)
+	## Cleanup leftover seeds for later dirty-before-reset path.
+	state.creep_contest_cooldowns.clear()
+	EnemyArmyCommand.clear_offensive_wave_tracking()
+	EnemyArmyCommand.clear_executable_mission("final ownership cleanup")
 
 
 func _verify_intent_bus(failures: PackedStringArray, state: AIPlayerState) -> void:
