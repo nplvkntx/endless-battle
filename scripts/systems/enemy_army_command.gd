@@ -792,7 +792,7 @@ static func purge_stale_runtime_caches() -> void:
 		func(entry: Variant) -> bool:
 			if not entry is Dictionary:
 				return false
-			return NodeSafety.is_alive_node((entry as Dictionary).get("unit"))
+			return _pending_order_unit_is_alive(entry as Dictionary)
 	)
 	PerfCounters.set_pending_group_orders(_pending_group_orders.size())
 	PerfCounters.set_combat_group_size(_main_army_cache.size())
@@ -5695,10 +5695,15 @@ static func _issue_spaced_group_orders(
 				if not entry is Dictionary:
 					continue
 				var order: Dictionary = entry
-				var unit: Variant = order.get("unit")
+				var unit: Variant = _resolve_pending_order_unit(order)
+				if not NodeSafety.is_alive_node(unit):
+					continue
 				var target: Vector3 = order.get("target", Vector3.ZERO)
 				wrapped.append({
 					"unit": unit,
+					"unit_id": (unit as Node).get_instance_id(),
+					"command_generation": int(order.get("command_generation", -1)),
+					"squad_id": int(order.get("squad_id", -1)),
 					"target": target,
 					"use_attack_move": VariantUtils.to_bool(order.get("use_attack_move", use_attack_move)),
 					"mission": order.get("mission", mission),
@@ -5772,6 +5777,29 @@ static func _build_pending_order_dedupe_key(
 	var bx: int = int(floor(destination.x / PENDING_ORDER_DEST_BUCKET))
 	var bz: int = int(floor(destination.z / PENDING_ORDER_DEST_BUCKET))
 	return "%d|%d|%d|%d" % [unit_id, int(mission), bx, bz]
+
+
+static func _resolve_pending_order_unit(order: Dictionary) -> Variant:
+	var unit: Variant = order.get("unit")
+	if NodeSafety.is_alive_node(unit):
+		return unit
+	if not order.has("unit_id"):
+		return null
+	var unit_id: int = int(order.get("unit_id", 0))
+	if unit_id == 0:
+		return null
+	var resolved: Variant = instance_from_id(unit_id)
+	if resolved == null or not is_instance_valid(resolved):
+		return null
+	if not resolved is Node:
+		return null
+	if (resolved as Node).is_queued_for_deletion():
+		return null
+	return resolved
+
+
+static func _pending_order_unit_is_alive(order: Dictionary) -> bool:
+	return NodeSafety.is_alive_node(_resolve_pending_order_unit(order))
 
 
 static func _mission_order_priority(mission: EnemyUnitMission.Mission) -> int:
@@ -5960,7 +5988,7 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 	while index < orders.size() and issued < MAX_GROUP_ORDERS_PER_FRAME:
 		var entry: Dictionary = orders[index]
-		var unit: Variant = entry.get("unit")
+		var unit: Variant = _resolve_pending_order_unit(entry)
 		var target: Vector3 = entry.get("target", Vector3.ZERO)
 		var use_attack_move: bool = VariantUtils.to_bool(entry.get("use_attack_move", true))
 		var mission: EnemyUnitMission.Mission = entry.get(
@@ -5971,6 +5999,17 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 
 		if not NodeSafety.is_alive_node(unit):
 			continue
+
+		var command_generation: int = int(entry.get("command_generation", -1))
+		var squad_id: int = int(entry.get("squad_id", -1))
+		if command_generation >= 0 and squad_id >= 0:
+			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(unit)
+			if (
+				squad_ctx == null
+				or squad_ctx.squad_id != squad_id
+				or squad_ctx.command_generation != command_generation
+			):
+				continue
 
 		if (
 			use_attack_move

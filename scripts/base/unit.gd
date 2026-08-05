@@ -1783,6 +1783,7 @@ func die() -> void:
 	BuffService.remove_all(self)
 	_release_reserved_food()
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
+	SharedSquadNavigation.release_unit(self)
 	DeathEffects.play_unit_death(self)
 	NodeSafety.prepare_node_for_death(self)
 	_unregister_with_entity_registry()

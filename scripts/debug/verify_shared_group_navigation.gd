@@ -38,6 +38,7 @@ func _ready() -> void:
 	await _verify_arrival_clears(failures)
 	await _verify_match_reset_clears(failures)
 	await _verify_ai_and_player_share_foundation(failures)
+	await _verify_freed_unit_squad_navigation(failures)
 	_report_perf_snapshot()
 
 	var report: String
@@ -744,6 +745,207 @@ func _verify_ai_and_player_share_foundation(failures: PackedStringArray) -> void
 		"shared foundation: two strategic routes",
 		int(PerfCounters._counts.get(PerfCounters.KEY_SQUAD_STRATEGIC_ROUTES, 0)) == 2
 	)
+	await _free_harness(harness)
+
+
+## Regression: freeing squad members / threats must never leave typed Object refs.
+func _verify_freed_unit_squad_navigation(failures: PackedStringArray) -> void:
+	print("verify: freed unit references during squad navigation")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var units: Array = []
+	for index: int in 40:
+		var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+		harness["root"].add_child(unit)
+		unit.global_position = Vector3(
+			float(index % 8) * 1.15 - 4.0,
+			0.0,
+			float(index / 8) * 1.15 - 4.0
+		)
+		units.append(unit)
+	await _wait_nav_ready(units[0] as Unit)
+
+	SharedSquadNavigation.clear_all()
+	SharedSquadNavigation.clear_stale_cleanup_reports()
+	PerfCounters.reset_all()
+	var move_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		units, Vector3(16.0, 0.0, 10.0), &"move", false
+	)
+	_expect(failures, "freed-nav: initial move handled", move_result.get("handled", false))
+	_expect(failures, "freed-nav: squad exists", SharedSquadNavigation.get_active_squad_count() == 1)
+
+	var ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(units[0])
+	_expect(failures, "freed-nav: context", ctx != null)
+	if ctx == null:
+		await _free_harness(harness)
+		return
+
+	var initial_count: int = ctx.member_count()
+	var front: Unit = units[0] as Unit
+	var middle: Unit = units[20] as Unit
+	var stagger_victim: Unit = units[5] as Unit
+	var front_id: int = front.get_instance_id()
+	var middle_id: int = middle.get_instance_id()
+	var stagger_id: int = stagger_victim.get_instance_id()
+
+	## Kill while moving: front, middle, staggered index, and a simultaneous batch.
+	front.die()
+	front.queue_free()
+	middle.die()
+	middle.queue_free()
+	stagger_victim.die()
+	stagger_victim.queue_free()
+	for index: int in [7, 8, 9]:
+		var batch: Unit = units[index] as Unit
+		batch.die()
+		batch.queue_free()
+
+	## Continue navigation ticks with freed members present in the scene tree exit path.
+	for _i: int in 16:
+		await get_tree().physics_frame
+
+	_expect(
+		failures,
+		"freed-nav: no stale refs after member deaths",
+		not SharedSquadNavigation.debug_has_stale_unit_references()
+	)
+	_expect(
+		failures,
+		"freed-nav: dead front removed from map",
+		not SharedSquadNavigation.debug_unit_to_squad_has(front_id)
+	)
+	_expect(
+		failures,
+		"freed-nav: dead middle removed from map",
+		not SharedSquadNavigation.debug_unit_to_squad_has(middle_id)
+	)
+	_expect(
+		failures,
+		"freed-nav: dead stagger removed from map",
+		not SharedSquadNavigation.debug_unit_to_squad_has(stagger_id)
+	)
+
+	var living: Array = []
+	for unit: Variant in units:
+		if NodeSafety.is_alive_node(unit):
+			living.append(unit)
+	_expect(failures, "freed-nav: survivors remain", living.size() >= 30)
+
+	ctx = SharedSquadNavigation.get_squad_for_unit(living[0])
+	if ctx != null:
+		_expect(
+			failures,
+			"freed-nav: member count shrunk",
+			ctx.member_count() < initial_count and ctx.member_count() == living.size()
+		)
+	else:
+		## Squad may dissolve only if everyone died; otherwise fail.
+		_expect(failures, "freed-nav: survivors still have squad", false)
+
+	## Fresh move command with survivors.
+	var second: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		living, Vector3(6.0, 0.0, -8.0), &"move", false
+	)
+	_expect(failures, "freed-nav: second move handled", second.get("handled", false))
+	for _i: int in 8:
+		await get_tree().physics_frame
+	_expect(
+		failures,
+		"freed-nav: no stale refs after second move",
+		not SharedSquadNavigation.debug_has_stale_unit_references()
+	)
+
+	## Attack-move then free the current shared threat target.
+	var threat: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	harness["root"].add_child(threat)
+	threat.add_to_group(&"enemies")
+	threat.team_id = 1
+	threat.global_position = Vector3(4.0, 0.0, 0.0)
+	await get_tree().physics_frame
+
+	var attack_move: Dictionary = SharedSquadNavigation.issue_player_group_command(
+		living, Vector3(4.0, 0.0, 0.0), &"attack_move", false
+	)
+	_expect(failures, "freed-nav: attack-move handled", attack_move.get("handled", false))
+	ctx = SharedSquadNavigation.get_squad_for_unit(living[0])
+	_expect(failures, "freed-nav: attack-move context", ctx != null)
+	if ctx != null:
+		ctx.set_shared_threat_target(threat)
+		ctx.set_member_threat((living[0] as Node).get_instance_id(), threat)
+		var threat_id: int = threat.get_instance_id()
+		threat.die()
+		threat.queue_free()
+		await get_tree().process_frame
+		await get_tree().physics_frame
+		## Accessing threat APIs must not crash on freed typed assignment.
+		var resolved: Node3D = ctx.get_shared_threat_target()
+		_expect(failures, "freed-nav: shared threat cleared after free", resolved == null)
+		_expect(failures, "freed-nav: shared threat id cleared", ctx.shared_threat_id == 0)
+		var assigned: Node3D = SharedSquadNavigation.try_get_assigned_target(living[0])
+		_expect(
+			failures,
+			"freed-nav: try_get_assigned_target safe after threat free",
+			assigned == null or NodeSafety.is_alive_node(assigned)
+		)
+		_expect(
+			failures,
+			"freed-nav: threat id not retained as living node",
+			SquadNavContext.resolve_living_node3d(threat_id) == null
+		)
+
+	## Delete whole squad during delayed processing.
+	var squad_to_wipe: Array = living.duplicate()
+	SharedSquadNavigation.issue_player_group_command(
+		squad_to_wipe, Vector3(-6.0, 0.0, 6.0), &"move", false
+	)
+	await get_tree().physics_frame
+	for unit: Variant in squad_to_wipe:
+		if NodeSafety.is_alive_node(unit):
+			(unit as Unit).die()
+			(unit as Unit).queue_free()
+	for _i: int in 10:
+		await get_tree().physics_frame
+	_expect(
+		failures,
+		"freed-nav: squad dissolved after total wipe",
+		SharedSquadNavigation.get_active_squad_count() == 0
+	)
+	_expect(
+		failures,
+		"freed-nav: no stale refs after total wipe",
+		not SharedSquadNavigation.debug_has_stale_unit_references()
+	)
+
+	## Match reset clears every navigation reference.
+	var leftover: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	var leftover2: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	harness["root"].add_child(leftover)
+	harness["root"].add_child(leftover2)
+	leftover.global_position = Vector3(-2.0, 0.0, -2.0)
+	leftover2.global_position = Vector3(-1.0, 0.0, -2.0)
+	await _wait_nav_ready(leftover)
+	SharedSquadNavigation.issue_player_group_command(
+		[leftover, leftover2], Vector3(3.0, 0.0, 3.0), &"move", false
+	)
+	_expect(
+		failures,
+		"freed-nav: squad before reset",
+		SharedSquadNavigation.get_active_squad_count() == 1
+	)
+	SharedSquadNavigation.clear_all()
+	_expect(failures, "freed-nav: reset clears squads", SharedSquadNavigation.get_active_squad_count() == 0)
+	_expect(
+		failures,
+		"freed-nav: reset clears member diag",
+		SharedSquadNavigation.get_active_member_count() == 0
+	)
+	_expect(
+		failures,
+		"freed-nav: reset leaves zero stale refs",
+		not SharedSquadNavigation.debug_has_stale_unit_references()
+	)
+
+	var reports: Array[String] = SharedSquadNavigation.get_stale_cleanup_reports()
+	print("freed-nav cleanup reports (%d): %s" % [reports.size(), ", ".join(reports)])
 	await _free_harness(harness)
 
 

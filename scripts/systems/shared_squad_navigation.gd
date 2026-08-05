@@ -35,12 +35,15 @@ const MAX_INITIAL_ORDERS := 12
 
 var _squads: Dictionary = {} ## squad_id -> SquadNavContext
 var _unit_to_squad: Dictionary = {} ## unit_instance_id -> squad_id
+var _unit_exit_handlers: Dictionary = {} ## unit_instance_id -> Callable
 var _next_squad_id: int = 1
 var _global_command_generation: int = 0
 var _anchor_accum: float = 0.0
 var _diag_member_count: int = 0
 var _diag_stalls: int = 0
 var _diag_route_failures: int = 0
+## One-shot stale-reference cleanup reports (not per-frame).
+var _diag_stale_reports: Array[String] = []
 ## Temporary player-move telemetry for one selected group command.
 var _player_diag: Dictionary = {
 	"command_generation": 0,
@@ -76,6 +79,9 @@ func _process(delta: float) -> void:
 
 
 func clear_all() -> void:
+	for unit_id: Variant in _unit_exit_handlers.keys():
+		_disconnect_unit_exit_handler(int(unit_id))
+	_unit_exit_handlers.clear()
 	_squads.clear()
 	_unit_to_squad.clear()
 	_next_squad_id = 1
@@ -83,6 +89,7 @@ func clear_all() -> void:
 	_diag_member_count = 0
 	_diag_stalls = 0
 	_diag_route_failures = 0
+	_diag_stale_reports.clear()
 	_reset_player_move_telemetry()
 	_publish_diag()
 
@@ -123,30 +130,124 @@ func get_squad_for_unit(unit: Variant) -> SquadNavContext:
 	var squad_id: int = int(_unit_to_squad.get((unit as Node).get_instance_id(), -1))
 	if squad_id < 0:
 		return null
-	return _squads.get(squad_id) as SquadNavContext
+	return _get_squad_context(squad_id)
 
 
 func release_unit(unit: Variant) -> void:
 	if unit == null or not is_instance_valid(unit) or not (unit is Node):
 		return
 	var unit_id: int = (unit as Node).get_instance_id()
-	if not _unit_to_squad.has(unit_id):
-		return
-	var squad_id: int = int(_unit_to_squad[unit_id])
-	_unit_to_squad.erase(unit_id)
 	if unit is Unit:
 		(unit as Unit).clear_player_squad_command()
-	var ctx: SquadNavContext = _squads.get(squad_id) as SquadNavContext
-	if ctx == null:
+	_remove_unit_by_id(unit_id, &"release")
+
+
+## Canonical membership cleanup — clears every per-unit container for one ID.
+func _remove_unit_by_id(unit_id: int, via: StringName = &"prune") -> void:
+	var squad_id: int = int(_unit_to_squad.get(unit_id, -1))
+	_unit_to_squad.erase(unit_id)
+	_disconnect_unit_exit_handler(unit_id)
+
+	if squad_id < 0:
 		return
-	ctx.member_ids.erase(unit_id)
-	ctx.slot_locals.erase(unit_id)
-	ctx.final_arrival_slots.erase(unit_id)
-	ctx.member_threats.erase(unit_id)
-	ctx.last_issued_slots.erase(unit_id)
-	ctx.stalled_member_ids.erase(unit_id)
-	if ctx.member_count() <= 0:
+
+	var ctx: SquadNavContext = _get_squad_context(squad_id)
+	if ctx == null:
 		_squads.erase(squad_id)
+		return
+	ctx.clear_unit_state(unit_id)
+
+	if via == &"prune":
+		_report_stale_cleanup(squad_id, unit_id, "membership", ctx.command_generation, via)
+
+	if ctx.member_count() <= 0:
+		_dissolve_squad(squad_id)
+
+
+func _get_squad_context(squad_id: int) -> SquadNavContext:
+	var ctx_variant: Variant = _squads.get(squad_id)
+	if ctx_variant == null or not is_instance_valid(ctx_variant):
+		return null
+	if not ctx_variant is SquadNavContext:
+		return null
+	return ctx_variant as SquadNavContext
+
+
+func _watch_unit(unit: Node) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var unit_id: int = unit.get_instance_id()
+	if _unit_exit_handlers.has(unit_id):
+		return
+	var handler: Callable = _on_unit_tree_exiting.bind(unit_id)
+	_unit_exit_handlers[unit_id] = handler
+	unit.tree_exiting.connect(handler, CONNECT_ONE_SHOT)
+
+
+func _on_unit_tree_exiting(unit_id: int) -> void:
+	_unit_exit_handlers.erase(unit_id)
+	_remove_unit_by_id(unit_id, &"signal")
+
+
+func _disconnect_unit_exit_handler(unit_id: int) -> void:
+	if not _unit_exit_handlers.has(unit_id):
+		return
+	var handler: Callable = _unit_exit_handlers[unit_id]
+	_unit_exit_handlers.erase(unit_id)
+	var node: Object = instance_from_id(unit_id)
+	if node == null or not is_instance_valid(node) or not node is Node:
+		return
+	var unit_node: Node = node as Node
+	if unit_node.tree_exiting.is_connected(handler):
+		unit_node.tree_exiting.disconnect(handler)
+
+
+func _report_stale_cleanup(
+	squad_id: int,
+	dead_id: int,
+	container: String,
+	command_generation: int,
+	via: StringName
+) -> void:
+	var line: String = (
+		"squad=%d dead_id=%d container=%s generation=%d via=%s"
+		% [squad_id, dead_id, container, command_generation, String(via)]
+	)
+	if _diag_stale_reports.size() < 32:
+		_diag_stale_reports.append(line)
+	push_warning("SharedSquadNavigation stale cleanup: %s" % line)
+
+
+func get_stale_cleanup_reports() -> Array[String]:
+	return _diag_stale_reports.duplicate()
+
+
+func clear_stale_cleanup_reports() -> void:
+	_diag_stale_reports.clear()
+
+
+## Test/debug: true when any squad or map still holds a freed unit ID.
+func debug_has_stale_unit_references() -> bool:
+	for unit_id: Variant in _unit_to_squad.keys():
+		if SquadNavContext.resolve_living_node3d(int(unit_id)) == null:
+			return true
+	for squad_id: Variant in _squads.keys():
+		var ctx: SquadNavContext = _get_squad_context(int(squad_id))
+		if ctx == null:
+			continue
+		for member_id: int in ctx.member_ids:
+			if SquadNavContext.resolve_living_node3d(member_id) == null:
+				return true
+		if ctx.shared_threat_id != 0 and SquadNavContext.resolve_living_node3d(ctx.shared_threat_id) == null:
+			return true
+		for key: Variant in ctx.member_threats.keys():
+			if SquadNavContext.resolve_living_node3d(int(ctx.member_threats[key])) == null:
+				return true
+	return false
+
+
+func debug_unit_to_squad_has(unit_id: int) -> bool:
+	return _unit_to_squad.has(unit_id)
 
 
 ## Called by Unit local recovery when a squad member exhausted local stages.
@@ -179,23 +280,21 @@ func try_get_assigned_target(unit: Variant) -> Node3D:
 	if unit == null or not is_instance_valid(unit):
 		return null
 	var unit_id: int = (unit as Node).get_instance_id()
-	if ctx.member_threats.has(unit_id):
-		var assigned: Variant = ctx.member_threats[unit_id]
-		if NodeSafety.is_alive_node(assigned) and assigned is Node3D:
-			var target: Node3D = assigned as Node3D
-			if CombatTargetValidation.is_valid_combat_target(target):
-				var search_range: float = 28.0
-				if unit is MilitaryUnit:
-					search_range = maxf(
-						(unit as MilitaryUnit).attack_range,
-						MilitaryUnit.ATTACK_MOVE_ENGAGEMENT_RANGE
-					)
-				if CombatTargetValidation.get_horizontal_attack_distance(unit as Node3D, target) <= (
-					search_range + 4.0
-				):
-					return target
-	if NodeSafety.is_alive_node(ctx.shared_threat_target):
-		return ctx.shared_threat_target
+	var assigned: Node3D = ctx.get_member_threat(unit_id)
+	if assigned != null and CombatTargetValidation.is_valid_combat_target(assigned):
+		var search_range: float = 28.0
+		if unit is MilitaryUnit:
+			search_range = maxf(
+				(unit as MilitaryUnit).attack_range,
+				MilitaryUnit.ATTACK_MOVE_ENGAGEMENT_RANGE
+			)
+		if CombatTargetValidation.get_horizontal_attack_distance(unit as Node3D, assigned) <= (
+			search_range + 4.0
+		):
+			return assigned
+	var shared: Node3D = ctx.get_shared_threat_target()
+	if shared != null:
+		return shared
 	return null
 
 
@@ -687,7 +786,7 @@ func _tick_squads(delta: float) -> void:
 	var total_members: int = 0
 
 	for squad_id: Variant in _squads.keys():
-		var ctx: SquadNavContext = _squads[squad_id] as SquadNavContext
+		var ctx: SquadNavContext = _get_squad_context(int(squad_id))
 		if ctx == null:
 			remove_ids.append(int(squad_id))
 			continue
@@ -739,7 +838,9 @@ func _compute_members_median(members: Array) -> Vector3:
 	var zs: Array[float] = []
 	var y_sum: float = 0.0
 	for unit: Variant in members:
-		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+		if unit == null or not is_instance_valid(unit) or not unit is Node3D:
+			continue
+		if (unit as Node3D).is_queued_for_deletion():
 			continue
 		var pos: Vector3 = (unit as Node3D).global_position
 		xs.append(pos.x)
@@ -771,11 +872,14 @@ func _player_squad_mostly_arrived(ctx: SquadNavContext) -> bool:
 		return true
 	var arrived: int = 0
 	for unit: Variant in members:
-		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+		if unit == null or not is_instance_valid(unit) or not unit is Node3D:
 			continue
-		var unit_id: int = (unit as Node).get_instance_id()
+		var unit_node: Node3D = unit as Node3D
+		if unit_node.is_queued_for_deletion():
+			continue
+		var unit_id: int = unit_node.get_instance_id()
 		var slot: Vector3 = ctx.get_final_arrival_slot(unit_id)
-		if _horizontal_distance((unit as Node3D).global_position, slot) <= 4.0:
+		if _horizontal_distance(unit_node.global_position, slot) <= 4.0:
 			arrived += 1
 	return arrived >= maxi(1, int(ceil(float(members.size()) * 0.7)))
 
@@ -886,25 +990,38 @@ func _tick_target_search(ctx: SquadNavContext, delta: float) -> void:
 
 	var members: Array = ctx.get_living_members()
 	if members.is_empty():
+		ctx.set_shared_threat_target(null)
 		return
-	var probe: Node3D = members[0] as Node3D
+
+	var probe_variant: Variant = members[0]
+	if (
+		probe_variant == null
+		or not is_instance_valid(probe_variant)
+		or not probe_variant is Node3D
+	):
+		ctx.set_shared_threat_target(null)
+		return
+	var probe: Node3D = probe_variant as Node3D
+	if probe.is_queued_for_deletion():
+		ctx.set_shared_threat_target(null)
+		return
+
 	var search_range: float = 30.0
 	if probe is MilitaryUnit:
 		search_range = maxf(
 			(probe as MilitaryUnit).attack_range,
 			MilitaryUnit.ATTACK_MOVE_ENGAGEMENT_RANGE
 		)
-	var anchor_probe: Node3D = probe
 	var found: Node3D = null
 	if CombatTargetValidation.is_enemy_faction(probe):
 		found = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
-			anchor_probe, search_range + 8.0
+			probe, search_range + 8.0
 		)
 	else:
 		found = CombatTargetValidation.find_best_auto_acquire_target_in_range(
-			anchor_probe, search_range + 8.0
+			probe, search_range + 8.0
 		)
-	ctx.shared_threat_target = found
+	ctx.set_shared_threat_target(found)
 	_distribute_threats(ctx, found, members)
 
 
@@ -912,17 +1029,16 @@ func _distribute_threats(ctx: SquadNavContext, threat: Node3D, members: Array) -
 	if not NodeSafety.is_alive_node(threat):
 		return
 	for unit: Variant in members:
-		if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+		if unit == null or not is_instance_valid(unit) or not unit is Node3D:
+			continue
+		if (unit as Node3D).is_queued_for_deletion():
 			continue
 		var unit_node: Node3D = unit as Node3D
-		# Preserve valid existing targets.
 		var unit_id: int = unit_node.get_instance_id()
-		if ctx.member_threats.has(unit_id):
-			var existing: Variant = ctx.member_threats[unit_id]
-			if NodeSafety.is_alive_node(existing) and CombatTargetValidation.is_valid_combat_target(
-				existing
-			):
-				continue
+		# Preserve valid existing targets.
+		var existing: Node3D = ctx.get_member_threat(unit_id)
+		if existing != null and CombatTargetValidation.is_valid_combat_target(existing):
+			continue
 		var max_range: float = 24.0
 		if unit is MilitaryUnit:
 			max_range = maxf(
@@ -930,7 +1046,7 @@ func _distribute_threats(ctx: SquadNavContext, threat: Node3D, members: Array) -
 				MilitaryUnit.ATTACK_MOVE_ENGAGEMENT_RANGE
 			)
 		if CombatTargetValidation.get_horizontal_attack_distance(unit_node, threat) <= max_range:
-			ctx.member_threats[unit_id] = threat
+			ctx.set_member_threat(unit_id, threat)
 
 
 func _issue_staggered_slot_orders(ctx: SquadNavContext) -> void:
@@ -945,10 +1061,20 @@ func _issue_staggered_slot_orders(ctx: SquadNavContext) -> void:
 
 	for offset: int in budget:
 		var index: int = (start + offset) % members.size()
-		var unit: Variant = members[index]
-		if not NodeSafety.is_alive_node(unit):
+		var unit_variant: Variant = members[index]
+		if (
+			unit_variant == null
+			or not is_instance_valid(unit_variant)
+			or not unit_variant is Node3D
+		):
 			continue
-		_issue_slot_order_for_unit(ctx, unit as Node3D)
+		var unit_node: Node3D = unit_variant as Node3D
+		if unit_node.is_queued_for_deletion():
+			continue
+		## Re-check squad membership / generation before applying staggered work.
+		if not ctx.contains_unit_id(unit_node.get_instance_id()):
+			continue
+		_issue_slot_order_for_unit(ctx, unit_node)
 
 
 func _collect_initial_orders(
@@ -961,16 +1087,21 @@ func _collect_initial_orders(
 	var budget: int = mini(ordered_units.size(), MAX_INITIAL_ORDERS)
 	for index: int in budget:
 		var unit: Variant = ordered_units[index]
-		if not NodeSafety.is_alive_node(unit):
+		if unit == null or not is_instance_valid(unit) or not unit is Node:
 			continue
-		var target: Vector3 = ctx.get_slot_world_position((unit as Node).get_instance_id())
+		if (unit as Node).is_queued_for_deletion():
+			continue
+		var unit_id: int = (unit as Node).get_instance_id()
+		var target: Vector3 = ctx.get_slot_world_position(unit_id)
 		orders.append({
-			"unit": unit,
+			"unit_id": unit_id,
+			"command_generation": ctx.command_generation,
+			"squad_id": ctx.squad_id,
 			"target": target,
 			"use_attack_move": use_attack_move,
 			"mission": mission,
 		})
-		ctx.last_issued_slots[(unit as Node).get_instance_id()] = target
+		ctx.last_issued_slots[unit_id] = target
 	return orders
 
 
@@ -1077,15 +1208,23 @@ func _recover_stalled_squad(ctx: SquadNavContext) -> void:
 	var members: Array = ctx.get_living_members()
 	var budget: int = mini(members.size(), UNIT_UPDATE_BUDGET_PER_SQUAD)
 	for index: int in budget:
-		var unit: Variant = members[index]
-		if NodeSafety.is_alive_node(unit) and unit is Node3D:
-			ctx.last_issued_slots.erase((unit as Node).get_instance_id())
-			_issue_slot_order_for_unit(ctx, unit as Node3D)
+		var unit_variant: Variant = members[index]
+		if (
+			unit_variant == null
+			or not is_instance_valid(unit_variant)
+			or not unit_variant is Node3D
+		):
+			continue
+		var unit_node: Node3D = unit_variant as Node3D
+		if unit_node.is_queued_for_deletion():
+			continue
+		ctx.last_issued_slots.erase(unit_node.get_instance_id())
+		_issue_slot_order_for_unit(ctx, unit_node)
 
 
 func _find_reusable_squad(equiv_signature: String) -> SquadNavContext:
 	for squad_id: Variant in _squads.keys():
-		var ctx: SquadNavContext = _squads[squad_id] as SquadNavContext
+		var ctx: SquadNavContext = _get_squad_context(int(squad_id))
 		if ctx == null:
 			continue
 		if ctx.equivalence_signature == equiv_signature:
@@ -1095,30 +1234,19 @@ func _find_reusable_squad(equiv_signature: String) -> SquadNavContext:
 
 func _bind_members(ctx: SquadNavContext, units: Array) -> void:
 	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit):
+		if unit == null or not is_instance_valid(unit) or not unit is Node:
 			continue
-		var unit_id: int = (unit as Node).get_instance_id()
+		var unit_node: Node = unit as Node
+		if unit_node.is_queued_for_deletion():
+			continue
+		var unit_id: int = unit_node.get_instance_id()
 		var existing_squad: int = int(_unit_to_squad.get(unit_id, -1))
 		if existing_squad >= 0 and existing_squad != ctx.squad_id:
-			_remove_unit_from_squad(unit_id, existing_squad)
+			_remove_unit_by_id(unit_id, &"rebind")
 		_unit_to_squad[unit_id] = ctx.squad_id
 		if not ctx.member_ids.has(unit_id):
 			ctx.member_ids.append(unit_id)
-
-
-func _remove_unit_from_squad(unit_id: int, squad_id: int) -> void:
-	_unit_to_squad.erase(unit_id)
-	var ctx: SquadNavContext = _squads.get(squad_id) as SquadNavContext
-	if ctx == null:
-		return
-	ctx.member_ids.erase(unit_id)
-	ctx.slot_locals.erase(unit_id)
-	ctx.final_arrival_slots.erase(unit_id)
-	ctx.member_threats.erase(unit_id)
-	ctx.last_issued_slots.erase(unit_id)
-	ctx.stalled_member_ids.erase(unit_id)
-	if ctx.member_count() <= 0:
-		_squads.erase(squad_id)
+		_watch_unit(unit_node)
 
 
 func _rebind_after_purge(ctx: SquadNavContext) -> void:
@@ -1129,19 +1257,36 @@ func _rebind_after_purge(ctx: SquadNavContext) -> void:
 		if int(_unit_to_squad[unit_id]) == ctx.squad_id and not ctx.member_ids.has(int(unit_id)):
 			stale.append(unit_id)
 	for unit_id: Variant in stale:
+		_report_stale_cleanup(
+			ctx.squad_id,
+			int(unit_id),
+			"_unit_to_squad",
+			ctx.command_generation,
+			&"prune"
+		)
 		_unit_to_squad.erase(unit_id)
+		_disconnect_unit_exit_handler(int(unit_id))
 
 
 func _dissolve_squad(squad_id: int) -> void:
-	var ctx: SquadNavContext = _squads.get(squad_id) as SquadNavContext
+	var ctx: SquadNavContext = _get_squad_context(squad_id)
 	if ctx == null:
 		_squads.erase(squad_id)
 		return
-	for unit_id: int in ctx.member_ids:
+	var member_snapshot: Array[int] = ctx.member_ids.duplicate()
+	for unit_id: int in member_snapshot:
 		_unit_to_squad.erase(unit_id)
+		_disconnect_unit_exit_handler(unit_id)
 		var node: Object = instance_from_id(unit_id)
 		if node != null and is_instance_valid(node) and node is Unit:
 			(node as Unit).clear_player_squad_command()
+	ctx.member_ids.clear()
+	ctx.slot_locals.clear()
+	ctx.final_arrival_slots.clear()
+	ctx.member_threats.clear()
+	ctx.last_issued_slots.clear()
+	ctx.stalled_member_ids.clear()
+	ctx.shared_threat_id = 0
 	_squads.erase(squad_id)
 
 
