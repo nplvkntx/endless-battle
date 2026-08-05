@@ -8,9 +8,49 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 
 ## Current task
 
-**PHASE 1 #3 (ready):** Remove or disable stub autoloads (audit #12). Match-reset verification is deterministic and `EnemyAttackPathDefense` is registered with `MatchSession`.
+**PHASE 1 #3 (in progress):** Remove unused `ProjectileManager` stub next (same pattern as Fog). `GameSettings` stays until cast-mode ownership is relocated.
 
 ## Completed tasks
+
+### 2026-08-05 — Remove obsolete FogOfWarManager stub autoload (audit PHASE 1 #3 / #12)
+
+| Field | Detail |
+|---|---|
+| **Audit phase** | PHASE 1 — Project Stability |
+| **Complete autoload classification** | See table below (20 registered autoloads after this change). |
+| **Exact stub removed** | `FogOfWarManager` registration removed from `project.godot`. Source `autoloads/fog_of_war_manager.gd` kept as documentation-only placeholder (signals + TODO; no runtime registration). |
+| **Evidence it was safe** | Repo-wide search of `.gd`/`.tscn`/`.yml`/`.sh`: **zero** callers of `FogOfWarManager` / `fog_of_war_manager` outside docs + former `project.godot` line. Script is `_ready() → pass` only; no match state, no reset registration, no scene dependency. |
+| **Root cause** | Production autoload advertised a commercial fog/visibility system that was never implemented, misleading architecture maps and inviting false assumptions. |
+| **Files changed** | `project.godot`, `AUDIT_PROGRESS.md` |
+| **Validation result** | Godot 4.7 headless `--import`: clean. `scripts/ci/validate_import.sh`: `VALIDATION PASS`. `verify_match_reset.tscn`: `PASS` (2 lifecycle cycles, registry=27). Post-change search: `FogOfWarManager` only in docs/`AUDIT_PROGRESS` (not in `project.godot`). |
+| **Remaining stubs** | `ProjectileManager` — confirmed no-op, **0** code refs (next removable). `GameSettings` — partial: real `hero_ability_cast_mode` API used by `HeroAbilityTargetingController` + verify harness; settings Resource TODO still empty — **do not remove** without relocating cast-mode ownership. |
+| **Next audit task** | Continue PHASE 1 #3 — unregister unused `ProjectileManager` stub (same evidence pattern). |
+
+#### Autoload classification (verified 2026-08-05)
+
+| Autoload | Classification | Notes |
+|---|---|---|
+| `GameSettings` | Partial / referenced | Cast-mode getters used; Resource load is TODO |
+| `ResourceManager` | Active | Player economy; many callers |
+| `EnemyResourceManager` | Active | Enemy economy |
+| `TechTree` | Active | Unlock gates |
+| `UpgradeManager` | Active | Upgrade application + reset |
+| `FormationManager` | Active | Full formation authority (~800 lines); not a stub |
+| `SharedSquadNavigation` | Active | Squad routing layer |
+| `InputManager` | Active | Attack-move/patrol arming + match reset |
+| `ControlGroupManager` | Active | Control groups |
+| `CommandFeedback` | Active | Order markers/FX |
+| `DeathEffects` | Active | Death FX pooling |
+| `ImpactEffects` | Active | Impact/trail FX (owns projectile VFX path) |
+| `FogOfWarManager` | **Removed (was stub)** | Unregistered; file kept for docs only |
+| `ProjectileManager` | Stub / unused | `_ready` pass; 0 callers — next removal |
+| `MatchSession` | Active | Match lifecycle + reset registry |
+| `EntityRegistry` | Active | Entity indexing |
+| `AIHeroMastery` | Active | Hero AI mastery |
+| `HeroAbilityTargetingController` | Active | Ability targeting UX |
+| `TooltipManager` | Active | Tooltip UI |
+| `PerfCounters` | Active (debug) | Perf counters written from hot paths |
+| `PerfDebugOverlay` | Active (debug) | Self-owned F3 overlay; gated to debug builds |
 
 ### 2026-08-05 — Deterministic match-reset verification + AttackPathDefense reset leak (audit PHASE 1 #2 / #11)
 
@@ -76,7 +116,7 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 |---|---|
 | **#10** Navigation verify log parse failures (`UnitNavigation`, `Unit`) | **Outdated** — `scripts/systems/unit_navigation.gd` has `class_name UnitNavigation`; headless verify passes in current tree. |
 | **#39** AIHeroMastery parser errors | **Resolved** in `6d562aa` (validated 2026-08-05). |
-| **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **Deferred** — stubs parse and boot; `GameSettings` is referenced by hero ability targeting. Removal is PHASE 1 #3, not a startup blocker. |
+| **#12** Stub autoloads (`GameSettings`, `FogOfWarManager`, `ProjectileManager`) | **In progress** — `FogOfWarManager` unregistered 2026-08-05. `ProjectileManager` still registered (unused stub). `GameSettings` is partial and referenced by hero ability targeting. |
 | **#63–64** Debug perf autoloads in production | **Deferred** — `PerfDebugOverlay` gates input on `OS.is_debug_build()`; not a parser/startup failure. |
 
 ## Validation history
@@ -97,11 +137,13 @@ Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Batt
 | 2026-08-05 | Strengthened `verify_match_reset` (2 lifecycle cycles, baseline compare) | `PASS` ×3 processes; registry=27 |
 | 2026-08-05 | Register `EnemyAttackPathDefense` match reset | Confirmed leak cleared (lane threat + preferred lane) |
 | 2026-08-05 | `validate_import.sh` after PHASE 1 #2 | `VALIDATION PASS` |
+| 2026-08-05 | Unregister `FogOfWarManager` stub | Import clean; `validate_import.sh` PASS; `verify_match_reset` PASS |
+| 2026-08-05 | Search `FogOfWarManager` after removal | Only docs / progress tracker; not in `project.godot` |
 
 ## Known blockers
 
-None for Phase 1 stability baseline — import CI is green; match-reset contract covers AttackPathDefense.
+None for Phase 1 stability baseline — import CI is green; match-reset contract covers AttackPathDefense. Remaining stub: `ProjectileManager`.
 
 ## Next task
 
-**PHASE 1 #3:** Remove or disable stub autoloads (audit #12). Do not expand scope into gameplay refactors.
+**PHASE 1 #3 (continue):** Remove unused `ProjectileManager` stub autoload. Do not remove `GameSettings` without relocating cast-mode ownership. Do not expand scope into gameplay refactors.
