@@ -248,6 +248,26 @@ func issue_formation_ground_order(
 			group.forward = face_dir.normalized()
 		group.ensure_slots_assigned()
 
+		if SharedSquadNavigation.is_shared_navigation_enabled():
+			var squad_result: Dictionary = SharedSquadNavigation.issue_formation_command(
+				int(fid),
+				members,
+				destination,
+				order_kind,
+				group
+			)
+			if squad_result.get("handled", false):
+				if not preview_shown:
+					show_preview(group)
+					preview_shown = true
+				for hero: Variant in heroes:
+					var follow: Vector3 = _hero_follow_world(hero as Hero, group)
+					_issue_unit_order(hero as Unit, follow, order_kind, queued, 0)
+					issued = true
+				heroes.clear()
+				issued = true
+				continue
+
 		if not preview_shown:
 			show_preview(group)
 			preview_shown = true
@@ -292,10 +312,32 @@ func issue_formation_ground_order(
 
 	# Unformed military in the same selection keep simple spacing around destination
 	if not unformed.is_empty():
-		var targets: Array[Vector3] = GroupMoveSpacing.compute_targets(destination, unformed.size())
-		for i: int in unformed.size():
-			_issue_unit_order(unformed[i] as Unit, targets[i], order_kind, queued, i)
-			issued = true
+		if (
+			SharedSquadNavigation.is_shared_navigation_enabled()
+			and unformed.size() > 1
+		):
+			var player_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
+				unformed,
+				destination,
+				order_kind,
+				queued
+			)
+			if player_result.get("handled", false):
+				issued = true
+			else:
+				var targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+					destination, unformed.size()
+				)
+				for i: int in unformed.size():
+					_issue_unit_order(unformed[i] as Unit, targets[i], order_kind, queued, i)
+					issued = true
+		else:
+			var targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+				destination, unformed.size()
+			)
+			for i: int in unformed.size():
+				_issue_unit_order(unformed[i] as Unit, targets[i], order_kind, queued, i)
+				issued = true
 
 	return issued
 

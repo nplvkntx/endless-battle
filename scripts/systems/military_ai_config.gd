@@ -26,6 +26,10 @@ extends RefCounted
 
 const USE_MILITARY_AI_V2: bool = true
 
+## Shared squad navigation: one strategic route per multi-unit command.
+## PRODUCTION DEFAULT: true — reduces per-unit repath storms for large armies.
+const USE_SHARED_SQUAD_NAVIGATION: bool = true
+
 ## V2 readiness thresholds.
 const V2_CREEP_READY_MILITARY_UNITS: int = 5
 ## Normal attack commit: living hero + this many non-hero military (10–12 band).
@@ -139,6 +143,10 @@ const V2_SQUAD_IDLE_SECONDS: float = 2.0
 
 static func is_v2_enabled() -> bool:
 	return USE_MILITARY_AI_V2
+
+
+static func is_shared_squad_nav_enabled() -> bool:
+	return USE_SHARED_SQUAD_NAVIGATION
 
 
 static func ai_version_label() -> String:

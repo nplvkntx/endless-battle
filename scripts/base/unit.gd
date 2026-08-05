@@ -550,6 +550,7 @@ func clear_move_target() -> void:
 
 ## Full stop: clears movement/navigation and the order queue. Combat subclasses also cancel orders.
 func stop_movement() -> void:
+	SharedSquadNavigation.release_unit(self)
 	if not _issuing_order:
 		_order_queue.clear()
 		_active_order = null

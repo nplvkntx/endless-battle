@@ -14,6 +14,10 @@ const KEY_AI_DECISION_UPDATES := &"ai_decision_updates"
 const KEY_AI_ORDERS := &"ai_orders"
 const KEY_REPATH_REQUESTS := &"repath_requests"
 const KEY_TARGET_SEARCHES := &"target_searches"
+const KEY_SQUAD_STRATEGIC_ROUTES := &"squad_strategic_routes"
+const KEY_SQUAD_LOCAL_REPATHS := &"squad_local_repaths"
+const KEY_SQUAD_ROUTE_CACHE_HITS := &"squad_route_cache_hits"
+const KEY_SQUAD_STALLS := &"squad_stalls"
 
 const FPS_SAMPLE_WINDOW_SECONDS := 3.0
 const WARN_FPS_THRESHOLD := 30.0
@@ -70,6 +74,10 @@ var _last_excessive_warn_msec: Dictionary = {}
 var _peak_rates: Dictionary = {}
 var _last_section_warn_msec: Dictionary = {}
 var verbose_ai_logging: bool = false
+var _squad_nav_enabled: bool = false
+var _squad_nav_active_squads: int = 0
+var _squad_nav_member_count: int = 0
+var _squad_nav_stalls: int = 0
 
 
 func _ready() -> void:
@@ -116,6 +124,51 @@ func record_navigation_path_request() -> void:
 func record_repath_request() -> void:
 	## Alias kept for call sites that decide a repath without going through UnitNavigation.
 	record_navigation_path_request()
+
+
+func record_squad_strategic_route() -> void:
+	bump(KEY_SQUAD_STRATEGIC_ROUTES)
+
+
+func record_squad_local_repath() -> void:
+	bump(KEY_SQUAD_LOCAL_REPATHS)
+	bump(KEY_REPATH_REQUESTS)
+
+
+func record_squad_route_cache_hit() -> void:
+	bump(KEY_SQUAD_ROUTE_CACHE_HITS)
+
+
+func record_squad_stall() -> void:
+	bump(KEY_SQUAD_STALLS)
+
+
+func set_squad_nav_status(
+	enabled: bool,
+	active_squads: int,
+	member_count: int,
+	stall_count: int
+) -> void:
+	_squad_nav_enabled = enabled
+	_squad_nav_active_squads = maxi(0, active_squads)
+	_squad_nav_member_count = maxi(0, member_count)
+	_squad_nav_stalls = maxi(0, stall_count)
+
+
+func is_squad_nav_enabled() -> bool:
+	return _squad_nav_enabled
+
+
+func get_squad_nav_active_squads() -> int:
+	return _squad_nav_active_squads
+
+
+func get_squad_nav_member_count() -> int:
+	return _squad_nav_member_count
+
+
+func get_squad_nav_stalls() -> int:
+	return _squad_nav_stalls
 
 
 func record_ai_economy_update() -> void:
@@ -543,6 +596,10 @@ func reset_all() -> void:
 	_military_ai_v2_last_order_time = "-"
 	_military_ai_v2_last_mission_change = "-"
 	_military_ai_v2_idle_time = 0.0
+	_squad_nav_enabled = MilitaryAIConfig.is_shared_squad_nav_enabled()
+	_squad_nav_active_squads = 0
+	_squad_nav_member_count = 0
+	_squad_nav_stalls = 0
 	_fps_samples.clear()
 	_fps_sample_times.clear()
 	_fps_sample_elapsed = 0.0

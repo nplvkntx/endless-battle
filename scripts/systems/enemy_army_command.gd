@@ -5279,6 +5279,43 @@ static func _issue_spaced_group_orders(
 			PerfCounters.warn_duplicate_group_order()
 			return
 
+	if MilitaryAIConfig.is_shared_squad_nav_enabled() and ordered_units.size() > 1:
+		var squad_result: Dictionary = SharedSquadNavigation.issue_group_command(
+			ordered_units,
+			center,
+			use_attack_move,
+			int(mission),
+			_group_order_generation + 1
+		)
+		if squad_result.get("handled", false):
+			if squad_result.get("equivalent_skip", false):
+				_record_group_order_signature(ordered_units, center, mission, use_attack_move)
+				return
+			var squad_pending: Array = squad_result.get("pending_orders", [])
+			_record_group_order_signature(ordered_units, center, mission, use_attack_move)
+			if squad_pending.is_empty():
+				return
+			var wrapped: Array = []
+			for entry: Variant in squad_pending:
+				if not entry is Dictionary:
+					continue
+				var order: Dictionary = entry
+				var unit: Variant = order.get("unit")
+				var target: Vector3 = order.get("target", Vector3.ZERO)
+				wrapped.append({
+					"unit": unit,
+					"target": target,
+					"use_attack_move": bool(order.get("use_attack_move", use_attack_move)),
+					"mission": order.get("mission", mission),
+					"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
+					"priority": _mission_order_priority(mission),
+				})
+			var had_pending: bool = not _pending_group_orders.is_empty()
+			_enqueue_pending_group_orders(wrapped)
+			if not had_pending and not _issuing_group_order_batch:
+				tick_group_order_batch(null)
+			return
+
 	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
 		ordered_units,
 		center,

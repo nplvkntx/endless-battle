@@ -530,6 +530,10 @@ func get_acquisition_range() -> float:
 
 func _find_auto_acquire_target() -> Node3D:
 	var search_range: float = get_acquisition_range()
+	if SharedSquadNavigation.is_shared_navigation_enabled():
+		var squad_target: Node3D = SharedSquadNavigation.try_get_assigned_target(self)
+		if squad_target != null:
+			return squad_target
 	if CombatTargetValidation.is_enemy_faction(self):
 		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 			self, search_range
@@ -551,6 +555,10 @@ func _find_closest_attack_target_in_range() -> Node3D:
 
 func _find_engagement_target_in_range() -> Node3D:
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	if SharedSquadNavigation.is_shared_navigation_enabled():
+		var squad_target: Node3D = SharedSquadNavigation.try_get_assigned_target(self)
+		if squad_target != null:
+			return squad_target
 	if CombatTargetValidation.is_enemy_faction(self):
 		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 			self, search_range
