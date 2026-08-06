@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/debug/verify_building_selection_ui_freed_instance.gd" id="1"]
+
+[node name="VerifyBuildingSelectionUiFreedInstance" type="Node"]
+script = ExtResource("1")

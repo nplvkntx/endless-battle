@@ -53,7 +53,10 @@ func _on_selection_changed(_units: Array[Unit]) -> void:
 	_refresh_frame_visibility()
 
 
-func _on_building_selection_changed(building: Building) -> void:
+func _on_building_selection_changed(building_ref: Variant = null) -> void:
+	var building: Building = null
+	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+		building = building_ref as Building
 	_track_selected_building(building)
 	_refresh_frame_visibility()
 
@@ -68,9 +71,10 @@ func _on_legacy_command_panel_visibility_changed() -> void:
 	_refresh_frame_visibility()
 
 
-func _track_selected_building(building: Building) -> void:
-	if building != null and not is_instance_valid(building):
-		building = null
+func _track_selected_building(building_ref: Variant = null) -> void:
+	var building: Building = null
+	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+		building = building_ref as Building
 
 	if _tracked_building == building:
 		return

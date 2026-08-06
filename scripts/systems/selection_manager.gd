@@ -39,6 +39,7 @@ var _inspected_building_handle: EntityHandle = EntityHandle.empty()
 var _unit_tree_exiting_handlers: Dictionary = {}
 var _inspected_building_destroyed_handler: Callable = Callable()
 var _selected_building_destroyed_handler: Callable = Callable()
+var _selected_building_tree_exiting_handler: Callable = Callable()
 var _selection_purge_timer: float = 0.0
 const SELECTION_PURGE_INTERVAL := 0.1
 
@@ -1114,6 +1115,7 @@ func _set_selected_building(building: Building) -> void:
 	selected_building = building
 	_selected_building_handle = EntityHandle.from_node(building)
 	_connect_selected_building_destroyed(building)
+	_connect_selected_building_tree_exiting(building)
 	if _is_selectable_building(selected_building):
 		_safe_set_building_selected(selected_building, true)
 	building_selection_changed.emit(selected_building)
@@ -1125,17 +1127,11 @@ func _clear_building_selection() -> void:
 	if building_ref == null:
 		return
 
-	_clear_building_selection_without_signal()
-	building_selection_changed.emit(null)
+	_clear_selected_building_reference(true)
 
 
 func _clear_building_selection_without_signal() -> void:
-	_disconnect_selected_building_destroyed()
-	var building_ref: Variant = selected_building
-	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
-		_safe_set_building_selected(building_ref, false)
-	selected_building = null
-	_selected_building_handle = EntityHandle.empty()
+	_clear_selected_building_reference(false)
 
 
 func _clear_selection_without_signal() -> void:
@@ -1293,10 +1289,7 @@ func _purge_invalid_selected_building() -> void:
 		_selected_building_handle = EntityHandle.from_node(building_ref)
 		return
 
-	_disconnect_selected_building_destroyed()
-	selected_building = null
-	_selected_building_handle = EntityHandle.empty()
-	building_selection_changed.emit(null)
+	_clear_selected_building_reference(true)
 
 
 func _purge_invalid_inspection() -> void:
@@ -1486,6 +1479,18 @@ func _connect_selected_building_destroyed(building: Building) -> void:
 		building.destroyed.connect(_selected_building_destroyed_handler, CONNECT_ONE_SHOT)
 
 
+func _connect_selected_building_tree_exiting(building: Building) -> void:
+	_disconnect_selected_building_tree_exiting()
+	if building == null or not is_instance_valid(building):
+		return
+
+	_selected_building_tree_exiting_handler = _on_selected_building_tree_exiting.bind(
+		building.get_instance_id()
+	)
+	if not building.tree_exiting.is_connected(_selected_building_tree_exiting_handler):
+		building.tree_exiting.connect(_selected_building_tree_exiting_handler, CONNECT_ONE_SHOT)
+
+
 func _disconnect_selected_building_destroyed() -> void:
 	if not _selected_building_destroyed_handler.is_valid():
 		_selected_building_destroyed_handler = Callable()
@@ -1504,11 +1509,49 @@ func _disconnect_selected_building_destroyed() -> void:
 	_selected_building_destroyed_handler = Callable()
 
 
+func _disconnect_selected_building_tree_exiting() -> void:
+	if not _selected_building_tree_exiting_handler.is_valid():
+		_selected_building_tree_exiting_handler = Callable()
+		return
+
+	var building_ref: Variant = selected_building
+	if (
+		building_ref != null
+		and is_instance_valid(building_ref)
+		and building_ref is Building
+		and (building_ref as Building).tree_exiting.is_connected(_selected_building_tree_exiting_handler)
+	):
+		(building_ref as Building).tree_exiting.disconnect(_selected_building_tree_exiting_handler)
+
+	_selected_building_tree_exiting_handler = Callable()
+
+
 func _on_selected_building_destroyed(_building: Building) -> void:
 	_selected_building_destroyed_handler = Callable()
+	_clear_selected_building_reference(true)
+
+
+func _on_selected_building_tree_exiting(expected_instance_id: int) -> void:
+	_selected_building_tree_exiting_handler = Callable()
+	if (
+		_selected_building_handle == null
+		or _selected_building_handle.instance_id != expected_instance_id
+	):
+		return
+
+	_clear_selected_building_reference(true)
+
+
+func _clear_selected_building_reference(emit_signal: bool) -> void:
+	_disconnect_selected_building_destroyed()
+	_disconnect_selected_building_tree_exiting()
+	var building_ref: Variant = selected_building
+	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
+		_safe_set_building_selected(building_ref, false)
 	selected_building = null
 	_selected_building_handle = EntityHandle.empty()
-	building_selection_changed.emit(null)
+	if emit_signal:
+		building_selection_changed.emit(null)
 
 
 func _filter_selectable_units(units: Array[Unit]) -> Array[Unit]:
@@ -1876,10 +1919,7 @@ func _on_entity_unregistered(instance_id: int, _category: int, _team_id: int) ->
 		_selected_building_handle != null
 		and _selected_building_handle.instance_id == instance_id
 	):
-		_disconnect_selected_building_destroyed()
-		selected_building = null
-		_selected_building_handle = EntityHandle.empty()
-		building_selection_changed.emit(null)
+		_clear_selected_building_reference(true)
 
 	if (
 		_inspected_unit_handle != null

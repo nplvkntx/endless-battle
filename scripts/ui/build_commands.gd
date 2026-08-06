@@ -1374,8 +1374,9 @@ func _cancel_production_units(train_id: StringName, cancel_amount: int) -> void:
 	elif train_id == CommandCenter.TRAIN_ID_WORKER:
 		_cancel_worker_units(cancel_amount)
 	elif train_id == &"hero":
-		if _selected_hero_altar != null:
-			_selected_hero_altar.cancel_hero_training()
+		var hero_altar: HeroAltar = _require_selected_hero_altar()
+		if hero_altar != null:
+			hero_altar.cancel_hero_training()
 
 
 func _cancel_barracks_unit_type(barracks: Barracks, train_id: StringName, cancel_amount: int) -> void:
@@ -2093,9 +2094,13 @@ func _set_town_center_button_labels() -> void:
 
 func _update_town_center_button_labels() -> void:
 	var label: String = _train_worker_base_label
+	var command_center_ref: Variant = _selected_command_center
 	if (
-		_selected_command_center != null
-		and _selected_command_center.is_repeat_training_enabled(CommandCenter.TRAIN_ID_WORKER)
+		NodeSafety.is_alive_node(command_center_ref)
+		and command_center_ref is CommandCenter
+		and (command_center_ref as CommandCenter).is_repeat_training_enabled(
+			CommandCenter.TRAIN_ID_WORKER
+		)
 	):
 		label += " [Repeat: ON]"
 	_train_worker_button.text = label
@@ -2105,12 +2110,14 @@ func _update_barracks_button_labels() -> void:
 	var spearman_label: String = _train_spearman_base_label
 	var swordsman_label: String = _train_swordsman_base_label
 	var archer_label: String = _train_archer_base_label
-	if _selected_barracks != null:
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
+	var barracks_ref: Variant = _selected_barracks
+	if NodeSafety.is_alive_node(barracks_ref) and barracks_ref is Barracks:
+		var barracks: Barracks = barracks_ref as Barracks
+		if barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SPEARMAN):
 			spearman_label += " [Repeat: ON]"
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
+		if barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_SWORDSMAN):
 			swordsman_label += " [Repeat: ON]"
-		if _selected_barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
+		if barracks.is_repeat_training_enabled(Barracks.TRAIN_ID_ARCHER):
 			archer_label += " [Repeat: ON]"
 	_train_spearman_button.text = spearman_label
 	_train_swordsman_button.text = swordsman_label
@@ -2122,10 +2129,12 @@ func _update_auto_training_label() -> void:
 		return
 
 	var auto_training_name: String = ""
-	if _is_active_command_center(_selected_command_center):
-		auto_training_name = _selected_command_center.get_repeat_unit_display_name()
-	elif _is_active_selected_building(_selected_barracks):
-		auto_training_name = _selected_barracks.get_repeat_unit_display_name()
+	var command_center_ref: Variant = _selected_command_center
+	var barracks_ref: Variant = _selected_barracks
+	if _is_active_command_center(command_center_ref):
+		auto_training_name = (command_center_ref as CommandCenter).get_repeat_unit_display_name()
+	elif _is_active_selected_building(barracks_ref):
+		auto_training_name = (barracks_ref as Barracks).get_repeat_unit_display_name()
 
 	if auto_training_name.is_empty():
 		_auto_training_label.visible = false
@@ -2357,19 +2366,19 @@ func _get_authoritative_selected_building() -> Building:
 	return building_ref as Building
 
 
-func _is_active_selected_building(building: Building) -> bool:
-	if not NodeSafety.is_alive_node(building):
+func _is_active_selected_building(building_ref: Variant) -> bool:
+	if not NodeSafety.is_alive_node(building_ref) or not building_ref is Building:
 		return false
 
-	return _get_authoritative_selected_building() == building
+	return _get_authoritative_selected_building() == building_ref
 
 
-func _is_active_command_center(command_center: CommandCenter) -> bool:
-	if not NodeSafety.is_alive_node(command_center):
+func _is_active_command_center(command_center_ref: Variant) -> bool:
+	if not NodeSafety.is_alive_node(command_center_ref) or not command_center_ref is CommandCenter:
 		return false
 
 	var selected_building: Building = _get_authoritative_selected_building()
-	return selected_building is CommandCenter and selected_building == command_center
+	return selected_building is CommandCenter and selected_building == command_center_ref
 
 
 func _alive_selected_building(building: Variant) -> bool:
@@ -2408,17 +2417,31 @@ func _clear_selected_building_caches() -> void:
 
 ## Resolve typed selection caches from SelectionManager for this refresh only.
 func _sync_selected_building_caches() -> Building:
+	_clear_selected_building_caches()
 	var building: Building = _get_authoritative_selected_building()
+	if building == null:
+		return null
+
 	_selected_building_handle = EntityHandle.from_node(building)
-	_selected_command_center = building as CommandCenter if building is CommandCenter else null
-	_selected_barracks = building as Barracks if building is Barracks else null
-	_selected_blacksmith = building as Blacksmith if building is Blacksmith else null
-	_selected_shop = building as Shop if building is Shop else null
-	_selected_hero_altar = building as HeroAltar if building is HeroAltar else null
-	_selected_stable = building as Stable if building is Stable else null
-	_selected_artillery_depot = building as ArtilleryDepot if building is ArtilleryDepot else null
-	_selected_academy = building as Academy if building is Academy else null
-	_selected_wall_segment = building as WallSegment if building is WallSegment else null
+	## Assign only after Variant validation; never copy a stale typed Object field.
+	if building is CommandCenter:
+		_selected_command_center = building as CommandCenter
+	if building is Barracks:
+		_selected_barracks = building as Barracks
+	if building is Blacksmith:
+		_selected_blacksmith = building as Blacksmith
+	if building is Shop:
+		_selected_shop = building as Shop
+	if building is HeroAltar:
+		_selected_hero_altar = building as HeroAltar
+	if building is Stable:
+		_selected_stable = building as Stable
+	if building is ArtilleryDepot:
+		_selected_artillery_depot = building as ArtilleryDepot
+	if building is Academy:
+		_selected_academy = building as Academy
+	if building is WallSegment:
+		_selected_wall_segment = building as WallSegment
 	return building
 
 
@@ -2951,6 +2974,7 @@ func _on_execute_upgrade_pressed() -> void:
 
 func _on_building_selection_changed(building_ref: Variant = null) -> void:
 	_disconnect_all_building_tracking()
+	_clear_selected_building_caches()
 
 	var building: Building = null
 	if NodeSafety.is_alive_node(building_ref) and building_ref is Building:
@@ -2959,27 +2983,28 @@ func _on_building_selection_changed(building_ref: Variant = null) -> void:
 	_sync_selected_building_caches()
 
 	if building is CommandCenter and is_instance_valid(building):
-		_selected_command_center = building as CommandCenter
-		if not _selected_command_center.building_state_changed.is_connected(
+		var command_center: CommandCenter = building as CommandCenter
+		_selected_command_center = command_center
+		if not command_center.building_state_changed.is_connected(
 			_on_command_center_building_state_changed
 		):
-			_selected_command_center.building_state_changed.connect(
+			command_center.building_state_changed.connect(
 				_on_command_center_building_state_changed
 			)
 		if (
-			_selected_command_center.has_signal("construction_completed")
-			and not _selected_command_center.construction_completed.is_connected(
+			command_center.has_signal("construction_completed")
+			and not command_center.construction_completed.is_connected(
 				_on_command_center_construction_completed
 			)
 		):
-			_selected_command_center.construction_completed.connect(
+			command_center.construction_completed.connect(
 				_on_command_center_construction_completed
 			)
-		_selected_command_center.worker_queue_changed.connect(_on_worker_queue_changed)
-		_selected_command_center.repeat_state_changed.connect(_on_production_repeat_state_changed)
-		if not _selected_command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
-			_selected_command_center.tier_state_changed.connect(_on_command_center_tier_state_changed)
-		_on_worker_queue_changed(_selected_command_center.get_worker_queue_count())
+		command_center.worker_queue_changed.connect(_on_worker_queue_changed)
+		command_center.repeat_state_changed.connect(_on_production_repeat_state_changed)
+		if not command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
+			command_center.tier_state_changed.connect(_on_command_center_tier_state_changed)
+		_on_worker_queue_changed(command_center.get_worker_queue_count())
 		_set_town_center_button_labels()
 		_update_town_center_button_labels()
 	else:
@@ -3335,7 +3360,9 @@ func _refresh_command_visibility() -> void:
 	# Keep CC tracking while an unfinished Town Hall stays selected so completion can refresh UI.
 	if selected_building is CommandCenter and is_instance_valid(selected_building):
 		_selected_command_center = selected_building as CommandCenter
-	elif _selected_command_center != null:
+	elif not NodeSafety.is_alive_node(_selected_command_center):
+		_selected_command_center = null
+	elif not (selected_building is CommandCenter):
 		_disconnect_worker_queue_signal()
 
 	var multi_worker_selection: bool = false
@@ -4276,32 +4303,34 @@ func _on_production_repeat_state_changed() -> void:
 
 
 func _disconnect_worker_queue_signal() -> void:
-	if _selected_command_center != null and is_instance_valid(_selected_command_center):
-		if _selected_command_center.building_state_changed.is_connected(
+	var command_center_ref: Variant = _selected_command_center
+	if NodeSafety.is_alive_node(command_center_ref) and command_center_ref is CommandCenter:
+		var command_center: CommandCenter = command_center_ref as CommandCenter
+		if command_center.building_state_changed.is_connected(
 			_on_command_center_building_state_changed
 		):
-			_selected_command_center.building_state_changed.disconnect(
+			command_center.building_state_changed.disconnect(
 				_on_command_center_building_state_changed
 			)
 
 		if (
-			_selected_command_center.has_signal("construction_completed")
-			and _selected_command_center.construction_completed.is_connected(
+			command_center.has_signal("construction_completed")
+			and command_center.construction_completed.is_connected(
 				_on_command_center_construction_completed
 			)
 		):
-			_selected_command_center.construction_completed.disconnect(
+			command_center.construction_completed.disconnect(
 				_on_command_center_construction_completed
 			)
 
-		if _selected_command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
-			_selected_command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
+		if command_center.worker_queue_changed.is_connected(_on_worker_queue_changed):
+			command_center.worker_queue_changed.disconnect(_on_worker_queue_changed)
 
-		if _selected_command_center.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
-			_selected_command_center.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
+		if command_center.repeat_state_changed.is_connected(_on_production_repeat_state_changed):
+			command_center.repeat_state_changed.disconnect(_on_production_repeat_state_changed)
 
-		if _selected_command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
-			_selected_command_center.tier_state_changed.disconnect(_on_command_center_tier_state_changed)
+		if command_center.tier_state_changed.is_connected(_on_command_center_tier_state_changed):
+			command_center.tier_state_changed.disconnect(_on_command_center_tier_state_changed)
 
 	_selected_command_center = null
 

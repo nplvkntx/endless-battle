@@ -19,6 +19,7 @@ func _ready() -> void:
 	await _verify_handle_resolve_and_clear(failures)
 	await _verify_registry_unregister_on_death(failures)
 	await _verify_selection_clears_on_unregister(failures)
+	await _verify_selection_clears_on_tree_exit(failures)
 	await _verify_hero_store_handle_separation(failures)
 	_verify_mission_target_handle(failures)
 
@@ -108,6 +109,35 @@ func _verify_selection_clears_on_unregister(failures: PackedStringArray) -> void
 	var handle: EntityHandle = selection.call("get_selected_building_handle") as EntityHandle
 	if handle != null and not handle.is_empty() and handle.resolve() != null:
 		failures.append("selection building handle still resolves after destroy")
+
+	selection.queue_free()
+
+
+func _verify_selection_clears_on_tree_exit(failures: PackedStringArray) -> void:
+	var selection: Node = SELECTION_MANAGER_SCRIPT.new()
+	add_child(selection)
+	await get_tree().process_frame
+
+	var building: Building = FARM_SCENE.instantiate() as Building
+	add_child(building)
+	building.team_id = PLAYER_TEAM_ID
+	building.start_under_construction()
+	building.setup_construction(10.0)
+	await get_tree().process_frame
+
+	selection.call("_set_selected_building", building)
+	if selection.get("selected_building") != building:
+		failures.append("selection did not track under-construction building")
+
+	building.refund_and_cancel_construction()
+	await get_tree().process_frame
+
+	if selection.get("selected_building") != null:
+		failures.append("selection kept building through tree exit cancel")
+
+	var handle: EntityHandle = selection.call("get_selected_building_handle") as EntityHandle
+	if handle != null and not handle.is_empty():
+		failures.append("selection building handle not cleared on tree exit")
 
 	selection.queue_free()
 
