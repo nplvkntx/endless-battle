@@ -19,14 +19,11 @@ signal died(unit: Unit)
 const UNSTUCK_STUCK_MOVE_RATIO := 0.2
 ## Stuck only after no meaningful goal-progress for this long (not frame jitter).
 const UNSTUCK_CONFIRM_SECONDS := 1.6
-## Player corridor congestion is normal — require sustained lack of route progress.
-const UNSTUCK_PLAYER_CORRIDOR_CONFIRM_SECONDS := 3.5
 const UNSTUCK_DETOUR_START_DELAY := 0.35
 const UNSTUCK_DETOUR_COMMIT_TIME := 0.75
 const UNSTUCK_DETOUR_MAX_TIME := 2.0
 const UNSTUCK_MAX_SIDE_FLIPS := 1
-## Detour must remain mostly forward; sideways peel is a last resort.
-const UNSTUCK_LATERAL_FORWARD_BLEND := 0.55
+const UNSTUCK_LATERAL_FORWARD_BLEND := 0.12
 const UNSTUCK_PROBE_DISTANCE := 2.5
 const UNSTUCK_PATH_CHECK_DISTANCE := 3.0
 const UNSTUCK_RECOVERY_COOLDOWN_SECONDS := 1.5
@@ -47,20 +44,6 @@ const REPATH_COOLDOWN_URGENT_SECONDS := 0.55
 const REPATH_COOLDOWN_STUCK_SECONDS := 1.0
 const REPATH_STAGGER_OFFSET_SECONDS := 0.14
 const PATH_VALIDITY_CHECK_INTERVAL := 0.7
-## No goal-closing progress → same-destination NavigationAgent refresh.
-## Reproduces what a player second click does: discard stale local path only.
-const LOCAL_STALL_CONFIRM_SECONDS := 1.25
-## Goal distance must improve by at least this much to count as progress.
-const LOCAL_STALL_PROGRESS_EPSILON := 0.35
-const LOCAL_STALL_MAX_REPATHS := 4
-const LOCAL_STALL_COOLDOWN_SECONDS := 0.85
-## Low-level physical corner/wall slide (not navigation authority).
-const CORNER_SLIDE_ENTER_MOVE_RATIO := 0.22
-const CORNER_SLIDE_BLOCK_DOT := 0.15
-const CORNER_SLIDE_SIDE_LOCK_SECONDS := 0.55
-const CORNER_SLIDE_MAX_SECONDS := 0.75
-const CORNER_SLIDE_PROGRESS_EPSILON := 0.12
-const CORNER_SLIDE_MIN_DEST_SCORE := 0.05
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
@@ -121,18 +104,6 @@ var _stuck_recovery_stage: int = 0
 var _stuck_progress_anchor_distance: float = -1.0
 var _crowd_yield_seconds: float = 0.0
 var _original_move_destination: Vector3 = Vector3.ZERO
-var _local_stall_time: float = 0.0
-var _local_stall_best_remaining: float = -1.0
-var _local_stall_repath_count: int = 0
-var _local_stall_cooldown: float = 0.0
-## Temporary physical slide around static building/world corners.
-var _corner_slide_active: bool = false
-var _corner_slide_dir: Vector3 = Vector3.ZERO
-var _corner_slide_normal: Vector3 = Vector3.ZERO
-var _corner_slide_timer: float = 0.0
-var _corner_slide_side_lock: float = 0.0
-var _corner_slide_best_goal_dist: float = -1.0
-var _dbg_corner_slide_desired_dir: Vector3 = Vector3.ZERO
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _chase_update_timer: float = 0.0
@@ -159,13 +130,11 @@ var _blocked_arrival_time: float = 0.0
 var _movement_generation: int = 0
 var _nav_velocity_request_generation: int = -1
 var _arrival_completed_generation: int = -1
-## Authoritative player route-command token from PlayerRouteNavigation.
+## Authoritative player group-command token from SharedSquadNavigation.
 var _player_squad_command_generation: int = -1
 var _player_squad_clicked_destination: Vector3 = Vector3.ZERO
 var _player_squad_final_arrival: Vector3 = Vector3.ZERO
 var _player_squad_command_type: StringName = &""
-var _player_route_id: int = -1
-var _player_route_waypoint_index: int = 0
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -174,17 +143,6 @@ var _issuing_order: bool = false
 
 ## Combat stealth — skipped by auto-targeting; area damage and manual orders still work.
 var _combat_hidden: bool = false
-
-## Temporary single-unit movement execution diagnostics (read by path/F3 overlays).
-var _dbg_desired_velocity: Vector3 = Vector3.ZERO
-var _dbg_avoidance_velocity: Vector3 = Vector3.ZERO
-var _dbg_separation_correction: Vector3 = Vector3.ZERO
-var _dbg_final_velocity: Vector3 = Vector3.ZERO
-var _dbg_formation_correction_ran: bool = false
-var _dbg_stall_recovery_ran: bool = false
-var _dbg_target_change_reason: String = ""
-var _dbg_nav_next_path_position: Vector3 = Vector3.ZERO
-var _dbg_repath_timer: float = 0.0
 
 
 func is_combat_hidden() -> bool:
@@ -467,9 +425,8 @@ func _start_order(order: UnitOrder) -> bool:
 
 
 ## Override to cancel attack / hold / patrol / gather before a replacement order.
-## Always detaches this unit from any prior player group route (individual command rule).
 func _prepare_for_new_player_order() -> void:
-	_detach_from_player_group_movement()
+	pass
 
 
 ## Worker override: promote in-progress gather/build into `_active_order` for Shift-append.
@@ -598,7 +555,7 @@ func clear_move_target() -> void:
 
 ## Full stop: clears movement/navigation and the order queue. Combat subclasses also cancel orders.
 func stop_movement() -> void:
-	_detach_from_player_group_movement()
+	SharedSquadNavigation.release_unit(self)
 	if not _issuing_order:
 		_order_queue.clear()
 		_active_order = null
@@ -635,9 +592,6 @@ func get_move_separation_blend() -> float:
 	remaining.y = 0.0
 	if remaining.length() <= ARRIVAL_SEPARATION_MUTE_DISTANCE:
 		return 0.0
-	## Route following owns direction; separation is a whisper only.
-	if is_player_route_travel_active():
-		return UnitSeparation.MOVE_BLEND * 0.35
 	return UnitSeparation.MOVE_BLEND
 
 
@@ -645,85 +599,31 @@ func get_movement_generation() -> int:
 	return _movement_generation
 
 
-func _detach_from_player_group_movement() -> void:
-	PlayerRouteNavigation.detach_unit_from_group_state(self)
-	SharedSquadNavigation.release_unit(self)
-
-
-func bind_player_route_command(
-	generation: int,
-	route_id: int,
-	waypoint_index: int,
-	clicked_destination: Vector3,
-	final_arrival: Vector3,
-	command_type: StringName
-) -> void:
-	_player_squad_command_generation = generation
-	_player_route_id = route_id
-	_player_route_waypoint_index = waypoint_index
-	_player_squad_clicked_destination = clicked_destination
-	_player_squad_final_arrival = final_arrival
-	_player_squad_command_type = command_type
-	if final_arrival.length_squared() > 0.0001:
-		_original_move_destination = Vector3(
-			final_arrival.x,
-			global_position.y,
-			final_arrival.z
-		)
-
-
-## Legacy name kept for SharedSquadNavigation AI/debug callers.
 func bind_player_squad_command(
 	generation: int,
 	clicked_destination: Vector3,
 	final_arrival: Vector3,
 	command_type: StringName
 ) -> void:
-	bind_player_route_command(
-		generation,
-		-1,
-		0,
-		clicked_destination,
-		final_arrival,
-		command_type
-	)
+	_player_squad_command_generation = generation
+	_player_squad_clicked_destination = clicked_destination
+	_player_squad_final_arrival = final_arrival
+	_player_squad_command_type = command_type
 
 
-func clear_player_route_command() -> void:
+func clear_player_squad_command() -> void:
 	_player_squad_command_generation = -1
-	_player_route_id = -1
-	_player_route_waypoint_index = 0
 	_player_squad_clicked_destination = Vector3.ZERO
 	_player_squad_final_arrival = Vector3.ZERO
 	_player_squad_command_type = &""
 
 
-func clear_player_squad_command() -> void:
-	clear_player_route_command()
-
-
-func matches_player_route_command(generation: int) -> bool:
-	return generation >= 0 and _player_squad_command_generation == generation
-
-
 func matches_player_squad_command(generation: int) -> bool:
-	return matches_player_route_command(generation)
+	return generation >= 0 and _player_squad_command_generation == generation
 
 
 func get_player_squad_command_generation() -> int:
 	return _player_squad_command_generation
-
-
-func get_player_route_id() -> int:
-	return _player_route_id
-
-
-func get_player_route_waypoint_index() -> int:
-	return _player_route_waypoint_index
-
-
-func set_player_route_waypoint_index(index: int) -> void:
-	_player_route_waypoint_index = maxi(0, index)
 
 
 func get_player_squad_final_arrival() -> Vector3:
@@ -732,146 +632,6 @@ func get_player_squad_final_arrival() -> Vector3:
 
 func get_player_squad_clicked_destination() -> Vector3:
 	return _player_squad_clicked_destination
-
-
-## True while following a validated shared route (not yet settled on final).
-func is_player_route_travel_active() -> bool:
-	if _player_squad_command_generation < 0:
-		return false
-	if _player_squad_final_arrival.length_squared() < 0.0001:
-		return false
-	if not PlayerRouteNavigation.is_unit_on_active_route(self):
-		return false
-	var to_final: Vector3 = _player_squad_final_arrival - global_position
-	to_final.y = 0.0
-	return to_final.length() > get_soft_arrival_radius() * 1.5
-
-
-func is_player_corridor_travel_active() -> bool:
-	## Intermediate shared-corridor travel only — not worker individual / final settle.
-	if not is_player_route_travel_active():
-		return false
-	return PlayerRouteNavigation.is_following_shared_corridor(self)
-
-
-## Debug-only snapshot for ONE selected unit (path overlay / F3). Cheap to call.
-func get_movement_execution_debug() -> Dictionary:
-	var remaining: Vector3 = _movement_target - global_position
-	remaining.y = 0.0
-	var actual_speed: float = Vector3(velocity.x, 0.0, velocity.z).length()
-	var shared_wp: int = _player_route_waypoint_index
-	var travel_offset: Vector3 = Vector3.ZERO
-	var waypoint_passed: bool = PlayerRouteNavigation.unit_has_passed_current_guide(self)
-	var cooldown_left: float = 0.0
-	if _last_path_request_msec > 0:
-		cooldown_left = maxf(
-			0.0,
-			REPATH_COOLDOWN_NORMAL_SECONDS
-			- float(Time.get_ticks_msec() - _last_path_request_msec) / 1000.0
-		)
-	_dbg_repath_timer = cooldown_left
-	var movement_state: String = "idle"
-	if _corner_slide_active:
-		movement_state = "corner_slide"
-	elif _detour_active:
-		movement_state = "detour"
-	elif has_move_target and _navigation_active:
-		movement_state = "nav_follow"
-	elif has_move_target:
-		movement_state = "direct_move"
-	elif _crowd_yield_seconds > 0.0:
-		movement_state = "yield"
-	var agent_radius: float = 0.0
-	if _navigation_agent != null and is_instance_valid(_navigation_agent):
-		agent_radius = _navigation_agent.radius
-	var slide_side: String = "none"
-	if _corner_slide_active and _corner_slide_dir.length_squared() > 0.0001:
-		## +X-ish right vs left relative to desired travel when available.
-		var facing: Vector3 = _dbg_corner_slide_desired_dir
-		if facing.length_squared() < 0.0001:
-			facing = _dbg_desired_velocity
-		facing.y = 0.0
-		if facing.length_squared() > 0.0001:
-			var right: Vector3 = Vector3(-facing.z, 0.0, facing.x)
-			slide_side = "right" if _corner_slide_dir.dot(right) >= 0.0 else "left"
-		else:
-			slide_side = "active"
-	return {
-		"unit_id": get_instance_id(),
-		"command_generation": _player_squad_command_generation,
-		"route_id": _player_route_id,
-		"shared_waypoint_index": shared_wp,
-		"travel_offset": travel_offset,
-		"waypoint_passed": waypoint_passed,
-		"movement_target": _movement_target,
-		"distance_to_waypoint": remaining.length(),
-		"nav_next_path_position": _dbg_nav_next_path_position,
-		"desired_velocity": _dbg_desired_velocity,
-		"avoidance_velocity": _dbg_avoidance_velocity,
-		"separation_correction": _dbg_separation_correction,
-		"final_velocity": _dbg_final_velocity,
-		"actual_speed": actual_speed,
-		"stuck_timer": _stuck_time,
-		"repath_timer": _dbg_repath_timer,
-		"movement_state": movement_state,
-		"formation_correction_ran": false,
-		"stall_recovery_ran": _dbg_stall_recovery_ran,
-		"target_change_reason": _dbg_target_change_reason,
-		"stuck_stage": _stuck_recovery_stage,
-		"has_move_target": has_move_target,
-		"agent_radius": agent_radius,
-		"collision_radius": UnitNavigation.effective_collision_radius(self),
-		"local_stall_timer": _local_stall_time,
-		"local_stall_best_remaining": _local_stall_best_remaining,
-		"local_stall_repaths": _local_stall_repath_count,
-		"corner_slide_active": _corner_slide_active,
-		"corner_slide_side": slide_side,
-		"corner_slide_normal": _corner_slide_normal,
-		"corner_slide_desired_dir": _dbg_corner_slide_desired_dir,
-		"corner_slide_dir": _corner_slide_dir,
-		"queue_mode": {},
-	}
-
-
-## Navigate toward a route waypoint while keeping the frozen final as the order goal.
-func request_route_travel_target(
-	travel_target: Vector3,
-	final_destination: Vector3,
-	urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER
-) -> bool:
-	var applied: bool = request_movement_target(travel_target, urgency)
-	if final_destination.length_squared() > 0.0001:
-		_original_move_destination = Vector3(
-			final_destination.x,
-			global_position.y,
-			final_destination.z
-		)
-		_player_squad_final_arrival = _original_move_destination
-	return applied
-
-
-func request_corridor_travel_target(
-	travel_target: Vector3,
-	final_destination: Vector3,
-	urgency: RepathUrgency = RepathUrgency.PLAYER_ORDER
-) -> bool:
-	return request_route_travel_target(travel_target, final_destination, urgency)
-
-
-## Debug-only: current NavigationAgent3D path polyline (empty when unused).
-func get_debug_navigation_path() -> PackedVector3Array:
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		return PackedVector3Array()
-	return _navigation_agent.get_current_navigation_path()
-
-
-## Debug-only: true when the unit has no active move target or the agent finished.
-func is_debug_destination_reached() -> bool:
-	if not has_move_target:
-		return true
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		return false
-	return _navigation_agent.is_navigation_finished()
 
 
 func _invalidate_movement_generation() -> void:
@@ -897,21 +657,14 @@ func apply_steered_velocity(
 	update_facing: bool = true,
 	allow_stationary_correction: bool = false
 ) -> void:
-	_dbg_formation_correction_ran = false
 	if not is_inside_tree() or not NodeSafety.is_alive_node(self):
 		velocity = Vector3.ZERO
 		_smoothed_move_velocity = Vector3.ZERO
-		_dbg_desired_velocity = Vector3.ZERO
-		_dbg_separation_correction = Vector3.ZERO
-		_dbg_final_velocity = Vector3.ZERO
 		return
 
 	if not is_movement_active() and not allow_stationary_correction:
 		_smoothed_move_velocity = Vector3.ZERO
 		velocity = Vector3.ZERO
-		_dbg_desired_velocity = Vector3.ZERO
-		_dbg_separation_correction = Vector3.ZERO
-		_dbg_final_velocity = Vector3.ZERO
 		return
 
 	if delta < 0.0:
@@ -923,13 +676,10 @@ func apply_steered_velocity(
 
 	var desired: Vector3 = desired_velocity
 	desired.y = 0.0
-	_dbg_desired_velocity = desired
 
 	if desired.length_squared() <= MOVE_VELOCITY_DEAD_ZONE_SQ:
 		_smoothed_move_velocity = Vector3.ZERO
 		velocity = Vector3.ZERO
-		_dbg_separation_correction = Vector3.ZERO
-		_dbg_final_velocity = Vector3.ZERO
 		return
 
 	# Face only meaningful travel direction — never tiny residual / separation noise.
@@ -948,9 +698,6 @@ func apply_steered_velocity(
 		if steer_delta.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
 			steered = desired
 
-	_dbg_separation_correction = steered - desired
-	_dbg_separation_correction.y = 0.0
-
 	# Light smoothing only for tiny corrections; large steering changes apply immediately
 	# so corridor peels and gap traversal stay responsive.
 	var delta_vel: Vector3 = steered - _smoothed_move_velocity
@@ -968,34 +715,11 @@ func apply_steered_velocity(
 
 	velocity = _smoothed_move_velocity
 	velocity.y = 0.0
-	if (
-		_corner_slide_active
-		and is_movement_active()
-		and not allow_stationary_correction
-		and _corner_slide_dir.length_squared() > 0.0001
-	):
-		velocity = _compose_corner_slide_velocity(
-			velocity, _corner_slide_normal, _corner_slide_dir
-		)
-	_dbg_final_velocity = velocity
 	if velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
 		velocity = Vector3.ZERO
-		_dbg_final_velocity = Vector3.ZERO
-		_clear_corner_slide_state()
 		return
 
-	var position_before: Vector3 = global_position
-	var desired_dir: Vector3 = desired
-	if desired_dir.length_squared() > 0.0001:
-		desired_dir = desired_dir.normalized()
-	else:
-		desired_dir = Vector3.ZERO
-	_dbg_corner_slide_desired_dir = desired_dir
-
 	move_and_slide()
-
-	if is_movement_active() and not allow_stationary_correction:
-		_update_corner_slide_after_move(delta, position_before, desired_dir)
 
 
 ## Stationary halt, plus a tiny peel only when collision bodies truly intersect.
@@ -1020,7 +744,6 @@ func _clear_residual_movement() -> void:
 	_smoothed_move_velocity = Vector3.ZERO
 	_desired_move_facing = Vector3.ZERO
 	_blocked_arrival_time = 0.0
-	_clear_corner_slide_state()
 	UnitSeparation.clear_state(self)
 	if has_meta(&"_nav_last_path_point"):
 		remove_meta(&"_nav_last_path_point")
@@ -1042,38 +765,26 @@ func _complete_movement_arrival() -> void:
 	if not has_move_target:
 		return
 
-	## Player validated route: advance waypoint / resume next guide — not order completion.
-	if _player_squad_command_generation >= 0 and _player_squad_final_arrival.length_squared() > 0.0001:
-		if PlayerRouteNavigation.is_unit_on_active_route(self):
-			PlayerRouteNavigation.advance_unit_waypoint(self)
-			var to_final: Vector3 = _player_squad_final_arrival - global_position
-			to_final.y = 0.0
-			if to_final.length() > get_soft_arrival_radius():
-				var next_travel: Vector3 = PlayerRouteNavigation.resolve_travel_target(self)
-				if next_travel.length_squared() < 0.0001:
-					next_travel = _player_squad_final_arrival
-				var to_next: Vector3 = next_travel - global_position
-				to_next.y = 0.0
-				var same_as_current: float = Vector3(
-					_movement_target.x - next_travel.x,
-					0.0,
-					_movement_target.z - next_travel.z
-				).length()
-				if to_next.length() > get_movement_acceptance_radius() * 0.35 or same_as_current > 0.35:
-					_dbg_target_change_reason = "route_pass_through"
-					request_route_travel_target(
-						next_travel,
-						_player_squad_final_arrival,
-						RepathUrgency.PLAYER_ORDER
-					)
-					return
-				_dbg_target_change_reason = "route_to_final"
-				request_route_travel_target(
-					_player_squad_final_arrival,
-					_player_squad_final_arrival,
-					RepathUrgency.PLAYER_ORDER
-				)
-				return
+	# Recovery waypoint reached — resume the original order destination instead of stopping.
+	if (
+		_stuck_recovery_stage >= 2
+		and _original_move_destination.length_squared() > 0.0001
+	):
+		var to_original: Vector3 = _original_move_destination - global_position
+		to_original.y = 0.0
+		if to_original.length() > get_soft_arrival_radius():
+			var resume: Vector3 = _original_move_destination
+			_stuck_recovery_stage = 3
+			_stuck_progress_anchor_distance = -1.0
+			_stuck_recovery_cooldown = 0.0
+			_crowd_yield_seconds = maxf(_crowd_yield_seconds, UNSTUCK_YIELD_SECONDS * 0.5)
+			if not request_movement_target(resume, RepathUrgency.STUCK_RECOVERY):
+				_begin_movement_generation()
+				_movement_target = resume
+				_original_move_destination = resume
+				has_move_target = true
+				_apply_navigation_destination(resume)
+			return
 
 	# Complete once per movement generation — never re-fire every settle frame.
 	if _arrival_completed_generation == _movement_generation:
@@ -1161,20 +872,6 @@ func request_movement_target(
 	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
 	_apply_navigation_destination(next_target)
-	if _dbg_target_change_reason.is_empty():
-		match urgency:
-			RepathUrgency.PLAYER_ORDER:
-				_dbg_target_change_reason = "player_order"
-			RepathUrgency.STUCK_RECOVERY:
-				_dbg_target_change_reason = "stuck_recovery"
-			RepathUrgency.FORMATION:
-				_dbg_target_change_reason = "formation"
-			RepathUrgency.CHASE:
-				_dbg_target_change_reason = "chase"
-			RepathUrgency.URGENT:
-				_dbg_target_change_reason = "urgent"
-			_:
-				_dbg_target_change_reason = "repath"
 	if urgency == RepathUrgency.STUCK_RECOVERY:
 		_stuck_repath_attempted = true
 		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
@@ -1340,8 +1037,6 @@ func should_run_staggered_update(bucket_count: int = 4) -> bool:
 
 
 func _physics_process(delta: float) -> void:
-	_dbg_stall_recovery_ran = false
-	_dbg_avoidance_velocity = Vector3.ZERO
 	if _stuck_recovery_cooldown > 0.0:
 		_stuck_recovery_cooldown = maxf(0.0, _stuck_recovery_cooldown - delta)
 	if _crowd_yield_seconds > 0.0:
@@ -1363,13 +1058,7 @@ func _physics_process(delta: float) -> void:
 	offset.y = 0.0
 	var distance: float = offset.length()
 	var arrive_distance: float = get_movement_acceptance_radius()
-	## Pass-through route waypoints: treat as reached and look ahead instead of hard-stop.
 	if distance <= arrive_distance:
-		_complete_movement_arrival()
-		return
-	if is_player_route_travel_active() and PlayerRouteNavigation.unit_has_passed_current_guide(
-		self
-	):
 		_complete_movement_arrival()
 		return
 
@@ -1385,30 +1074,38 @@ func _physics_process(delta: float) -> void:
 		var detour_velocity: Vector3 = direction * move_speed
 		# Keep separation gentle during unstuck so narrow corridors do not deadlock.
 		apply_steered_velocity(detour_velocity, delta, minf(separation_blend, 0.12))
-	elif _navigation_active and UnitNavigation.can_use(_navigation_agent):
-		if _navigation_agent != null:
-			_dbg_nav_next_path_position = _navigation_agent.get_next_path_position()
-			_dbg_nav_next_path_position.y = global_position.y
-		var arrived: bool = UnitNavigation.process_movement(
-			self,
-			_navigation_agent,
-			_movement_target,
-			move_speed,
-			stopping_distance,
-			separation_blend > 0.0
-		)
-		if arrived:
-			_complete_movement_arrival()
+	elif _navigation_agent != null:
+		# NavigationAgent present: world movement must use navmesh paths only.
+		# Never fall back to collision-blind steering toward the final destination.
+		if _is_navigation_path_executable():
+			_navigation_active = true
+			var arrived: bool = UnitNavigation.process_movement(
+				self,
+				_navigation_agent,
+				_movement_target,
+				move_speed,
+				stopping_distance,
+				separation_blend > 0.0
+			)
+			if arrived:
+				_complete_movement_arrival()
+				return
+			if _desired_move_facing.length_squared() > 0.0001:
+				direction = _desired_move_facing
+		else:
+			# Path not executable yet (map sync / reachability pending) — wait & retry.
+			_navigation_active = false
+			_hold_for_navigation_path()
+			# Do not accumulate stuck/detour from an intentional nav wait.
 			return
-		if _desired_move_facing.length_squared() > 0.0001:
-			direction = _desired_move_facing
 	else:
+		# No NavigationAgent at all — direct steering is the only option.
 		if direction.length_squared() < 0.0001:
 			_complete_movement_arrival()
 			return
 		var arrival_speed: float = move_speed
 		var slow_start: float = maxf(stopping_distance * 2.0, UnitNavigation.ARRIVAL_SLOWDOWN_DISTANCE)
-		if distance < slow_start and not is_player_route_travel_active():
+		if distance < slow_start:
 			var t: float = clampf(
 				(distance - stopping_distance) / maxf(0.001, slow_start - stopping_distance),
 				0.0,
@@ -1424,7 +1121,6 @@ func _physics_process(delta: float) -> void:
 	if _try_complete_soft_arrival():
 		return
 
-	_update_local_stall_repath(delta, position_before)
 	_update_unstuck(delta, position_before, direction, distance)
 	CommandFeedback.notify_unit_moving(self)
 
@@ -1639,256 +1335,11 @@ func _is_direct_path_clear(forward: Vector3, distance: float) -> bool:
 	return space_state.intersect_ray(query).is_empty()
 
 
-## Low-level physical corner/wall slide. Uses move_and_slide collision normals only.
-## Does not change destination, command generation, or NavigationAgent targets.
-func _clear_corner_slide_state() -> void:
-	_corner_slide_active = false
-	_corner_slide_dir = Vector3.ZERO
-	_corner_slide_normal = Vector3.ZERO
-	_corner_slide_timer = 0.0
-	_corner_slide_side_lock = 0.0
-	_corner_slide_best_goal_dist = -1.0
-	_dbg_corner_slide_desired_dir = Vector3.ZERO
-
-
-func _get_corner_slide_destination_dir() -> Vector3:
-	var goal: Vector3 = _movement_target
-	if _player_squad_final_arrival.length_squared() > 0.0001:
-		goal = _player_squad_final_arrival
-	elif (
-		_navigation_agent != null
-		and is_instance_valid(_navigation_agent)
-		and UnitNavigation.can_use(_navigation_agent)
-	):
-		goal = _navigation_agent.target_position
-	var to_goal: Vector3 = goal - global_position
-	to_goal.y = 0.0
-	if to_goal.length_squared() < 0.0001:
-		return Vector3.ZERO
-	return to_goal.normalized()
-
-
-func _get_corner_slide_goal_distance() -> float:
-	var goal: Vector3 = _movement_target
-	if _player_squad_final_arrival.length_squared() > 0.0001:
-		goal = _player_squad_final_arrival
-	var to_goal: Vector3 = goal - global_position
-	to_goal.y = 0.0
-	return to_goal.length()
-
-
-## Prefer static world/building contacts. Units do not mask other units, but still
-## skip pure unit colliders if present so we never wall-follow another body.
-func _is_static_obstacle_collider(collider: Object) -> bool:
-	if collider == null or not is_instance_valid(collider):
-		return false
-	if collider is Unit:
-		return false
-	if collider is CollisionObject3D:
-		var layer: int = (collider as CollisionObject3D).collision_layer
-		if (layer & PhysicsLayers.UNITS) != 0 and (layer & PhysicsLayers.UNIT_COLLISION_MASK) == 0:
-			return false
-	return true
-
-
-func _find_blocking_static_normal(desired_dir: Vector3) -> Vector3:
-	if desired_dir.length_squared() < 0.0001:
-		return Vector3.ZERO
-	var goal_dir: Vector3 = desired_dir.normalized()
-	var best_normal: Vector3 = Vector3.ZERO
-	var best_oppose: float = 0.0
-	for index: int in get_slide_collision_count():
-		var collision: KinematicCollision3D = get_slide_collision(index)
-		if not _is_static_obstacle_collider(collision.get_collider()):
-			continue
-		var normal: Vector3 = collision.get_normal()
-		normal.y = 0.0
-		if normal.length_squared() < 0.0001:
-			continue
-		normal = normal.normalized()
-		var oppose: float = -normal.dot(goal_dir)
-		if oppose > best_oppose and oppose > CORNER_SLIDE_BLOCK_DOT:
-			best_oppose = oppose
-			best_normal = normal
-	return best_normal
-
-
-func _choose_corner_slide_tangent(normal: Vector3, dest_dir: Vector3) -> Vector3:
-	if normal.length_squared() < 0.0001:
-		return Vector3.ZERO
-	var flat_normal: Vector3 = Vector3(normal.x, 0.0, normal.z)
-	if flat_normal.length_squared() < 0.0001:
-		return Vector3.ZERO
-	flat_normal = flat_normal.normalized()
-	var tangent_a: Vector3 = Vector3(-flat_normal.z, 0.0, flat_normal.x)
-	if tangent_a.length_squared() < 0.0001:
-		return Vector3.ZERO
-	tangent_a = tangent_a.normalized()
-	var tangent_b: Vector3 = -tangent_a
-
-	var score_a: float = 0.0
-	var score_b: float = 0.0
-	if dest_dir.length_squared() > 0.0001:
-		var dest: Vector3 = dest_dir.normalized()
-		score_a = tangent_a.dot(dest)
-		score_b = tangent_b.dot(dest)
-
-	## Prefer the tangent that progresses toward the active destination.
-	if score_a >= score_b and score_a > CORNER_SLIDE_MIN_DEST_SCORE:
-		return tangent_a
-	if score_b > CORNER_SLIDE_MIN_DEST_SCORE:
-		return tangent_b
-
-	## Neither side clearly helps — keep the locked side if still valid.
-	if _corner_slide_dir.length_squared() > 0.0001:
-		if _corner_slide_dir.dot(tangent_a) >= _corner_slide_dir.dot(tangent_b):
-			return tangent_a
-		return tangent_b
-	return Vector3.ZERO
-
-
-func _compose_corner_slide_velocity(
-	desired_velocity: Vector3, normal: Vector3, slide_dir: Vector3
-) -> Vector3:
-	var vel: Vector3 = desired_velocity
-	vel.y = 0.0
-	var flat_normal: Vector3 = Vector3(normal.x, 0.0, normal.z)
-	if flat_normal.length_squared() > 0.0001:
-		flat_normal = flat_normal.normalized()
-		var into_wall: float = vel.dot(flat_normal)
-		if into_wall < 0.0:
-			vel -= flat_normal * into_wall
-
-	var speed: float = move_speed
-	if vel.length_squared() > MOVE_VELOCITY_DEAD_ZONE_SQ:
-		speed = minf(move_speed, maxf(vel.length(), move_speed * 0.75))
-	var slide: Vector3 = slide_dir
-	slide.y = 0.0
-	if slide.length_squared() < 0.0001:
-		return vel
-	slide = slide.normalized() * speed
-
-	if vel.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ or vel.dot(slide) < 0.0:
-		vel = slide
-	else:
-		vel = vel.normalized() * speed
-		vel = vel.lerp(slide, 0.7)
-
-	if flat_normal.length_squared() > 0.0001:
-		var into_after: float = vel.dot(flat_normal)
-		if into_after < 0.0:
-			vel -= flat_normal * into_after
-
-	if vel.length() > move_speed:
-		vel = vel.normalized() * move_speed
-	vel.y = 0.0
-	return vel
-
-
-func _trigger_corner_slide_same_destination_repath() -> void:
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		return
-	if not UnitNavigation.can_use(_navigation_agent):
-		return
-	var refresh_target: Vector3 = _movement_target
-	if (
-		_player_squad_command_generation >= 0
-		and PlayerRouteNavigation.is_unit_on_active_route(self)
-	):
-		var route_travel: Vector3 = PlayerRouteNavigation.resolve_travel_target(self)
-		if route_travel.length_squared() > 0.0001:
-			refresh_target = route_travel
-	_dbg_stall_recovery_ran = true
-	_dbg_target_change_reason = "corner_slide_same_dest_repath"
-	UnitNavigation.force_same_destination_repath(_navigation_agent, self, refresh_target)
-	_movement_target = Vector3(refresh_target.x, global_position.y, refresh_target.z)
-	_navigation_active = true
-	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
-	call_deferred("_refresh_navigation_active_state")
-
-
-func _update_corner_slide_after_move(
-	delta: float, position_before: Vector3, desired_dir: Vector3
-) -> void:
-	if not has_move_target:
-		_clear_corner_slide_state()
-		return
-
-	var dest_dir: Vector3 = _get_corner_slide_destination_dir()
-	var probe_dir: Vector3 = desired_dir
-	if probe_dir.length_squared() < 0.0001:
-		probe_dir = dest_dir
-	if probe_dir.length_squared() < 0.0001:
-		_clear_corner_slide_state()
-		return
-
-	var blocking_normal: Vector3 = _find_blocking_static_normal(probe_dir)
-	var moved: Vector3 = global_position - position_before
-	moved.y = 0.0
-	var expected_move: float = move_speed * delta * CORNER_SLIDE_ENTER_MOVE_RATIO
-	var forward_progress: float = moved.dot(probe_dir.normalized())
-	var physically_blocked: bool = (
-		blocking_normal.length_squared() > 0.0001 and forward_progress < expected_move
-	)
-
-	if _corner_slide_active:
-		_corner_slide_timer += delta
-		_corner_slide_side_lock = maxf(0.0, _corner_slide_side_lock - delta)
-		var goal_dist: float = _get_corner_slide_goal_distance()
-		if _corner_slide_best_goal_dist < 0.0:
-			_corner_slide_best_goal_dist = goal_dist
-		elif goal_dist <= _corner_slide_best_goal_dist - CORNER_SLIDE_PROGRESS_EPSILON:
-			_corner_slide_best_goal_dist = goal_dist
-
-		## Forward nav direction clear → resume normal navigation immediately.
-		if not physically_blocked:
-			_clear_corner_slide_state()
-			return
-
-		_corner_slide_normal = blocking_normal
-		## Keep the same side briefly; only rechoose after the lock expires.
-		if _corner_slide_side_lock <= 0.0 or _corner_slide_dir.length_squared() < 0.0001:
-			var chosen: Vector3 = _choose_corner_slide_tangent(blocking_normal, dest_dir)
-			if chosen.length_squared() > 0.0001:
-				_corner_slide_dir = chosen
-				_corner_slide_side_lock = CORNER_SLIDE_SIDE_LOCK_SECONDS
-			else:
-				_clear_corner_slide_state()
-				_trigger_corner_slide_same_destination_repath()
-				return
-
-		var no_goal_progress: bool = (
-			goal_dist > _corner_slide_best_goal_dist - CORNER_SLIDE_PROGRESS_EPSILON
-		)
-		if _corner_slide_timer >= CORNER_SLIDE_MAX_SECONDS and no_goal_progress:
-			_clear_corner_slide_state()
-			_trigger_corner_slide_same_destination_repath()
-		return
-
-	if not physically_blocked:
-		return
-
-	var enter_tangent: Vector3 = _choose_corner_slide_tangent(blocking_normal, dest_dir)
-	if enter_tangent.length_squared() < 0.0001:
-		return
-
-	_corner_slide_active = true
-	_corner_slide_normal = blocking_normal
-	_corner_slide_dir = enter_tangent
-	_corner_slide_timer = 0.0
-	_corner_slide_side_lock = CORNER_SLIDE_SIDE_LOCK_SECONDS
-	_corner_slide_best_goal_dist = _get_corner_slide_goal_distance()
-
-
 ## When pressed against a building/world collider near the destination, settle instead of
 ## oscillating between path desire and collision slide (classic Town Hall jitter).
 func _try_complete_blocked_arrival(
 	delta: float, position_before: Vector3, forward: Vector3, distance: float
 ) -> bool:
-	## Corridor travel must not settle against buildings at intermediate guides.
-	if is_player_corridor_travel_active():
-		_blocked_arrival_time = 0.0
-		return false
 	if distance > maxf(BLOCKED_ARRIVAL_DISTANCE, stopping_distance * 4.0):
 		_blocked_arrival_time = 0.0
 		return false
@@ -1932,10 +1383,6 @@ func _try_complete_blocked_arrival(
 func _try_complete_soft_arrival() -> bool:
 	if not has_move_target:
 		return false
-	## During shared route travel, soft-settle must not clear the move —
-	## pass-through / look-ahead owns intermediate guides.
-	if is_player_route_travel_active():
-		return false
 
 	var remaining: Vector3 = _movement_target - global_position
 	remaining.y = 0.0
@@ -1955,93 +1402,6 @@ func _should_skip_stuck_recovery() -> bool:
 	return false
 
 
-## Safety net: discard ONLY the stale local NavigationAgent path and re-request
-## the same active destination/waypoint. Matches what a second player click fixes
-## without changing command generation, group membership, or final destination.
-func _update_local_stall_repath(delta: float, _position_before: Vector3) -> void:
-	if _local_stall_cooldown > 0.0:
-		_local_stall_cooldown = maxf(0.0, _local_stall_cooldown - delta)
-
-	if not has_move_target:
-		_reset_local_stall_progress()
-		return
-	if _should_skip_stuck_recovery():
-		_reset_local_stall_progress()
-		return
-	if _player_squad_command_generation < 0:
-		## Player-move reliability contract only — AI keeps existing recovery.
-		_reset_local_stall_progress()
-		return
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		_reset_local_stall_progress()
-		return
-	if not UnitNavigation.can_use(_navigation_agent):
-		_reset_local_stall_progress()
-		return
-
-	var accept: float = get_movement_acceptance_radius()
-	var goal: Vector3 = _movement_target
-	if _player_squad_final_arrival.length_squared() > 0.0001:
-		goal = _player_squad_final_arrival
-	var remaining_vec: Vector3 = goal - global_position
-	remaining_vec.y = 0.0
-	var remaining: float = remaining_vec.length()
-	## Intentionally settling / arrived — not a stall.
-	if remaining <= maxf(UNSTUCK_MIN_REMAINING_DISTANCE, accept * 2.5):
-		_reset_local_stall_progress()
-		return
-
-	## Progress = closing on the active goal. Wall-slide jitter is NOT progress.
-	if _local_stall_best_remaining < 0.0:
-		_local_stall_best_remaining = remaining
-		_local_stall_time = 0.0
-		return
-	if remaining <= _local_stall_best_remaining - LOCAL_STALL_PROGRESS_EPSILON:
-		_local_stall_best_remaining = remaining
-		_local_stall_time = 0.0
-		return
-
-	_local_stall_time += delta
-	if _local_stall_time < LOCAL_STALL_CONFIRM_SECONDS:
-		return
-	if _local_stall_cooldown > 0.0:
-		return
-	if _local_stall_repath_count >= LOCAL_STALL_MAX_REPATHS:
-		return
-
-	## Keep the same travel target (current waypoint or final). Never rewrite the order.
-	var refresh_target: Vector3 = _movement_target
-	if (
-		_player_squad_command_generation >= 0
-		and PlayerRouteNavigation.is_unit_on_active_route(self)
-	):
-		var route_travel: Vector3 = PlayerRouteNavigation.resolve_travel_target(self)
-		if route_travel.length_squared() > 0.0001:
-			refresh_target = route_travel
-
-	_local_stall_time = 0.0
-	_local_stall_best_remaining = remaining
-	_local_stall_cooldown = LOCAL_STALL_COOLDOWN_SECONDS
-	_local_stall_repath_count += 1
-	_dbg_stall_recovery_ran = true
-	_dbg_target_change_reason = "local_same_dest_repath"
-	## Throw away the dead local path and rebuild from the current pose.
-	UnitNavigation.force_same_destination_repath(
-		_navigation_agent,
-		self,
-		refresh_target
-	)
-	_movement_target = Vector3(refresh_target.x, global_position.y, refresh_target.z)
-	_navigation_active = true
-	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
-	call_deferred("_refresh_navigation_active_state")
-
-
-func _reset_local_stall_progress() -> void:
-	_local_stall_time = 0.0
-	_local_stall_best_remaining = -1.0
-
-
 func _update_unstuck(
 	delta: float, _position_before: Vector3, forward: Vector3, distance: float
 ) -> void:
@@ -2051,44 +1411,10 @@ func _update_unstuck(
 		return
 
 	var accept: float = get_movement_acceptance_radius()
-	var on_player_route: bool = is_player_route_travel_active()
-	## Progress metric: toward final slot on player route, else current move target.
-	var progress_distance: float = distance
-	if (
-		_player_squad_command_generation >= 0
-		and _player_squad_final_arrival.length_squared() > 0.0001
-	):
-		var to_final: Vector3 = _player_squad_final_arrival - global_position
-		to_final.y = 0.0
-		progress_distance = to_final.length()
-
 	# Already arrived / settling — never stuck.
-	if progress_distance <= maxf(UNSTUCK_MIN_REMAINING_DISTANCE, accept * 2.5):
+	if distance <= maxf(UNSTUCK_MIN_REMAINING_DISTANCE, accept * 2.5):
 		_stuck_time = 0.0
 		_is_confirmed_stuck = false
-		return
-
-	## Player route: ONE recovery only — no multi-stage detours / offset collapse.
-	if on_player_route:
-		if _stuck_progress_anchor_distance < 0.0:
-			_stuck_progress_anchor_distance = progress_distance
-		if progress_distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
-			_stuck_progress_anchor_distance = progress_distance
-			_stuck_time = 0.0
-			_is_confirmed_stuck = false
-			return
-		_stuck_time += delta
-		if _stuck_time < PlayerRouteNavigation.get_stuck_confirm_seconds():
-			return
-		_is_confirmed_stuck = true
-		if _stuck_recovery_cooldown > 0.0:
-			return
-		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
-		_stuck_time = 0.0
-		_stuck_progress_anchor_distance = progress_distance
-		_dbg_stall_recovery_ran = true
-		_dbg_target_change_reason = "stuck_rejoin_validated_route"
-		PlayerRouteNavigation.recover_stuck_unit(self)
 		return
 
 	if _detour_active:
@@ -2098,7 +1424,7 @@ func _update_unstuck(
 			_reset_unstuck_state()
 			return
 
-		if progress_distance < _distance_at_detour_start - UNSTUCK_PROGRESS_EPSILON:
+		if distance < _distance_at_detour_start - UNSTUCK_PROGRESS_EPSILON:
 			_reset_unstuck_state()
 			return
 
@@ -2110,29 +1436,29 @@ func _update_unstuck(
 				_detour_side *= -1.0
 				_detour_flips += 1
 				_detour_time = 0.0
-				_distance_at_detour_start = progress_distance
+				_distance_at_detour_start = distance
 			else:
 				_detour_gave_up = true
 				_detour_active = false
 				_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
-				_advance_stuck_recovery(progress_distance)
+				_advance_stuck_recovery(distance)
 
 		return
 
 	if _detour_gave_up:
 		# After detour, fall through to staged recovery rather than looping forever.
 		if _stuck_progress_anchor_distance < 0.0:
-			_stuck_progress_anchor_distance = progress_distance
-		if progress_distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
+			_stuck_progress_anchor_distance = distance
+		if distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
 			_reset_unstuck_state()
 			return
 
 	# Meaningful progress = closing on the destination, not raw frame displacement.
 	if _stuck_progress_anchor_distance < 0.0:
-		_stuck_progress_anchor_distance = progress_distance
+		_stuck_progress_anchor_distance = distance
 
-	if progress_distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
-		_stuck_progress_anchor_distance = progress_distance
+	if distance <= _stuck_progress_anchor_distance - UNSTUCK_PROGRESS_EPSILON:
+		_stuck_progress_anchor_distance = distance
 		_stuck_time = 0.0
 		_is_confirmed_stuck = false
 		return
@@ -2145,23 +1471,14 @@ func _update_unstuck(
 	if _stuck_recovery_cooldown > 0.0:
 		return
 
-	_advance_stuck_recovery(progress_distance)
+	_advance_stuck_recovery(distance)
 
 
-## Non-player staged recovery. Player routes use PlayerRouteNavigation.recover_stuck_unit only.
+## Staged recovery: repath → nearby waypoint → yield crowd → resume → cancel last.
 func _advance_stuck_recovery(distance: float) -> void:
 	_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
 	_stuck_time = 0.0
 	_stuck_progress_anchor_distance = distance
-	_dbg_stall_recovery_ran = true
-
-	## If somehow still bound to a player route, use the single rejoin path.
-	if PlayerRouteNavigation.is_unit_on_active_route(self):
-		_dbg_target_change_reason = "stuck_rejoin_validated_route"
-		PlayerRouteNavigation.recover_stuck_unit(self)
-		return
-
-	var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(self)
 
 	match _stuck_recovery_stage:
 		0:
@@ -2188,16 +1505,30 @@ func _advance_stuck_recovery(distance: float) -> void:
 			if detour_forward.length_squared() > 0.0001:
 				_begin_detour(detour_forward.normalized(), distance)
 		_:
-			# Stage 4+: prefer AI shared-route refresh over cancel while in a squad.
-			if squad_ctx != null and not squad_ctx.is_player_squad:
+			# Stage 4+: prefer shared-route refresh over cancel while in a squad.
+			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(self)
+			if squad_ctx != null:
+				## Stale player-command callbacks must not retake control after a newer click.
+				if squad_ctx.is_player_squad and not matches_player_squad_command(
+					squad_ctx.command_generation
+				):
+					_stuck_recovery_stage = 0
+					return
 				_stuck_recovery_stage = 1
 				SharedSquadNavigation.notify_member_confirmed_stall(self)
-				request_movement_target(
-					_original_move_destination
-					if _original_move_destination.length_squared() > 0.0001
-					else _movement_target,
-					RepathUrgency.STUCK_RECOVERY
+				var resume_shared: Vector3 = (
+					_player_squad_final_arrival
+					if (
+						squad_ctx.is_player_squad
+						and _player_squad_final_arrival.length_squared() > 0.0001
+					)
+					else (
+						_original_move_destination
+						if _original_move_destination.length_squared() > 0.0001
+						else _movement_target
+					)
 				)
+				request_movement_target(resume_shared, RepathUrgency.STUCK_RECOVERY)
 				return
 			# Final fallback — never teleport.
 			_stuck_recovery_stage = 0
@@ -2267,11 +1598,6 @@ func _reset_unstuck_state() -> void:
 	_stuck_recovery_stage = 0
 	_stuck_progress_anchor_distance = -1.0
 	_blocked_arrival_time = 0.0
-	_local_stall_time = 0.0
-	_local_stall_best_remaining = -1.0
-	_local_stall_repath_count = 0
-	_local_stall_cooldown = 0.0
-	_clear_corner_slide_state()
 	# Keep _crowd_yield_seconds ticking — do not clear mid-yield.
 
 
@@ -2282,7 +1608,6 @@ func _setup_navigation_agent() -> void:
 		return
 
 	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
-	UnitNavigation.sync_agent_radius_to_collision(_navigation_agent, self)
 	_set_navigation_avoidance_enabled(false)
 	if not _navigation_agent.velocity_computed.is_connected(_on_navigation_velocity_computed):
 		_navigation_agent.velocity_computed.connect(_on_navigation_velocity_computed)
@@ -2305,20 +1630,37 @@ func _apply_navigation_destination(destination: Vector3) -> void:
 		return
 
 	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
-	UnitNavigation.sync_agent_radius_to_collision(_navigation_agent, self)
 	# Keep RVO off — manual UnitSeparation handles moving units only.
 	_set_navigation_avoidance_enabled(false)
-	if not UnitNavigation.can_use(_navigation_agent):
-		_navigation_active = false
-		UnitNavigation.apply_destination(_navigation_agent, destination)
-		call_deferred("_refresh_navigation_active_state")
-		return
-
 	UnitNavigation.apply_destination(_navigation_agent, destination)
-	_navigation_active = true
-	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
 	_nav_velocity_request_generation = _movement_generation
+	# Path data may be invalid same-frame after target_position — poll next frame.
+	# Never treat early unreachability as permission to direct-steer.
+	_navigation_active = _is_navigation_path_executable()
+	# Brief grace before validity re-request so we do not reset an in-flight query.
+	_path_validity_timer = 0.15
 	call_deferred("_refresh_navigation_active_state")
+
+
+func _is_navigation_path_executable() -> bool:
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		return false
+	if not UnitNavigation.can_use(_navigation_agent):
+		return false
+	if not _navigation_agent.is_target_reachable():
+		return false
+	if _navigation_agent.is_navigation_finished():
+		return false
+	return true
+
+
+## Hold still while NavigationAgent path/map syncs. Preserves the player command.
+func _hold_for_navigation_path() -> void:
+	_smoothed_move_velocity = Vector3.ZERO
+	velocity = Vector3.ZERO
+	if _navigation_agent != null and is_instance_valid(_navigation_agent):
+		if _navigation_agent.has_method("set_velocity_forced"):
+			_navigation_agent.set_velocity_forced(Vector3.ZERO)
 
 
 func _refresh_navigation_active_state() -> void:
@@ -2329,11 +1671,8 @@ func _refresh_navigation_active_state() -> void:
 		_navigation_active = false
 		return
 
-	if not UnitNavigation.can_use(_navigation_agent):
-		_navigation_active = false
-		return
-
-	_navigation_active = _navigation_agent.is_target_reachable()
+	# false = path not currently executable. Never means "use direct steering".
+	_navigation_active = _is_navigation_path_executable()
 
 
 func _clear_navigation_agent() -> void:
@@ -2382,7 +1721,6 @@ func _on_navigation_velocity_computed(safe_velocity: Vector3) -> void:
 
 	# Avoidance is intentionally disabled project-wide; if re-enabled later, still
 	# route through the authoritative steered path with generation checks above.
-	_dbg_avoidance_velocity = horizontal
 	apply_steered_velocity(horizontal, -1.0, 0.0, true)
 
 
@@ -2402,28 +1740,38 @@ func _update_navigation_path_validity(delta: float) -> void:
 	if _path_validity_timer > 0.0:
 		return
 
-	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL + get_repath_stagger_offset_seconds()
+	# Poll sooner while waiting for map/path sync so units do not idle for the full interval.
+	var interval: float = PATH_VALIDITY_CHECK_INTERVAL
+	if not _navigation_active:
+		interval = 0.05
+	_path_validity_timer = interval + get_repath_stagger_offset_seconds()
+
 	if not UnitNavigation.can_use(_navigation_agent):
 		_navigation_active = false
+		# Map may activate on a later frame — keep command, retry activation.
+		call_deferred("_refresh_navigation_active_state")
 		return
 
 	if not _navigation_agent.is_target_reachable():
 		_navigation_active = false
+		# Preserve destination & generation; re-request when the agent has no live path.
+		# Do not direct-steer. Early false after set is timing, not bypass permission.
+		if _navigation_agent.is_navigation_finished():
+			UnitNavigation.apply_destination(_navigation_agent, _movement_target)
+		call_deferred("_refresh_navigation_active_state")
 		return
 
-	_navigation_active = true
+	_navigation_active = not _navigation_agent.is_navigation_finished()
 	# Force a repath when the agent finished early but destination is still distant.
-	# Player corridor: do not churn STUCK repaths every validity tick during congestion.
 	var remaining: Vector3 = _movement_target - global_position
 	remaining.y = 0.0
 	if (
 		_navigation_agent.is_navigation_finished()
 		and remaining.length() > stopping_distance + MOVE_DEST_TOLERANCE
 		and _stuck_recovery_cooldown <= 0.0
-		and not is_player_corridor_travel_active()
 	):
-		_dbg_target_change_reason = "path_validity_refresh"
-		request_movement_target(_movement_target, RepathUrgency.STUCK_RECOVERY)
+		UnitNavigation.apply_destination(_navigation_agent, _movement_target)
+		call_deferred("_refresh_navigation_active_state")
 
 
 ## Loads runtime state from unit_data when the data pipeline is available.
@@ -2474,7 +1822,7 @@ func die() -> void:
 	BuffService.remove_all(self)
 	_release_reserved_food()
 	EnemyArmyCommand.release_reinforcement_from_pool(self)
-	_detach_from_player_group_movement()
+	SharedSquadNavigation.release_unit(self)
 	DeathEffects.play_unit_death(self)
 	NodeSafety.prepare_node_for_death(self)
 	_unregister_with_entity_registry()
