@@ -142,6 +142,7 @@ func _update_label() -> void:
 		"Army: %s" % PerfCounters.get_military_ai_v2_army_label(),
 		"Camps: %s" % PerfCounters.get_military_ai_v2_camps_label(),
 		"Target: %s" % PerfCounters.get_military_ai_v2_target_label(),
+		"TargetDist: %s" % PerfCounters.get_military_ai_v2_target_dist_label(),
 		"Defense: %s" % PerfCounters.get_military_ai_v2_defense_label(),
 		"Threat: %s" % PerfCounters.get_military_ai_v2_threat_label(),
 		"Combat Group: %d" % PerfCounters.get_combat_group_size(),

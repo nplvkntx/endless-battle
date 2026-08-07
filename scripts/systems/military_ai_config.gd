@@ -39,7 +39,8 @@ const V2_ATTACK_READY_MILITARY_UNITS_PREFERRED: int = 12
 const V2_ATTACK_LETHAL_MIN_MILITARY_UNITS: int = 6
 
 ## Early CREEP priority: prefer camps until ~hero level 3 / a few clears.
-## Soft goal — lethal / greed / clear strength advantage still interrupt.
+## Soft goal — after either threshold, an attack-ready army launches first pressure.
+## Lethal / greed / clear strength advantage still interrupt earlier.
 const V2_CREEP_TARGET_HERO_LEVEL: int = 3
 const V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK: int = 2
 ## Greed score (0–100) that outranks early creeping for a punish attack.

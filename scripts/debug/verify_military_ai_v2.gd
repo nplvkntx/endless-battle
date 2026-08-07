@@ -1037,6 +1037,8 @@ func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "attack preempts creep on lethal/greed", text.contains("preempts CREEP only on lethal"))
 		_expect(failures, "early creep preference helper", text.contains("_should_prefer_early_creeping"))
 		_expect(failures, "creep interrupt helper", text.contains("_should_interrupt_creeping_for_attack"))
+		_expect(failures, "early creep goals helper", text.contains("_are_early_creep_goals_met"))
+		_expect(failures, "first pressure after soft goals", text.contains("first real pressure"))
 		_expect(failures, "camp chain reason", text.contains("chain %s"))
 		_expect(failures, "hero xp creep priority", text.contains("hero_xp_priority"))
 		_expect(failures, "attack exits to retreat when losing", text.contains("army clearly losing"))
@@ -1044,6 +1046,8 @@ func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "attack exits when scattered", text.contains("attack army too scattered"))
 		_expect(failures, "attack admits no mid-fight reinforcements", text.contains("_can_admit_reinforcements"))
 		_expect(failures, "attack commits to town hall", text.contains("_should_commit_to_town_hall"))
+		_expect(failures, "attack prefers expansion before main TC", text.contains("_find_player_expansion"))
+		_expect(failures, "commitment blocks false contact retreat", text.contains("false first-attack abort"))
 
 	var commander_source := FileAccess.open("res://scripts/systems/army_commander_v2.gd", FileAccess.READ)
 	_expect(failures, "attack commander source readable", commander_source != null)
@@ -1053,6 +1057,8 @@ func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "attack uses Attack-Move", commander_text.contains("Mission.ATTACK"))
 		_expect(failures, "attack resumes strategic route", commander_text.contains("strategic_destination"))
 		_expect(failures, "attack stops endless chase", commander_text.contains("V2_ATTACK_CHASE_DURATION_SECONDS"))
+		_expect(failures, "attack refuses fleeing-hero peel", commander_text.contains("_is_fleeing_hero_pulling_from_objective"))
+		_expect(failures, "attack resumes after local chase", commander_text.contains("advancing on objective"))
 
 
 func _verify_attack_priority_order(failures: PackedStringArray) -> void:

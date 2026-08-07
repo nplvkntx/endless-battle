@@ -1645,7 +1645,7 @@ func _execute_attack_mission(
 	var engaging_local: bool = false
 
 	if NodeSafety.is_alive_node(local_focus):
-		if _should_continue_local_chase(army_center, local_focus, strategic_destination):
+		if _should_continue_local_chase(army_center, local_focus, strategic_destination, strategic_target):
 			engaging_local = true
 			focus = local_focus
 			destination = _clamp_attack_chase_destination(
@@ -1654,6 +1654,11 @@ func _execute_attack_mission(
 			)
 		else:
 			_clear_attack_chase()
+			## Local skirmish ended / leashed — resume the strategic attack objective.
+			focus = strategic_target
+			destination = strategic_destination
+			## Force a prompt attack-move refresh toward the objective.
+			_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
 
 	var lethal: bool = director.is_attack_lethal_active()
 	var exec_mission: EnemyArmyCommand.ExecutableMission = (
@@ -1697,10 +1702,13 @@ func _execute_attack_mission(
 			)
 		if engaging_local:
 			mission.note_progress("started combat")
+		else:
+			mission.note_progress("advancing on objective")
 		EnemyArmyCommand.note_mission_progress(army_center, engaging_local, attack_army.size())
 		EnemyArmyCommand.begin_fight_tracking(attack_army, army_center)
 
 	## Focus the strategic (or leashed local) target once in contact — never endless chase.
+	## Prefer the strategic building objective over a fleeing hero when already on objective.
 	if (
 		NodeSafety.is_alive_node(focus)
 		and _attack_focus_reissue_timer >= MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
@@ -2003,6 +2011,11 @@ func _pick_local_attack_focus(
 	if (
 		NodeSafety.is_alive_node(_attack_chase_target)
 		and candidates.has(_attack_chase_target)
+		and not _is_fleeing_hero_pulling_from_objective(
+			army_center,
+			_attack_chase_target,
+			strategic_target
+		)
 	):
 		return _attack_chase_target
 
@@ -2015,10 +2028,17 @@ func _pick_local_attack_focus(
 	if probe == null:
 		return null
 
+	var near_objective: bool = false
+	if NodeSafety.is_alive_node(strategic_target) and strategic_target is Building:
+		near_objective = (
+			EnemyArmyCommand.horizontal_distance(army_center, strategic_target.global_position)
+			<= MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS * 1.35
+		)
+
 	for entry: Variant in candidates:
 		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
 			continue
-		## Do not abandon a town-hall commit to chase a lone scout forever.
+		## Do not abandon a town-hall / production commit to chase a lone scout forever.
 		if (
 			strategic_target is CommandCenter
 			and entry is Unit
@@ -2031,6 +2051,17 @@ func _pick_local_attack_focus(
 			)
 			if lone_distance > MilitaryAIConfig.V2_ATTACK_CHASE_LEASH * 0.75:
 				continue
+		## Near a valuable structure objective: never peel the army to chase a fleeing hero.
+		if (
+			near_objective
+			and entry is Hero
+			and _is_fleeing_hero_pulling_from_objective(
+				army_center,
+				entry as Node3D,
+				strategic_target
+			)
+		):
+			continue
 		var candidate: Node3D = entry as Node3D
 		var distance: float = EnemyArmyCommand.horizontal_distance(army_center, candidate.global_position)
 		var priority: int = CombatTargetValidation.get_enemy_attack_target_priority(
@@ -2048,6 +2079,27 @@ func _pick_local_attack_focus(
 	if best != null:
 		_begin_attack_chase(best, army_center)
 	return best
+
+
+func _is_fleeing_hero_pulling_from_objective(
+	army_center: Vector3,
+	candidate: Node3D,
+	strategic_target: Node3D
+) -> bool:
+	if not NodeSafety.is_alive_node(candidate) or not candidate is Hero:
+		return false
+	if not NodeSafety.is_alive_node(strategic_target) or not strategic_target is Building:
+		return false
+	var army_to_obj: float = EnemyArmyCommand.horizontal_distance(
+		army_center,
+		strategic_target.global_position
+	)
+	var hero_to_obj: float = EnemyArmyCommand.horizontal_distance(
+		candidate.global_position,
+		strategic_target.global_position
+	)
+	## Hero is farther from the objective than the army — chasing pulls off the base.
+	return hero_to_obj > army_to_obj + 8.0
 
 
 func _begin_attack_chase(target: Node3D, army_center: Vector3) -> void:
@@ -2071,7 +2123,8 @@ func _clear_attack_chase() -> void:
 func _should_continue_local_chase(
 	army_center: Vector3,
 	local_focus: Node3D,
-	strategic_destination: Vector3
+	strategic_destination: Vector3,
+	strategic_target: Node3D = null
 ) -> bool:
 	if not NodeSafety.is_alive_node(local_focus):
 		return false
@@ -2090,6 +2143,10 @@ func _should_continue_local_chase(
 		and EnemyArmyCommand.horizontal_distance(from_anchor, local_focus.global_position)
 		> MilitaryAIConfig.V2_ATTACK_CHASE_LEASH
 	):
+		return false
+
+	## Do not abandon an exposed Town Center / production base to chase a fleeing hero.
+	if _is_fleeing_hero_pulling_from_objective(army_center, local_focus, strategic_target):
 		return false
 
 	## Resume the strategic route once the skirmish drifts too far from the objective path.

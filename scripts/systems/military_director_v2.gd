@@ -7,9 +7,11 @@ extends Node
 ## Does not issue unit orders — ArmyCommanderV2 executes the mission.
 ##
 ## DEFEND overrides CREEP / ATTACK / ASSEMBLE / RECOVER for emergency base defense.
-## Early opening philosophy: ASSEMBLE → CREEP → CREEP → CREEP → ATTACK (≈ hero L3).
+## Early opening philosophy: ASSEMBLE → CREEP → CREEP → CREEP → ATTACK (≈ hero L3 / preferred camps).
 ## ATTACK preempts CREEP only on lethal / greed / clear strength advantage — never
-## merely because the minimum attack squad exists.
+## merely because the minimum attack squad exists *during* the early creep window.
+## After soft early-creep goals, an attack-ready main squad must launch first pressure
+## instead of chaining camps forever.
 ## RETREAT pulls the squad home as one group; RECOVER rebuilds before offense resumes.
 ## After a clear, the director chains to another nearby safe camp when valuable,
 ## otherwise reassesses via RECOVER or ASSEMBLE (never resumes a stale reservation).
@@ -1445,6 +1447,19 @@ func _maybe_begin_retreat(tree: SceneTree, rally_point: Vector3) -> bool:
 	if not decision.get("should_retreat", false):
 		return false
 
+	## During minimum ATTACK/CREEP commitment, ignore soft contact retreats that fire
+	## the moment the army approaches a defended base (false first-attack abort).
+	## Keep only critical disadvantage signals.
+	if not _has_met_state_commitment():
+		var reason: String = String(decision.get("reason", ""))
+		var critical: bool = (
+			reason == "hero in serious danger"
+			or reason.ends_with("fight unwinnable")
+			or reason == "frontline losses critical"
+		)
+		if not critical:
+			return false
+
 	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
 	var destination: Vector3 = _resolve_retreat_destination(tree, rally_point, center)
 	_transition_to(
@@ -1976,6 +1991,7 @@ func _select_attack_strategic_target(
 		origin,
 		lethal
 	)
+	## Lethal / clear commit windows go straight at the main Town Center.
 	if commit_th and player_cc != null:
 		return {
 			"node": player_cc,
@@ -1985,7 +2001,8 @@ func _select_attack_strategic_target(
 			"commit_town_hall": true,
 		}
 
-	if not lethal and not commit_th:
+	## 1) Exposed player military threatening the AI army / route.
+	if not lethal:
 		var blocking: Dictionary = _find_route_blocking_player_army(
 			tree,
 			origin,
@@ -1993,7 +2010,33 @@ func _select_attack_strategic_target(
 		)
 		if not blocking.is_empty():
 			return blocking
+		var threatening: Dictionary = _find_threatening_player_military(tree, origin, rally_point)
+		if not threatening.is_empty():
+			return threatening
 
+	## 2) Player expansion / economically valuable structure.
+	var expansion: Node3D = _find_player_expansion(tree, origin, player_cc)
+	if expansion != null:
+		return {
+			"node": expansion,
+			"position": expansion.global_position,
+			"reason": "player expansion",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_OTHER_STRUCTURE,
+			"commit_town_hall": false,
+		}
+
+	## 3) Player production.
+	var production: Node3D = _find_player_production_building(tree, origin)
+	if production != null:
+		return {
+			"node": production,
+			"position": production.global_position,
+			"reason": "production building",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_PRODUCTION,
+			"commit_town_hall": false,
+		}
+
+	## 4) Stable first-attack fallback: living player Town Center / main base.
 	if player_cc != null:
 		return {
 			"node": player_cc,
@@ -2010,16 +2053,6 @@ func _select_attack_strategic_target(
 			"position": tower.global_position,
 			"reason": "dangerous tower",
 			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_DANGEROUS_TOWER,
-			"commit_town_hall": false,
-		}
-
-	var production: Node3D = _find_player_production_building(tree, origin)
-	if production != null:
-		return {
-			"node": production,
-			"position": production.global_position,
-			"reason": "production building",
-			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_PRODUCTION,
 			"commit_town_hall": false,
 		}
 
@@ -2043,6 +2076,15 @@ func _select_attack_strategic_target(
 			"commit_town_hall": false,
 		}
 
+	## Last-resort living fallback position — never fail the first attack for score gaps.
+	if player_cc != null:
+		return {
+			"node": player_cc,
+			"position": player_cc.global_position,
+			"reason": "player town hall fallback",
+			"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_TOWN_HALL,
+			"commit_town_hall": false,
+		}
 	if rally_point != Vector3.ZERO:
 		return {
 			"node": null,
@@ -2052,6 +2094,85 @@ func _select_attack_strategic_target(
 			"commit_town_hall": false,
 		}
 	return {}
+
+
+## Player military near the AI base / army that is actively threatening.
+func _find_threatening_player_military(
+	tree: SceneTree,
+	origin: Vector3,
+	rally_point: Vector3
+) -> Dictionary:
+	var probe: Vector3 = origin if origin != Vector3.ZERO else rally_point
+	if probe == Vector3.ZERO:
+		return {}
+	var units: Array = EnemyArmyCommand.collect_player_military_near(
+		tree,
+		probe,
+		MilitaryAIConfig.V2_ATTACK_ROUTE_BLOCK_RADIUS
+	)
+	units = NodeSafety.clean_node_array(units)
+	if units.size() < MilitaryAIConfig.V2_ATTACK_ROUTE_BLOCK_MIN_UNITS:
+		## Single hero / small force only counts when deep in AI territory.
+		if units.size() < 1:
+			return {}
+		var near_base: Array = EnemyArmyCommand.collect_player_military_near(
+			tree,
+			rally_point if rally_point != Vector3.ZERO else probe,
+			MilitaryAIConfig.V2_DEFEND_THREAT_SEARCH_RANGE
+		)
+		near_base = NodeSafety.clean_node_array(near_base)
+		if near_base.is_empty():
+			return {}
+		units = near_base
+
+	var center: Vector3 = EnemyArmyCommand.compute_army_center(units)
+	if center == Vector3.ZERO:
+		return {}
+	var strongest: Node3D = null
+	var strongest_power: int = 0
+	for entry: Variant in units:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var power: int = EnemyArmyCommand.estimate_military_power([entry])
+		if power > strongest_power:
+			strongest_power = power
+			strongest = entry as Node3D
+	if strongest == null:
+		return {}
+	return {
+		"node": strongest,
+		"position": center,
+		"reason": "threatening military",
+		"priority": CombatTargetValidation.V2_ATTACK_STRATEGIC_PRIORITY_ROUTE_BLOCKING_ARMY,
+		"commit_town_hall": false,
+	}
+
+
+## Secondary player Town Center (expansion) preferred over the main base when present.
+func _find_player_expansion(
+	tree: SceneTree,
+	origin: Vector3,
+	main_cc: CommandCenter
+) -> Node3D:
+	if tree == null:
+		return null
+	var best: Node3D = null
+	var best_distance: float = INF
+	for node: Variant in CombatTargetValidation.get_cached_group_nodes(tree, &"buildings"):
+		if not node is CommandCenter or not NodeSafety.is_alive_node(node):
+			continue
+		if not CombatTargetValidation.is_player_selectable_building(node):
+			continue
+		var cc: CommandCenter = node as CommandCenter
+		if main_cc != null and cc == main_cc:
+			continue
+		if cc.building_state != Building.STATE_COMPLETED:
+			continue
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, cc.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = cc
+	return best
 
 
 func _should_commit_to_town_hall(
@@ -2357,6 +2478,28 @@ func _force_offensive_reevaluation(
 		_maybe_log_offense_diag(tree, rally_point, "%s incomplete" % context)
 		return false
 
+	## After early creep goals (or when attack-ready and creep is no longer preferred),
+	## prefer a real grouped ATTACK over endless camp chaining.
+	var prefer_attack_now: bool = (
+		(is_attack_ready() or is_lethal_attack_ready() or combat_units >= 10)
+		and (
+			_are_early_creep_goals_met(tree)
+			or not _should_prefer_early_creeping(tree, rally_point)
+		)
+	)
+	var previous_cooldown: float = _post_retreat_attack_cooldown
+	if prefer_attack_now:
+		_post_retreat_attack_cooldown = 0.0
+		var launched_attack: bool = false
+		if is_attack_ready() or is_lethal_attack_ready() or combat_units >= 10:
+			launched_attack = _evaluate_attack_strategy(tree, rally_point)
+			if not launched_attack and combat_units >= 10:
+				launched_attack = _publish_pressure_attack(tree, rally_point, context)
+		if launched_attack:
+			_maybe_log_offense_diag(tree, rally_point, "%s → ATTACK" % context)
+			return true
+		_post_retreat_attack_cooldown = previous_cooldown
+
 	## Prefer creeping so the army stays grouped and gains XP before a full push.
 	var can_try_creep: bool = (
 		is_creep_ready()
@@ -2368,7 +2511,6 @@ func _force_offensive_reevaluation(
 
 	## Bypass early-creep preference: attack/pressure with the formed squad.
 	## Temporarily clear post-retreat cooldown so a healthy army can leave base.
-	var previous_cooldown: float = _post_retreat_attack_cooldown
 	_post_retreat_attack_cooldown = 0.0
 	## Hero-less but large armies may still pressure a known player base.
 	var launched: bool = false
@@ -2666,8 +2808,9 @@ func _get_creep_squad_units() -> Array:
 	return NodeSafety.clean_node_array(units)
 
 
-## Soft early-game preference: keep clearing safe camps until ~hero level 3.
+## Soft early-game preference: keep clearing safe camps until ~hero level 3 / preferred camps.
 ## Never forces CREEP through defense, retreat, or a clear winning attack.
+## After soft goals, do NOT keep chaining forever — first real attack must become eligible.
 func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> bool:
 	if tree == null:
 		return false
@@ -2678,6 +2821,9 @@ func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> boo
 	if _has_intent(MilitaryIntent.Kind.FINISH):
 		return false
 	if not is_creep_ready():
+		return false
+	## Soft goals complete → stop preferring creep (even mid-chain) so ATTACK can launch.
+	if _are_early_creep_goals_met(tree):
 		return false
 
 	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
@@ -2696,16 +2842,6 @@ func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> boo
 	if EnemyArmyCommand.get_health_ratio(hero) < MilitaryAIConfig.V2_CREEP_HERO_HEALTHY_RATIO:
 		return false
 
-	var hero_level: int = hero.level
-	var camps_cleared: int = _cleared_creep_camp_ids.size()
-	var below_power_spike: bool = hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL
-	var under_camp_goal: bool = (
-		camps_cleared < MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK
-	)
-	## After the soft goals, only keep preferring while already chaining camps.
-	if not below_power_spike and not under_camp_goal and _state != State.CREEP:
-		return false
-
 	var origin: Vector3 = _main_squad.center
 	if origin == Vector3.ZERO:
 		origin = EnemyArmyCommand.compute_army_center(creep_army)
@@ -2716,6 +2852,19 @@ func _should_prefer_early_creeping(tree: SceneTree, rally_point: Vector3) -> boo
 	if not _is_valid_creep_camp(tree, next_camp, creep_manager, creep_army, origin, rally_point):
 		next_camp = _select_best_creep_camp(tree, creep_manager, creep_army, origin, rally_point)
 	return next_camp != null
+
+
+## True once ≈L3 and/or preferred early camps are done (soft first-attack gate).
+func _are_early_creep_goals_met(tree: SceneTree) -> bool:
+	var camps_cleared: int = _cleared_creep_camp_ids.size()
+	if camps_cleared >= MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK:
+		return true
+	if tree == null:
+		return false
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	if hero != null and hero.level >= MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL:
+		return true
+	return false
 
 
 ## Immediate CREEP → ATTACK interrupt conditions (not "min attack squad ready").
@@ -2764,6 +2913,11 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 	)
 	if early_creep_window:
 		return false
+
+	## Soft goals done + attack-ready army → launch the first real pressure attack.
+	## Do not require a perfect strength-advantage score or keep chaining camps forever.
+	if is_attack_ready():
+		return true
 
 	var attack_army: Array = _get_attack_squad_units()
 	if attack_army.is_empty():
@@ -3596,6 +3750,7 @@ func _publish_perf_status() -> void:
 		camps_target = strategic.get_creep_camps_target()
 	var blocked: String = _resolve_compact_blocked_reason(display_state)
 	var target_label: String = objective
+	var target_dist: float = _watchdog_distance
 	if _mission != null:
 		var alive_target: Node3D = _mission.get_alive_target_object()
 		if alive_target != null:
@@ -3604,6 +3759,16 @@ func _publish_perf_status() -> void:
 				target_label = creep_manager._format_camp_name(alive_target)
 			else:
 				target_label = alive_target.name
+			if _main_squad.center != Vector3.ZERO:
+				target_dist = EnemyArmyCommand.horizontal_distance(
+					_main_squad.center,
+					alive_target.global_position
+				)
+		elif _mission.target_position != Vector3.ZERO and _main_squad.center != Vector3.ZERO:
+			target_dist = EnemyArmyCommand.horizontal_distance(
+				_main_squad.center,
+				_mission.target_position
+			)
 	var threat: Dictionary = {}
 	if tree != null:
 		threat = _resolve_v2_defense_threat(tree)
@@ -3615,22 +3780,46 @@ func _publish_perf_status() -> void:
 		defense_label = "post-clear regroup %.1fs" % _post_defend_regroup_remaining
 	elif EnemyArmyCommand.is_emergency_defense_active():
 		defense_label = "emergency"
+	var army_need: int = MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
+	if (
+		_are_early_creep_goals_met(tree)
+		or _state == State.ATTACK
+		or _state == State.ASSEMBLE
+	):
+		army_need = MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
+	var executable_label: String = EnemyArmyCommand.executable_mission_to_label(
+		EnemyArmyCommand.get_executable_mission()
+	)
+	if _state == State.ATTACK:
+		var has_target: bool = (
+			(_mission != null and _mission.get_alive_target_object() != null)
+			or (_mission != null and _mission.target_position != Vector3.ZERO)
+		)
+		if not has_target:
+			executable_label = "NO"
+			if blocked == "-" or blocked.is_empty():
+				blocked = "no_player_target"
+		elif get_military_unit_count() <= 0 and not _main_squad.hero_present:
+			executable_label = "NO"
+			if blocked == "-" or blocked.is_empty():
+				blocked = "army empty"
 	PerfCounters.set_military_ai_v2_compact_status(
 		macro_phase,
 		display_state,
 		mission_name,
-		EnemyArmyCommand.executable_mission_to_label(EnemyArmyCommand.get_executable_mission()),
+		executable_label,
 		blocked,
 		"L%d %s" % [hero_level, "yes" if _main_squad.hero_present else "no"],
 		"%d/%d (+%d pend)" % [
 			get_military_unit_count(),
-			MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS,
+			army_need,
 			_pending_reinforcements.size(),
 		],
 		"%d/%d" % [_cleared_creep_camp_ids.size(), camps_target],
 		target_label,
 		defense_label,
-		"yes" if threat_active else "no"
+		"yes" if threat_active else "no",
+		target_dist
 	)
 	PerfCounters.set_ai_mission_detail(
 		"V2 %s → %s (%s)%s" % [
@@ -3648,26 +3837,90 @@ func _publish_perf_status() -> void:
 
 
 func _resolve_compact_blocked_reason(display_state: String) -> String:
-	if _state == State.CREEP or _state == State.ATTACK:
+	## Active offensive missions are not "blocked" — show "-" unless execution lacks a target.
+	if _state == State.ATTACK:
+		return _compact_attack_block_label()
+	if _state == State.CREEP:
 		return "-"
-	if not _last_creep_block_reason.is_empty():
-		return _last_creep_block_reason
-	if not _last_attack_block_reason.is_empty():
-		return _last_attack_block_reason
 	if _state == State.DEFEND:
 		return "defense active"
-	if _state == State.ASSEMBLE:
+	if _post_retreat_attack_cooldown > 0.0 and _state in [State.ASSEMBLE, State.RECOVER, State.IDLE]:
+		var attack_worthy: bool = is_attack_ready() or is_lethal_attack_ready()
+		if attack_worthy:
+			return "retreat cooldown"
+	if not _last_creep_block_reason.is_empty() and _state != State.ASSEMBLE:
+		return _compact_named_block(_last_creep_block_reason)
+	var attack_block: String = _compact_attack_block_label()
+	if not attack_block.is_empty() and attack_block != "-":
+		return attack_block
+	if _state == State.ASSEMBLE or _state == State.RECOVER or _state == State.IDLE:
 		if not _main_squad.hero_present:
-			return "missing hero"
+			return "hero missing"
 		var escorts: int = get_military_unit_count()
-		if escorts < MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS:
-			return "escorts %d/%d" % [escorts, MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS]
+		var tree: SceneTree = get_tree()
+		var goals_met: bool = _are_early_creep_goals_met(tree)
+		var need: int = (
+			MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS
+			if goals_met
+			else MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
+		)
+		if escorts < need:
+			return "army %d/%d" % [escorts, need]
 		if _post_defend_regroup_remaining > 0.0:
 			return "post-defense regroup"
+		if EnemyArmyCommand.is_defense_blocking_offense():
+			return "defense active"
+		if goals_met and is_attack_ready():
+			## Attack-ready but still assembling — surface the exact gate.
+			if not _last_attack_block_reason.is_empty():
+				return _compact_attack_block_label()
+			return "gathering"
+		if not goals_met and escorts < MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS:
+			return "gathering"
 		return "gathering"
 	if display_state.is_empty():
 		return "-"
 	return "-"
+
+
+func _compact_attack_block_label() -> String:
+	var reason: String = _last_attack_block_reason
+	if reason.is_empty():
+		return "-"
+	if reason.contains("attack_ready=false") or reason.contains("army incomplete"):
+		return "army %d/%d" % [
+			get_military_unit_count(),
+			MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS,
+		]
+	if reason.contains("missing hero") or reason.contains("hero="):
+		if not _main_squad.hero_present:
+			return "hero missing"
+	if reason.contains("emergency_defense") or reason.contains("defense active"):
+		return "defense active"
+	if reason.contains("post_retreat_attack_cooldown") or reason.contains("retreat cooldown"):
+		return "retreat cooldown"
+	if reason.contains("no valid attack target") or reason.contains("no_target") or reason.contains("no player"):
+		return "no_player_target"
+	if reason.contains("pressure failed"):
+		return "no_player_target"
+	## Keep short actionable text; truncate noisy telemetry.
+	if reason.length() > 42:
+		return reason.substr(0, 42)
+	return reason
+
+
+func _compact_named_block(reason: String) -> String:
+	if reason.is_empty():
+		return "-"
+	if reason.begins_with("escorts "):
+		return reason.replace("escorts ", "army ")
+	if reason == "missing hero":
+		return "hero missing"
+	if reason == "defense active" or reason.contains("aggression suspend"):
+		return "defense active"
+	if reason.length() > 42:
+		return reason.substr(0, 42)
+	return reason
 
 
 func _format_destination_label(mission: ArmyMissionV2) -> String:

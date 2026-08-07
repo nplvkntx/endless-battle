@@ -71,6 +71,7 @@ var _military_ai_v2_target_label: String = "-"
 var _military_ai_v2_defense_label: String = "-"
 var _military_ai_v2_threat_label: String = "-"
 var _military_ai_v2_executable_label: String = "-"
+var _military_ai_v2_target_dist: float = -1.0
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -414,7 +415,8 @@ func set_military_ai_v2_compact_status(
 	camps_label: String,
 	target_label: String,
 	defense_label: String,
-	threat_label: String
+	threat_label: String,
+	target_dist: float = -1.0
 ) -> void:
 	_military_ai_v2_macro = macro_phase if not macro_phase.is_empty() else "-"
 	_military_ai_v2_state = military_state if not military_state.is_empty() else "-"
@@ -427,6 +429,7 @@ func set_military_ai_v2_compact_status(
 	_military_ai_v2_target_label = target_label if not target_label.is_empty() else "-"
 	_military_ai_v2_defense_label = defense_label if not defense_label.is_empty() else "-"
 	_military_ai_v2_threat_label = threat_label if not threat_label.is_empty() else "-"
+	_military_ai_v2_target_dist = target_dist
 
 
 func get_military_ai_v2_macro() -> String:
@@ -451,6 +454,12 @@ func get_military_ai_v2_camps_label() -> String:
 
 func get_military_ai_v2_target_label() -> String:
 	return _military_ai_v2_target_label
+
+
+func get_military_ai_v2_target_dist_label() -> String:
+	if _military_ai_v2_target_dist < 0.0:
+		return "-"
+	return "%.0f" % _military_ai_v2_target_dist
 
 
 func get_military_ai_v2_defense_label() -> String:
