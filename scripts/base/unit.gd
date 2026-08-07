@@ -54,6 +54,13 @@ const LOCAL_STALL_CONFIRM_SECONDS := 1.25
 const LOCAL_STALL_PROGRESS_EPSILON := 0.35
 const LOCAL_STALL_MAX_REPATHS := 4
 const LOCAL_STALL_COOLDOWN_SECONDS := 0.85
+## Low-level physical corner/wall slide (not navigation authority).
+const CORNER_SLIDE_ENTER_MOVE_RATIO := 0.22
+const CORNER_SLIDE_BLOCK_DOT := 0.15
+const CORNER_SLIDE_SIDE_LOCK_SECONDS := 0.55
+const CORNER_SLIDE_MAX_SECONDS := 0.75
+const CORNER_SLIDE_PROGRESS_EPSILON := 0.12
+const CORNER_SLIDE_MIN_DEST_SCORE := 0.05
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
@@ -118,6 +125,14 @@ var _local_stall_time: float = 0.0
 var _local_stall_best_remaining: float = -1.0
 var _local_stall_repath_count: int = 0
 var _local_stall_cooldown: float = 0.0
+## Temporary physical slide around static building/world corners.
+var _corner_slide_active: bool = false
+var _corner_slide_dir: Vector3 = Vector3.ZERO
+var _corner_slide_normal: Vector3 = Vector3.ZERO
+var _corner_slide_timer: float = 0.0
+var _corner_slide_side_lock: float = 0.0
+var _corner_slide_best_goal_dist: float = -1.0
+var _dbg_corner_slide_desired_dir: Vector3 = Vector3.ZERO
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _chase_update_timer: float = 0.0
@@ -756,7 +771,9 @@ func get_movement_execution_debug() -> Dictionary:
 		)
 	_dbg_repath_timer = cooldown_left
 	var movement_state: String = "idle"
-	if _detour_active:
+	if _corner_slide_active:
+		movement_state = "corner_slide"
+	elif _detour_active:
 		movement_state = "detour"
 	elif has_move_target and _navigation_active:
 		movement_state = "nav_follow"
@@ -767,6 +784,18 @@ func get_movement_execution_debug() -> Dictionary:
 	var agent_radius: float = 0.0
 	if _navigation_agent != null and is_instance_valid(_navigation_agent):
 		agent_radius = _navigation_agent.radius
+	var slide_side: String = "none"
+	if _corner_slide_active and _corner_slide_dir.length_squared() > 0.0001:
+		## +X-ish right vs left relative to desired travel when available.
+		var facing: Vector3 = _dbg_corner_slide_desired_dir
+		if facing.length_squared() < 0.0001:
+			facing = _dbg_desired_velocity
+		facing.y = 0.0
+		if facing.length_squared() > 0.0001:
+			var right: Vector3 = Vector3(-facing.z, 0.0, facing.x)
+			slide_side = "right" if _corner_slide_dir.dot(right) >= 0.0 else "left"
+		else:
+			slide_side = "active"
 	return {
 		"unit_id": get_instance_id(),
 		"command_generation": _player_squad_command_generation,
@@ -795,6 +824,11 @@ func get_movement_execution_debug() -> Dictionary:
 		"local_stall_timer": _local_stall_time,
 		"local_stall_best_remaining": _local_stall_best_remaining,
 		"local_stall_repaths": _local_stall_repath_count,
+		"corner_slide_active": _corner_slide_active,
+		"corner_slide_side": slide_side,
+		"corner_slide_normal": _corner_slide_normal,
+		"corner_slide_desired_dir": _dbg_corner_slide_desired_dir,
+		"corner_slide_dir": _corner_slide_dir,
 		"queue_mode": {},
 	}
 
@@ -934,13 +968,34 @@ func apply_steered_velocity(
 
 	velocity = _smoothed_move_velocity
 	velocity.y = 0.0
+	if (
+		_corner_slide_active
+		and is_movement_active()
+		and not allow_stationary_correction
+		and _corner_slide_dir.length_squared() > 0.0001
+	):
+		velocity = _compose_corner_slide_velocity(
+			velocity, _corner_slide_normal, _corner_slide_dir
+		)
 	_dbg_final_velocity = velocity
 	if velocity.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ:
 		velocity = Vector3.ZERO
 		_dbg_final_velocity = Vector3.ZERO
+		_clear_corner_slide_state()
 		return
 
+	var position_before: Vector3 = global_position
+	var desired_dir: Vector3 = desired
+	if desired_dir.length_squared() > 0.0001:
+		desired_dir = desired_dir.normalized()
+	else:
+		desired_dir = Vector3.ZERO
+	_dbg_corner_slide_desired_dir = desired_dir
+
 	move_and_slide()
+
+	if is_movement_active() and not allow_stationary_correction:
+		_update_corner_slide_after_move(delta, position_before, desired_dir)
 
 
 ## Stationary halt, plus a tiny peel only when collision bodies truly intersect.
@@ -965,6 +1020,7 @@ func _clear_residual_movement() -> void:
 	_smoothed_move_velocity = Vector3.ZERO
 	_desired_move_facing = Vector3.ZERO
 	_blocked_arrival_time = 0.0
+	_clear_corner_slide_state()
 	UnitSeparation.clear_state(self)
 	if has_meta(&"_nav_last_path_point"):
 		remove_meta(&"_nav_last_path_point")
@@ -1583,6 +1639,247 @@ func _is_direct_path_clear(forward: Vector3, distance: float) -> bool:
 	return space_state.intersect_ray(query).is_empty()
 
 
+## Low-level physical corner/wall slide. Uses move_and_slide collision normals only.
+## Does not change destination, command generation, or NavigationAgent targets.
+func _clear_corner_slide_state() -> void:
+	_corner_slide_active = false
+	_corner_slide_dir = Vector3.ZERO
+	_corner_slide_normal = Vector3.ZERO
+	_corner_slide_timer = 0.0
+	_corner_slide_side_lock = 0.0
+	_corner_slide_best_goal_dist = -1.0
+	_dbg_corner_slide_desired_dir = Vector3.ZERO
+
+
+func _get_corner_slide_destination_dir() -> Vector3:
+	var goal: Vector3 = _movement_target
+	if _player_squad_final_arrival.length_squared() > 0.0001:
+		goal = _player_squad_final_arrival
+	elif (
+		_navigation_agent != null
+		and is_instance_valid(_navigation_agent)
+		and UnitNavigation.can_use(_navigation_agent)
+	):
+		goal = _navigation_agent.target_position
+	var to_goal: Vector3 = goal - global_position
+	to_goal.y = 0.0
+	if to_goal.length_squared() < 0.0001:
+		return Vector3.ZERO
+	return to_goal.normalized()
+
+
+func _get_corner_slide_goal_distance() -> float:
+	var goal: Vector3 = _movement_target
+	if _player_squad_final_arrival.length_squared() > 0.0001:
+		goal = _player_squad_final_arrival
+	var to_goal: Vector3 = goal - global_position
+	to_goal.y = 0.0
+	return to_goal.length()
+
+
+## Prefer static world/building contacts. Units do not mask other units, but still
+## skip pure unit colliders if present so we never wall-follow another body.
+func _is_static_obstacle_collider(collider: Object) -> bool:
+	if collider == null or not is_instance_valid(collider):
+		return false
+	if collider is Unit:
+		return false
+	if collider is CollisionObject3D:
+		var layer: int = (collider as CollisionObject3D).collision_layer
+		if (layer & PhysicsLayers.UNITS) != 0 and (layer & PhysicsLayers.UNIT_COLLISION_MASK) == 0:
+			return false
+	return true
+
+
+func _find_blocking_static_normal(desired_dir: Vector3) -> Vector3:
+	if desired_dir.length_squared() < 0.0001:
+		return Vector3.ZERO
+	var goal_dir: Vector3 = desired_dir.normalized()
+	var best_normal: Vector3 = Vector3.ZERO
+	var best_oppose: float = 0.0
+	for index: int in get_slide_collision_count():
+		var collision: KinematicCollision3D = get_slide_collision(index)
+		if not _is_static_obstacle_collider(collision.get_collider()):
+			continue
+		var normal: Vector3 = collision.get_normal()
+		normal.y = 0.0
+		if normal.length_squared() < 0.0001:
+			continue
+		normal = normal.normalized()
+		var oppose: float = -normal.dot(goal_dir)
+		if oppose > best_oppose and oppose > CORNER_SLIDE_BLOCK_DOT:
+			best_oppose = oppose
+			best_normal = normal
+	return best_normal
+
+
+func _choose_corner_slide_tangent(normal: Vector3, dest_dir: Vector3) -> Vector3:
+	if normal.length_squared() < 0.0001:
+		return Vector3.ZERO
+	var flat_normal: Vector3 = Vector3(normal.x, 0.0, normal.z)
+	if flat_normal.length_squared() < 0.0001:
+		return Vector3.ZERO
+	flat_normal = flat_normal.normalized()
+	var tangent_a: Vector3 = Vector3(-flat_normal.z, 0.0, flat_normal.x)
+	if tangent_a.length_squared() < 0.0001:
+		return Vector3.ZERO
+	tangent_a = tangent_a.normalized()
+	var tangent_b: Vector3 = -tangent_a
+
+	var score_a: float = 0.0
+	var score_b: float = 0.0
+	if dest_dir.length_squared() > 0.0001:
+		var dest: Vector3 = dest_dir.normalized()
+		score_a = tangent_a.dot(dest)
+		score_b = tangent_b.dot(dest)
+
+	## Prefer the tangent that progresses toward the active destination.
+	if score_a >= score_b and score_a > CORNER_SLIDE_MIN_DEST_SCORE:
+		return tangent_a
+	if score_b > CORNER_SLIDE_MIN_DEST_SCORE:
+		return tangent_b
+
+	## Neither side clearly helps — keep the locked side if still valid.
+	if _corner_slide_dir.length_squared() > 0.0001:
+		if _corner_slide_dir.dot(tangent_a) >= _corner_slide_dir.dot(tangent_b):
+			return tangent_a
+		return tangent_b
+	return Vector3.ZERO
+
+
+func _compose_corner_slide_velocity(
+	desired_velocity: Vector3, normal: Vector3, slide_dir: Vector3
+) -> Vector3:
+	var vel: Vector3 = desired_velocity
+	vel.y = 0.0
+	var flat_normal: Vector3 = Vector3(normal.x, 0.0, normal.z)
+	if flat_normal.length_squared() > 0.0001:
+		flat_normal = flat_normal.normalized()
+		var into_wall: float = vel.dot(flat_normal)
+		if into_wall < 0.0:
+			vel -= flat_normal * into_wall
+
+	var speed: float = move_speed
+	if vel.length_squared() > MOVE_VELOCITY_DEAD_ZONE_SQ:
+		speed = minf(move_speed, maxf(vel.length(), move_speed * 0.75))
+	var slide: Vector3 = slide_dir
+	slide.y = 0.0
+	if slide.length_squared() < 0.0001:
+		return vel
+	slide = slide.normalized() * speed
+
+	if vel.length_squared() < MOVE_VELOCITY_DEAD_ZONE_SQ or vel.dot(slide) < 0.0:
+		vel = slide
+	else:
+		vel = vel.normalized() * speed
+		vel = vel.lerp(slide, 0.7)
+
+	if flat_normal.length_squared() > 0.0001:
+		var into_after: float = vel.dot(flat_normal)
+		if into_after < 0.0:
+			vel -= flat_normal * into_after
+
+	if vel.length() > move_speed:
+		vel = vel.normalized() * move_speed
+	vel.y = 0.0
+	return vel
+
+
+func _trigger_corner_slide_same_destination_repath() -> void:
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		return
+	if not UnitNavigation.can_use(_navigation_agent):
+		return
+	var refresh_target: Vector3 = _movement_target
+	if (
+		_player_squad_command_generation >= 0
+		and PlayerRouteNavigation.is_unit_on_active_route(self)
+	):
+		var route_travel: Vector3 = PlayerRouteNavigation.resolve_travel_target(self)
+		if route_travel.length_squared() > 0.0001:
+			refresh_target = route_travel
+	_dbg_stall_recovery_ran = true
+	_dbg_target_change_reason = "corner_slide_same_dest_repath"
+	UnitNavigation.force_same_destination_repath(_navigation_agent, self, refresh_target)
+	_movement_target = Vector3(refresh_target.x, global_position.y, refresh_target.z)
+	_navigation_active = true
+	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
+	call_deferred("_refresh_navigation_active_state")
+
+
+func _update_corner_slide_after_move(
+	delta: float, position_before: Vector3, desired_dir: Vector3
+) -> void:
+	if not has_move_target:
+		_clear_corner_slide_state()
+		return
+
+	var dest_dir: Vector3 = _get_corner_slide_destination_dir()
+	var probe_dir: Vector3 = desired_dir
+	if probe_dir.length_squared() < 0.0001:
+		probe_dir = dest_dir
+	if probe_dir.length_squared() < 0.0001:
+		_clear_corner_slide_state()
+		return
+
+	var blocking_normal: Vector3 = _find_blocking_static_normal(probe_dir)
+	var moved: Vector3 = global_position - position_before
+	moved.y = 0.0
+	var expected_move: float = move_speed * delta * CORNER_SLIDE_ENTER_MOVE_RATIO
+	var forward_progress: float = moved.dot(probe_dir.normalized())
+	var physically_blocked: bool = (
+		blocking_normal.length_squared() > 0.0001 and forward_progress < expected_move
+	)
+
+	if _corner_slide_active:
+		_corner_slide_timer += delta
+		_corner_slide_side_lock = maxf(0.0, _corner_slide_side_lock - delta)
+		var goal_dist: float = _get_corner_slide_goal_distance()
+		if _corner_slide_best_goal_dist < 0.0:
+			_corner_slide_best_goal_dist = goal_dist
+		elif goal_dist <= _corner_slide_best_goal_dist - CORNER_SLIDE_PROGRESS_EPSILON:
+			_corner_slide_best_goal_dist = goal_dist
+
+		## Forward nav direction clear → resume normal navigation immediately.
+		if not physically_blocked:
+			_clear_corner_slide_state()
+			return
+
+		_corner_slide_normal = blocking_normal
+		## Keep the same side briefly; only rechoose after the lock expires.
+		if _corner_slide_side_lock <= 0.0 or _corner_slide_dir.length_squared() < 0.0001:
+			var chosen: Vector3 = _choose_corner_slide_tangent(blocking_normal, dest_dir)
+			if chosen.length_squared() > 0.0001:
+				_corner_slide_dir = chosen
+				_corner_slide_side_lock = CORNER_SLIDE_SIDE_LOCK_SECONDS
+			else:
+				_clear_corner_slide_state()
+				_trigger_corner_slide_same_destination_repath()
+				return
+
+		var no_goal_progress: bool = (
+			goal_dist > _corner_slide_best_goal_dist - CORNER_SLIDE_PROGRESS_EPSILON
+		)
+		if _corner_slide_timer >= CORNER_SLIDE_MAX_SECONDS and no_goal_progress:
+			_clear_corner_slide_state()
+			_trigger_corner_slide_same_destination_repath()
+		return
+
+	if not physically_blocked:
+		return
+
+	var enter_tangent: Vector3 = _choose_corner_slide_tangent(blocking_normal, dest_dir)
+	if enter_tangent.length_squared() < 0.0001:
+		return
+
+	_corner_slide_active = true
+	_corner_slide_normal = blocking_normal
+	_corner_slide_dir = enter_tangent
+	_corner_slide_timer = 0.0
+	_corner_slide_side_lock = CORNER_SLIDE_SIDE_LOCK_SECONDS
+	_corner_slide_best_goal_dist = _get_corner_slide_goal_distance()
+
+
 ## When pressed against a building/world collider near the destination, settle instead of
 ## oscillating between path desire and collision slide (classic Town Hall jitter).
 func _try_complete_blocked_arrival(
@@ -1974,6 +2271,7 @@ func _reset_unstuck_state() -> void:
 	_local_stall_best_remaining = -1.0
 	_local_stall_repath_count = 0
 	_local_stall_cooldown = 0.0
+	_clear_corner_slide_state()
 	# Keep _crowd_yield_seconds ticking — do not clear mid-yield.
 
 

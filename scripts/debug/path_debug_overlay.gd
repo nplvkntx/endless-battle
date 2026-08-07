@@ -580,6 +580,18 @@ func _build_unit_exec_lines(unit: Unit) -> PackedStringArray:
 			float(dbg.get("local_stall_timer", 0.0)),
 			int(dbg.get("local_stall_repaths", 0)),
 		],
+		"Corner slide: %s  side:%s" % [
+			"yes" if bool(dbg.get("corner_slide_active", false)) else "no",
+			str(dbg.get("corner_slide_side", "none")),
+		],
+		"Slide n:(%.2f, %.2f) des:(%.2f, %.2f) dir:(%.2f, %.2f)" % [
+			(dbg.get("corner_slide_normal", Vector3.ZERO) as Vector3).x,
+			(dbg.get("corner_slide_normal", Vector3.ZERO) as Vector3).z,
+			(dbg.get("corner_slide_desired_dir", Vector3.ZERO) as Vector3).x,
+			(dbg.get("corner_slide_desired_dir", Vector3.ZERO) as Vector3).z,
+			(dbg.get("corner_slide_dir", Vector3.ZERO) as Vector3).x,
+			(dbg.get("corner_slide_dir", Vector3.ZERO) as Vector3).z,
+		],
 		"State: %s  moving: %s" % [
 			str(dbg.get("movement_state", "?")),
 			"yes" if bool(dbg.get("has_move_target", false)) else "no",
