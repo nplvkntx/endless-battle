@@ -131,7 +131,7 @@ check_scene_resource_paths() {
 scan_godot_log() {
 	local log="$1"
 	local label="$2"
-	if grep -Eiq '(SCRIPT ERROR|Parse Error|Failed to load|Cannot open file|Compile Error|ERROR:.*\.gd)' "$log"; then
+	if grep -Eiq '(SCRIPT ERROR|Parse Error|Failed to load|Cannot open file|Compile Error|ERROR:.*\.gd|Lambda capture.*was freed|previously freed|Trying to assign invalid previously freed|Invalid type.*freed)' "$log"; then
 		cat "$log" >&2
 		fail "$label. $(summarize_log "$log")"
 	fi

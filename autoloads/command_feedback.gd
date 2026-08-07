@@ -9,6 +9,11 @@ enum MarkerKind {
 	PATROL,
 }
 
+enum TrackKind {
+	MARKER,
+	DUST,
+}
+
 ## Master switches — easy to disable or tune from the inspector / debugger.
 var enabled: bool = true
 var markers_enabled: bool = true
@@ -34,8 +39,9 @@ const ATTACK_MOVE_COLOR := Color(1.0, 0.42, 0.18, 0.95)
 const PATROL_COLOR := Color(1.0, 0.92, 0.25, 0.95)
 const DUST_COLOR := Color(0.62, 0.52, 0.38, 0.55)
 
-var _active_markers: Array[Node3D] = []
-var _active_dust: Array[Node3D] = []
+## Instance IDs only — never retain raw effect Nodes across delayed work.
+var _active_markers: PackedInt64Array = []
+var _active_dust: PackedInt64Array = []
 ## instance_id -> last footstep msec
 var _footstep_last_msec: Dictionary = {}
 
@@ -45,10 +51,11 @@ func _ready() -> void:
 
 
 func clear_all() -> void:
+	## Free live FX immediately so any root-bound tweens die with them.
 	_free_tracked(_active_markers)
 	_free_tracked(_active_dust)
-	_active_markers.clear()
-	_active_dust.clear()
+	_active_markers = PackedInt64Array()
+	_active_dust = PackedInt64Array()
 	_footstep_last_msec.clear()
 
 
@@ -134,9 +141,8 @@ func _show_marker(world_position: Vector3, kind: MarkerKind) -> void:
 
 	_prune_invalid(_active_markers)
 	while _active_markers.size() >= MAX_ACTIVE_MARKERS:
-		var oldest: Node3D = _active_markers.pop_front()
-		if oldest != null and is_instance_valid(oldest):
-			oldest.queue_free()
+		_free_tracked_id(_active_markers[0])
+		_active_markers.remove_at(0)
 
 	var marker: Node3D = _build_marker(kind)
 	var parent: Node = _fx_parent()
@@ -146,8 +152,8 @@ func _show_marker(world_position: Vector3, kind: MarkerKind) -> void:
 
 	parent.add_child(marker)
 	marker.global_position = Vector3(world_position.x, MARKER_Y, world_position.z)
-	_active_markers.append(marker)
-	_animate_fade_and_free(marker, MARKER_DURATION, MARKER_FADE_START_RATIO, _active_markers)
+	_active_markers.append(marker.get_instance_id())
+	_animate_fade_and_free(marker, MARKER_DURATION, MARKER_FADE_START_RATIO)
 
 
 func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
@@ -156,9 +162,8 @@ func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
 
 	_prune_invalid(_active_dust)
 	while _active_dust.size() >= MAX_ACTIVE_DUST:
-		var oldest: Node3D = _active_dust.pop_front()
-		if oldest != null and is_instance_valid(oldest):
-			oldest.queue_free()
+		_free_tracked_id(_active_dust[0])
+		_active_dust.remove_at(0)
 
 	var puff: Node3D = _build_dust_puff(is_start)
 	var parent: Node = _fx_parent()
@@ -168,7 +173,7 @@ func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
 
 	parent.add_child(puff)
 	puff.global_position = Vector3(world_position.x, 0.04, world_position.z)
-	_active_dust.append(puff)
+	_active_dust.append(puff.get_instance_id())
 	var lifetime: float = DUST_START_LIFETIME if is_start else DUST_FOOTSTEP_LIFETIME
 	_animate_dust(puff, lifetime)
 
@@ -287,14 +292,11 @@ func _make_fx_material(color: Color) -> StandardMaterial3D:
 	return material
 
 
-func _animate_fade_and_free(
-	root: Node3D,
-	duration: float,
-	fade_start_ratio: float,
-	track: Array[Node3D]
-) -> void:
+func _animate_fade_and_free(root: Node3D, duration: float, fade_start_ratio: float) -> void:
+	## Bind tween to the effect node so freeing/reset kills the tween with it.
+	var effect_id: int = root.get_instance_id()
 	var materials: Array[StandardMaterial3D] = _collect_materials(root)
-	var tween: Tween = create_tween()
+	var tween: Tween = root.create_tween()
 	var fade_delay: float = duration * fade_start_ratio
 	var fade_duration: float = maxf(0.05, duration - fade_delay)
 	tween.tween_interval(fade_delay)
@@ -306,19 +308,20 @@ func _animate_fade_and_free(
 			0.0,
 			fade_duration
 		)
-	# Lambda avoids CallbackTweener typed-Array bind failures ("Cannot convert Object to Object").
-	tween.chain().tween_callback(func() -> void: _finish_tracked(root, track))
+	## Immutable id + track kind — never capture the effect Node in a delayed lambda.
+	tween.chain().tween_callback(_finish_tracked_by_id.bind(effect_id, TrackKind.MARKER))
 
 
 func _animate_dust(root: Node3D, lifetime: float) -> void:
+	var effect_id: int = root.get_instance_id()
 	var materials: Array[StandardMaterial3D] = _collect_materials(root)
-	var tween: Tween = create_tween()
+	var tween: Tween = root.create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(root, "position:y", root.position.y + 0.35, lifetime)
 	tween.tween_property(root, "scale", Vector3.ONE * 1.8, lifetime)
 	for material: StandardMaterial3D in materials:
 		tween.tween_property(material, "albedo_color:a", 0.0, lifetime)
-	tween.chain().tween_callback(func() -> void: _finish_tracked(root, _active_dust))
+	tween.chain().tween_callback(_finish_tracked_by_id.bind(effect_id, TrackKind.DUST))
 
 
 func _collect_materials(root: Node) -> Array[StandardMaterial3D]:
@@ -337,24 +340,53 @@ func _collect_materials_recursive(node: Node, out: Array[StandardMaterial3D]) ->
 		_collect_materials_recursive(child, out)
 
 
-func _finish_tracked(root: Node3D, track: Array[Node3D]) -> void:
-	var index: int = track.find(root)
-	if index >= 0:
-		track.remove_at(index)
-	if root != null and is_instance_valid(root):
-		root.queue_free()
+func _finish_tracked_by_id(effect_id: int, track_kind: TrackKind) -> void:
+	match track_kind:
+		TrackKind.MARKER:
+			_remove_tracked_id(_active_markers, effect_id)
+		TrackKind.DUST:
+			_remove_tracked_id(_active_dust, effect_id)
+		_:
+			pass
+	var obj: Object = instance_from_id(effect_id)
+	if obj == null or not is_instance_valid(obj):
+		return
+	if obj is Node:
+		(obj as Node).queue_free()
 
 
-func _prune_invalid(track: Array[Node3D]) -> void:
+func _remove_tracked_id(track: PackedInt64Array, effect_id: int) -> void:
+	for i: int in range(track.size() - 1, -1, -1):
+		if track[i] == effect_id:
+			track.remove_at(i)
+			return
+
+
+func _prune_invalid(track: PackedInt64Array) -> void:
 	var write: int = 0
-	for node: Node3D in track:
-		if node != null and is_instance_valid(node):
-			track[write] = node
+	for i: int in track.size():
+		var effect_id: int = track[i]
+		var obj: Object = instance_from_id(effect_id)
+		if obj != null and is_instance_valid(obj):
+			track[write] = effect_id
 			write += 1
 	track.resize(write)
 
 
-func _free_tracked(track: Array[Node3D]) -> void:
-	for node: Node3D in track:
-		if node != null and is_instance_valid(node):
-			node.queue_free()
+func _free_tracked(track: PackedInt64Array) -> void:
+	for effect_id: int in track:
+		_free_tracked_id(effect_id)
+
+
+func _free_tracked_id(effect_id: int) -> void:
+	var obj: Object = instance_from_id(effect_id)
+	if obj == null or not is_instance_valid(obj):
+		return
+	if not obj is Node:
+		return
+	var node: Node = obj as Node
+	## Detach + free now so root-bound tweens cannot outlive the effect.
+	var parent: Node = node.get_parent()
+	if parent != null:
+		parent.remove_child(node)
+	node.free()

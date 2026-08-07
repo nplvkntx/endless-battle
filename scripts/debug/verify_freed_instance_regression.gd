@@ -35,6 +35,7 @@ func _ready() -> void:
 	await _verify_hero_cast_rejects_freed_target(failures)
 	await _verify_hero_move_to_cast_clears_on_free(failures)
 	await _verify_targeting_cancels_on_hero_free(failures)
+	await _verify_command_feedback_reset_kills_effect_tweens(failures)
 	await _verify_match_restart_clears_stale_refs(failures)
 
 	var report: String
@@ -320,6 +321,72 @@ func _verify_targeting_cancels_on_hero_free(failures: PackedStringArray) -> void
 	HeroAbilityTargetingController.cancel_targeting()
 	hero2.queue_free()
 	await _settle()
+
+
+func _verify_command_feedback_reset_kills_effect_tweens(failures: PackedStringArray) -> void:
+	## Mid-lifetime clear_all must not leave autoload tweens capturing freed FX nodes.
+	CommandFeedback.clear_all()
+	CommandFeedback.enabled = true
+	CommandFeedback.markers_enabled = true
+	CommandFeedback.dust_enabled = true
+
+	CommandFeedback.show_move_marker(Vector3(1.0, 0.0, 1.0))
+	CommandFeedback.show_attack_move_marker(Vector3(2.0, 0.0, 2.0))
+	CommandFeedback.show_patrol_marker(Vector3(3.0, 0.0, 3.0))
+
+	var unit: MilitaryUnit = SWORDSMAN_SCENE.instantiate() as MilitaryUnit
+	add_child(unit)
+	unit.global_position = Vector3(0.0, 0.0, 0.0)
+	await _settle()
+	CommandFeedback.notify_movement_started(unit)
+
+	_expect(
+		failures,
+		"command_feedback: markers alive before clear",
+		CommandFeedback.get_active_marker_count() > 0
+	)
+	_expect(
+		failures,
+		"command_feedback: dust alive before clear",
+		CommandFeedback.get_active_dust_count() > 0
+	)
+
+	CommandFeedback.clear_all()
+	await _settle()
+	## Allow any previously scheduled tween step to run after free.
+	await get_tree().create_timer(0.2).timeout
+
+	_expect(
+		failures,
+		"command_feedback: markers cleared after clear_all",
+		CommandFeedback.get_active_marker_count() == 0
+	)
+	_expect(
+		failures,
+		"command_feedback: dust cleared after clear_all",
+		CommandFeedback.get_active_dust_count() == 0
+	)
+
+	## Spawn again then tear down the parent scene nodes while FX tweens are live.
+	CommandFeedback.show_move_marker(Vector3(4.0, 0.0, 4.0))
+	CommandFeedback.notify_movement_started(unit)
+	_expect(
+		failures,
+		"command_feedback: live fx before scene free",
+		CommandFeedback.get_active_marker_count() > 0
+		and CommandFeedback.get_active_dust_count() > 0
+	)
+	unit.queue_free()
+	## Match reset must clear remaining FX without delayed freed captures.
+	MatchSession.prepare_new_match()
+	await _settle()
+	await get_tree().create_timer(0.2).timeout
+	_expect(
+		failures,
+		"command_feedback: prepare_new_match clears fx",
+		CommandFeedback.get_active_marker_count() == 0
+		and CommandFeedback.get_active_dust_count() == 0
+	)
 
 
 func _verify_match_restart_clears_stale_refs(failures: PackedStringArray) -> void:
