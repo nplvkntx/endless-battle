@@ -14,6 +14,12 @@ const RAW_WAYPOINT_COLOR := Color(1.0, 0.55, 0.2, 0.55)
 const START_COLOR := Color(0.55, 1.0, 0.75, 0.9)
 const DEST_COLOR := Color(1.0, 0.95, 0.2, 0.95)
 const CLEARANCE_COLOR := Color(0.35, 0.85, 1.0, 0.18)
+const UNIT_PHYS_COLOR := Color(0.2, 0.75, 1.0, 0.85)
+const UNIT_AGENT_COLOR := Color(0.95, 0.85, 0.2, 0.75)
+const BUILDING_PHYS_COLOR := Color(1.0, 0.25, 0.2, 0.7)
+const BUILDING_NAV_COLOR := Color(1.0, 0.55, 0.1, 0.55)
+const FOOTPRINT_Y := 0.08
+const BUILDING_DEBUG_RANGE := 18.0
 
 var _panel: PanelContainer
 var _label: Label
@@ -27,6 +33,10 @@ var _marker_material_raw_waypoint: StandardMaterial3D
 var _marker_material_start: StandardMaterial3D
 var _marker_material_dest: StandardMaterial3D
 var _clearance_material: StandardMaterial3D
+var _unit_phys_material: StandardMaterial3D
+var _unit_agent_material: StandardMaterial3D
+var _building_phys_material: StandardMaterial3D
+var _building_nav_material: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -92,6 +102,10 @@ func _build_materials() -> void:
 	_marker_material_start = _make_unshaded(START_COLOR)
 	_marker_material_dest = _make_unshaded(DEST_COLOR)
 	_clearance_material = _make_unshaded(CLEARANCE_COLOR)
+	_unit_phys_material = _make_unshaded(UNIT_PHYS_COLOR)
+	_unit_agent_material = _make_unshaded(UNIT_AGENT_COLOR)
+	_building_phys_material = _make_unshaded(BUILDING_PHYS_COLOR)
+	_building_nav_material = _make_unshaded(BUILDING_NAV_COLOR)
 
 
 func _make_unshaded(color: Color) -> StandardMaterial3D:
@@ -179,6 +193,7 @@ func _refresh_visualization() -> void:
 	var routes: Array[Dictionary] = _collect_unique_routes(units)
 	for route: Dictionary in routes:
 		_draw_route(route)
+	_draw_clearance_footprints(units)
 
 	_label.text = _build_hud_text(units, routes)
 
@@ -355,9 +370,79 @@ func _draw_marker(position: Vector3, radius: float, material: StandardMaterial3D
 func _draw_clearance_ring(position: Vector3, radius: float) -> void:
 	if _draw_root == null or radius <= 0.05:
 		return
-	var segments: int = 24
+	_draw_circle_outline(position, radius, _clearance_material)
+
+
+func _draw_clearance_footprints(units: Array[Unit]) -> void:
+	if units.is_empty() or _draw_root == null:
+		return
+	var drawn_buildings: Dictionary = {}
+	for unit: Unit in units:
+		var dbg: Dictionary = unit.get_movement_execution_debug()
+		var col_r: float = float(dbg.get("collision_radius", 0.0))
+		var agent_r: float = float(dbg.get("agent_radius", 0.0))
+		var center := Vector3(unit.global_position.x, FOOTPRINT_Y, unit.global_position.z)
+		if col_r > 0.05:
+			_draw_circle_outline(center, col_r, _unit_phys_material)
+		if agent_r > 0.05:
+			_draw_circle_outline(center, agent_r, _unit_agent_material)
+		_draw_nearby_building_footprints(unit.global_position, drawn_buildings)
+
+
+func _draw_nearby_building_footprints(origin: Vector3, drawn_buildings: Dictionary) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var range_sq: float = BUILDING_DEBUG_RANGE * BUILDING_DEBUG_RANGE
+	for node: Node in tree.get_nodes_in_group("buildings"):
+		if node == null or not is_instance_valid(node) or not node is Node3D:
+			continue
+		var building: Node3D = node as Node3D
+		var building_id: int = building.get_instance_id()
+		if drawn_buildings.has(building_id):
+			continue
+		var delta: Vector3 = building.global_position - origin
+		delta.y = 0.0
+		if delta.length_squared() > range_sq:
+			continue
+		drawn_buildings[building_id] = true
+		var phys: Vector2 = NavigationObstacleSetup.physical_half_extents(
+			building as CollisionObject3D
+		)
+		var nav: Vector2 = NavigationObstacleSetup.navigation_half_extents(
+			building as CollisionObject3D
+		)
+		## Prefer live NavigationObstacle vertices when already configured.
+		var obstacle: NavigationObstacle3D = (
+			building.get_node_or_null("NavigationObstacle3D") as NavigationObstacle3D
+		)
+		if obstacle != null and obstacle.vertices.size() >= 3:
+			nav = _obstacle_half_extents(obstacle)
+		if phys != Vector2.ZERO:
+			_draw_box_outline(building.global_position, phys, _building_phys_material)
+		if nav != Vector2.ZERO:
+			_draw_box_outline(building.global_position, nav, _building_nav_material)
+
+
+func _obstacle_half_extents(obstacle: NavigationObstacle3D) -> Vector2:
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_z: float = INF
+	var max_z: float = -INF
+	for vertex: Vector3 in obstacle.vertices:
+		min_x = minf(min_x, vertex.x)
+		max_x = maxf(max_x, vertex.x)
+		min_z = minf(min_z, vertex.z)
+		max_z = maxf(max_z, vertex.z)
+	return Vector2((max_x - min_x) * 0.5, (max_z - min_z) * 0.5)
+
+
+func _draw_circle_outline(position: Vector3, radius: float, material: StandardMaterial3D) -> void:
+	if _draw_root == null or radius <= 0.05:
+		return
+	var segments: int = 28
 	var mesh := ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _clearance_material)
+	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, material)
 	for step: int in segments + 1:
 		var angle: float = TAU * float(step) / float(segments)
 		mesh.surface_add_vertex(
@@ -368,6 +453,20 @@ func _draw_clearance_ring(position: Vector3, radius: float) -> void:
 	instance.mesh = mesh
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_draw_root.add_child(instance)
+
+
+func _draw_box_outline(center: Vector3, half_extents: Vector2, material: StandardMaterial3D) -> void:
+	if _draw_root == null or half_extents == Vector2.ZERO:
+		return
+	var y: float = FOOTPRINT_Y
+	var corners: PackedVector3Array = PackedVector3Array([
+		Vector3(center.x - half_extents.x, y, center.z - half_extents.y),
+		Vector3(center.x + half_extents.x, y, center.z - half_extents.y),
+		Vector3(center.x + half_extents.x, y, center.z + half_extents.y),
+		Vector3(center.x - half_extents.x, y, center.z + half_extents.y),
+		Vector3(center.x - half_extents.x, y, center.z - half_extents.y),
+	])
+	_draw_polyline(corners, material)
 
 
 func _build_hud_text(units: Array[Unit], routes: Array[Dictionary]) -> String:
@@ -406,6 +505,8 @@ func _build_hud_text(units: Array[Unit], routes: Array[Dictionary]) -> String:
 	var lines: PackedStringArray = PackedStringArray([
 		"Path Debug (O)",
 		"Green=final  Orange=raw",
+		"Cyan=unit phys  Yellow=agentR",
+		"Red=bldg phys  Orange=bldg nav",
 		"Routes drawn: %d" % routes.size(),
 		"Selected units: %d" % units.size(),
 		"Raw waypoints: %d" % raw_count,
@@ -474,6 +575,10 @@ func _build_unit_exec_lines(unit: Unit) -> PackedStringArray:
 			float(dbg.get("stuck_timer", 0.0)),
 			int(dbg.get("stuck_stage", 0)),
 			float(dbg.get("repath_timer", 0.0)),
+		],
+		"Local stall: %.2fs  repaths:%d" % [
+			float(dbg.get("local_stall_timer", 0.0)),
+			int(dbg.get("local_stall_repaths", 0)),
 		],
 		"State: %s  moving: %s" % [
 			str(dbg.get("movement_state", "?")),

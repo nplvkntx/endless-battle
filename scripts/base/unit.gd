@@ -47,6 +47,12 @@ const REPATH_COOLDOWN_URGENT_SECONDS := 0.55
 const REPATH_COOLDOWN_STUCK_SECONDS := 1.0
 const REPATH_STAGGER_OFFSET_SECONDS := 0.14
 const PATH_VALIDITY_CHECK_INTERVAL := 0.7
+## Physical-displacement stall → same-destination NavigationAgent refresh.
+const LOCAL_STALL_CONFIRM_SECONDS := 1.25
+## Total XZ travel from stall anchor over the confirm window.
+const LOCAL_STALL_DISPLACEMENT_THRESHOLD := 0.4
+const LOCAL_STALL_MAX_REPATHS := 3
+const LOCAL_STALL_COOLDOWN_SECONDS := 0.85
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
@@ -107,6 +113,10 @@ var _stuck_recovery_stage: int = 0
 var _stuck_progress_anchor_distance: float = -1.0
 var _crowd_yield_seconds: float = 0.0
 var _original_move_destination: Vector3 = Vector3.ZERO
+var _local_stall_time: float = 0.0
+var _local_stall_anchor: Vector3 = Vector3.ZERO
+var _local_stall_repath_count: int = 0
+var _local_stall_cooldown: float = 0.0
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _chase_update_timer: float = 0.0
@@ -781,6 +791,8 @@ func get_movement_execution_debug() -> Dictionary:
 		"has_move_target": has_move_target,
 		"agent_radius": agent_radius,
 		"collision_radius": UnitNavigation.effective_collision_radius(self),
+		"local_stall_timer": _local_stall_time,
+		"local_stall_repaths": _local_stall_repath_count,
 		"queue_mode": {},
 	}
 
@@ -1354,6 +1366,7 @@ func _physics_process(delta: float) -> void:
 	if _try_complete_soft_arrival():
 		return
 
+	_update_local_stall_repath(delta, position_before)
 	_update_unstuck(delta, position_before, direction, distance)
 	CommandFeedback.notify_unit_moving(self)
 
@@ -1643,6 +1656,85 @@ func _should_skip_stuck_recovery() -> bool:
 	return false
 
 
+## Safety net: if NavigationAgent is active but the body barely moves, force a
+## same-destination repath (what a second player click currently "fixes").
+func _update_local_stall_repath(delta: float, position_before: Vector3) -> void:
+	if _local_stall_cooldown > 0.0:
+		_local_stall_cooldown = maxf(0.0, _local_stall_cooldown - delta)
+
+	if not has_move_target:
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if _should_skip_stuck_recovery():
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if _player_squad_command_generation < 0:
+		## Player-move reliability contract only — AI keeps existing recovery.
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if not _navigation_active or not UnitNavigation.can_use(_navigation_agent):
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if _navigation_agent.is_navigation_finished():
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+	if not _navigation_agent.is_target_reachable():
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+
+	var accept: float = get_movement_acceptance_radius()
+	var remaining: Vector3 = _movement_target - global_position
+	remaining.y = 0.0
+	if remaining.length() <= maxf(UNSTUCK_MIN_REMAINING_DISTANCE, accept * 2.5):
+		_local_stall_time = 0.0
+		_local_stall_anchor = Vector3.ZERO
+		return
+
+	if _local_stall_anchor == Vector3.ZERO:
+		_local_stall_anchor = position_before
+		_local_stall_time = 0.0
+
+	var from_anchor: Vector3 = global_position - _local_stall_anchor
+	from_anchor.y = 0.0
+	if from_anchor.length() >= LOCAL_STALL_DISPLACEMENT_THRESHOLD:
+		_local_stall_time = 0.0
+		_local_stall_anchor = global_position
+		return
+
+	_local_stall_time += delta
+	if _local_stall_time < LOCAL_STALL_CONFIRM_SECONDS:
+		return
+	if _local_stall_cooldown > 0.0:
+		return
+	if _local_stall_repath_count >= LOCAL_STALL_MAX_REPATHS:
+		return
+
+	_local_stall_time = 0.0
+	_local_stall_anchor = global_position
+	_local_stall_cooldown = LOCAL_STALL_COOLDOWN_SECONDS
+	_local_stall_repath_count += 1
+	_dbg_stall_recovery_ran = true
+	_dbg_target_change_reason = "local_same_dest_repath"
+	UnitNavigation.force_same_destination_repath(
+		_navigation_agent,
+		self,
+		_movement_target
+	)
+	_navigation_active = true
+	_path_validity_timer = PATH_VALIDITY_CHECK_INTERVAL
+	call_deferred("_refresh_navigation_active_state")
+
+
 func _update_unstuck(
 	delta: float, _position_before: Vector3, forward: Vector3, distance: float
 ) -> void:
@@ -1868,6 +1960,10 @@ func _reset_unstuck_state() -> void:
 	_stuck_recovery_stage = 0
 	_stuck_progress_anchor_distance = -1.0
 	_blocked_arrival_time = 0.0
+	_local_stall_time = 0.0
+	_local_stall_anchor = Vector3.ZERO
+	_local_stall_repath_count = 0
+	_local_stall_cooldown = 0.0
 	# Keep _crowd_yield_seconds ticking — do not clear mid-yield.
 
 

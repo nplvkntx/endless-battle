@@ -417,9 +417,12 @@ func _sync_wall_navigation_obstacle(blocked: bool) -> void:
 		)
 		if obstacle == null and _collision_shape != null and not _collision_shape.disabled:
 			NavigationObstacleSetup.apply_from_collision_body(self)
-		elif obstacle != null:
-			obstacle.avoidance_enabled = true
-			obstacle.carve_navigation_mesh = true
+		elif obstacle != null and _collision_shape != null:
+			NavigationObstacleSetup.apply_to_collision_shape(
+				self,
+				_collision_shape,
+				&"NavigationObstacle3D"
+			)
 	else:
 		_remove_navigation_obstacle()
 
@@ -449,23 +452,7 @@ func _sync_gate_navigation_obstacles(passage_blocked: bool) -> void:
 func _add_navigation_obstacle_for_collision(
 	collision_shape: CollisionShape3D, obstacle_name: StringName
 ) -> NavigationObstacle3D:
-	var obstacle := NavigationObstacle3D.new()
-	obstacle.name = obstacle_name
-	obstacle.affect_navigation_mesh = true
-	obstacle.carve_navigation_mesh = true
-	obstacle.avoidance_enabled = true
-	obstacle.position = collision_shape.position
-
-	var box_shape := collision_shape.shape as BoxShape3D
-	if box_shape != null:
-		obstacle.radius = maxf(box_shape.size.x, box_shape.size.z) * 0.5
-		obstacle.height = box_shape.size.y
-	else:
-		obstacle.radius = 0.25
-		obstacle.height = GATE_PASSAGE_SIZE.y
-
-	add_child(obstacle)
-	return obstacle
+	return NavigationObstacleSetup.apply_to_collision_shape(self, collision_shape, obstacle_name)
 
 
 func _remove_gate_post_navigation_obstacles() -> void:

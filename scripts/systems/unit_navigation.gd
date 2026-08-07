@@ -10,6 +10,8 @@ const ARRIVAL_ACCEPTANCE_RADIUS := 0.65
 const PATH_POINT_HYSTERESIS_SQ := 0.04 # ~0.2m — ignore small next-point jitter
 const PATH_POINT_NEAR_DEST_HYSTERESIS_SQ := 0.25 # ~0.5m — damp corridor flips near arrival
 const META_LAST_PATH_POINT := &"_nav_last_path_point"
+## Matches NavigationRegion bake + NavigationObstacleSetup.GROUND_AGENT_CLEARANCE.
+const GROUND_AGENT_RADIUS := 0.55
 
 
 static func can_use(agent: NavigationAgent3D) -> bool:
@@ -37,20 +39,21 @@ static func configure_agent(agent: NavigationAgent3D, stopping_distance: float) 
 
 ## Match NavigationAgent radius to the unit's horizontal collision footprint.
 ## Box units use the circumscribed circle so corners are not tighter than physics.
+## Never smaller than the bake ground-agent radius.
 static func sync_agent_radius_to_collision(agent: NavigationAgent3D, body: CollisionObject3D) -> void:
 	if agent == null or body == null:
 		return
-	agent.radius = maxf(agent.radius, effective_collision_radius(body))
+	agent.radius = maxf(GROUND_AGENT_RADIUS, effective_collision_radius(body))
 
 
 static func effective_collision_radius(body: CollisionObject3D) -> float:
 	if body == null:
-		return 0.55
+		return GROUND_AGENT_RADIUS
 	var collision_shape: CollisionShape3D = body.get_node_or_null(
 		"CollisionShape3D"
 	) as CollisionShape3D
 	if collision_shape == null or collision_shape.shape == null:
-		return 0.55
+		return GROUND_AGENT_RADIUS
 	if collision_shape.shape is CapsuleShape3D:
 		return (collision_shape.shape as CapsuleShape3D).radius
 	if collision_shape.shape is CylinderShape3D:
@@ -61,10 +64,14 @@ static func effective_collision_radius(body: CollisionObject3D) -> float:
 		var box := collision_shape.shape as BoxShape3D
 		## Circumscribed XZ radius — matches corner contact distance of the box.
 		return 0.5 * sqrt(box.size.x * box.size.x + box.size.z * box.size.z)
-	return 0.55
+	return GROUND_AGENT_RADIUS
 
 
-static func apply_destination(agent: NavigationAgent3D, destination: Vector3) -> void:
+static func apply_destination(
+	agent: NavigationAgent3D,
+	destination: Vector3,
+	force_repath: bool = false
+) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
 
@@ -75,14 +82,29 @@ static func apply_destination(agent: NavigationAgent3D, destination: Vector3) ->
 	var delta: Vector3 = destination - previous
 	delta.y = 0.0
 	var same_target: bool = delta.length_squared() < 0.04 # ~0.2m
-	if same_target and not agent.is_navigation_finished():
+	if same_target and not force_repath and not agent.is_navigation_finished():
 		return
 
-	if same_target:
+	if same_target or force_repath:
 		# Identical assignment may be ignored by NavigationServer — nudge then set.
 		agent.target_position = destination + Vector3(0.05, 0.0, 0.0)
 	agent.target_position = destination
 	PerfCounters.record_navigation_path_request()
+
+
+## Re-request the same destination so NavigationAgent rebuilds from the current pose.
+## Does not teleport, change command generation, or alter the destination.
+static func force_same_destination_repath(
+	agent: NavigationAgent3D,
+	_body: CharacterBody3D,
+	destination: Vector3
+) -> bool:
+	if agent == null or not is_instance_valid(agent):
+		return false
+	if not can_use(agent):
+		return false
+	apply_destination(agent, destination, true)
+	return true
 
 
 static func clear(agent: NavigationAgent3D, unit_position: Vector3) -> void:
