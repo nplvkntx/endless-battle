@@ -16,6 +16,8 @@ var requested_destination: Vector3 = Vector3.ZERO
 var route_waypoints: PackedVector3Array = PackedVector3Array()
 var waypoint_index: int = 0
 var route_valid: bool = false
+## Concise failure token when route_valid is false (e.g. no_path, nav_map_not_ready).
+var route_failure_reason: String = ""
 var formation_forward: Vector3 = Vector3(0.0, 0.0, 1.0)
 var anchor_position: Vector3 = Vector3.ZERO
 var member_ids: Array[int] = []

@@ -652,6 +652,9 @@ static var _attack_wave_pending_transition_reason: String:
 		_rt().attack_wave_pending_transition_reason = value
 
 ## Authoritative executable army mission (SoT: AIPlayerState when bound).
+## Last shared-squad route failure reason (ephemeral; not strategic state).
+static var _last_squad_route_failure_reason: String = ""
+
 static var _exec_mission: ExecutableMission:
 	get:
 		return _rt().exec_mission as ExecutableMission
@@ -2037,11 +2040,18 @@ static func issue_group_combat_move(
 			)
 
 	begin_fight_tracking(units, compute_army_center(units))
+	var move_ok: Array = [false]
 	with_authorized_orders(func() -> void:
-		command_attack_move(units, destination, mission)
+		move_ok[0] = command_attack_move(units, destination, mission)
 	)
+	if not VariantUtils.to_bool(move_ok[0]):
+		return false
 	note_mission_order("attack-move", destination)
 	return true
+
+
+static func get_last_squad_route_failure_reason() -> String:
+	return _last_squad_route_failure_reason
 
 
 static func is_rebuilding_army() -> bool:
@@ -5580,7 +5590,7 @@ static func command_attack_move(
 	units: Array,
 	destination: Vector3,
 	mission: EnemyUnitMission.Mission = EnemyUnitMission.Mission.ATTACK
-) -> void:
+) -> bool:
 	if mission == EnemyUnitMission.Mission.ATTACK and not _allow_hostile_engagement:
 		## V2 owns ATTACK authority — legacy early-phase offense gates must not soft-lock.
 		if not MilitaryAIConfig.is_v2_enabled():
@@ -5590,17 +5600,17 @@ static func command_attack_move(
 					"player_attack_blocked",
 					"Player attack blocked: %s" % get_player_offense_block_reason(tree)
 				)
-				return
+				return false
 
 	if not _combat_orders_allowed(mission):
-		return
+		return false
 
 	units = filter_units_for_field_combat(units, mission)
 	units = EnemyUnitMission.claim_units_for_mission(units, mission)
 	if units.is_empty():
-		return
+		return false
 
-	_issue_spaced_group_orders(units, destination, true, mission)
+	return _issue_spaced_group_orders(units, destination, true, mission)
 
 
 static func command_defend_position(units: Array, position: Vector3) -> void:
@@ -5651,16 +5661,18 @@ static func _issue_spaced_group_orders(
 	center: Vector3,
 	use_attack_move: bool,
 	mission: EnemyUnitMission.Mission
-) -> void:
+) -> bool:
 	units = NodeSafety.clean_and_dedupe_nodes(units)
 	var commandable_units: Array = EnemyUnitMission.filter_commandable_units(units, mission)
 	var ordered_units: Array = _order_units_for_formation(commandable_units)
 	if ordered_units.is_empty():
-		return
+		return false
+
+	_last_squad_route_failure_reason = ""
 
 	if _is_duplicate_group_order(ordered_units, center, mission, use_attack_move):
 		PerfCounters.warn_duplicate_group_order()
-		return
+		return true
 
 	## Fresh Attack-Move younger than 1s must not be refreshed for soft formation drift.
 	if (
@@ -5672,7 +5684,7 @@ static func _issue_spaced_group_orders(
 		var age_sec: float = float(Time.get_ticks_msec() - _active_group_order_msec) / 1000.0
 		if age_sec < GROUP_ORDER_MIN_REFRESH_SECONDS:
 			PerfCounters.warn_duplicate_group_order()
-			return
+			return true
 
 	if MilitaryAIConfig.is_shared_squad_nav_enabled() and ordered_units.size() > 1:
 		var squad_result: Dictionary = SharedSquadNavigation.issue_group_command(
@@ -5683,13 +5695,24 @@ static func _issue_spaced_group_orders(
 			_group_order_generation + 1
 		)
 		if squad_result.get("handled", false):
-			if squad_result.get("equivalent_skip", false):
+			var route_ok: bool = VariantUtils.to_bool(squad_result.get("route_valid", false))
+			var equiv_skip: bool = VariantUtils.to_bool(squad_result.get("equivalent_skip", false))
+			if not route_ok and not equiv_skip:
+				_last_squad_route_failure_reason = String(
+					squad_result.get("route_failure_reason", "no_path")
+				)
+				## Do not record a success signature — allow controlled reissue cadence
+				## (and director reevaluation) without falling through to direct formation.
+				return false
+			if equiv_skip:
 				_record_group_order_signature(ordered_units, center, mission, use_attack_move)
-				return
+				_last_squad_route_failure_reason = ""
+				return true
 			var squad_pending: Array = squad_result.get("pending_orders", [])
 			_record_group_order_signature(ordered_units, center, mission, use_attack_move)
+			_last_squad_route_failure_reason = ""
 			if squad_pending.is_empty():
-				return
+				return true
 			var wrapped: Array = []
 			for entry: Variant in squad_pending:
 				if not entry is Dictionary:
@@ -5714,7 +5737,7 @@ static func _issue_spaced_group_orders(
 			_enqueue_pending_group_orders(wrapped)
 			if not had_pending and not _issuing_group_order_batch:
 				tick_group_order_batch(null)
-			return
+			return true
 
 	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
 		ordered_units,
@@ -5756,14 +5779,17 @@ static func _issue_spaced_group_orders(
 		# All units individually skipped — still record signature so AI does not
 		# keep recomputing identical formation destinations every tick.
 		_record_group_order_signature(ordered_units, center, mission, use_attack_move)
-		return
+		_last_squad_route_failure_reason = ""
+		return true
 
 	_record_group_order_signature(ordered_units, center, mission, use_attack_move)
+	_last_squad_route_failure_reason = ""
 	var had_pending: bool = not _pending_group_orders.is_empty()
 	_enqueue_pending_group_orders(pending_orders)
 	# Never recurse into batch processing while a batch is already draining.
 	if not had_pending and not _issuing_group_order_batch:
 		tick_group_order_batch(null)
+	return true
 
 
 static func _build_pending_order_dedupe_key(

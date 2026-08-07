@@ -67,6 +67,9 @@ var _state_entered_msec: int = 0
 var _post_retreat_attack_cooldown: float = 0.0
 var _designated_recovery_point: Vector3 = Vector3.ZERO
 
+## instance_id -> true for camps whose execution route failed (no_path / projection).
+## Used by validity checks so the director can pick another reachable camp.
+var _route_failed_creep_camp_ids: Dictionary = {}
 ## Mission watchdog / truthful F3 diagnostics.
 var _watchdog_timer: float = 0.0
 var _watchdog_diag_timer: float = 0.0
@@ -145,6 +148,7 @@ func _clear_roster_state() -> void:
 	_assemble_rally_base_id = 0
 	_reserved_creep_camp_id = 0
 	_cleared_creep_camp_ids.clear()
+	_route_failed_creep_camp_ids.clear()
 	_defend_clear_timer = 0.0
 	_defend_active = false
 	_defend_reason = &""
@@ -486,6 +490,43 @@ func get_reserved_creep_camp_id() -> int:
 
 func has_reserved_creep_camp() -> bool:
 	return _reserved_creep_camp_id != 0
+
+
+## Execution feedback from ArmyCommanderV2 — not a strategic decision.
+## Releases creep reservation / marks unreachable camps so the next evaluate can pick
+## another objective. Temporary nav sync failures do not permanently blacklist.
+func notify_execution_route_failed(reason: String, objective_id: int = 0) -> void:
+	if reason.is_empty():
+		return
+	match _state:
+		State.CREEP:
+			_note_creep_block(reason)
+			if reason != "nav_map_not_ready" and objective_id != 0:
+				_route_failed_creep_camp_ids[objective_id] = true
+			_release_creep_reservation()
+			if _mission != null:
+				_mission.clear_target_object()
+			_publish_perf_status()
+		State.ATTACK:
+			_note_attack_block(reason)
+			_publish_perf_status()
+		_:
+			pass
+
+
+## Clears transient execution-block telemetry after a successful order issue.
+func clear_execution_route_block() -> void:
+	if _state == State.CREEP:
+		_last_creep_block_reason = ""
+	elif _state == State.ATTACK:
+		if (
+			_last_attack_block_reason == "no_path"
+			or _last_attack_block_reason == "nav_map_not_ready"
+			or _last_attack_block_reason == "start_not_on_nav"
+			or _last_attack_block_reason == "destination_not_on_nav"
+			or _last_attack_block_reason == "destination_projection_failed"
+		):
+			_last_attack_block_reason = ""
 
 
 func get_cleared_creep_camp_count() -> int:
@@ -3086,6 +3127,8 @@ func _is_valid_creep_camp(
 		return false
 	if _cleared_creep_camp_ids.has(camp.get_instance_id()):
 		return false
+	if _route_failed_creep_camp_ids.has(camp.get_instance_id()):
+		return false
 	if creep_manager._is_camp_cleared(tree, camp):
 		return false
 	if creep_manager._is_player_contesting_camp(tree, camp):
@@ -3161,6 +3204,8 @@ func _select_early_creep_fallback_camp(
 			continue
 		if _cleared_creep_camp_ids.has(camp.get_instance_id()):
 			continue
+		if _route_failed_creep_camp_ids.has(camp.get_instance_id()):
+			continue
 		if creep_manager._is_camp_cleared(tree, camp):
 			continue
 		if creep_manager._is_player_contesting_camp(tree, camp):
@@ -3177,6 +3222,8 @@ func _select_early_creep_fallback_camp(
 			continue
 		## Soft early margin — hero+5 escorts must be able to take Medium camps.
 		if army_power < float(camp_power) * 0.85:
+			continue
+		if not _is_creep_camp_reachable(origin, camp.global_position):
 			continue
 		if distance < best_distance:
 			best_distance = distance
@@ -3267,6 +3314,8 @@ func _score_creep_camp(
 	if camp == null or not is_instance_valid(camp):
 		return -INF
 	if _cleared_creep_camp_ids.has(camp.get_instance_id()):
+		return -INF
+	if _route_failed_creep_camp_ids.has(camp.get_instance_id()):
 		return -INF
 	if not creep_manager._is_enemy_side_camp(camp, rally_point, tree):
 		return -INF
@@ -3819,6 +3868,12 @@ func _publish_perf_status() -> void:
 	var executable_label: String = EnemyArmyCommand.executable_mission_to_label(
 		EnemyArmyCommand.get_executable_mission()
 	)
+	if _state == State.CREEP:
+		if not EnemyArmyCommand.is_creeping_executable_active():
+			executable_label = "NO"
+			if blocked == "-" or blocked.is_empty():
+				if not _last_creep_block_reason.is_empty():
+					blocked = _compact_named_block(_last_creep_block_reason)
 	if _state == State.ATTACK:
 		var has_target: bool = (
 			(_mission != null and _mission.get_alive_target_object() != null)
@@ -3832,6 +3887,13 @@ func _publish_perf_status() -> void:
 			executable_label = "NO"
 			if blocked == "-" or blocked.is_empty():
 				blocked = "army empty"
+		elif not EnemyArmyCommand.get_executable_mission() in [
+			EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
+			EnemyArmyCommand.ExecutableMission.LETHAL_PUSH,
+		]:
+			executable_label = "NO"
+			if (blocked == "-" or blocked.is_empty()) and not _last_attack_block_reason.is_empty():
+				blocked = _compact_attack_block_label()
 	var workers_label: String = "-"
 	var tier_label: String = "-"
 	var expansion_label: String = "-"
@@ -3883,6 +3945,8 @@ func _resolve_compact_blocked_reason(display_state: String) -> String:
 	if _state == State.ATTACK:
 		return _compact_attack_block_label()
 	if _state == State.CREEP:
+		if not _last_creep_block_reason.is_empty():
+			return _compact_named_block(_last_creep_block_reason)
 		return "-"
 	if _state == State.DEFEND:
 		return "defense active"

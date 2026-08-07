@@ -20,6 +20,7 @@ const COMPRESSED_SPACING_SCALE := 0.55
 const FORMATION_SPACING := 2.0
 const SIMPLE_SLOT_BASE_SPACING := 1.6
 const ROUTE_SNAP_ACCEPT_DISTANCE := 8.0
+const ROUTE_END_ACCEPT_DISTANCE := 4.0
 const ROUTE_FALLBACK_RING_STEPS := 8
 const ROUTE_FALLBACK_RING_COUNT := 4
 const ROUTE_FALLBACK_RING_RADIUS := 2.5
@@ -299,6 +300,8 @@ func try_get_assigned_target(unit: Variant) -> Node3D:
 
 
 ## Issue or refresh a squad command. Returns pending per-unit orders for the caller to drain.
+## When shared nav owns the attempt but the route is invalid: handled=true, route_valid=false,
+## pending_orders empty — callers must not fall through to fabricated direct movement.
 func issue_group_command(
 	units: Array,
 	destination: Vector3,
@@ -310,6 +313,8 @@ func issue_group_command(
 		"handled": false,
 		"equivalent_skip": false,
 		"pending_orders": [],
+		"route_valid": false,
+		"route_failure_reason": "",
 	}
 	if not is_shared_navigation_enabled():
 		return result
@@ -331,7 +336,14 @@ func issue_group_command(
 
 	var ctx: SquadNavContext = _find_reusable_squad(equiv_signature)
 	if ctx != null:
+		if not ctx.route_valid:
+			result["route_valid"] = false
+			result["route_failure_reason"] = (
+				ctx.route_failure_reason if not ctx.route_failure_reason.is_empty() else "no_path"
+			)
+			return result
 		result["equivalent_skip"] = true
+		result["route_valid"] = true
 		_bind_members(ctx, ordered_units)
 		PerfCounters.record_squad_route_cache_hit()
 		_publish_diag()
@@ -351,6 +363,18 @@ func issue_group_command(
 		result["handled"] = false
 		return result
 
+	if not ctx.route_valid:
+		var fail_reason: String = (
+			ctx.route_failure_reason if not ctx.route_failure_reason.is_empty() else "no_path"
+		)
+		_dissolve_squad(ctx.squad_id)
+		result["route_valid"] = false
+		result["route_failure_reason"] = fail_reason
+		result["pending_orders"] = []
+		_publish_diag()
+		return result
+
+	result["route_valid"] = true
 	result["pending_orders"] = _collect_initial_orders(ctx, ordered_units, use_attack_move, mission)
 	_publish_diag()
 	return result
@@ -404,6 +428,13 @@ func issue_formation_command(
 		result["handled"] = false
 		return result
 
+	## Player formation: do not rewrite player movement here — if the shared route is
+	## invalid, release ownership so FormationManager can use its existing path.
+	if not ctx.route_valid:
+		_dissolve_squad(ctx.squad_id)
+		result["handled"] = false
+		return result
+
 	ctx.command_type = order_kind
 	_freeze_player_arrival_slots(ctx)
 	_issue_player_orders(ctx, ordered_units, order_kind)
@@ -425,6 +456,7 @@ func issue_player_group_command(
 		"equivalent_skip": false,
 		"route_valid": false,
 		"accepted_destination": destination,
+		"route_failure_reason": "",
 	}
 	if not is_shared_navigation_enabled():
 		return result
@@ -477,6 +509,15 @@ func issue_player_group_command(
 		null
 	)
 	if ctx == null:
+		return result
+
+	## Invalid shared route: release squad and let SelectionManager fall through to
+	## existing per-unit orders — do not fabricate a direct corridor for the player.
+	if not ctx.route_valid:
+		result["route_failure_reason"] = (
+			ctx.route_failure_reason if not ctx.route_failure_reason.is_empty() else "no_path"
+		)
+		_dissolve_squad(ctx.squad_id)
 		return result
 
 	ctx.command_type = order_kind
@@ -680,29 +721,41 @@ func _estimate_unit_radius(body: CollisionObject3D) -> float:
 func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void:
 	var nav_map: RID = _resolve_nav_map(ordered_units)
 	ctx.route_valid = false
+	ctx.route_failure_reason = ""
+	ctx.route_waypoints = PackedVector3Array()
+	ctx.waypoint_index = 0
 	var requested: Vector3 = ctx.requested_destination
 	if requested == Vector3.ZERO:
 		requested = ctx.strategic_destination
+	ctx.requested_destination = requested
+	## Keep the original request visible even when routing fails.
+	ctx.strategic_destination = requested
 
 	if not nav_map.is_valid() or not NavigationServer3D.map_is_active(nav_map):
-		ctx.strategic_destination = requested
-		ctx.route_waypoints = PackedVector3Array([ctx.anchor_position, requested])
-		ctx.waypoint_index = 0
-		# Allow movement to begin; local agents will path once the map is ready.
-		ctx.route_valid = true
-		PerfCounters.record_squad_strategic_route()
+		_fail_shared_route(ctx, "nav_map_not_ready")
 		return
 
 	var from: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, ctx.anchor_position)
-	var to: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, requested)
+	if from == Vector3.ZERO and ctx.anchor_position != Vector3.ZERO:
+		_fail_shared_route(ctx, "start_not_on_nav")
+		return
+	if _horizontal_distance(ctx.anchor_position, from) > ROUTE_SNAP_ACCEPT_DISTANCE:
+		_fail_shared_route(ctx, "start_not_on_nav")
+		return
 
-	# Reject absurd snaps far from the click when a closer reachable point exists.
+	var to: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, requested)
+	if to == Vector3.ZERO and requested != Vector3.ZERO:
+		_fail_shared_route(ctx, "destination_not_on_nav")
+		return
+
+	## Reject absurd snaps far from the click when a closer reachable point exists.
 	if _horizontal_distance(requested, to) > ROUTE_SNAP_ACCEPT_DISTANCE:
 		var nearest: Vector3 = _find_nearest_reachable_destination(nav_map, from, requested)
 		if nearest != Vector3.ZERO:
 			to = nearest
 		else:
-			to = GroupMoveSpacing.clamp_to_map_bounds(requested)
+			_fail_shared_route(ctx, "destination_projection_failed")
+			return
 
 	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, from, to, true)
 	PerfCounters.record_squad_strategic_route()
@@ -714,19 +767,16 @@ func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void
 			path = NavigationServer3D.map_get_path(nav_map, from, to, true)
 
 	if path.is_empty() or path.size() < 2:
-		# Keep the intended destination rather than collapsing to world origin.
-		if _horizontal_distance(to, Vector3.ZERO) < 0.5 and requested.length() > 1.0:
-			to = GroupMoveSpacing.clamp_to_map_bounds(requested)
-		path = PackedVector3Array([from, to])
-		_diag_route_failures += 1
-		push_warning(
-			"SharedSquadNavigation: empty path; using direct fallback to (%.1f, %.1f)"
-			% [to.x, to.z]
-		)
-		ctx.route_valid = true
-	else:
-		ctx.route_valid = true
+		_fail_shared_route(ctx, "no_path")
+		return
 
+	var path_end: Vector3 = path[path.size() - 1]
+	if _horizontal_distance(path_end, to) > ROUTE_END_ACCEPT_DISTANCE:
+		_fail_shared_route(ctx, "no_path")
+		return
+
+	ctx.route_valid = true
+	ctx.route_failure_reason = ""
 	ctx.strategic_destination = to
 	ctx.route_waypoints = path
 	ctx.waypoint_index = 0
@@ -739,6 +789,17 @@ func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void
 		segment.y = 0.0
 		if segment.length_squared() >= 0.01:
 			ctx.formation_forward = segment.normalized()
+
+
+func _fail_shared_route(ctx: SquadNavContext, reason: String) -> void:
+	ctx.route_valid = false
+	ctx.route_failure_reason = reason
+	ctx.route_waypoints = PackedVector3Array()
+	ctx.waypoint_index = 0
+	## Preserve the original request; never invent a traversable direct segment.
+	if ctx.requested_destination != Vector3.ZERO:
+		ctx.strategic_destination = ctx.requested_destination
+	_diag_route_failures += 1
 
 
 func _find_nearest_reachable_destination(
@@ -801,6 +862,9 @@ func _tick_squads(delta: float) -> void:
 			## Player squads: no continuous formation steering.
 			## Units keep their one-shot stable arrival destinations.
 			_tick_player_squad(ctx, delta)
+		elif not ctx.route_valid:
+			## Invalid strategic route: hold membership/tokens, do not invent movement.
+			continue
 		else:
 			_advance_anchor(ctx, delta)
 			_update_passage_compression(ctx)
@@ -1052,6 +1116,8 @@ func _distribute_threats(ctx: SquadNavContext, threat: Node3D, members: Array) -
 func _issue_staggered_slot_orders(ctx: SquadNavContext) -> void:
 	if ctx.is_player_squad:
 		return
+	if not ctx.route_valid:
+		return
 	var members: Array = ctx.get_living_members()
 	if members.is_empty():
 		return
@@ -1204,6 +1270,8 @@ func _recover_stalled_squad(ctx: SquadNavContext) -> void:
 	_diag_stalls += 1
 	PerfCounters.record_squad_stall()
 	_refresh_shared_route(ctx)
+	if not ctx.route_valid:
+		return
 	# Re-issue a bounded batch of local slot targets after strategic refresh.
 	var members: Array = ctx.get_living_members()
 	var budget: int = mini(members.size(), UNIT_UPDATE_BUDGET_PER_SQUAD)
@@ -1227,7 +1295,7 @@ func _find_reusable_squad(equiv_signature: String) -> SquadNavContext:
 		var ctx: SquadNavContext = _get_squad_context(int(squad_id))
 		if ctx == null:
 			continue
-		if ctx.equivalence_signature == equiv_signature:
+		if ctx.equivalence_signature == equiv_signature and ctx.route_valid:
 			return ctx
 	return null
 

@@ -439,8 +439,11 @@ func _issue_stall_recovery_orders(
 					EnemyArmyCommand.ArmyMode.CREEPING
 				)
 				if not issued:
-					_force_attack_move(units, destination, EnemyUnitMission.Mission.CREEP)
-					issued = true
+					_handle_route_issue_failure(
+						director,
+						mission,
+						EnemyArmyCommand.get_last_squad_route_failure_reason()
+					)
 			MilitaryDirectorV2.State.ATTACK:
 				issued = EnemyArmyCommand.issue_group_combat_move(
 					tree,
@@ -451,8 +454,11 @@ func _issue_stall_recovery_orders(
 					true
 				)
 				if not issued:
-					_force_attack_move(units, destination, EnemyUnitMission.Mission.ATTACK)
-					issued = true
+					_handle_route_issue_failure(
+						director,
+						mission,
+						EnemyArmyCommand.get_last_squad_route_failure_reason()
+					)
 			MilitaryDirectorV2.State.DEFEND:
 				## Prefer role-aware defend slots; fall back to a group attack-move.
 				if squad != null:
@@ -485,6 +491,28 @@ func _issue_stall_recovery_orders(
 				pass
 
 	return issued
+
+
+func _handle_route_issue_failure(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	reason: String
+) -> void:
+	if reason.is_empty():
+		reason = EnemyArmyCommand.get_last_squad_route_failure_reason()
+	if reason.is_empty():
+		## Non-route issuance failure (mode/gates) — do not invent movement or strategy.
+		EnemyArmyCommand.clear_executable_mission("order not issued")
+		return
+	## Keep strategic ownership; mark execution non-executable and report to director.
+	EnemyArmyCommand.clear_executable_mission(reason)
+	if director != null:
+		var objective_id: int = 0
+		if mission != null:
+			var alive_target: Node3D = mission.get_alive_target_object()
+			if alive_target != null:
+				objective_id = alive_target.get_instance_id()
+		director.notify_execution_route_failed(reason, objective_id)
 
 
 func _resolve_stall_recovery_destination(
@@ -954,17 +982,17 @@ func _execute_creep_mission(
 		EnemyUnitMission.Mission.CREEP,
 		EnemyArmyCommand.ArmyMode.CREEPING
 	):
-		## Never leave CREEP with no executable order — force Attack-Move.
-		EnemyArmyCommand.prepare_v2_execution(
-			EnemyArmyCommand.ArmyMode.CREEPING,
-			EnemyArmyCommand.StrategicState.CREEPING,
-			"creep move fallback"
+		## Invalid route — never fabricate a straight-line CREEP order.
+		_handle_route_issue_failure(
+			director,
+			mission,
+			EnemyArmyCommand.get_last_squad_route_failure_reason()
 		)
-		_force_attack_move(creep_army, destination, EnemyUnitMission.Mission.CREEP)
-		EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
 		_creep_order_reissue_timer = 0.0
 		return
 
+	if director != null:
+		director.clear_execution_route_block()
 	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
 	## Distance reduction is tracked by the director watchdog — do not fake progress here.
 	_creep_order_reissue_timer = 0.0
@@ -1688,18 +1716,15 @@ func _execute_attack_mission(
 			true
 		)
 		if not issued:
-			EnemyArmyCommand.request_strategic_state(
-				EnemyArmyCommand.StrategicState.ATTACKING,
-				mission.transition_reason
+			## Invalid route — do not straight-line into walls; allow director reevaluation.
+			_handle_route_issue_failure(
+				director,
+				mission,
+				EnemyArmyCommand.get_last_squad_route_failure_reason()
 			)
-			EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING, true)
-			EnemyArmyCommand.with_authorized_orders(func() -> void:
-				EnemyArmyCommand.command_attack_move(
-					attack_army,
-					destination,
-					EnemyUnitMission.Mission.ATTACK
-				)
-			)
+			return
+		if director != null:
+			director.clear_execution_route_block()
 		if engaging_local:
 			mission.note_progress("started combat")
 		else:
