@@ -1,0 +1,32 @@
+---
+description: Endless Battle mandatory constitution, ownership, movement, and workflow constraints
+alwaysApply: true
+---
+
+# Endless Battle — Project Constraints
+
+Before editing Endless Battle gameplay/runtime code, read:
+
+1. `docs/GAME_CONSTITUTION.md`
+2. `docs/ENGINE_RULES.md`
+3. `docs/MOVEMENT_CONTRACT.md`
+4. `docs/WORKFLOW.md`
+
+These are **mandatory** project constraints. Source code is implementation truth; these docs are design/engineering law.
+
+## Before modifying code — summarize internally
+
+- Relevant ownership (e.g. `SelectionManager`, `MilitaryDirectorV2`, `ArmyCommanderV2`, `AIPlayerState`, `MatchCompositionRoot`, `PlayerRouteNavigation`)
+- Forbidden regressions (stale commands, freed Nodes, parser breaks, unrelated system edits)
+- Relevant system contract (especially player movement)
+
+## Hard rules
+
+- Do **not** layer new player movement on deprecated formation/corridor/follow-leader/stuck-stack mechanics — follow `MOVEMENT_CONTRACT.md`; use/extend `PlayerRouteNavigation`
+- Latest player command always wins (command generation / tokens)
+- Do **not** introduce raw stale Node ownership — prefer `EntityHandle` / instance IDs + `NodeSafety`
+- Do **not** modify unrelated systems
+- Run existing parse/headless validation after implementation
+- Gameplay tasks require **manual user acceptance before commit** unless the user explicitly says otherwise
+- Do not commit yet when the user has not asked
+- UI reads state and issues requests; UI is never gameplay-state authority

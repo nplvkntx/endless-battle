@@ -13,7 +13,12 @@ var mission: int = 0
 var use_attack_move: bool = true
 var strategic_destination: Vector3 = Vector3.ZERO
 var requested_destination: Vector3 = Vector3.ZERO
+## Final processed squad corridor (units follow this).
 var route_waypoints: PackedVector3Array = PackedVector3Array()
+## Unprocessed NavigationServer path retained for path-debug comparison.
+var raw_route_waypoints: PackedVector3Array = PackedVector3Array()
+## Strategic clearance used when processing route_waypoints (0 = none).
+var route_clearance_radius: float = 0.0
 var waypoint_index: int = 0
 var route_valid: bool = false
 var formation_forward: Vector3 = Vector3(0.0, 0.0, 1.0)
@@ -24,6 +29,12 @@ var slot_locals: Dictionary = {}
 ## unit_instance_id -> frozen world arrival (player squads only; never moves with anchor)
 var final_arrival_slots: Dictionary = {}
 var arrival_slots_frozen: bool = false
+## unit_instance_id -> stable corridor travel offset (loose spacing; never rotated mid-travel)
+var travel_offsets: Dictionary = {}
+## unit_instance_id -> last shared waypoint index issued (-1 = final approach)
+var last_issued_waypoint_index: Dictionary = {}
+## Player squad has handed off from corridor travel to frozen finals.
+var in_final_approach: bool = false
 var route_created_msec: int = 0
 var last_progress_msec: int = 0
 var last_progress_position: Vector3 = Vector3.ZERO
@@ -44,6 +55,16 @@ var is_player_squad: bool = false
 var uses_formation_layout: bool = false
 var formation_shape: int = int(FormationLayout.Shape.SQUARE)
 var formation_size: int = 15
+## Temporary single-file through a constrained route section (small player groups only).
+## Not a permanent formation — enter near corners/narrow clearance, exit when clear.
+var queue_mode_active: bool = false
+var queue_leader_id: int = 0
+## Stable follow order while queue mode is active (front-most / leader first).
+var queue_order_ids: Array[int] = []
+## Scale applied to travel lane offsets (1 = loose, ~0 = centerline single-file).
+var queue_lateral_scale: float = 1.0
+## Debug: collapsed a pinned unit onto the corridor center when queue mode engaged.
+var queue_stuck_recovery: bool = false
 
 
 func member_count() -> int:
@@ -112,11 +133,16 @@ func clear_unit_state(unit_id: int) -> void:
 	member_ids.erase(unit_id)
 	slot_locals.erase(unit_id)
 	final_arrival_slots.erase(unit_id)
+	travel_offsets.erase(unit_id)
+	last_issued_waypoint_index.erase(unit_id)
 	member_threats.erase(unit_id)
 	last_issued_slots.erase(unit_id)
 	stalled_member_ids.erase(unit_id)
 	if shared_threat_id == unit_id:
 		shared_threat_id = 0
+	if queue_leader_id == unit_id:
+		queue_leader_id = 0
+	queue_order_ids.erase(unit_id)
 
 
 func purge_dead_members() -> bool:
@@ -163,6 +189,19 @@ func purge_dead_members() -> bool:
 	for key: Variant in final_arrival_slots.keys():
 		if not valid.has(int(key)):
 			final_arrival_slots.erase(key)
+	for key: Variant in travel_offsets.keys():
+		if not valid.has(int(key)):
+			travel_offsets.erase(key)
+	for key: Variant in last_issued_waypoint_index.keys():
+		if not valid.has(int(key)):
+			last_issued_waypoint_index.erase(key)
+	if queue_leader_id != 0 and not valid.has(queue_leader_id):
+		queue_leader_id = 0
+	var kept_order: Array[int] = []
+	for order_id: int in queue_order_ids:
+		if valid.has(order_id):
+			kept_order.append(order_id)
+	queue_order_ids = kept_order
 	return true
 
 

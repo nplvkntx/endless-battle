@@ -6,10 +6,14 @@ extends CanvasLayer
 const TOGGLE_KEY := KEY_O
 const REFRESH_INTERVAL_SECONDS := 0.2
 const PATH_Y := 0.18
-const LINE_COLOR := Color(0.25, 0.95, 0.35, 0.55)
+const RAW_PATH_Y := 0.14
+const LINE_COLOR := Color(0.25, 0.95, 0.35, 0.7)
+const RAW_LINE_COLOR := Color(0.95, 0.45, 0.15, 0.45)
 const WAYPOINT_COLOR := Color(0.35, 1.0, 0.45, 0.75)
+const RAW_WAYPOINT_COLOR := Color(1.0, 0.55, 0.2, 0.55)
 const START_COLOR := Color(0.55, 1.0, 0.75, 0.9)
 const DEST_COLOR := Color(1.0, 0.95, 0.2, 0.95)
+const CLEARANCE_COLOR := Color(0.35, 0.85, 1.0, 0.18)
 
 var _panel: PanelContainer
 var _label: Label
@@ -17,9 +21,12 @@ var _draw_root: Node3D
 var _refresh_timer: float = 0.0
 var _enabled: bool = false
 var _line_material: StandardMaterial3D
+var _raw_line_material: StandardMaterial3D
 var _marker_material_waypoint: StandardMaterial3D
+var _marker_material_raw_waypoint: StandardMaterial3D
 var _marker_material_start: StandardMaterial3D
 var _marker_material_dest: StandardMaterial3D
+var _clearance_material: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -79,9 +86,12 @@ func is_path_debug_enabled() -> bool:
 
 func _build_materials() -> void:
 	_line_material = _make_unshaded(LINE_COLOR)
+	_raw_line_material = _make_unshaded(RAW_LINE_COLOR)
 	_marker_material_waypoint = _make_unshaded(WAYPOINT_COLOR)
+	_marker_material_raw_waypoint = _make_unshaded(RAW_WAYPOINT_COLOR)
 	_marker_material_start = _make_unshaded(START_COLOR)
 	_marker_material_dest = _make_unshaded(DEST_COLOR)
+	_clearance_material = _make_unshaded(CLEARANCE_COLOR)
 
 
 func _make_unshaded(color: Color) -> StandardMaterial3D:
@@ -120,7 +130,7 @@ func _build_ui() -> void:
 
 	add_child(_panel)
 	_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_panel.offset_left = -320.0
+	_panel.offset_left = -360.0
 	_panel.offset_top = 12.0
 	_panel.offset_right = -12.0
 	_panel.offset_bottom = 12.0
@@ -202,22 +212,24 @@ func _find_selection_manager() -> Node:
 
 func _collect_unique_routes(units: Array[Unit]) -> Array[Dictionary]:
 	var routes: Array[Dictionary] = []
-	var seen_squad_ids: Dictionary = {}
+	var seen_route_ids: Dictionary = {}
 	var units_without_shared: Array[Unit] = []
 
 	for unit: Unit in units:
-		var ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(unit)
-		if ctx != null and ctx.is_player_squad and not ctx.route_waypoints.is_empty():
-			if seen_squad_ids.has(ctx.squad_id):
+		var route: PlayerRoute = PlayerRouteNavigation.get_route_for_unit(unit)
+		if route != null and route.route_valid and not route.waypoints.is_empty():
+			if seen_route_ids.has(route.route_id):
 				continue
-			seen_squad_ids[ctx.squad_id] = true
+			seen_route_ids[route.route_id] = true
 			routes.append({
-				"waypoints": ctx.route_waypoints,
-				"waypoint_index": ctx.waypoint_index,
-				"destination": ctx.strategic_destination,
-				"command_generation": ctx.command_generation,
+				"waypoints": route.waypoints,
+				"raw_waypoints": route.raw_waypoints,
+				"clearance_radius": route.route_clearance_radius,
+				"waypoint_index": route.get_waypoint_index(unit.get_instance_id()),
+				"destination": route.accepted_destination,
+				"command_generation": route.command_generation,
 				"shared": true,
-				"squad_id": ctx.squad_id,
+				"squad_id": route.route_id,
 				"unit": unit,
 			})
 		else:
@@ -239,6 +251,8 @@ func _collect_unique_routes(units: Array[Unit]) -> Array[Dictionary]:
 		var dest: Vector3 = path[path.size() - 1]
 		routes.append({
 			"waypoints": path,
+			"raw_waypoints": PackedVector3Array(),
+			"clearance_radius": 0.0,
 			"waypoint_index": 0,
 			"destination": dest,
 			"command_generation": unit.get_player_squad_command_generation(),
@@ -263,6 +277,22 @@ func _path_signature(path: PackedVector3Array) -> String:
 
 func _draw_route(route: Dictionary) -> void:
 	var waypoints: PackedVector3Array = route.get("waypoints", PackedVector3Array()) as PackedVector3Array
+	var raw_waypoints: PackedVector3Array = route.get(
+		"raw_waypoints", PackedVector3Array()
+	) as PackedVector3Array
+	var clearance: float = float(route.get("clearance_radius", 0.0))
+
+	## RAW NavigationServer path (orange) — drawn first so final sits on top.
+	if raw_waypoints.size() >= 2:
+		var raw_lifted: PackedVector3Array = PackedVector3Array()
+		for point: Vector3 in raw_waypoints:
+			raw_lifted.append(Vector3(point.x, RAW_PATH_Y, point.z))
+		_draw_polyline(raw_lifted, _raw_line_material)
+		for index: int in raw_lifted.size():
+			if index == 0 or index == raw_lifted.size() - 1:
+				continue
+			_draw_marker(raw_lifted[index], 0.09, _marker_material_raw_waypoint)
+
 	if waypoints.is_empty():
 		return
 
@@ -270,7 +300,7 @@ func _draw_route(route: Dictionary) -> void:
 	for point: Vector3 in waypoints:
 		lifted.append(Vector3(point.x, PATH_Y, point.z))
 
-	_draw_polyline(lifted)
+	_draw_polyline(lifted, _line_material)
 
 	for index: int in lifted.size():
 		var color_mat: StandardMaterial3D = _marker_material_waypoint
@@ -282,6 +312,9 @@ func _draw_route(route: Dictionary) -> void:
 			color_mat = _marker_material_dest
 			radius = 0.2
 		_draw_marker(lifted[index], radius, color_mat)
+		## Clearance rings only while path-debug is on, and only on final route.
+		if clearance > 0.05 and index > 0 and index < lifted.size() - 1:
+			_draw_clearance_ring(lifted[index], clearance)
 
 	var destination: Vector3 = route.get("destination", Vector3.ZERO) as Vector3
 	if destination != Vector3.ZERO:
@@ -291,11 +324,11 @@ func _draw_route(route: Dictionary) -> void:
 			_draw_marker(dest_lifted, 0.22, _marker_material_dest)
 
 
-func _draw_polyline(points: PackedVector3Array) -> void:
+func _draw_polyline(points: PackedVector3Array, material: StandardMaterial3D) -> void:
 	if points.size() < 2 or _draw_root == null:
 		return
 	var mesh := ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _line_material)
+	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, material)
 	for point: Vector3 in points:
 		mesh.surface_add_vertex(point)
 	mesh.surface_end()
@@ -319,8 +352,26 @@ func _draw_marker(position: Vector3, radius: float, material: StandardMaterial3D
 	_draw_root.add_child(instance)
 
 
+func _draw_clearance_ring(position: Vector3, radius: float) -> void:
+	if _draw_root == null or radius <= 0.05:
+		return
+	var segments: int = 24
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _clearance_material)
+	for step: int in segments + 1:
+		var angle: float = TAU * float(step) / float(segments)
+		mesh.surface_add_vertex(
+			position + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+		)
+	mesh.surface_end()
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_draw_root.add_child(instance)
+
+
 func _build_hud_text(units: Array[Unit], routes: Array[Dictionary]) -> String:
-	var telemetry: Dictionary = SharedSquadNavigation.get_player_move_telemetry()
+	var telemetry: Dictionary = PlayerRouteNavigation.get_player_move_telemetry()
 	var primary: Dictionary = {}
 	if not routes.is_empty():
 		primary = routes[0]
@@ -328,11 +379,22 @@ func _build_hud_text(units: Array[Unit], routes: Array[Dictionary]) -> String:
 	var waypoints: PackedVector3Array = primary.get(
 		"waypoints", PackedVector3Array()
 	) as PackedVector3Array
+	var raw_waypoints: PackedVector3Array = primary.get(
+		"raw_waypoints", PackedVector3Array()
+	) as PackedVector3Array
 	var waypoint_count: int = waypoints.size()
 	if waypoint_count <= 0:
 		waypoint_count = int(telemetry.get("route_waypoint_count", 0))
+	var raw_count: int = raw_waypoints.size()
+	if raw_count <= 0:
+		raw_count = int(telemetry.get("raw_route_waypoint_count", 0))
+	var clearance: float = float(primary.get(
+		"clearance_radius",
+		telemetry.get("route_clearance_radius", 0.0)
+	))
 
 	var path_length: float = _path_length(waypoints)
+	var raw_length: float = _path_length(raw_waypoints)
 	var waypoint_index: int = int(primary.get("waypoint_index", 0))
 	var command_generation: int = int(primary.get(
 		"command_generation",
@@ -343,19 +405,86 @@ func _build_hud_text(units: Array[Unit], routes: Array[Dictionary]) -> String:
 
 	var lines: PackedStringArray = PackedStringArray([
 		"Path Debug (O)",
+		"Green=final  Orange=raw",
 		"Routes drawn: %d" % routes.size(),
 		"Selected units: %d" % units.size(),
-		"Waypoint count: %d" % waypoint_count,
-		"Path length: %.1f" % path_length,
+		"Raw waypoints: %d" % raw_count,
+		"Final waypoints: %d" % waypoint_count,
+		"Clearance: %.2f" % clearance,
+		"Raw length: %.1f" % raw_length,
+		"Final length: %.1f" % path_length,
 		"Repath count: %d" % repath_count,
 		"Command generation: %d" % command_generation,
 		"Current waypoint index: %d" % waypoint_index,
 		"Destination reached: %s" % ("yes" if destination_reached else "no"),
-		"Player formations: %s" % (
-			"OFF (debug)" if SharedSquadNavigation.are_player_formations_disabled() else "ON"
-		),
+		"Player formations: OFF (route baseline)",
+		"Orders/s: %.0f | Repaths/s: %.0f" % [
+			PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),
+			PerfCounters.get_rate(PerfCounters.KEY_REPATH_REQUESTS),
+		],
+		"Local repaths/s: %.0f | Stall recoveries: %d" % [
+			PerfCounters.get_rate(PerfCounters.KEY_SQUAD_LOCAL_REPATHS),
+			int(telemetry.get("stall_recovery_count", 0)),
+		],
 	])
+	if not units.is_empty():
+		lines.append_array(_build_unit_exec_lines(units[0]))
 	return "\n".join(lines)
+
+
+func _build_unit_exec_lines(unit: Unit) -> PackedStringArray:
+	var dbg: Dictionary = unit.get_movement_execution_debug()
+	var desired: Vector3 = dbg.get("desired_velocity", Vector3.ZERO) as Vector3
+	var avoid: Vector3 = dbg.get("avoidance_velocity", Vector3.ZERO) as Vector3
+	var sep: Vector3 = dbg.get("separation_correction", Vector3.ZERO) as Vector3
+	var final_v: Vector3 = dbg.get("final_velocity", Vector3.ZERO) as Vector3
+	var target: Vector3 = dbg.get("movement_target", Vector3.ZERO) as Vector3
+	var next_path: Vector3 = dbg.get("nav_next_path_position", Vector3.ZERO) as Vector3
+	var queue: Dictionary = dbg.get("queue_mode", {}) as Dictionary
+	return PackedStringArray([
+		"",
+		"— Exec (selected unit) —",
+		"ID: %d  gen: %d" % [int(dbg.get("unit_id", 0)), int(dbg.get("command_generation", -1))],
+		"WP idx: %d  dist: %.2f  passed: %s" % [
+			int(dbg.get("shared_waypoint_index", -1)),
+			float(dbg.get("distance_to_waypoint", 0.0)),
+			"yes" if bool(dbg.get("waypoint_passed", false)) else "no",
+		],
+		"Queue: %s  leader:%d  followers:%d  latScale:%.2f  stuckRec:%s" % [
+			"ON" if bool(queue.get("queue_mode", false)) else "OFF",
+			int(queue.get("leader_id", 0)),
+			int(queue.get("follower_count", 0)),
+			float(queue.get("lateral_offset_scale", 1.0)),
+			"yes" if bool(queue.get("stuck_recovery", false)) else "no",
+		],
+		"Travel offset: %.2f  agentR: %.2f colR: %.2f" % [
+			(dbg.get("travel_offset", Vector3.ZERO) as Vector3).x,
+			float(dbg.get("agent_radius", 0.0)),
+			float(dbg.get("collision_radius", 0.0)),
+		],
+		"Target: (%.1f, %.1f)" % [target.x, target.z],
+		"Nav next: (%.1f, %.1f)" % [next_path.x, next_path.z],
+		"Desired v: (%.2f, %.2f) |%.2f|" % [desired.x, desired.z, desired.length()],
+		"Avoid v: (%.2f, %.2f)" % [avoid.x, avoid.z],
+		"Sep corr: (%.2f, %.2f) |%.2f|" % [sep.x, sep.z, sep.length()],
+		"Final v: (%.2f, %.2f) speed: %.2f" % [
+			final_v.x, final_v.z, float(dbg.get("actual_speed", 0.0))
+		],
+		"Stuck: %.2fs stage:%d  repathT: %.2f" % [
+			float(dbg.get("stuck_timer", 0.0)),
+			int(dbg.get("stuck_stage", 0)),
+			float(dbg.get("repath_timer", 0.0)),
+		],
+		"State: %s  moving: %s" % [
+			str(dbg.get("movement_state", "?")),
+			"yes" if bool(dbg.get("has_move_target", false)) else "no",
+		],
+		"Formation corr: %s  Stall: %s" % [
+			"yes" if bool(dbg.get("formation_correction_ran", false)) else "no",
+			"yes" if bool(dbg.get("stall_recovery_ran", false)) else "no",
+		],
+		"Target reason: %s" % str(dbg.get("target_change_reason", "")),
+	])
 
 
 func _selection_destination_reached(units: Array[Unit], primary: Dictionary) -> bool:

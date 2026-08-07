@@ -35,6 +35,35 @@ static func configure_agent(agent: NavigationAgent3D, stopping_distance: float) 
 	agent.avoidance_enabled = false
 
 
+## Match NavigationAgent radius to the unit's horizontal collision footprint.
+## Box units use the circumscribed circle so corners are not tighter than physics.
+static func sync_agent_radius_to_collision(agent: NavigationAgent3D, body: CollisionObject3D) -> void:
+	if agent == null or body == null:
+		return
+	agent.radius = maxf(agent.radius, effective_collision_radius(body))
+
+
+static func effective_collision_radius(body: CollisionObject3D) -> float:
+	if body == null:
+		return 0.55
+	var collision_shape: CollisionShape3D = body.get_node_or_null(
+		"CollisionShape3D"
+	) as CollisionShape3D
+	if collision_shape == null or collision_shape.shape == null:
+		return 0.55
+	if collision_shape.shape is CapsuleShape3D:
+		return (collision_shape.shape as CapsuleShape3D).radius
+	if collision_shape.shape is CylinderShape3D:
+		return (collision_shape.shape as CylinderShape3D).radius
+	if collision_shape.shape is SphereShape3D:
+		return (collision_shape.shape as SphereShape3D).radius
+	if collision_shape.shape is BoxShape3D:
+		var box := collision_shape.shape as BoxShape3D
+		## Circumscribed XZ radius — matches corner contact distance of the box.
+		return 0.5 * sqrt(box.size.x * box.size.x + box.size.z * box.size.z)
+	return 0.55
+
+
 static func apply_destination(agent: NavigationAgent3D, destination: Vector3) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
@@ -84,11 +113,20 @@ static func process_movement(
 		return true
 
 	if not can_use(agent):
+		## Corridor guides must not fall through to raw direct steering through buildings.
+		if body is Unit and (body as Unit).is_player_corridor_travel_active():
+			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+			return false
 		return process_direct_movement(
 			body, destination, move_speed, stopping_distance, apply_separation
 		)
 
 	if agent.is_navigation_finished():
+		## Intermediate corridor waypoint path ended: look ahead instead of ramming the point.
+		if body is Unit and (body as Unit).is_player_corridor_travel_active():
+			_clear_path_point_cache(body)
+			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+			return true
 		return process_direct_movement(
 			body, destination, move_speed, stopping_distance, apply_separation
 		)
@@ -114,13 +152,20 @@ static func process_movement(
 	var direction: Vector3 = next_position - body.global_position
 	direction.y = 0.0
 	if direction.length_squared() < 0.0001:
+		if body is Unit and (body as Unit).is_player_corridor_travel_active():
+			_clear_path_point_cache(body)
+			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+			return true
 		return process_direct_movement(
 			body, destination, move_speed, stopping_distance, apply_separation
 		)
 
 	var speed: float = move_speed
 	var slow_start: float = maxf(stopping_distance * 2.0, ARRIVAL_SLOWDOWN_DISTANCE)
-	if distance < slow_start:
+	var corridor_travel: bool = (
+		body is Unit and (body as Unit).is_player_corridor_travel_active()
+	)
+	if distance < slow_start and not corridor_travel:
 		speed = _arrival_speed(move_speed, distance, stopping_distance)
 		# Below crawl threshold, prefer stop over endless micro-approach.
 		if distance <= maxf(arrive_distance * 1.25, 0.85):
@@ -129,6 +174,8 @@ static func process_movement(
 			return true
 	# Mute separation near arrival so soft settle can complete.
 	var use_separation: bool = apply_separation and distance > arrive_distance * 2.0
+	if corridor_travel:
+		use_separation = apply_separation
 	var desired_velocity: Vector3 = direction.normalized() * speed
 	_apply_final_velocity(body, desired_velocity, move_speed, use_separation)
 	return false
@@ -155,12 +202,19 @@ static func process_direct_movement(
 		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
 		return true
 
-	var speed: float = _arrival_speed(move_speed, distance, stopping_distance)
-	if distance <= maxf(arrive_distance * 1.25, 0.85):
-		_clear_path_point_cache(body)
-		_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
-		return true
+	var corridor_travel: bool = (
+		body is Unit and (body as Unit).is_player_corridor_travel_active()
+	)
+	var speed: float = move_speed
+	if not corridor_travel:
+		speed = _arrival_speed(move_speed, distance, stopping_distance)
+		if distance <= maxf(arrive_distance * 1.25, 0.85):
+			_clear_path_point_cache(body)
+			_apply_final_velocity(body, Vector3.ZERO, move_speed, false)
+			return true
 	var use_separation: bool = apply_separation and distance > arrive_distance * 2.0
+	if corridor_travel:
+		use_separation = apply_separation
 	var desired_velocity: Vector3 = offset.normalized() * speed
 	_apply_final_velocity(body, desired_velocity, move_speed, use_separation)
 	return false

@@ -146,6 +146,7 @@ func _prepare_for_new_player_order() -> void:
 	_clear_auto_acquire_leash()
 	cancel_attack_move()
 	cancel_attack()
+	super._prepare_for_new_player_order()
 
 
 func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
@@ -894,7 +895,29 @@ func _resume_attack_move_or_patrol() -> bool:
 		return false
 
 	_has_chase_target = false
-	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
+	var resume_dest: Vector3 = _attack_move_destination
+	## Player shared-route: resume the active route guide, not a stale mid-fight point.
+	if _player_squad_command_generation >= 0:
+		var travel: Vector3 = PlayerRouteNavigation.resolve_travel_target(self)
+		if travel.length_squared() > 0.0001:
+			resume_dest = travel
+			if _player_squad_final_arrival.length_squared() > 0.0001:
+				_attack_move_destination = Vector3(
+					_player_squad_final_arrival.x,
+					global_position.y,
+					_player_squad_final_arrival.z
+				)
+	if (
+		_player_squad_command_generation >= 0
+		and _player_squad_final_arrival.length_squared() > 0.0001
+	):
+		request_route_travel_target(
+			resume_dest,
+			_player_squad_final_arrival,
+			RepathUrgency.NORMAL
+		)
+	else:
+		_set_move_destination(resume_dest, RepathUrgency.NORMAL)
 	return true
 
 

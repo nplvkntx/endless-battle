@@ -524,6 +524,7 @@ func _prepare_for_new_player_order() -> void:
 	cancel_gathering()
 	if _build_trip_state != BuildTripState.IDLE:
 		_cancel_build_trip()
+	super._prepare_for_new_player_order()
 
 
 func _adopt_blocking_activity_as_active_order() -> void:

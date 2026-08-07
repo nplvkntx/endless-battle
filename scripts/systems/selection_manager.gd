@@ -602,59 +602,26 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 	if commandable_units.is_empty():
 		return
 
-	# Formation-aware destinations when any selected military unit is formed.
-	# Temporarily bypassed to isolate movement regression (formation system kept intact).
-	if (
-		not SharedSquadNavigation.are_player_formations_disabled()
-		and FormationManager.issue_formation_ground_order(
-			commandable_units,
-			ground_position,
-			&"move",
-			queued
-		)
-	):
-		CommandFeedback.show_move_marker(ground_position)
-		return
-
-	# Ordinary unformed multi-select: one shared strategic corridor + unique slots.
-	# With formations disabled: shared corridor + one destination for every unit.
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"move",
-			queued
-		)
-		if shared_result.get("handled", false):
-			CommandFeedback.show_move_marker(
-				shared_result.get("accepted_destination", ground_position) as Vector3
-			)
-			return
-
+	# Player formations permanently bypassed — validated shared route owns Move.
 	commandable_units.sort_custom(_compare_units_by_instance_id)
-	if SharedSquadNavigation.are_player_formations_disabled():
-		for unit: Unit in commandable_units:
-			if unit is Worker and not queued:
-				(unit as Worker).cancel_gathering()
-			unit.issue_order(UnitOrder.move(ground_position), queued)
-		CommandFeedback.show_move_marker(ground_position)
+	var shared_result: Dictionary = PlayerRouteNavigation.issue_command(
+		commandable_units,
+		ground_position,
+		&"move",
+		queued
+	)
+	if shared_result.get("handled", false):
+		CommandFeedback.show_move_marker(
+			shared_result.get("accepted_destination", ground_position) as Vector3
+		)
 		return
 
-	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
-		ground_position,
-		commandable_units.size()
-	)
-	for index: int in commandable_units.size():
-		var unit: Unit = commandable_units[index]
-		if unit is Worker and not queued:
-			(unit as Worker).cancel_gathering()
-		unit.issue_order(UnitOrder.move(move_targets[index]), queued)
-
-	# Marker at accepted command point (click destination), not per-unit spacing slots.
-	CommandFeedback.show_move_marker(ground_position)
+	## Route validation failed — keep units idle; do not pretend the move succeeded.
+	if not queued and not commandable_units.is_empty():
+		push_warning(
+			"Move refused: %s"
+			% String(shared_result.get("failure_reason", "invalid_route"))
+		)
 
 
 func _compare_units_by_instance_id(a: Unit, b: Unit) -> bool:
@@ -679,13 +646,15 @@ func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 		return
 
 	military_units.sort_custom(_compare_units_by_instance_id)
+	## Attack keeps simple approach slots; no formation/corridor travel system.
 	var approach_slots: Dictionary = FormationManager.compute_attack_approach_slots(
 		military_units,
 		target
 	)
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
-		# Approach slots keep backline protection; attack target remains shared.
+		## Individual attack immediately detaches from any prior group route.
+		PlayerRouteNavigation.detach_unit_from_group_state(unit)
 		if approach_slots.has(unit.get_instance_id()):
 			var approach: Vector3 = approach_slots[unit.get_instance_id()] as Vector3
 			if _horizontal_distance_xz(unit.global_position, approach) > 1.5:
@@ -702,81 +671,34 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 	if commandable_units.is_empty():
 		return
 
-	if (
-		not SharedSquadNavigation.are_player_formations_disabled()
-		and FormationManager.issue_formation_ground_order(
-			commandable_units,
-			ground_position,
-			&"attack_move",
-			queued
-		)
-	):
-		CommandFeedback.show_attack_move_marker(ground_position)
-		return
-
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"attack_move",
-			queued
-		)
-		if shared_result.get("handled", false):
-			var any_combat := false
-			for unit: Unit in commandable_units:
-				if _is_combat_order_unit(unit):
-					any_combat = true
-					break
-			if any_combat:
-				CommandFeedback.show_attack_move_marker(
-					shared_result.get("accepted_destination", ground_position) as Vector3
-				)
-			else:
-				CommandFeedback.show_move_marker(
-					shared_result.get("accepted_destination", ground_position) as Vector3
-				)
-			return
-
 	commandable_units.sort_custom(_compare_units_by_instance_id)
-	if SharedSquadNavigation.are_player_formations_disabled():
-		var issued_attack_move_flat := false
+	var shared_result: Dictionary = PlayerRouteNavigation.issue_command(
+		commandable_units,
+		ground_position,
+		&"attack_move",
+		queued
+	)
+	if shared_result.get("handled", false):
+		var any_combat := false
 		for unit: Unit in commandable_units:
 			if _is_combat_order_unit(unit):
-				unit.issue_order(UnitOrder.attack_move(ground_position), queued)
-				issued_attack_move_flat = true
-			else:
-				if unit is Worker and not queued:
-					(unit as Worker).cancel_gathering()
-				unit.issue_order(UnitOrder.move(ground_position), queued)
-		if issued_attack_move_flat:
-			CommandFeedback.show_attack_move_marker(ground_position)
+				any_combat = true
+				break
+		if any_combat:
+			CommandFeedback.show_attack_move_marker(
+				shared_result.get("accepted_destination", ground_position) as Vector3
+			)
 		else:
-			CommandFeedback.show_move_marker(ground_position)
+			CommandFeedback.show_move_marker(
+				shared_result.get("accepted_destination", ground_position) as Vector3
+			)
 		return
 
-	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
-		ground_position,
-		commandable_units.size()
-	)
-	var issued_attack_move := false
-	for index: int in commandable_units.size():
-		var unit: Unit = commandable_units[index]
-		if _is_combat_order_unit(unit):
-			unit.issue_order(UnitOrder.attack_move(move_targets[index]), queued)
-			issued_attack_move = true
-		else:
-			# Mixed selection: non-combat units receive a compatible move.
-			if unit is Worker and not queued:
-				(unit as Worker).cancel_gathering()
-			unit.issue_order(UnitOrder.move(move_targets[index]), queued)
-
-	if issued_attack_move:
-		CommandFeedback.show_attack_move_marker(ground_position)
-	else:
-		CommandFeedback.show_move_marker(ground_position)
+	if not queued and not commandable_units.is_empty():
+		push_warning(
+			"Attack-move refused: %s"
+			% String(shared_result.get("failure_reason", "invalid_route"))
+		)
 
 
 func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) -> void:
@@ -785,33 +707,27 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 	if commandable_units.is_empty():
 		return
 
-	if FormationManager.issue_formation_ground_order(
+	commandable_units.sort_custom(_compare_units_by_instance_id)
+	var shared_result: Dictionary = PlayerRouteNavigation.issue_command(
 		commandable_units,
 		ground_position,
 		&"patrol",
 		queued
-	):
-		CommandFeedback.show_patrol_marker(ground_position)
+	)
+	if shared_result.get("handled", false):
+		CommandFeedback.show_patrol_marker(
+			shared_result.get("accepted_destination", ground_position) as Vector3
+		)
 		return
 
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-		and not queued
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"patrol",
-			false
+	## Route validation failed on a fresh click — keep units idle.
+	if not queued:
+		push_warning(
+			"Patrol refused: %s"
+			% String(shared_result.get("failure_reason", "invalid_route"))
 		)
-		if shared_result.get("handled", false):
-			CommandFeedback.show_patrol_marker(
-				shared_result.get("accepted_destination", ground_position) as Vector3
-			)
-			return
+		return
 
-	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()
@@ -820,17 +736,16 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 	for index: int in commandable_units.size():
 		var unit: Unit = commandable_units[index]
 		if not unit.supports_patrol():
-			# Compatible fallback for mixed selections.
-			unit.issue_order(UnitOrder.move(move_targets[index]), queued)
+			unit.issue_order(UnitOrder.move(move_targets[index]), true)
 			continue
-
-		if queued and unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.PATROL:
+		if unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.PATROL:
 			unit.append_patrol_point(move_targets[index])
 			issued_patrol = true
 			continue
-
-		var points: Array[Vector3] = [unit.global_position, move_targets[index]]
-		unit.issue_order(UnitOrder.patrol(points), queued)
+		unit.issue_order(
+			UnitOrder.patrol([unit.global_position, move_targets[index]]),
+			true
+		)
 		issued_patrol = true
 
 	if issued_patrol:

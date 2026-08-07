@@ -62,6 +62,11 @@ var _military_ai_v2_destination: String = "-"
 var _military_ai_v2_last_order_time: String = "-"
 var _military_ai_v2_last_mission_change: String = "-"
 var _military_ai_v2_idle_time: float = 0.0
+var _military_ai_v2_hero_level: int = 0
+var _military_ai_v2_escort_count: int = 0
+var _military_ai_v2_camps_cleared: int = 0
+var _military_ai_v2_mission_executable: bool = false
+var _military_ai_v2_block_reason: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -394,6 +399,44 @@ func get_military_ai_v2_idle_time() -> float:
 	return _military_ai_v2_idle_time
 
 
+func set_military_ai_v2_creep_status(
+	hero_level: int,
+	escort_count: int,
+	camps_cleared: int
+) -> void:
+	_military_ai_v2_hero_level = maxi(0, hero_level)
+	_military_ai_v2_escort_count = maxi(0, escort_count)
+	_military_ai_v2_camps_cleared = maxi(0, camps_cleared)
+
+
+func get_military_ai_v2_hero_level() -> int:
+	return _military_ai_v2_hero_level
+
+
+func get_military_ai_v2_escort_count() -> int:
+	return _military_ai_v2_escort_count
+
+
+func get_military_ai_v2_camps_cleared() -> int:
+	return _military_ai_v2_camps_cleared
+
+
+func set_military_ai_v2_mission_executable(
+	mission_executable: bool,
+	block_reason: String = ""
+) -> void:
+	_military_ai_v2_mission_executable = mission_executable
+	_military_ai_v2_block_reason = block_reason if not block_reason.is_empty() else "-"
+
+
+func get_military_ai_v2_mission_executable() -> bool:
+	return _military_ai_v2_mission_executable
+
+
+func get_military_ai_v2_block_reason() -> String:
+	return _military_ai_v2_block_reason
+
+
 func sample_fps(delta: float) -> void:
 	var fps: float = float(Engine.get_frames_per_second())
 	_last_fps = fps
@@ -596,6 +639,11 @@ func reset_all() -> void:
 	_military_ai_v2_last_order_time = "-"
 	_military_ai_v2_last_mission_change = "-"
 	_military_ai_v2_idle_time = 0.0
+	_military_ai_v2_hero_level = 0
+	_military_ai_v2_escort_count = 0
+	_military_ai_v2_camps_cleared = 0
+	_military_ai_v2_mission_executable = false
+	_military_ai_v2_block_reason = "-"
 	_squad_nav_enabled = MilitaryAIConfig.is_shared_squad_nav_enabled()
 	_squad_nav_active_squads = 0
 	_squad_nav_member_count = 0
