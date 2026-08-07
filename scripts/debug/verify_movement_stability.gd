@@ -382,9 +382,8 @@ func _verify_progress_stuck_and_arrival_api(failures: PackedStringArray) -> void
 	_expect(
 		failures,
 		"separation blend is bounded correction",
-		sep_source.contains("const MOVE_BLEND := 0.18")
+		sep_source.contains("const MOVE_BLEND := 0.22")
 		and sep_source.contains("MAX_PUSH_SPEED_RATIO")
-		and sep_source.contains("MAX_SEPARATION_VS_FORWARD")
 	)
 	_expect(
 		failures,

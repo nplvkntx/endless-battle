@@ -3,17 +3,10 @@ extends Node
 ## Centralized shared squad navigation: one strategic route per group command,
 ## stable role slots, staggered local follower destinations.
 
-## Temporary debug switch retained for callers — player Move/Attack-Move no longer
-## uses this system. See PlayerRouteNavigation.
-const DEBUG_DISABLE_PLAYER_FORMATIONS := true
-
 const ANCHOR_TICK_INTERVAL := 0.25
 const UNIT_UPDATE_BUDGET_PER_SQUAD := 5
 const DEST_BUCKET_SIZE := 2.0
 const WAYPOINT_REACH_DISTANCE := 3.25
-const WAYPOINT_PASS_DISTANCE := 4.5
-const WAYPOINT_MAJORITY_RATIO := 0.65
-const FINAL_APPROACH_RADIUS := 8.0
 const ANCHOR_MOVE_SPEED := 9.0
 const SLOT_DEST_THRESHOLD := 2.25
 const SLOT_SKIP_DISTANCE := 1.35
@@ -32,34 +25,6 @@ const ROUTE_FALLBACK_RING_COUNT := 4
 const ROUTE_FALLBACK_RING_RADIUS := 2.5
 const MEMBER_STALL_REFRESH_RATIO := 0.45
 const MAX_INITIAL_ORDERS := 12
-## Strategic corridor clearance (unit nav radius + small squad safety margin).
-## Not full formation width — narrow chokepoints remain valid.
-const UNIT_NAV_RADIUS := 0.55
-const SQUAD_ROUTE_SAFETY_MARGIN := 0.45
-const SQUAD_ROUTE_CLEARANCE := UNIT_NAV_RADIUS + SQUAD_ROUTE_SAFETY_MARGIN
-## Soft lane spacing along the corridor perpendicular (optional; shrinks near obstacles).
-const TRAVEL_LATERAL_SPACING := 0.85
-const TRAVEL_OFFSET_CLEARANCE := UNIT_NAV_RADIUS
-const TRAVEL_CORNER_DOT := 0.55
-const TRAVEL_OFFSET_VALIDATE_STEPS := 4
-const ROUTE_CORNER_PUSH_MAX := 1.4
-const ROUTE_CLEARANCE_PROBE_COUNT := 8
-const ROUTE_SEGMENT_SAMPLE_STEP := 1.15
-const ROUTE_ON_MESH_TOLERANCE := 0.35
-const ROUTE_MICRO_TURN_DOT := 0.985
-const ROUTE_MIN_WAYPOINT_SPACING := 0.85
-const ROUTE_NARROW_CLEARANCE_FLOOR := 0.28
-const ROUTE_NARROW_BALANCE_TOLERANCE := 0.3
-## Temporary single-file through constrained sections for small player groups only.
-## Not a formation — enter near corners/narrow clearance, exit when open again.
-const SMALL_GROUP_QUEUE_MAX := 6
-const QUEUE_TRAIL_SPACING := 1.15
-const QUEUE_ENTER_CLEARANCE := 0.72
-const QUEUE_EXIT_CLEARANCE := 0.95
-const QUEUE_STATIC_NEAR_DIST := 1.45
-const QUEUE_STATIC_NEAR_COUNT := 2
-const QUEUE_LATERAL_SCALE_ACTIVE := 0.05
-const QUEUE_EXIT_HYSTERESIS_WPS := 1
 
 ## Stall recovery ownership (escalation order):
 ## 1. Local steering / UnitSeparation while progress exists
@@ -87,8 +52,6 @@ var _player_diag: Dictionary = {
 	"stable_slot_count": 0,
 	"shared_route_count": 0,
 	"route_waypoint_count": 0,
-	"raw_route_waypoint_count": 0,
-	"route_clearance_radius": 0.0,
 	"orders_issued": 0,
 	"slot_generation_count": 0,
 	"formation_refresh_count": 0,
@@ -132,12 +95,11 @@ func clear_all() -> void:
 
 
 func reset_player_move_telemetry() -> void:
-	PlayerRouteNavigation.reset_player_move_telemetry()
 	_reset_player_move_telemetry()
 
 
 func get_player_move_telemetry() -> Dictionary:
-	return PlayerRouteNavigation.get_player_move_telemetry()
+	return _player_diag.duplicate()
 
 
 func _reset_player_move_telemetry() -> void:
@@ -148,8 +110,6 @@ func _reset_player_move_telemetry() -> void:
 		"stable_slot_count": 0,
 		"shared_route_count": 0,
 		"route_waypoint_count": 0,
-		"raw_route_waypoint_count": 0,
-		"route_clearance_radius": 0.0,
 		"orders_issued": 0,
 		"slot_generation_count": 0,
 		"formation_refresh_count": 0,
@@ -162,11 +122,6 @@ func _reset_player_move_telemetry() -> void:
 
 func is_shared_navigation_enabled() -> bool:
 	return MilitaryAIConfig.is_shared_squad_nav_enabled()
-
-
-## True while player Move/Attack-Move skip formation slots (always — see PlayerRouteNavigation).
-func are_player_formations_disabled() -> bool:
-	return true
 
 
 func get_squad_for_unit(unit: Variant) -> SquadNavContext:
@@ -343,11 +298,6 @@ func try_get_assigned_target(unit: Variant) -> Node3D:
 	return null
 
 
-## Current travel point — redirected to PlayerRouteNavigation.
-func resolve_player_travel_target(unit: Variant) -> Vector3:
-	return PlayerRouteNavigation.resolve_travel_target(unit)
-
-
 ## Issue or refresh a squad command. Returns pending per-unit orders for the caller to drain.
 func issue_group_command(
 	units: Array,
@@ -406,16 +356,59 @@ func issue_group_command(
 	return result
 
 
-## Player / formation-manager entry — permanently redirected to PlayerRouteNavigation.
-## Do not create SharedSquadNavigation player squads / corridor state for player commands.
+## Player / formation-manager entry: one squad per formation group.
+## Uses stable final arrival slots — no continuous formation steering while travelling.
 func issue_formation_command(
-	_formation_id: int,
+	formation_id: int,
 	members: Array,
 	destination: Vector3,
 	order_kind: StringName,
-	_group: FormationGroup
+	group: FormationGroup
 ) -> Dictionary:
-	return issue_player_group_command(members, destination, order_kind, false)
+	var result: Dictionary = {
+		"handled": false,
+		"equivalent_skip": false,
+	}
+	if not is_shared_navigation_enabled():
+		return result
+	if members.size() <= 1 or destination == Vector3.ZERO or group == null:
+		return result
+
+	var ordered_units: Array = _filter_military_units(members)
+	if ordered_units.size() <= 1:
+		return result
+
+	result["handled"] = true
+	_global_command_generation += 1
+	var member_ids: Array[int] = _collect_unit_ids(ordered_units)
+	var mission: int = 0 if order_kind == &"move" else 1
+	var use_attack_move: bool = order_kind == &"attack_move"
+	var equiv_signature: String = _build_equivalence_signature(
+		member_ids, destination, mission, use_attack_move
+	)
+	var signature: String = "player|%d|%d|%s" % [
+		formation_id, _global_command_generation, equiv_signature
+	]
+
+	var ctx: SquadNavContext = _create_squad_context(
+		ordered_units,
+		destination,
+		use_attack_move,
+		mission,
+		_global_command_generation,
+		signature,
+		true,
+		group
+	)
+	if ctx == null:
+		result["handled"] = false
+		return result
+
+	ctx.command_type = order_kind
+	_freeze_player_arrival_slots(ctx)
+	_issue_player_orders(ctx, ordered_units, order_kind)
+	_publish_diag()
+	return result
 
 
 ## Player unformed multi-unit selection (workers + military): one shared route +
@@ -427,9 +420,76 @@ func issue_player_group_command(
 	order_kind: StringName,
 	queued: bool = false
 ) -> Dictionary:
-	## Player Move / Attack-Move / Patrol owned by PlayerRouteNavigation.
-	## Keep this stub so older callers fail closed instead of re-entering corridor logic.
-	return PlayerRouteNavigation.issue_command(units, destination, order_kind, queued)
+	var result: Dictionary = {
+		"handled": false,
+		"equivalent_skip": false,
+		"route_valid": false,
+		"accepted_destination": destination,
+	}
+	if not is_shared_navigation_enabled():
+		return result
+
+	var ordered_units: Array = _order_units_for_formation(_filter_movable_units(units))
+	if ordered_units.size() <= 1 or destination == Vector3.ZERO:
+		return result
+
+	# Shift-queued: stable unique slots only. Do not start a live shared route yet.
+	if queued:
+		result["handled"] = true
+		var spacing: float = _compute_member_spacing(ordered_units)
+		var slot_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+			destination, ordered_units.size(), spacing
+		)
+		for index: int in ordered_units.size():
+			var unit: Variant = ordered_units[index]
+			if not NodeSafety.is_alive_node(unit) or not unit is Unit:
+				continue
+			var target: Vector3 = GroupMoveSpacing.resolve_nearby_walkable_position(
+				slot_targets[index], unit as Node3D, destination, spacing
+			)
+			_issue_unit_ground_order(unit as Unit, target, order_kind, true)
+		return result
+
+	var use_attack_move: bool = order_kind == &"attack_move"
+	var mission: int = 0 if order_kind == &"move" else 1
+	var member_ids: Array[int] = _collect_unit_ids(ordered_units)
+	var equiv_signature: String = _build_equivalence_signature(
+		member_ids, destination, mission, use_attack_move
+	)
+
+	## Every fresh click is authoritative — do not soft-skip equivalent destinations.
+	_global_command_generation += 1
+	var signature: String = "player_group|%d|%s" % [
+		_global_command_generation, equiv_signature
+	]
+	_reset_player_move_telemetry()
+	_player_diag["command_generation"] = _global_command_generation
+	_player_diag["clicked_position"] = destination
+
+	var ctx: SquadNavContext = _create_squad_context(
+		ordered_units,
+		destination,
+		use_attack_move,
+		mission,
+		_global_command_generation,
+		signature,
+		true,
+		null
+	)
+	if ctx == null:
+		return result
+
+	ctx.command_type = order_kind
+	_freeze_player_arrival_slots(ctx)
+	result["handled"] = true
+	result["route_valid"] = ctx.route_valid
+	result["accepted_destination"] = ctx.strategic_destination
+	_player_diag["accepted_destination"] = ctx.strategic_destination
+	_player_diag["shared_route_count"] = 1
+	_player_diag["route_waypoint_count"] = ctx.route_waypoints.size()
+	_issue_player_orders(ctx, ordered_units, order_kind)
+	_publish_diag()
+	return result
 
 
 func _issue_unit_ground_order(
@@ -495,20 +555,8 @@ func _create_squad_context(
 
 	ctx.recompute_anchor_median()
 	ctx.last_progress_position = ctx.anchor_position
-	if is_player and DEBUG_DISABLE_PLAYER_FORMATIONS:
-		## No FormationManager shapes / continuous slot chase — still assign loose
-		## corridor offsets and freeze unique finals after the shared route.
-		ctx.uses_formation_layout = false
-		ctx.slot_locals.clear()
-		ctx.formation_size = ordered_units.size()
-		_assign_player_travel_offsets(ctx, ordered_units)
-	else:
-		_assign_stable_slots(ctx, ordered_units, group)
-		if is_player:
-			_assign_player_travel_offsets(ctx, ordered_units)
+	_assign_stable_slots(ctx, ordered_units, group)
 	_calculate_shared_route(ctx, ordered_units)
-	if is_player:
-		_bootstrap_player_waypoint_index(ctx)
 	_bind_members(ctx, ordered_units)
 	_squads[ctx.squad_id] = ctx
 	return ctx
@@ -578,28 +626,6 @@ func _freeze_player_arrival_slots(ctx: SquadNavContext) -> void:
 	if face.length_squared() >= 0.01:
 		ctx.formation_forward = face.normalized()
 
-	## Ordinary player travel (formations disabled): unique grid arrivals, frozen once.
-	if DEBUG_DISABLE_PLAYER_FORMATIONS or not ctx.uses_formation_layout:
-		var spacing: float = SIMPLE_SLOT_BASE_SPACING
-		var members: Array = ctx.get_living_members()
-		if not members.is_empty():
-			spacing = _compute_member_spacing(members)
-		var ordered_ids: Array[int] = ctx.member_ids.duplicate()
-		var targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
-			accepted, ordered_ids.size(), spacing
-		)
-		for index: int in ordered_ids.size():
-			var unit_id: int = ordered_ids[index]
-			var world: Vector3 = accepted
-			if index < targets.size():
-				world = GroupMoveSpacing.resolve_formation_position(targets[index], accepted)
-			ctx.final_arrival_slots[unit_id] = world
-		ctx.arrival_slots_frozen = true
-		if ctx.is_player_squad:
-			_player_diag["stable_slot_count"] = ctx.final_arrival_slots.size()
-			_player_diag["slot_generation_count"] = int(_player_diag["slot_generation_count"]) + 1
-		return
-
 	var saved_anchor: Vector3 = ctx.anchor_position
 	var saved_compressed: bool = ctx.compressed_passage
 	var saved_scale: float = ctx.spacing_scale
@@ -624,47 +650,6 @@ func _freeze_player_arrival_slots(ctx: SquadNavContext) -> void:
 	if ctx.is_player_squad:
 		_player_diag["stable_slot_count"] = ctx.final_arrival_slots.size()
 		_player_diag["slot_generation_count"] = int(_player_diag["slot_generation_count"]) + 1
-
-
-## Stable path-relative lane offsets (signed meters along corridor-right).
-## Applied per waypoint with navigability validation — never raw world-axis grids.
-func _assign_player_travel_offsets(ctx: SquadNavContext, ordered_units: Array) -> void:
-	ctx.travel_offsets.clear()
-	var count: int = ordered_units.size()
-	if count <= 0:
-		return
-	var spacing: float = TRAVEL_LATERAL_SPACING
-	if count >= 2:
-		spacing = minf(_compute_member_spacing(ordered_units) * 0.55, TRAVEL_LATERAL_SPACING)
-	for index: int in count:
-		var unit: Variant = ordered_units[index]
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		var unit_id: int = (unit as Node).get_instance_id()
-		var lane: float = (float(index) - (float(count) - 1.0) * 0.5) * spacing
-		## Store signed lateral meters in x; yz unused. Applied with route tangent at issue time.
-		ctx.travel_offsets[unit_id] = Vector3(lane, 0.0, 0.0)
-
-
-func _bootstrap_player_waypoint_index(ctx: SquadNavContext) -> void:
-	ctx.in_final_approach = false
-	ctx.last_issued_waypoint_index.clear()
-	if ctx.route_waypoints.is_empty():
-		ctx.waypoint_index = 0
-		ctx.in_final_approach = true
-		return
-	## Skip the start vertex — the squad already stands there.
-	if (
-		ctx.route_waypoints.size() >= 2
-		and _horizontal_distance(ctx.anchor_position, ctx.route_waypoints[0])
-		<= WAYPOINT_REACH_DISTANCE * 1.5
-	):
-		ctx.waypoint_index = 1
-	else:
-		ctx.waypoint_index = 0
-	if _horizontal_distance(ctx.anchor_position, ctx.strategic_destination) <= FINAL_APPROACH_RADIUS:
-		ctx.in_final_approach = true
-		ctx.waypoint_index = maxi(ctx.route_waypoints.size() - 1, 0)
 
 
 func _compute_member_spacing(units: Array) -> float:
@@ -695,17 +680,13 @@ func _estimate_unit_radius(body: CollisionObject3D) -> float:
 func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void:
 	var nav_map: RID = _resolve_nav_map(ordered_units)
 	ctx.route_valid = false
-	ctx.raw_route_waypoints = PackedVector3Array()
-	ctx.route_clearance_radius = 0.0
 	var requested: Vector3 = ctx.requested_destination
 	if requested == Vector3.ZERO:
 		requested = ctx.strategic_destination
 
 	if not nav_map.is_valid() or not NavigationServer3D.map_is_active(nav_map):
 		ctx.strategic_destination = requested
-		var fallback_path := PackedVector3Array([ctx.anchor_position, requested])
-		ctx.raw_route_waypoints = fallback_path
-		ctx.route_waypoints = fallback_path
+		ctx.route_waypoints = PackedVector3Array([ctx.anchor_position, requested])
 		ctx.waypoint_index = 0
 		# Allow movement to begin; local agents will path once the map is ready.
 		ctx.route_valid = true
@@ -747,276 +728,17 @@ func _calculate_shared_route(ctx: SquadNavContext, ordered_units: Array) -> void
 		ctx.route_valid = true
 
 	ctx.strategic_destination = to
-	ctx.raw_route_waypoints = path.duplicate()
-	## Player groups get clearance-aware corridor processing once at create/refresh.
-	## AI keeps the raw NavigationServer path (no strategy change).
-	if ctx.is_player_squad:
-		ctx.route_clearance_radius = SQUAD_ROUTE_CLEARANCE
-		ctx.route_waypoints = _process_player_squad_route(nav_map, path, SQUAD_ROUTE_CLEARANCE)
-	else:
-		ctx.route_waypoints = path
+	ctx.route_waypoints = path
 	ctx.waypoint_index = 0
 	var face: Vector3 = ctx.strategic_destination - ctx.anchor_position
 	face.y = 0.0
 	if face.length_squared() >= 0.01:
 		ctx.formation_forward = face.normalized()
-	elif ctx.route_waypoints.size() >= 2:
-		var segment: Vector3 = ctx.route_waypoints[1] - ctx.route_waypoints[0]
+	elif path.size() >= 2:
+		var segment: Vector3 = path[1] - path[0]
 		segment.y = 0.0
 		if segment.length_squared() >= 0.01:
 			ctx.formation_forward = segment.normalized()
-
-
-## Build an RTS-style squad corridor from a raw NavigationServer polyline.
-## Runs once per strategic route create/refresh — never per frame / per unit.
-func _process_player_squad_route(
-	nav_map: RID,
-	raw_path: PackedVector3Array,
-	clearance: float
-) -> PackedVector3Array:
-	if raw_path.size() < 2 or not nav_map.is_valid():
-		return raw_path
-	var processed: PackedVector3Array = raw_path.duplicate()
-	processed = _push_route_corners_for_clearance(nav_map, processed, clearance)
-	processed = _simplify_route_with_clearance(nav_map, processed, clearance)
-	processed = _smooth_route_micro_turns(nav_map, processed, clearance)
-	processed = _dedupe_route_waypoints(processed)
-	## Preserve the player's accepted destination exactly (last raw/strategic point).
-	if processed.size() >= 1 and raw_path.size() >= 1:
-		processed[processed.size() - 1] = raw_path[raw_path.size() - 1]
-	if processed.size() < 2:
-		return raw_path
-	return processed
-
-
-func _push_route_corners_for_clearance(
-	nav_map: RID,
-	path: PackedVector3Array,
-	clearance: float
-) -> PackedVector3Array:
-	if path.size() < 3:
-		return path
-	var result: PackedVector3Array = path.duplicate()
-	## Skip start (0) and final destination (last) — never move the click target.
-	for index: int in range(1, result.size() - 1):
-		var current: Vector3 = result[index]
-		var pushed: Vector3 = _push_waypoint_into_clearance(
-			nav_map, current, clearance, ROUTE_CORNER_PUSH_MAX
-		)
-		## Prefer a stable outward correction; reject if snap jumped sideways too far.
-		if _horizontal_distance(current, pushed) > 0.05:
-			result[index] = pushed
-	return result
-
-
-func _push_waypoint_into_clearance(
-	nav_map: RID,
-	point: Vector3,
-	clearance: float,
-	max_push: float
-) -> Vector3:
-	var free_sum := Vector3.ZERO
-	var free_weight: float = 0.0
-	var blocked_sum := Vector3.ZERO
-	var blocked_weight: float = 0.0
-	for step: int in ROUTE_CLEARANCE_PROBE_COUNT:
-		var angle: float = TAU * float(step) / float(ROUTE_CLEARANCE_PROBE_COUNT)
-		var dir := Vector3(cos(angle), 0.0, sin(angle))
-		var achieved: float = _radial_clearance_in_direction(nav_map, point, dir, clearance)
-		if achieved >= clearance * 0.92:
-			free_sum += dir * achieved
-			free_weight += achieved
-		else:
-			var deficit: float = clearance - achieved
-			blocked_sum += dir * deficit
-			blocked_weight += deficit
-
-	## Already clear on all sides — keep centerline.
-	if blocked_weight <= 0.001:
-		return point
-
-	var push_dir := Vector3.ZERO
-	if free_weight > 0.001:
-		push_dir = free_sum / free_weight
-	elif blocked_weight > 0.001:
-		push_dir = -(blocked_sum / blocked_weight)
-	push_dir.y = 0.0
-	if push_dir.length_squared() < 0.0001:
-		return point
-	push_dir = push_dir.normalized()
-
-	var best: Vector3 = point
-	var best_score: float = _score_waypoint_clearance(nav_map, point, clearance)
-	## Single outward step — no left/right oscillation loops.
-	var push_distance: float = minf(max_push, clearance * 0.9)
-	var candidate: Vector3 = point + push_dir * push_distance
-	var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, candidate)
-	if _horizontal_distance(candidate, snapped) > ROUTE_ON_MESH_TOLERANCE:
-		## Back off once toward the mesh.
-		candidate = point + push_dir * (push_distance * 0.5)
-		snapped = NavigationServer3D.map_get_closest_point(nav_map, candidate)
-	if _horizontal_distance(point, snapped) < 0.05:
-		return point
-	var score: float = _score_waypoint_clearance(nav_map, snapped, clearance)
-	if score + 0.05 >= best_score:
-		best = snapped
-	return best
-
-
-func _score_waypoint_clearance(nav_map: RID, point: Vector3, clearance: float) -> float:
-	var min_clear: float = clearance
-	var sum_clear: float = 0.0
-	for step: int in ROUTE_CLEARANCE_PROBE_COUNT:
-		var angle: float = TAU * float(step) / float(ROUTE_CLEARANCE_PROBE_COUNT)
-		var dir := Vector3(cos(angle), 0.0, sin(angle))
-		var achieved: float = _radial_clearance_in_direction(nav_map, point, dir, clearance)
-		min_clear = minf(min_clear, achieved)
-		sum_clear += achieved
-	## Prefer higher minimum clearance, with average as a mild tie-break.
-	return min_clear * 2.0 + sum_clear / float(ROUTE_CLEARANCE_PROBE_COUNT)
-
-
-func _radial_clearance_in_direction(
-	nav_map: RID,
-	point: Vector3,
-	direction: Vector3,
-	max_radius: float
-) -> float:
-	var dir: Vector3 = direction
-	dir.y = 0.0
-	if dir.length_squared() < 0.0001:
-		return 0.0
-	dir = dir.normalized()
-	var low: float = 0.0
-	var high: float = max_radius
-	## Binary search how far we stay on the navmesh along this ray.
-	for _iter: int in 5:
-		var mid: float = (low + high) * 0.5
-		var probe: Vector3 = point + dir * mid
-		var closest: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, probe)
-		if _horizontal_distance(probe, closest) <= ROUTE_ON_MESH_TOLERANCE * 0.75:
-			low = mid
-		else:
-			high = mid
-	return low
-
-
-func _simplify_route_with_clearance(
-	nav_map: RID,
-	path: PackedVector3Array,
-	clearance: float
-) -> PackedVector3Array:
-	if path.size() <= 2:
-		return path
-	var result: PackedVector3Array = PackedVector3Array()
-	result.append(path[0])
-	var anchor_index: int = 0
-	for index: int in range(1, path.size() - 1):
-		var previous: Vector3 = path[anchor_index]
-		var next_point: Vector3 = path[index + 1]
-		## Only drop waypoint if previous→next is safely navigable with clearance.
-		if _segment_has_squad_clearance(nav_map, previous, next_point, clearance):
-			continue
-		result.append(path[index])
-		anchor_index = index
-	result.append(path[path.size() - 1])
-	return result
-
-
-func _smooth_route_micro_turns(
-	nav_map: RID,
-	path: PackedVector3Array,
-	clearance: float
-) -> PackedVector3Array:
-	if path.size() < 3:
-		return path
-	var result: PackedVector3Array = PackedVector3Array()
-	result.append(path[0])
-	var index: int = 1
-	while index < path.size() - 1:
-		var previous: Vector3 = result[result.size() - 1]
-		var current: Vector3 = path[index]
-		var next_point: Vector3 = path[index + 1]
-		var in_dir: Vector3 = current - previous
-		var out_dir: Vector3 = next_point - current
-		in_dir.y = 0.0
-		out_dir.y = 0.0
-		var can_remove := false
-		if in_dir.length_squared() >= 0.0001 and out_dir.length_squared() >= 0.0001:
-			in_dir = in_dir.normalized()
-			out_dir = out_dir.normalized()
-			var turn_dot: float = in_dir.dot(out_dir)
-			## Tiny zig-zag / micro-turn: collapse when A→C is clearance-safe.
-			if (
-				turn_dot >= ROUTE_MICRO_TURN_DOT
-				and _segment_has_squad_clearance(nav_map, previous, next_point, clearance)
-			):
-				can_remove = true
-		if can_remove:
-			index += 1
-			continue
-		result.append(current)
-		index += 1
-	result.append(path[path.size() - 1])
-	return result
-
-
-func _segment_has_squad_clearance(
-	nav_map: RID,
-	from: Vector3,
-	to: Vector3,
-	clearance: float
-) -> bool:
-	var length: float = _horizontal_distance(from, to)
-	if length < 0.05:
-		return true
-	var steps: int = maxi(1, int(ceil(length / ROUTE_SEGMENT_SAMPLE_STEP)))
-	var dir: Vector3 = to - from
-	dir.y = 0.0
-	if dir.length_squared() < 0.0001:
-		return true
-	dir = dir.normalized()
-	var perp := Vector3(-dir.z, 0.0, dir.x)
-	for step: int in steps + 1:
-		var t: float = float(step) / float(steps)
-		var sample: Vector3 = from.lerp(to, t)
-		var on_mesh: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, sample)
-		if _horizontal_distance(sample, on_mesh) > ROUTE_ON_MESH_TOLERANCE:
-			return false
-		if not _point_has_lateral_clearance(nav_map, on_mesh, perp, clearance):
-			return false
-	return true
-
-
-func _point_has_lateral_clearance(
-	nav_map: RID,
-	point: Vector3,
-	perp: Vector3,
-	clearance: float
-) -> bool:
-	var left: float = _radial_clearance_in_direction(nav_map, point, perp, clearance)
-	var right: float = _radial_clearance_in_direction(nav_map, point, -perp, clearance)
-	if left >= clearance * 0.85 and right >= clearance * 0.85:
-		return true
-	## Narrow but centered corridor: allow compression; reject one-sided scraping.
-	var balanced: bool = absf(left - right) <= ROUTE_NARROW_BALANCE_TOLERANCE
-	var floor_ok: bool = mini(left, right) >= ROUTE_NARROW_CLEARANCE_FLOOR
-	return balanced and floor_ok
-
-
-func _dedupe_route_waypoints(path: PackedVector3Array) -> PackedVector3Array:
-	if path.size() <= 1:
-		return path
-	var result: PackedVector3Array = PackedVector3Array()
-	result.append(path[0])
-	for index: int in range(1, path.size()):
-		if _horizontal_distance(result[result.size() - 1], path[index]) < ROUTE_MIN_WAYPOINT_SPACING:
-			## Keep the last point so destination / end vertex is preserved when collapsing.
-			if index == path.size() - 1:
-				result[result.size() - 1] = path[index]
-			continue
-		result.append(path[index])
-	return result
 
 
 func _find_nearest_reachable_destination(
@@ -1076,9 +798,9 @@ func _tick_squads(delta: float) -> void:
 
 		total_members += ctx.member_count()
 		if ctx.is_player_squad:
-			## Player squads are owned by PlayerRouteNavigation — dissolve leftovers.
-			remove_ids.append(int(squad_id))
-			continue
+			## Player squads: no continuous formation steering.
+			## Units keep their one-shot stable arrival destinations.
+			_tick_player_squad(ctx, delta)
 		else:
 			_advance_anchor(ctx, delta)
 			_update_passage_compression(ctx)
@@ -1094,16 +816,10 @@ func _tick_squads(delta: float) -> void:
 	_publish_diag()
 
 
-## Attack-move threat search + shared-waypoint corridor travel (no formation chase).
+## Attack-move threat search + real-unit progress tracking. Never reissues formation targets.
 func _tick_player_squad(ctx: SquadNavContext, delta: float) -> void:
 	_tick_target_search(ctx, delta)
 	_note_player_squad_progress(ctx)
-	_update_player_queue_mode(ctx)
-	var advanced: bool = _advance_player_shared_waypoints(ctx)
-	if advanced:
-		_retarget_player_squad_travel(ctx, true)
-	else:
-		_retarget_player_idle_or_stale(ctx)
 	if _detect_player_squad_stall(ctx):
 		_recover_player_squad_stall(ctx)
 
@@ -1115,667 +831,6 @@ func _note_player_squad_progress(ctx: SquadNavContext) -> void:
 	var median: Vector3 = _compute_members_median(members)
 	if _horizontal_distance(median, ctx.last_progress_position) >= PROGRESS_EPSILON:
 		ctx.note_progress(median)
-
-
-## Advance shared waypoint when ~65% of living members reach/pass it. Never wait for stragglers.
-func _advance_player_shared_waypoints(ctx: SquadNavContext) -> bool:
-	if ctx.in_final_approach:
-		return false
-	var members: Array = ctx.get_living_members()
-	if members.is_empty():
-		return false
-
-	var median: Vector3 = _compute_members_median(members)
-	if _horizontal_distance(median, ctx.strategic_destination) <= FINAL_APPROACH_RADIUS:
-		ctx.in_final_approach = true
-		if not ctx.route_waypoints.is_empty():
-			ctx.waypoint_index = ctx.route_waypoints.size() - 1
-		return true
-
-	if ctx.route_waypoints.is_empty():
-		ctx.in_final_approach = true
-		return true
-
-	var advanced: bool = false
-	while ctx.waypoint_index < ctx.route_waypoints.size() - 1:
-		var waypoint: Vector3 = ctx.route_waypoints[ctx.waypoint_index]
-		var passed: int = 0
-		for unit: Variant in members:
-			if unit == null or not is_instance_valid(unit) or not unit is Node3D:
-				continue
-			if _unit_reached_or_passed_waypoint(unit as Node3D, waypoint, ctx):
-				passed += 1
-		## Single-file queue: advance with the leader — do not wait on trailing workers.
-		var needed: int = maxi(1, int(ceil(float(members.size()) * WAYPOINT_MAJORITY_RATIO)))
-		if ctx.queue_mode_active:
-			needed = 1
-			if ctx.queue_leader_id != 0:
-				var leader_node: Node3D = SquadNavContext.resolve_living_node3d(
-					ctx.queue_leader_id
-				)
-				if (
-					leader_node != null
-					and _unit_reached_or_passed_waypoint(leader_node, waypoint, ctx)
-				):
-					passed = needed
-		if passed < needed:
-			break
-		ctx.waypoint_index += 1
-		advanced = true
-
-	if ctx.waypoint_index >= ctx.route_waypoints.size() - 1:
-		var last_wp: Vector3 = ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-		var at_last: int = 0
-		for unit: Variant in members:
-			if unit == null or not is_instance_valid(unit) or not unit is Node3D:
-				continue
-			if _unit_reached_or_passed_waypoint(unit as Node3D, last_wp, ctx):
-				at_last += 1
-		var last_needed: int = maxi(
-			1, int(ceil(float(members.size()) * WAYPOINT_MAJORITY_RATIO))
-		)
-		if (
-			at_last >= last_needed
-			or _horizontal_distance(median, ctx.strategic_destination) <= FINAL_APPROACH_RADIUS
-		):
-			ctx.in_final_approach = true
-			advanced = true
-
-	return advanced
-
-
-func _unit_reached_or_passed_waypoint(
-	unit: Node3D,
-	waypoint: Vector3,
-	ctx: SquadNavContext,
-	waypoint_index: int = -1
-) -> bool:
-	var pos: Vector3 = unit.global_position
-	if _horizontal_distance(pos, waypoint) <= WAYPOINT_PASS_DISTANCE:
-		return true
-	## Count as passed once beyond the waypoint plane along the route.
-	var index: int = waypoint_index if waypoint_index >= 0 else ctx.waypoint_index
-	var ahead: Vector3 = ctx.strategic_destination
-	if index + 1 < ctx.route_waypoints.size():
-		ahead = ctx.route_waypoints[index + 1]
-	var route_dir: Vector3 = ahead - waypoint
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		route_dir = ctx.formation_forward
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		return false
-	route_dir = route_dir.normalized()
-	var from_wp: Vector3 = pos - waypoint
-	from_wp.y = 0.0
-	## Soft plane cross — do not U-turn to kiss an exact offset coordinate.
-	if from_wp.dot(route_dir) >= 0.0:
-		return true
-	## Closer to the next guide than this one → already past in practice.
-	if _horizontal_distance(pos, ahead) + 0.35 < _horizontal_distance(pos, waypoint):
-		return true
-	return false
-
-
-## Personal look-ahead index: never behind the shared index; advance while passed.
-func _player_personal_waypoint_index(ctx: SquadNavContext, unit_id: int) -> int:
-	if ctx.route_waypoints.is_empty():
-		return 0
-	var last_index: int = ctx.route_waypoints.size() - 1
-	var index: int = clampi(ctx.waypoint_index, 0, last_index)
-	var unit_node: Node3D = SquadNavContext.resolve_living_node3d(unit_id)
-	if unit_node == null:
-		return index
-	while index < last_index:
-		if _unit_reached_or_passed_waypoint(
-			unit_node, ctx.route_waypoints[index], ctx, index
-		):
-			index += 1
-		else:
-			break
-	return index
-
-
-func _player_desired_travel_target(ctx: SquadNavContext, unit_id: int) -> Vector3:
-	if ctx.in_final_approach or ctx.route_waypoints.is_empty():
-		return ctx.get_final_arrival_slot(unit_id)
-	return _player_corridor_travel_target(ctx, unit_id)
-
-
-func _player_corridor_travel_target(ctx: SquadNavContext, unit_id: int) -> Vector3:
-	if ctx.route_waypoints.is_empty():
-		return ctx.get_final_arrival_slot(unit_id)
-	## Temporary single-file: shared centerline + longitudinal trail, no lateral lanes.
-	if ctx.queue_mode_active:
-		return _player_queue_travel_target(ctx, unit_id)
-	var index: int = _player_personal_waypoint_index(ctx, unit_id)
-	## Finished the corridor personally — proceed to frozen final slot without waiting.
-	if index >= ctx.route_waypoints.size() - 1:
-		var unit_node: Node3D = SquadNavContext.resolve_living_node3d(unit_id)
-		var last_wp: Vector3 = ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-		if (
-			unit_node != null
-			and _unit_reached_or_passed_waypoint(
-				unit_node, last_wp, ctx, ctx.route_waypoints.size() - 1
-			)
-		):
-			return ctx.get_final_arrival_slot(unit_id)
-	var waypoint: Vector3 = ctx.route_waypoints[mini(index, ctx.route_waypoints.size() - 1)]
-	var lane: Vector3 = ctx.travel_offsets.get(unit_id, Vector3.ZERO) as Vector3
-	var lateral: float = lane.x * ctx.queue_lateral_scale
-	if absf(lateral) < 0.05:
-		return waypoint
-	return _safe_corridor_offset_target(ctx, index, waypoint, lateral)
-
-
-## Path-relative offset with mandatory navigability. Spacing is optional; center is always safe.
-func _safe_corridor_offset_target(
-	ctx: SquadNavContext,
-	waypoint_index: int,
-	waypoint: Vector3,
-	lateral_meters: float
-) -> Vector3:
-	var nav_map: RID = _resolve_nav_map(ctx.get_living_members())
-	if not nav_map.is_valid():
-		return waypoint
-
-	var prev: Vector3 = waypoint
-	if waypoint_index > 0:
-		prev = ctx.route_waypoints[waypoint_index - 1]
-	elif not ctx.route_waypoints.is_empty():
-		prev = ctx.route_waypoints[0]
-	var next: Vector3 = ctx.strategic_destination
-	if waypoint_index + 1 < ctx.route_waypoints.size():
-		next = ctx.route_waypoints[waypoint_index + 1]
-
-	var route_dir: Vector3 = next - prev
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		route_dir = next - waypoint
-		route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		route_dir = ctx.formation_forward
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		return waypoint
-	route_dir = route_dir.normalized()
-	var right: Vector3 = Vector3(-route_dir.z, 0.0, route_dir.x)
-
-	## Inside of a sharp bend → collapse lateral toward corridor center.
-	var scale: float = 1.0
-	if waypoint_index > 0 and waypoint_index + 1 < ctx.route_waypoints.size():
-		var in_dir: Vector3 = waypoint - prev
-		var out_dir: Vector3 = next - waypoint
-		in_dir.y = 0.0
-		out_dir.y = 0.0
-		if in_dir.length_squared() > 0.0001 and out_dir.length_squared() > 0.0001:
-			in_dir = in_dir.normalized()
-			out_dir = out_dir.normalized()
-			var turn_dot: float = in_dir.dot(out_dir)
-			if turn_dot < TRAVEL_CORNER_DOT:
-				var turn_sign: float = signf(in_dir.cross(out_dir).y)
-				var lane_sign: float = signf(lateral_meters)
-				## Same sign as turn = inside lane around the bend.
-				if turn_sign != 0.0 and lane_sign != 0.0 and turn_sign == lane_sign:
-					scale = 0.0
-				else:
-					## Outside lane: still shrink a bit so the approach stays on-mesh.
-					scale = clampf((turn_dot + 1.0) * 0.5, 0.25, 1.0)
-
-	var desired_lateral: float = lateral_meters * scale
-	if absf(desired_lateral) < 0.05:
-		return waypoint
-
-	## Shrink toward center until the offset point itself is navigable with unit clearance.
-	for step: int in range(TRAVEL_OFFSET_VALIDATE_STEPS + 1):
-		var t: float = 1.0 - float(step) / float(TRAVEL_OFFSET_VALIDATE_STEPS)
-		var candidate: Vector3 = waypoint + right * (desired_lateral * t)
-		if _corridor_offset_point_is_safe(nav_map, waypoint, candidate, right):
-			return candidate
-	return waypoint
-
-
-## --- Temporary small-group single-file (queue) through constrained route sections ---
-
-
-func is_unit_in_queue_mode(_unit: Variant) -> bool:
-	## Player queue/follow-the-leader mode removed.
-	return false
-
-
-func get_player_queue_mode_debug(_unit: Variant) -> Dictionary:
-	return {
-		"queue_mode": false,
-		"leader_id": 0,
-		"follower_count": 0,
-		"waypoint_index": -1,
-		"lateral_offset_scale": 1.0,
-		"stuck_recovery": false,
-	}
-
-
-func _update_player_queue_mode(_ctx: SquadNavContext) -> void:
-	## Queue / follow-the-leader bypassed — PlayerRouteNavigation owns player travel.
-	return
-
-
-func _player_route_section_is_constrained(ctx: SquadNavContext) -> bool:
-	if ctx.route_waypoints.is_empty():
-		return false
-	var last_index: int = ctx.route_waypoints.size() - 1
-	var probe_index: int = clampi(ctx.waypoint_index, 0, last_index)
-	## When already queued, require clearance a bit further ahead before exiting.
-	if ctx.queue_mode_active:
-		probe_index = clampi(
-			ctx.waypoint_index + QUEUE_EXIT_HYSTERESIS_WPS, 0, last_index
-		)
-
-	var nav_map: RID = _resolve_nav_map(ctx.get_living_members())
-	if not nav_map.is_valid():
-		return false
-
-	var clearance_limit: float = (
-		QUEUE_EXIT_CLEARANCE if ctx.queue_mode_active else QUEUE_ENTER_CLEARANCE
-	)
-	if _route_waypoint_min_clearance(nav_map, ctx, probe_index) < clearance_limit:
-		return true
-	if _route_waypoint_has_sharp_turn(ctx, probe_index):
-		return true
-	## Several members scraping static geometry on the same segment → force single-file.
-	if _player_squad_near_static_count(ctx) >= QUEUE_STATIC_NEAR_COUNT:
-		return true
-	return false
-
-
-func _route_waypoint_min_clearance(
-	nav_map: RID,
-	ctx: SquadNavContext,
-	waypoint_index: int
-) -> float:
-	if ctx.route_waypoints.is_empty():
-		return SQUAD_ROUTE_CLEARANCE
-	var index: int = clampi(waypoint_index, 0, ctx.route_waypoints.size() - 1)
-	var point: Vector3 = ctx.route_waypoints[index]
-	var prev: Vector3 = point
-	if index > 0:
-		prev = ctx.route_waypoints[index - 1]
-	var next: Vector3 = ctx.strategic_destination
-	if index + 1 < ctx.route_waypoints.size():
-		next = ctx.route_waypoints[index + 1]
-	var route_dir: Vector3 = next - prev
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		route_dir = ctx.formation_forward
-	route_dir.y = 0.0
-	if route_dir.length_squared() < 0.0001:
-		return SQUAD_ROUTE_CLEARANCE
-	route_dir = route_dir.normalized()
-	var perp := Vector3(-route_dir.z, 0.0, route_dir.x)
-	var left: float = _radial_clearance_in_direction(
-		nav_map, point, perp, SQUAD_ROUTE_CLEARANCE
-	)
-	var right: float = _radial_clearance_in_direction(
-		nav_map, point, -perp, SQUAD_ROUTE_CLEARANCE
-	)
-	return minf(left, right)
-
-
-func _route_waypoint_has_sharp_turn(ctx: SquadNavContext, waypoint_index: int) -> bool:
-	if ctx.route_waypoints.size() < 3:
-		return false
-	var index: int = clampi(waypoint_index, 1, ctx.route_waypoints.size() - 2)
-	var prev: Vector3 = ctx.route_waypoints[index - 1]
-	var current: Vector3 = ctx.route_waypoints[index]
-	var next: Vector3 = ctx.route_waypoints[index + 1]
-	var in_dir: Vector3 = current - prev
-	var out_dir: Vector3 = next - current
-	in_dir.y = 0.0
-	out_dir.y = 0.0
-	if in_dir.length_squared() < 0.0001 or out_dir.length_squared() < 0.0001:
-		return false
-	return in_dir.normalized().dot(out_dir.normalized()) < TRAVEL_CORNER_DOT
-
-
-func _player_squad_near_static_count(ctx: SquadNavContext) -> int:
-	var count: int = 0
-	for unit: Variant in ctx.get_living_members():
-		if unit == null or not is_instance_valid(unit) or not unit is CharacterBody3D:
-			continue
-		if _unit_near_static_obstacle(unit as CharacterBody3D):
-			count += 1
-	return count
-
-
-func _unit_near_static_obstacle(body: CharacterBody3D) -> bool:
-	if body == null or not is_instance_valid(body) or not body.is_inside_tree():
-		return false
-	var world: World3D = body.get_world_3d()
-	if world == null:
-		return false
-	var space: PhysicsDirectSpaceState3D = world.direct_space_state
-	var from: Vector3 = body.global_position + Vector3(0.0, 0.4, 0.0)
-	## Probe four cardinals — building corner contact is enough to queue.
-	var dirs: Array[Vector3] = [
-		Vector3(1.0, 0.0, 0.0),
-		Vector3(-1.0, 0.0, 0.0),
-		Vector3(0.0, 0.0, 1.0),
-		Vector3(0.0, 0.0, -1.0),
-	]
-	for dir: Vector3 in dirs:
-		var to: Vector3 = from + dir * QUEUE_STATIC_NEAR_DIST
-		var ray := PhysicsRayQueryParameters3D.create(from, to)
-		ray.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
-		ray.exclude = [body.get_rid()]
-		ray.collide_with_areas = false
-		ray.collide_with_bodies = true
-		var hit: Dictionary = space.intersect_ray(ray)
-		if hit.is_empty():
-			continue
-		var collider: Variant = hit.get("collider")
-		## Ignore other units — only static world / buildings pin corners.
-		if collider is Unit:
-			continue
-		return true
-	return false
-
-
-func _enter_player_queue_mode(ctx: SquadNavContext) -> void:
-	ctx.queue_mode_active = true
-	ctx.queue_lateral_scale = QUEUE_LATERAL_SCALE_ACTIVE
-	ctx.queue_stuck_recovery = false
-	_rebuild_player_queue_order(ctx)
-	## Already-pinned members: collapse onto shared centerline (same command / route).
-	for unit: Variant in ctx.get_living_members():
-		if unit == null or not is_instance_valid(unit) or not unit is Unit:
-			continue
-		var unit_typed: Unit = unit as Unit
-		if not unit_typed.matches_player_squad_command(ctx.command_generation):
-			continue
-		if not _unit_near_static_obstacle(unit_typed):
-			continue
-		collapse_unit_travel_offset_to_center(unit_typed)
-		ctx.queue_stuck_recovery = true
-	_retarget_player_squad_travel(ctx, true)
-
-
-func _exit_player_queue_mode(ctx: SquadNavContext, retarget: bool) -> void:
-	ctx.queue_mode_active = false
-	ctx.queue_leader_id = 0
-	ctx.queue_order_ids.clear()
-	ctx.queue_lateral_scale = 1.0
-	## Keep stuck_recovery flag for path-debug until the next enter / new command.
-	if retarget:
-		_retarget_player_squad_travel(ctx, true)
-
-
-func _rebuild_player_queue_order(ctx: SquadNavContext) -> void:
-	ctx.queue_order_ids.clear()
-	ctx.queue_leader_id = 0
-	var scored: Array[Dictionary] = []
-	for unit: Variant in ctx.get_living_members():
-		if unit == null or not is_instance_valid(unit) or not unit is Node3D:
-			continue
-		var unit_id: int = (unit as Node).get_instance_id()
-		var progress: float = _unit_route_progress_meters(ctx, unit_id)
-		scored.append({"id": unit_id, "progress": progress})
-	## Front-most along the shared route leads; stable secondary key = instance id.
-	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		var pa: float = float(a.get("progress", 0.0))
-		var pb: float = float(b.get("progress", 0.0))
-		if absf(pa - pb) > 0.05:
-			return pa > pb
-		return int(a.get("id", 0)) < int(b.get("id", 0))
-	)
-	for entry: Dictionary in scored:
-		ctx.queue_order_ids.append(int(entry.get("id", 0)))
-	if not ctx.queue_order_ids.is_empty():
-		ctx.queue_leader_id = ctx.queue_order_ids[0]
-
-
-func _unit_route_progress_meters(ctx: SquadNavContext, unit_id: int) -> float:
-	if ctx.route_waypoints.is_empty():
-		return 0.0
-	var unit_node: Node3D = SquadNavContext.resolve_living_node3d(unit_id)
-	if unit_node == null:
-		return 0.0
-	var pos: Vector3 = unit_node.global_position
-	var best_dist: float = INF
-	var best_progress: float = 0.0
-	var cumulative: float = 0.0
-	for index: int in ctx.route_waypoints.size() - 1:
-		var a: Vector3 = ctx.route_waypoints[index]
-		var b: Vector3 = ctx.route_waypoints[index + 1]
-		var seg: Vector3 = b - a
-		seg.y = 0.0
-		var seg_len: float = seg.length()
-		if seg_len < 0.0001:
-			continue
-		var to_pos: Vector3 = pos - a
-		to_pos.y = 0.0
-		var t: float = clampf(to_pos.dot(seg) / (seg_len * seg_len), 0.0, 1.0)
-		var closest: Vector3 = a + seg * t
-		var dist: float = _horizontal_distance(pos, closest)
-		if dist < best_dist:
-			best_dist = dist
-			best_progress = cumulative + seg_len * t
-		cumulative += seg_len
-	## Past the last waypoint → count full route length.
-	if (
-		_horizontal_distance(pos, ctx.route_waypoints[ctx.route_waypoints.size() - 1])
-		<= WAYPOINT_PASS_DISTANCE
-	):
-		return maxf(best_progress, cumulative)
-	return best_progress
-
-
-func _sample_route_at_distance(ctx: SquadNavContext, distance: float) -> Vector3:
-	if ctx.route_waypoints.is_empty():
-		return ctx.strategic_destination
-	if distance <= 0.0:
-		return ctx.route_waypoints[0]
-	var remaining: float = distance
-	for index: int in ctx.route_waypoints.size() - 1:
-		var a: Vector3 = ctx.route_waypoints[index]
-		var b: Vector3 = ctx.route_waypoints[index + 1]
-		var seg: Vector3 = b - a
-		seg.y = 0.0
-		var seg_len: float = seg.length()
-		if seg_len < 0.0001:
-			continue
-		if remaining <= seg_len:
-			return a.lerp(b, remaining / seg_len)
-		remaining -= seg_len
-	return ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-
-
-## Queue-mode guide: shared corridor centerline with longitudinal trailing only.
-func _player_queue_travel_target(ctx: SquadNavContext, unit_id: int) -> Vector3:
-	if ctx.route_waypoints.is_empty():
-		return ctx.get_final_arrival_slot(unit_id)
-	if ctx.queue_order_ids.is_empty() or ctx.queue_leader_id == 0:
-		_rebuild_player_queue_order(ctx)
-
-	var rank: int = ctx.queue_order_ids.find(unit_id)
-	if rank < 0:
-		## New member mid-command: append at the rear without reshuffling the whole order.
-		ctx.queue_order_ids.append(unit_id)
-		rank = ctx.queue_order_ids.size() - 1
-
-	## Leader follows the shared route centerline (no lateral offset, no overtake cap).
-	if unit_id == ctx.queue_leader_id or rank <= 0:
-		var lead_index: int = _player_personal_waypoint_index(ctx, unit_id)
-		if lead_index >= ctx.route_waypoints.size() - 1:
-			var lead_node: Node3D = SquadNavContext.resolve_living_node3d(unit_id)
-			var last_wp: Vector3 = ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-			if (
-				lead_node != null
-				and _unit_reached_or_passed_waypoint(
-					lead_node, last_wp, ctx, ctx.route_waypoints.size() - 1
-				)
-			):
-				return ctx.get_final_arrival_slot(unit_id)
-		return ctx.route_waypoints[mini(lead_index, ctx.route_waypoints.size() - 1)]
-
-	var leader_progress: float = _unit_route_progress_meters(ctx, ctx.queue_leader_id)
-	## Trail behind the leader on the same polyline — never cut inside with a lateral lane.
-	var trail_progress: float = maxf(0.0, leader_progress - float(rank) * QUEUE_TRAIL_SPACING)
-	var trail_point: Vector3 = _sample_route_at_distance(ctx, trail_progress)
-	## Soft cap: do not aim past the unit immediately ahead along the queue.
-	if rank >= 1:
-		var ahead_id: int = ctx.queue_order_ids[rank - 1]
-		var ahead_progress: float = _unit_route_progress_meters(ctx, ahead_id)
-		var capped: float = maxf(0.0, ahead_progress - QUEUE_TRAIL_SPACING * 0.65)
-		if trail_progress > capped:
-			trail_point = _sample_route_at_distance(ctx, capped)
-	return trail_point
-
-
-func _corridor_offset_point_is_safe(
-	nav_map: RID,
-	center: Vector3,
-	candidate: Vector3,
-	perp: Vector3
-) -> bool:
-	var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, candidate)
-	if _horizontal_distance(candidate, snapped) > ROUTE_ON_MESH_TOLERANCE:
-		return false
-	## Must keep unit-radius clearance; one-sided scrape against a building is rejected.
-	if not _point_has_lateral_clearance(nav_map, snapped, perp, TRAVEL_OFFSET_CLEARANCE):
-		return false
-	## Straight center→offset must stay on the mesh (no cutting the building corner).
-	if not _segment_has_squad_clearance(nav_map, center, snapped, TRAVEL_OFFSET_CLEARANCE * 0.85):
-		return false
-	return true
-
-
-## Lateral corridor offsets removed; rejoin validated route guide instead.
-func collapse_unit_travel_offset_to_center(unit: Variant) -> Vector3:
-	return PlayerRouteNavigation.resolve_travel_target(unit)
-
-
-## Debug helper: travel offsets removed for player routes.
-func get_unit_travel_offset(_unit: Variant) -> Vector3:
-	return Vector3.ZERO
-
-
-## True when the unit has passed its currently issued route guide.
-func unit_has_passed_current_guide(unit: Variant) -> bool:
-	return PlayerRouteNavigation.unit_has_passed_current_guide(unit)
-
-
-func _retarget_player_squad_travel(ctx: SquadNavContext, force_all: bool) -> void:
-	var members: Array = ctx.get_living_members()
-	for unit: Variant in members:
-		if unit == null or not is_instance_valid(unit) or not unit is Unit:
-			continue
-		var unit_typed: Unit = unit as Unit
-		if not unit_typed.matches_player_squad_command(ctx.command_generation):
-			continue
-		## Do not yank units off active combat — they resume via attack-move afterward.
-		if _player_unit_is_busy_fighting(unit_typed):
-			continue
-		if force_all or _player_unit_needs_travel_reissue(ctx, unit_typed):
-			_issue_player_travel_target(ctx, unit_typed)
-
-
-func _retarget_player_idle_or_stale(ctx: SquadNavContext) -> void:
-	var members: Array = ctx.get_living_members()
-	for unit: Variant in members:
-		if unit == null or not is_instance_valid(unit) or not unit is Unit:
-			continue
-		var unit_typed: Unit = unit as Unit
-		if not unit_typed.matches_player_squad_command(ctx.command_generation):
-			continue
-		if _player_unit_is_busy_fighting(unit_typed):
-			continue
-		if _player_unit_needs_travel_reissue(ctx, unit_typed):
-			_issue_player_travel_target(ctx, unit_typed)
-
-
-func _player_unit_is_busy_fighting(unit: Unit) -> bool:
-	if not ("_attack_target" in unit):
-		return false
-	var attack_target: Variant = unit.get("_attack_target")
-	if not NodeSafety.is_alive_node(attack_target) or not attack_target is Node3D:
-		return false
-	return CombatTargetValidation.is_valid_combat_target(attack_target as Node3D)
-
-
-func _player_unit_needs_travel_reissue(ctx: SquadNavContext, unit: Unit) -> bool:
-	var unit_id: int = unit.get_instance_id()
-	var desired: Vector3 = _player_desired_travel_target(ctx, unit_id)
-	## Queue followers: trail points drift with the leader — reissue by guide distance only.
-	if ctx.queue_mode_active and unit_id != ctx.queue_leader_id:
-		if not unit.has_move_target:
-			if _horizontal_distance(unit.global_position, desired) > unit.get_soft_arrival_radius():
-				return true
-			return false
-		if _horizontal_distance(unit.get_movement_destination(), desired) > SLOT_DEST_THRESHOLD * 0.65:
-			return true
-		if ctx.last_issued_slots.has(unit_id):
-			var previous_q: Vector3 = ctx.last_issued_slots[unit_id] as Vector3
-			if _horizontal_distance(previous_q, desired) > SLOT_DEST_THRESHOLD * 0.65:
-				return true
-		return false
-	var personal_wp: int = _player_personal_waypoint_index(ctx, unit_id)
-	var expected_wp: int = -1 if ctx.in_final_approach else personal_wp
-	## Leaders that finished the corridor personally use final-slot guide (-1).
-	if (
-		not ctx.in_final_approach
-		and personal_wp >= ctx.route_waypoints.size() - 1
-		and not ctx.route_waypoints.is_empty()
-	):
-		var last_wp: Vector3 = ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-		if _unit_reached_or_passed_waypoint(unit, last_wp, ctx, personal_wp):
-			expected_wp = -1
-	var issued_wp: int = int(ctx.last_issued_waypoint_index.get(unit_id, -999))
-	if issued_wp != expected_wp:
-		return true
-	if not unit.has_move_target:
-		if _horizontal_distance(unit.global_position, desired) > unit.get_soft_arrival_radius():
-			return true
-		return false
-	if ctx.last_issued_slots.has(unit_id):
-		var previous: Vector3 = ctx.last_issued_slots[unit_id] as Vector3
-		if _horizontal_distance(previous, desired) > SLOT_DEST_THRESHOLD:
-			return true
-	## Current agent target drifted from look-ahead guide.
-	if _horizontal_distance(unit.get_movement_destination(), desired) > SLOT_DEST_THRESHOLD:
-		return true
-	return false
-
-
-func _issue_player_travel_target(ctx: SquadNavContext, unit: Unit) -> bool:
-	var unit_id: int = unit.get_instance_id()
-	var final_slot: Vector3 = ctx.get_final_arrival_slot(unit_id)
-	var travel: Vector3 = _player_desired_travel_target(ctx, unit_id)
-	var personal_wp: int = _player_personal_waypoint_index(ctx, unit_id)
-	var issued_index: int = -1 if ctx.in_final_approach else personal_wp
-	if (
-		not ctx.in_final_approach
-		and personal_wp >= ctx.route_waypoints.size() - 1
-		and not ctx.route_waypoints.is_empty()
-	):
-		var last_wp: Vector3 = ctx.route_waypoints[ctx.route_waypoints.size() - 1]
-		if _unit_reached_or_passed_waypoint(unit, last_wp, ctx, personal_wp):
-			issued_index = -1
-	## Skip no-op reissues of the same guide.
-	if (
-		unit.has_move_target
-		and int(ctx.last_issued_waypoint_index.get(unit_id, -999)) == issued_index
-		and _horizontal_distance(unit.get_movement_destination(), travel) <= 0.35
-	):
-		ctx.last_issued_slots[unit_id] = travel
-		ctx.last_issued_waypoint_index[unit_id] = issued_index
-		return false
-	var applied: bool = unit.request_corridor_travel_target(travel, final_slot)
-	## Always record the intended guide so we do not reissue every tick when already near.
-	ctx.last_issued_slots[unit_id] = travel
-	ctx.last_issued_waypoint_index[unit_id] = issued_index
-	if applied:
-		_player_diag["target_replacements"] = int(_player_diag["target_replacements"]) + 1
-		PerfCounters.record_squad_local_repath()
-	return applied
 
 
 func _compute_members_median(members: Array) -> Vector3:
@@ -1829,7 +884,7 @@ func _player_squad_mostly_arrived(ctx: SquadNavContext) -> bool:
 	return arrived >= maxi(1, int(ceil(float(members.size()) * 0.7)))
 
 
-## Player stall: refresh strategic route metadata, re-issue current travel targets only.
+## Player stall: refresh strategic route metadata, re-issue original frozen slots only.
 ## Never regenerates or rotates arrival slots. Never whole-group reshuffle for one blocker.
 func _recover_player_squad_stall(ctx: SquadNavContext) -> void:
 	var now_msec: int = Time.get_ticks_msec()
@@ -1847,23 +902,15 @@ func _recover_player_squad_stall(ctx: SquadNavContext) -> void:
 
 	## Preserve frozen arrival slots and original click across strategic refresh.
 	var frozen_slots: Dictionary = ctx.final_arrival_slots.duplicate()
-	var frozen_offsets: Dictionary = ctx.travel_offsets.duplicate()
 	var frozen_forward: Vector3 = ctx.formation_forward
 	var requested: Vector3 = ctx.requested_destination
 	var accepted: Vector3 = ctx.strategic_destination
-	var was_final: bool = ctx.in_final_approach
-	## Drop temporary queue — next tick re-enters if the refreshed section is still tight.
-	_exit_player_queue_mode(ctx, false)
 	_refresh_shared_route(ctx)
 	ctx.final_arrival_slots = frozen_slots
-	ctx.travel_offsets = frozen_offsets
 	ctx.arrival_slots_frozen = true
 	ctx.formation_forward = frozen_forward
 	ctx.requested_destination = requested
 	ctx.strategic_destination = accepted
-	_bootstrap_player_waypoint_index(ctx)
-	if was_final:
-		ctx.in_final_approach = true
 
 	var stalled_ids: Dictionary = ctx.stalled_member_ids.duplicate()
 	ctx.stalled_member_ids.clear()
@@ -1875,19 +922,9 @@ func _recover_player_squad_stall(ctx: SquadNavContext) -> void:
 		if not unit.matches_player_squad_command(ctx.command_generation):
 			_player_diag["stale_callback_blocks"] = int(_player_diag["stale_callback_blocks"]) + 1
 			continue
-		ctx.last_issued_waypoint_index.erase(int(unit_id))
-		var travel: Vector3 = _player_desired_travel_target(ctx, int(unit_id))
-		var final_slot: Vector3 = ctx.get_final_arrival_slot(int(unit_id))
-		if unit.request_corridor_travel_target(
-			travel,
-			final_slot,
-			Unit.RepathUrgency.STUCK_RECOVERY
-		):
-			ctx.last_issued_slots[int(unit_id)] = travel
-			var personal_wp: int = _player_personal_waypoint_index(ctx, int(unit_id))
-			ctx.last_issued_waypoint_index[int(unit_id)] = (
-				-1 if ctx.in_final_approach else personal_wp
-			)
+		var target: Vector3 = ctx.get_final_arrival_slot(int(unit_id))
+		if unit.request_movement_target(target, Unit.RepathUrgency.STUCK_RECOVERY):
+			ctx.last_issued_slots[int(unit_id)] = target
 			_player_diag["target_replacements"] = int(_player_diag["target_replacements"]) + 1
 			PerfCounters.record_squad_local_repath()
 
@@ -2130,25 +1167,15 @@ func _issue_player_orders(ctx: SquadNavContext, members: Array, order_kind: Stri
 			continue
 		var unit_typed: Unit = unit as Unit
 		var unit_id: int = unit_typed.get_instance_id()
-		var final_slot: Vector3 = ctx.get_final_arrival_slot(unit_id)
-		var travel: Vector3 = _player_desired_travel_target(ctx, unit_id)
+		var target: Vector3 = ctx.get_final_arrival_slot(unit_id)
 		unit_typed.bind_player_squad_command(
 			ctx.command_generation,
 			ctx.requested_destination,
-			final_slot,
+			target,
 			order_kind
 		)
-		## Order bookkeeping uses the frozen final; navigation follows the corridor guide.
-		if order_kind == &"attack_move" and unit_typed.supports_combat_orders():
-			unit_typed.issue_order(UnitOrder.attack_move(final_slot), false)
-		else:
-			_issue_unit_ground_order(unit_typed, travel, order_kind, false)
-		unit_typed.request_corridor_travel_target(travel, final_slot)
-		ctx.last_issued_slots[unit_id] = travel
-		var personal_wp: int = _player_personal_waypoint_index(ctx, unit_id)
-		ctx.last_issued_waypoint_index[unit_id] = (
-			-1 if ctx.in_final_approach else personal_wp
-		)
+		_issue_unit_ground_order(unit_typed, target, order_kind, false)
+		ctx.last_issued_slots[unit_id] = target
 		issued += 1
 
 	if ctx.is_player_squad:
@@ -2256,8 +1283,6 @@ func _dissolve_squad(squad_id: int) -> void:
 	ctx.member_ids.clear()
 	ctx.slot_locals.clear()
 	ctx.final_arrival_slots.clear()
-	ctx.travel_offsets.clear()
-	ctx.last_issued_waypoint_index.clear()
 	ctx.member_threats.clear()
 	ctx.last_issued_slots.clear()
 	ctx.stalled_member_ids.clear()

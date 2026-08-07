@@ -11,8 +11,6 @@ func _ready() -> void:
 
 
 func _deferred_bake_navigation_mesh() -> void:
-	## Allow buildings to install NavigationObstacle3D (also deferred) before parse/bake.
-	await get_tree().process_frame
 	await get_tree().process_frame
 
 	var nav_mesh := _create_navigation_mesh_settings()
@@ -25,8 +23,7 @@ func _deferred_bake_navigation_mesh() -> void:
 
 func _create_navigation_mesh_settings() -> NavigationMesh:
 	var nav_mesh := NavigationMesh.new()
-	## Keep aligned with UnitNavigation.GROUND_AGENT_RADIUS / NavigationObstacleSetup.
-	nav_mesh.agent_radius = UnitNavigation.GROUND_AGENT_RADIUS
+	nav_mesh.agent_radius = 0.55
 	nav_mesh.agent_height = 2.0
 	nav_mesh.cell_size = 0.25
 	nav_mesh.cell_height = 0.25

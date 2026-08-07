@@ -24,7 +24,6 @@ TechTree="*res://autoloads/tech_tree.gd"
 UpgradeManager="*res://autoloads/upgrade_manager.gd"
 FormationManager="*res://autoloads/formation_manager.gd"
 SharedSquadNavigation="*res://scripts/systems/shared_squad_navigation.gd"
-PlayerRouteNavigation="*res://scripts/systems/player_route_navigation.gd"
 InputManager="*res://autoloads/input_manager.gd"
 ControlGroupManager="*res://autoloads/control_group_manager.gd"
 CommandFeedback="*res://autoloads/command_feedback.gd"
@@ -37,7 +36,6 @@ HeroAbilityTargetingController="*res://autoloads/hero_ability_targeting_controll
 TooltipManager="*res://scripts/ui/tooltip_manager.gd"
 PerfCounters="*res://scripts/debug/perf_counters.gd"
 PerfDebugOverlay="*res://scripts/debug/perf_debug_overlay.gd"
-PathDebugOverlay="*res://scripts/debug/path_debug_overlay.gd"
 
 [display]
 

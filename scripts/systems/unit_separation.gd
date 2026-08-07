@@ -10,15 +10,13 @@ const DEFAULT_RADIUS := 0.55
 const QUERY_RADIUS := 1.35
 const MIN_SEPARATION := 1.05
 ## Small bounded correction — never compete with path following as a second full steering system.
-const MOVE_BLEND := 0.18
-const MAX_PUSH_SPEED_RATIO := 0.28
-## Separation correction may not exceed this fraction of forward desired speed.
-const MAX_SEPARATION_VS_FORWARD := 0.45
+const MOVE_BLEND := 0.22
+const MAX_PUSH_SPEED_RATIO := 0.35
 const IDLE_PUSH_SPEED_RATIO := 0.22
 const COMBAT_PUSH_SPEED_RATIO := 0.12
 const MAX_NEIGHBORS := 10
 const OVERLAP_EPSILON := 0.04
-const MIN_FORWARD_RATIO := 0.45
+const MIN_FORWARD_RATIO := 0.35
 const PUSH_CACHE_SECONDS := 0.06
 const SIDE_HYSTERESIS_SECONDS := 0.28
 const PUSH_DEAD_ZONE_SQ := 0.0225 # ~0.15 — ignore soft separation noise
@@ -98,28 +96,10 @@ static func blend_desired_velocity(
 	if push.length_squared() < PUSH_DEAD_ZONE_SQ:
 		return desired_velocity
 
-	## Never let neighbor peel shove a unit into static building geometry.
-	push = _clamp_push_away_from_static(body, push)
-	if push.length_squared() < PUSH_DEAD_ZONE_SQ:
-		return desired_velocity
-
 	var desired: Vector3 = desired_velocity
 	desired.y = 0.0
-	## Temporary single-file corridor: kill sideways peel so workers are not
-	## pressed into Town Center corners while following the shared centerline.
-	var queue_mode: bool = false
-	if queue_mode and desired.length_squared() > 0.0001:
-		var desired_dir_q: Vector3 = desired.normalized()
-		var forward_q: float = push.dot(desired_dir_q)
-		## Keep tiny longitudinal anti-overlap only; strip lateral almost entirely.
-		push = desired_dir_q * clampf(forward_q, -0.35, 0.15)
-		if push.length_squared() < PUSH_DEAD_ZONE_SQ:
-			return desired_velocity
-
 	# Cap push magnitude so separation stays a correction, not a second steering system.
 	var push_velocity: Vector3 = push * (max_speed * MAX_PUSH_SPEED_RATIO)
-	if queue_mode:
-		push_velocity *= 0.35
 	var blended: Vector3
 	if desired.length_squared() < 0.0001:
 		blended = push_velocity * IDLE_PUSH_SPEED_RATIO
@@ -127,8 +107,6 @@ static func blend_desired_velocity(
 		var desired_dir: Vector3 = desired.normalized()
 		var desired_speed: float = minf(desired.length(), max_speed)
 		var effective_blend: float = clampf(blend, 0.0, MOVE_BLEND)
-		if queue_mode:
-			effective_blend = minf(effective_blend, MOVE_BLEND * 0.2)
 		# Neighbor ahead → rearward push. Soften so corridors remain passable / queue forms.
 		var forward_push: float = push.dot(desired_dir)
 		if forward_push < -0.25:
@@ -139,94 +117,29 @@ static func blend_desired_velocity(
 			if push.length_squared() > 0.0001:
 				push = push.normalized()
 			push_velocity = push * (max_speed * MAX_PUSH_SPEED_RATIO * 0.5)
-			if queue_mode:
-				push_velocity *= 0.35
 		else:
 			# Path-relative side hysteresis (left/right of travel), not world axes.
-			if not queue_mode:
-				push = _apply_path_side_hysteresis(body, push, desired_dir)
+			push = _apply_path_side_hysteresis(body, push, desired_dir)
 			push_velocity = push * (max_speed * MAX_PUSH_SPEED_RATIO)
-			if queue_mode:
-				push_velocity *= 0.35
 
 		# Bounded blend, then clamp so separation cannot reverse travel unless blocked.
 		blended = desired.lerp(desired + push_velocity, effective_blend)
 		var forward_speed: float = blended.dot(desired_dir)
 		var min_forward: float = desired_speed * MIN_FORWARD_RATIO
-		if queue_mode:
-			min_forward = desired_speed * 0.75
 		if forward_push < -0.25:
-			min_forward = desired_speed * (0.55 if queue_mode else 0.35)
+			min_forward = desired_speed * 0.2
 		if forward_speed < min_forward:
 			blended += desired_dir * (min_forward - forward_speed)
 
 		# Never let avoidance reverse the travel direction.
 		if blended.dot(desired_dir) < 0.0:
-			blended = desired_dir * maxf(desired_speed * 0.35, 0.05)
-
-		## Hard cap: separation correction must stay weaker than forward motion.
-		var correction: Vector3 = blended - desired
-		correction.y = 0.0
-		var max_correction: float = desired_speed * (
-			0.18 if queue_mode else MAX_SEPARATION_VS_FORWARD
-		)
-		if correction.length() > max_correction and max_correction > 0.0001:
-			blended = desired + correction.normalized() * max_correction
-			if blended.dot(desired_dir) < desired_speed * MIN_FORWARD_RATIO:
-				blended = desired_dir * desired_speed * MIN_FORWARD_RATIO + (
-					blended - desired_dir * blended.dot(desired_dir)
-				)
+			blended = desired_dir * maxf(desired_speed * 0.15, 0.05)
 
 		if blended.length() > max_speed:
 			blended = blended.normalized() * max_speed
 
 	blended.y = 0.0
 	return blended
-
-
-## Strip any separation component that pushes into nearby world/building colliders.
-static func _clamp_push_away_from_static(body: CharacterBody3D, push: Vector3) -> Vector3:
-	if body == null or not is_instance_valid(body) or not body.is_inside_tree():
-		return push
-	var world: World3D = body.get_world_3d()
-	if world == null:
-		return push
-	var push_flat: Vector3 = push
-	push_flat.y = 0.0
-	if push_flat.length_squared() < PUSH_DEAD_ZONE_SQ:
-		return Vector3.ZERO
-
-	var space: PhysicsDirectSpaceState3D = world.direct_space_state
-	var self_radius: float = get_unit_radius(body)
-	var push_dir: Vector3 = push_flat.normalized()
-	## Ray along the peel: if static geometry is immediately ahead, kill that component.
-	var from: Vector3 = body.global_position + Vector3(0.0, 0.4, 0.0)
-	var to: Vector3 = from + push_dir * (self_radius + 0.85)
-	var ray := PhysicsRayQueryParameters3D.create(from, to)
-	ray.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
-	ray.exclude = [body.get_rid()]
-	ray.collide_with_areas = false
-	ray.collide_with_bodies = true
-	var hit: Dictionary = space.intersect_ray(ray)
-	if not hit.is_empty():
-		var normal: Vector3 = hit.get("normal", Vector3.ZERO) as Vector3
-		normal.y = 0.0
-		if normal.length_squared() > 0.0001:
-			normal = normal.normalized()
-			## Remove motion into the wall; keep sliding along it weakly.
-			var into: float = -push_flat.dot(normal)
-			if into > 0.0:
-				push_flat += normal * into
-			push_flat *= 0.2
-		else:
-			push_flat = Vector3.ZERO
-
-	push_flat.y = 0.0
-	if push_flat.length_squared() < PUSH_DEAD_ZONE_SQ:
-		return Vector3.ZERO
-	if push_flat.length_squared() > 1.0:
-		return push_flat.normalized()
-	return push_flat
 
 
 static func _apply_path_side_hysteresis(

@@ -211,14 +211,6 @@ func issue_formation_ground_order(
 	order_kind: StringName,
 	queued: bool = false
 ) -> bool:
-	## Player Move / Attack-Move permanently owned by PlayerRouteNavigation.
-	## Formation layout no longer steers player march orders.
-	if PlayerRouteNavigation.are_player_formations_disabled():
-		var routed: Dictionary = PlayerRouteNavigation.issue_command(
-			units, destination, order_kind, queued
-		)
-		return bool(routed.get("handled", false))
-
 	var by_formation: Dictionary = {}
 	var unformed: Array = []
 	var heroes: Array = []
