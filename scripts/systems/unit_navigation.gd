@@ -94,15 +94,17 @@ static func apply_destination(
 
 ## Re-request the same destination so NavigationAgent rebuilds from the current pose.
 ## Does not teleport, change command generation, or alter the destination.
+## Clears next-path hysteresis so a stale corner sample cannot keep the unit pinned.
 static func force_same_destination_repath(
 	agent: NavigationAgent3D,
-	_body: CharacterBody3D,
+	body: CharacterBody3D,
 	destination: Vector3
 ) -> bool:
 	if agent == null or not is_instance_valid(agent):
 		return false
 	if not can_use(agent):
 		return false
+	_clear_path_point_cache(body)
 	apply_destination(agent, destination, true)
 	return true
 
