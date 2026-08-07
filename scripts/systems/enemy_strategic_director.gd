@@ -234,6 +234,15 @@ func get_creep_camps_target() -> int:
 	return _creep_camps_target
 
 
+func _resolve_military_director_v2() -> MilitaryDirectorV2:
+	var composition: MatchCompositionRoot = get_parent() as MatchCompositionRoot
+	if composition != null:
+		return composition.military_director_v2
+	if get_parent() != null:
+		return get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
+	return null
+
+
 func get_min_army_size_for_current_phase() -> int:
 	return get_min_army_size_for_phase(_strategic_phase)
 
@@ -901,7 +910,21 @@ func _build_world_snapshot() -> Dictionary:
 	var cleared_early_camps: int = 0
 	var has_safe_creep_camp: bool = false
 	var creeping_army_healthy: bool = false
-	if creep_manager != null:
+	if MilitaryAIConfig.is_v2_enabled():
+		## MilitaryDirectorV2 owns real V2 creep clears — never use EnemyCreepManager's
+		## legacy counter (stays 0 while V2 executes camps).
+		var military_director_v2: MilitaryDirectorV2 = _resolve_military_director_v2()
+		if military_director_v2 != null:
+			cleared_early_camps = military_director_v2.get_cleared_creep_camp_count()
+		if creep_manager != null:
+			has_safe_creep_camp = creep_manager.has_safe_creep_camp_available()
+		## Live army health only — does not depend on legacy creep mission FSM.
+		creeping_army_healthy = (
+			hero != null
+			and non_hero_army.size() >= get_min_army_size_for_current_phase()
+			and EnemyArmyCommand.get_health_ratio(hero) >= EnemyArmyCommand.HERO_RETREAT_HP_RATIO
+		)
+	elif creep_manager != null:
 		cleared_early_camps = creep_manager.get_cleared_early_camp_count()
 		has_safe_creep_camp = creep_manager.has_safe_creep_camp_available()
 		creeping_army_healthy = creep_manager.is_army_healthy_after_creeping()

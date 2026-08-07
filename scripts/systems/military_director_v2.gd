@@ -2256,11 +2256,19 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	var current_camp: Node3D = _get_current_creep_camp()
 	var just_cleared_camp: bool = false
 	if _is_camp_cleared_or_invalid(tree, current_camp, creep_manager):
-		if current_camp != null and is_instance_valid(current_camp):
-			_cleared_creep_camp_ids[current_camp.get_instance_id()] = true
-			just_cleared_camp = true
-			if _mission != null:
-				_mission.note_progress("cleared camp")
+		## Count only genuine clears of still-present camps. Do not count freed,
+		## abandoned, contested, or merely reserved camps as progress.
+		if (
+			current_camp != null
+			and NodeSafety.is_alive_node(current_camp)
+			and creep_manager._is_camp_cleared(tree, current_camp)
+		):
+			var camp_id: int = current_camp.get_instance_id()
+			if not _cleared_creep_camp_ids.has(camp_id):
+				_cleared_creep_camp_ids[camp_id] = true
+				just_cleared_camp = true
+				if _mission != null:
+					_mission.note_progress("cleared camp")
 		current_camp = null
 		_release_creep_reservation()
 
@@ -3405,7 +3413,14 @@ func _publish_perf_status() -> void:
 		idle_time
 	)
 	## Keep legacy AI status fields filled so older overlay lines stay coherent under V2.
-	PerfCounters.set_ai_status(display_state, mission_name, "MilitaryDirectorV2")
+	## AI Phase = macro strategic phase; V2 State / AI Combat carry military truth.
+	var macro_phase: String = display_state
+	var strategic: EnemyStrategicDirector = null
+	if get_parent() != null:
+		strategic = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	if strategic != null:
+		macro_phase = strategic.get_strategic_phase_name()
+	PerfCounters.set_ai_status(macro_phase, display_state, "MilitaryDirectorV2")
 	PerfCounters.set_ai_mission_detail(
 		"V2 %s → %s (%s)%s" % [
 			display_state,
