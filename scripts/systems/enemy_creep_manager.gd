@@ -166,7 +166,8 @@ func has_safe_creep_camp_available() -> bool:
 	if not creep_plan.get("can_launch", false):
 		return false
 
-	var army_power: int = EnemyArmyCommand.estimate_combat_strength(creep_plan.get("units", []))
+	## Use military_power (HP+dmg scale) so Medium camps are comparable to hero+escorts.
+	var army_power: int = EnemyArmyCommand.estimate_military_power(creep_plan.get("units", []))
 	return _find_best_creep_camp(tree, rally_position, int(army_power), Vector3.ZERO) != null
 
 
@@ -1288,19 +1289,21 @@ func _find_best_creep_camp(
 		if camp_power <= 0:
 			continue
 
+		var strong_camp: bool = String(camp.name).begins_with("Strong")
 		var power_margin: float = (
 			STRONG_CAMP_POWER_MARGIN
-			if camp_power >= STRONG_CAMP_POWER_THRESHOLD
+			if strong_camp
 			else CAMP_POWER_MARGIN
 		)
 		## Stronger camps only after the hero/squad has leveled.
-		if camp_power >= STRONG_CAMP_POWER_THRESHOLD and hero_level < 3:
+		## Classify by name — Medium (~1008) and Strong (~1040) both exceed the old 280 threshold.
+		if strong_camp and hero_level < 3:
 			continue
 
 		if float(camp_power) * power_margin > float(army_power):
 			continue
 
-		var player_near_power: int = EnemyArmyCommand.estimate_combat_strength(
+		var player_near_power: int = EnemyArmyCommand.estimate_military_power(
 			EnemyArmyCommand.collect_player_military_near(
 				tree,
 				camp.global_position,

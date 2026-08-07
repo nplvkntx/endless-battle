@@ -1645,10 +1645,12 @@ func _verify_perf_squad_api(failures: PackedStringArray) -> void:
 	if overlay_source != null:
 		var text: String = overlay_source.get_as_text()
 		overlay_source.close()
-		_expect(failures, "overlay shows V2 Squad Size", text.contains("V2 Squad Size"))
-		_expect(failures, "overlay shows V2 Hero Present", text.contains("V2 Hero Present"))
-		_expect(failures, "overlay shows V2 Role Counts", text.contains("V2 Role Counts"))
-		_expect(failures, "overlay shows V2 Army Strength", text.contains("V2 Army Strength"))
+		_expect(failures, "overlay shows Macro", text.contains("Macro:"))
+		_expect(failures, "overlay shows Military", text.contains("Military:"))
+		_expect(failures, "overlay shows Blocked", text.contains("Blocked:"))
+		_expect(failures, "overlay shows Hero", text.contains("Hero:"))
+		_expect(failures, "overlay shows Army", text.contains("Army:"))
+		_expect(failures, "overlay shows Camps", text.contains("Camps:"))
 
 
 func _verify_hero_micro_integration(failures: PackedStringArray) -> void:
@@ -1858,20 +1860,17 @@ func _verify_watchdog_config_and_source(failures: PackedStringArray) -> void:
 	if overlay_source != null:
 		var overlay_text: String = overlay_source.get_as_text()
 		overlay_source.close()
-		_expect(failures, "F3 shows V2 Order", overlay_text.contains("V2 Order"))
-		_expect(failures, "F3 shows V2 Destination", overlay_text.contains("V2 Destination"))
-		_expect(failures, "F3 shows V2 Last Order", overlay_text.contains("V2 Last Order"))
-		_expect(failures, "F3 shows V2 Last Mission Change", overlay_text.contains("V2 Last Mission Change"))
-		_expect(failures, "F3 shows V2 Idle Time", overlay_text.contains("V2 Idle Time"))
-		_expect(failures, "F3 shows V2 Distance", overlay_text.contains("V2 Distance"))
-		_expect(failures, "F3 shows V2 Since Progress", overlay_text.contains("V2 Since Progress"))
-		_expect(failures, "F3 shows V2 State Age", overlay_text.contains("V2 State Age"))
-		_expect(failures, "F3 shows V2 Watchdog", overlay_text.contains("V2 Watchdog"))
-		_expect(failures, "F3 shows V2 Transition", overlay_text.contains("V2 Transition"))
-		_expect(failures, "F3 shows V2 Squad Size", overlay_text.contains("V2 Squad Size"))
-		_expect(failures, "F3 shows V2 Objective", overlay_text.contains("V2 Objective"))
-		_expect(failures, "F3 shows V2 State", overlay_text.contains("V2 State"))
-		_expect(failures, "F3 shows V2 Mission", overlay_text.contains("V2 Mission"))
+		_expect(failures, "F3 shows Macro", overlay_text.contains("Macro:"))
+		_expect(failures, "F3 shows Military", overlay_text.contains("Military:"))
+		_expect(failures, "F3 shows Mission", overlay_text.contains("Mission:"))
+		_expect(failures, "F3 shows Executable", overlay_text.contains("Executable:"))
+		_expect(failures, "F3 shows Blocked", overlay_text.contains("Blocked:"))
+		_expect(failures, "F3 shows Hero", overlay_text.contains("Hero:"))
+		_expect(failures, "F3 shows Army", overlay_text.contains("Army:"))
+		_expect(failures, "F3 shows Camps", overlay_text.contains("Camps:"))
+		_expect(failures, "F3 shows Target", overlay_text.contains("Target:"))
+		_expect(failures, "F3 shows Defense", overlay_text.contains("Defense:"))
+		_expect(failures, "F3 shows Threat", overlay_text.contains("Threat:"))
 
 
 func _verify_watchdog_progress_helpers(failures: PackedStringArray) -> void:

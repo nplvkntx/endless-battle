@@ -78,6 +78,8 @@ var _watchdog_last_diag_signature: String = ""
 var _watchdog_objective_valid: bool = true
 ## Last blocked offense evaluation reason (change-only telemetry).
 var _last_attack_block_reason: String = ""
+## Last blocked CREEP evaluation reason (actionable F3 Blocked line).
+var _last_creep_block_reason: String = ""
 var _last_offense_diag_signature: String = ""
 ## Change-only strategy telemetry signature.
 var _last_strategy_diag_signature: String = ""
@@ -123,6 +125,7 @@ func reset_match_state() -> void:
 	_watchdog_active_order = "-"
 	_watchdog_last_diag_signature = ""
 	_last_attack_block_reason = ""
+	_last_creep_block_reason = ""
 	_last_offense_diag_signature = ""
 	_last_strategy_diag_signature = ""
 	_post_defend_regroup_remaining = 0.0
@@ -155,6 +158,7 @@ func _clear_roster_state() -> void:
 	_post_retreat_attack_cooldown = 0.0
 	_designated_recovery_point = Vector3.ZERO
 	_last_attack_block_reason = ""
+	_last_creep_block_reason = ""
 	_last_offense_diag_signature = ""
 	_last_strategy_diag_signature = ""
 	_post_defend_regroup_remaining = 0.0
@@ -2243,14 +2247,16 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		if _state == State.CREEP:
 			_transition_to(State.ASSEMBLE, "creep manager unavailable", rally_point)
 			return true
-		_note_attack_block("creep manager unavailable")
+		_note_creep_block("creep manager unavailable")
 		return false
 
 	var creep_army: Array = _get_creep_squad_units()
-	if not _can_commit_to_creeping(tree, creep_army, creep_manager):
+	var commit_block: String = _describe_creep_commit_block(tree, creep_army, creep_manager)
+	if not commit_block.is_empty():
 		if _state == State.CREEP:
-			_transition_to(State.ASSEMBLE, "creep squad unavailable", rally_point)
+			_transition_to(State.ASSEMBLE, commit_block, rally_point)
 			return true
+		_note_creep_block(commit_block)
 		return false
 
 	var current_camp: Node3D = _get_current_creep_camp()
@@ -2285,7 +2291,7 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		if _state == State.CREEP:
 			_transition_to(State.ASSEMBLE, "no worthwhile camps remain", rally_point)
 			return true
-		_note_attack_block("no worthwhile creep camps")
+		_note_creep_block(_describe_no_camp_block(tree, creep_manager, creep_army, origin, rally_point))
 		return false
 
 	var score: float = _score_creep_camp(
@@ -2300,6 +2306,7 @@ func _evaluate_creep_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	if just_cleared_camp:
 		reason = "chain %s" % creep_manager._format_camp_name(current_camp)
 	_last_attack_block_reason = ""
+	_last_creep_block_reason = ""
 	_transition_to(
 		State.CREEP,
 		reason,
@@ -2729,8 +2736,9 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 		return is_attack_ready() or is_lethal_attack_ready()
 
 	## Town Hall / workers are handled by DEFEND before this path.
+	## Only suspend creeping when an attack can actually launch — otherwise ASSEMBLE forever.
 	if EnemyAggression.should_suspend_creeping():
-		return true
+		return is_attack_ready() or is_lethal_attack_ready()
 
 	var lethal: bool = _detect_lethal_attack_window(tree, rally_point)
 	if lethal and (is_attack_ready() or is_lethal_attack_ready()):
@@ -2830,27 +2838,46 @@ func _can_commit_to_creeping(
 	creep_army: Array,
 	creep_manager: EnemyCreepManager
 ) -> bool:
+	return _describe_creep_commit_block(tree, creep_army, creep_manager).is_empty()
+
+
+## Empty string = ready to commit. Otherwise an actionable Blocked reason.
+func _describe_creep_commit_block(
+	tree: SceneTree,
+	creep_army: Array,
+	creep_manager: EnemyCreepManager
+) -> String:
 	if not _main_squad.hero_present:
-		return false
-	if get_military_unit_count() < MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS:
-		return false
+		return "missing hero"
+	var escorts: int = get_military_unit_count()
+	if escorts < MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS:
+		return "escorts %d/%d" % [escorts, MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS]
 	if creep_army.is_empty():
-		return false
-	if EnemyAggression.should_suspend_creeping():
-		return false
-	## Do not keep creeping while a high-confidence finish / greed punish is available.
-	if _should_interrupt_creeping_for_attack(
-		tree,
-		EnemyArmyCommand.resolve_enemy_rally_position(tree)
-	):
-		return false
+		return "creep squad empty"
 	if EnemyArmyCommand.is_defense_blocking_offense():
-		return false
+		return "defense active"
 	if not EnemyArmyCommand.allows_creep_orders():
-		return false
+		return "creep orders gated (%s)" % EnemyArmyCommand._strategic_state_label(
+			EnemyArmyCommand.get_strategic_state()
+		)
+	## Do not dual-block via attack interrupt here — strategy tick already prefers ATTACK
+	## when interrupt is true, then falls through to CREEP if attack cannot launch.
+	if EnemyAggression.should_suspend_creeping() and (
+		is_attack_ready() or is_lethal_attack_ready()
+	):
+		return "aggression suspend (attack ready)"
+	if creep_manager == null:
+		return "creep manager unavailable"
 	if not creep_manager._squad_safe_to_commit(tree, creep_army):
-		return false
-	return true
+		return "squad unhealthy"
+	return ""
+
+
+func _note_creep_block(reason: String) -> void:
+	if reason.is_empty():
+		return
+	_last_creep_block_reason = reason
+	_note_attack_block(reason)
 
 
 func _get_current_creep_camp() -> Node3D:
@@ -2915,7 +2942,142 @@ func _select_best_creep_camp(
 		if score > best_score:
 			best_score = score
 			best_camp = camp
+	if best_camp != null:
+		return best_camp
+	## Early opening fallback: never leave a creep-ready army with "no camp forever"
+	## because scoring was slightly imperfect. Pick the nearest valid medium camp.
+	return _select_early_creep_fallback_camp(
+		tree,
+		creep_manager,
+		creep_army,
+		origin,
+		rally_point
+	)
+
+
+## Deterministic first-camp / early-chain candidate when scored selection returns none.
+func _select_early_creep_fallback_camp(
+	tree: SceneTree,
+	creep_manager: EnemyCreepManager,
+	creep_army: Array,
+	origin: Vector3,
+	rally_point: Vector3
+) -> Node3D:
+	if tree == null or creep_manager == null:
+		return null
+	if not is_creep_ready():
+		return null
+	var hero: Hero = _find_creep_hero(creep_army)
+	var hero_level: int = hero.level if hero != null else 1
+	var early_window: bool = (
+		hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL
+		or _cleared_creep_camp_ids.size()
+		< MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK
+	)
+	if not early_window and _state != State.CREEP:
+		return null
+
+	var army_power: float = maxf(float(EnemyArmyCommand.estimate_military_power(creep_army)), 1.0)
+	var best_camp: Node3D = null
+	var best_distance: float = INF
+	for camp: Node3D in creep_manager._collect_creep_camps(tree):
+		if camp == null or not is_instance_valid(camp):
+			continue
+		if _cleared_creep_camp_ids.has(camp.get_instance_id()):
+			continue
+		if creep_manager._is_camp_cleared(tree, camp):
+			continue
+		if creep_manager._is_player_contesting_camp(tree, camp):
+			continue
+		if not creep_manager._is_enemy_side_camp(camp, rally_point, tree):
+			continue
+		if _is_strong_creep_camp(camp):
+			continue
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, camp.global_position)
+		if distance > EnemyCreepManager.CREEP_SEARCH_RANGE * 1.35:
+			continue
+		var camp_power: int = creep_manager._estimate_camp_power(camp)
+		if camp_power <= 0:
+			continue
+		## Soft early margin — hero+5 escorts must be able to take Medium camps.
+		if army_power < float(camp_power) * 0.85:
+			continue
+		if distance < best_distance:
+			best_distance = distance
+			best_camp = camp
 	return best_camp
+
+
+func _describe_no_camp_block(
+	tree: SceneTree,
+	creep_manager: EnemyCreepManager,
+	creep_army: Array,
+	origin: Vector3,
+	rally_point: Vector3
+) -> String:
+	var total: int = 0
+	var enemy_side: int = 0
+	var uncleared: int = 0
+	var in_range: int = 0
+	var strong_blocked: int = 0
+	var underpowered: int = 0
+	var contested: int = 0
+	var army_power: float = maxf(float(EnemyArmyCommand.estimate_military_power(creep_army)), 1.0)
+	var hero: Hero = _find_creep_hero(creep_army)
+	var hero_level: int = hero.level if hero != null else 1
+	for camp: Node3D in creep_manager._collect_creep_camps(tree):
+		if camp == null or not is_instance_valid(camp):
+			continue
+		total += 1
+		if _cleared_creep_camp_ids.has(camp.get_instance_id()):
+			continue
+		if creep_manager._is_camp_cleared(tree, camp):
+			continue
+		uncleared += 1
+		if not creep_manager._is_enemy_side_camp(camp, rally_point, tree):
+			continue
+		enemy_side += 1
+		if creep_manager._is_player_contesting_camp(tree, camp):
+			contested += 1
+			continue
+		var distance: float = EnemyArmyCommand.horizontal_distance(origin, camp.global_position)
+		if distance > EnemyCreepManager.CREEP_SEARCH_RANGE:
+			continue
+		in_range += 1
+		var camp_power: int = creep_manager._estimate_camp_power(camp)
+		if _is_strong_creep_camp(camp) and hero_level < 3:
+			strong_blocked += 1
+			continue
+		var required_ratio: float = (
+			EnemyCreepManager.STRONG_CAMP_POWER_MARGIN
+			if _is_strong_creep_camp(camp)
+			else EnemyCreepManager.CAMP_POWER_MARGIN
+		)
+		if army_power < float(camp_power) * required_ratio:
+			underpowered += 1
+	if total <= 0:
+		return "no camps on map"
+	if uncleared <= 0:
+		return "all camps cleared"
+	if enemy_side <= 0:
+		return "no enemy-side camps"
+	if in_range <= 0:
+		return "no camps in range (%.0f)" % EnemyCreepManager.CREEP_SEARCH_RANGE
+	if contested > 0 and contested >= in_range:
+		return "camps contested by player"
+	if strong_blocked > 0 and underpowered <= 0:
+		return "strong camps need hero L3 (have L%d)" % hero_level
+	if underpowered > 0:
+		return "army power %.0f too low for %d camp(s)" % [army_power, underpowered]
+	return "no worthwhile creep camps"
+
+
+func _is_strong_creep_camp(camp: Node3D) -> bool:
+	## Map camps are named Strong* / Medium*. Power values alone are nearly identical
+	## (~1008 Medium vs ~1040 Strong), so the old 280 threshold treated every camp as strong.
+	if camp == null or not is_instance_valid(camp):
+		return false
+	return String(camp.name).begins_with("Strong")
 
 
 func _score_creep_camp(
@@ -2956,14 +3118,19 @@ func _score_creep_camp(
 		hero_mana = float(hero.current_mana) / float(maxi(hero.max_mana, 1))
 		hero_level = hero.level
 
-	var army_power: float = maxf(EnemyArmyCommand.estimate_combat_strength(creep_army), 1.0)
+	## Compare camp HP+dmg power against army military_power (same units), not
+	## weight*100 combat strength — otherwise Medium camps always out-score hero+5.
+	var army_power: float = maxf(float(EnemyArmyCommand.estimate_military_power(creep_army)), 1.0)
 	var safety_ratio: float = army_power / maxf(float(camp_power), 1.0)
-	var strong_camp: bool = camp_power >= EnemyCreepManager.STRONG_CAMP_POWER_THRESHOLD
+	var strong_camp: bool = _is_strong_creep_camp(camp)
 	if strong_camp and hero_level < 3:
 		return -INF
 	var required_ratio: float = (
 		EnemyCreepManager.STRONG_CAMP_POWER_MARGIN if strong_camp else EnemyCreepManager.CAMP_POWER_MARGIN
 	)
+	## Early Medium camps: soft margin so a healthy creep-ready squad always qualifies.
+	if not strong_camp and hero_level < MilitaryAIConfig.V2_CREEP_TARGET_HERO_LEVEL:
+		required_ratio = minf(required_ratio, 0.90)
 	if army_power < float(camp_power) * required_ratio:
 		return -INF
 
@@ -2972,18 +3139,17 @@ func _score_creep_camp(
 		camp.global_position,
 		V2_CREEP_PLAYER_THREAT_RADIUS
 	)
-	var player_power: float = EnemyArmyCommand.estimate_combat_strength(player_near)
+	var player_power: float = float(EnemyArmyCommand.estimate_military_power(player_near))
 	if player_power > army_power * V2_CREEP_PLAYER_THREAT_STRENGTH_RATIO:
 		return -INF
 
 	var reward_value: float = _estimate_camp_reward_value(camp)
 	var preference_bonus: float = 0.0
-	if camp_power < V2_CREEP_MEDIUM_POWER_THRESHOLD:
-		preference_bonus = 145.0
-	elif strong_camp:
+	if strong_camp:
 		preference_bonus = 20.0 + maxf(safety_ratio - 1.35, 0.0) * 35.0
 	else:
-		preference_bonus = 85.0 if distance <= EnemyCreepManager.CREEP_SEARCH_RANGE * 0.65 else 45.0
+		## Prefer Medium/Small for the opening clear.
+		preference_bonus = 145.0
 
 	## Hero XP progression: L1 weak → L2 better → L3 major power spike.
 	var hero_xp_priority: float = 0.0
@@ -3421,19 +3587,87 @@ func _publish_perf_status() -> void:
 	if strategic != null:
 		macro_phase = strategic.get_strategic_phase_name()
 	PerfCounters.set_ai_status(macro_phase, display_state, "MilitaryDirectorV2")
+
+	var tree: SceneTree = get_tree()
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree) if tree != null else null
+	var hero_level: int = hero.level if hero != null else 0
+	var camps_target: int = MilitaryAIConfig.V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK
+	if strategic != null:
+		camps_target = strategic.get_creep_camps_target()
+	var blocked: String = _resolve_compact_blocked_reason(display_state)
+	var target_label: String = objective
+	if _mission != null:
+		var alive_target: Node3D = _mission.get_alive_target_object()
+		if alive_target != null:
+			var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+			if creep_manager != null and _state == State.CREEP:
+				target_label = creep_manager._format_camp_name(alive_target)
+			else:
+				target_label = alive_target.name
+	var threat: Dictionary = {}
+	if tree != null:
+		threat = _resolve_v2_defense_threat(tree)
+	var threat_active: bool = threat.get("threatened", false)
+	var defense_label: String = "-"
+	if _state == State.DEFEND or _defend_active:
+		defense_label = String(_defend_reason) if _defend_reason != &"" else _last_transition_reason
+	elif _post_defend_regroup_remaining > 0.0:
+		defense_label = "post-clear regroup %.1fs" % _post_defend_regroup_remaining
+	elif EnemyArmyCommand.is_emergency_defense_active():
+		defense_label = "emergency"
+	PerfCounters.set_military_ai_v2_compact_status(
+		macro_phase,
+		display_state,
+		mission_name,
+		EnemyArmyCommand.executable_mission_to_label(EnemyArmyCommand.get_executable_mission()),
+		blocked,
+		"L%d %s" % [hero_level, "yes" if _main_squad.hero_present else "no"],
+		"%d/%d (+%d pend)" % [
+			get_military_unit_count(),
+			MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS,
+			_pending_reinforcements.size(),
+		],
+		"%d/%d" % [_cleared_creep_camp_ids.size(), camps_target],
+		target_label,
+		defense_label,
+		"yes" if threat_active else "no"
+	)
 	PerfCounters.set_ai_mission_detail(
 		"V2 %s → %s (%s)%s" % [
 			display_state,
 			objective,
 			_last_transition_reason,
 			(
-				" | block=%s" % _last_attack_block_reason
-				if not _last_attack_block_reason.is_empty() and _state == State.ASSEMBLE
+				" | block=%s" % blocked
+				if not blocked.is_empty() and blocked != "-" and _state == State.ASSEMBLE
 				else ""
 			),
 		]
 	)
 	PerfCounters.set_combat_group_size(_main_squad.get_size())
+
+
+func _resolve_compact_blocked_reason(display_state: String) -> String:
+	if _state == State.CREEP or _state == State.ATTACK:
+		return "-"
+	if not _last_creep_block_reason.is_empty():
+		return _last_creep_block_reason
+	if not _last_attack_block_reason.is_empty():
+		return _last_attack_block_reason
+	if _state == State.DEFEND:
+		return "defense active"
+	if _state == State.ASSEMBLE:
+		if not _main_squad.hero_present:
+			return "missing hero"
+		var escorts: int = get_military_unit_count()
+		if escorts < MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS:
+			return "escorts %d/%d" % [escorts, MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS]
+		if _post_defend_regroup_remaining > 0.0:
+			return "post-defense regroup"
+		return "gathering"
+	if display_state.is_empty():
+		return "-"
+	return "-"
 
 
 func _format_destination_label(mission: ArmyMissionV2) -> String:

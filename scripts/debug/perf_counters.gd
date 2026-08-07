@@ -62,6 +62,15 @@ var _military_ai_v2_destination: String = "-"
 var _military_ai_v2_last_order_time: String = "-"
 var _military_ai_v2_last_mission_change: String = "-"
 var _military_ai_v2_idle_time: float = 0.0
+var _military_ai_v2_macro: String = "-"
+var _military_ai_v2_blocked: String = "-"
+var _military_ai_v2_hero_label: String = "-"
+var _military_ai_v2_army_label: String = "-"
+var _military_ai_v2_camps_label: String = "-"
+var _military_ai_v2_target_label: String = "-"
+var _military_ai_v2_defense_label: String = "-"
+var _military_ai_v2_threat_label: String = "-"
+var _military_ai_v2_executable_label: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -394,6 +403,68 @@ func get_military_ai_v2_idle_time() -> float:
 	return _military_ai_v2_idle_time
 
 
+func set_military_ai_v2_compact_status(
+	macro_phase: String,
+	military_state: String,
+	mission: String,
+	executable: String,
+	blocked: String,
+	hero_label: String,
+	army_label: String,
+	camps_label: String,
+	target_label: String,
+	defense_label: String,
+	threat_label: String
+) -> void:
+	_military_ai_v2_macro = macro_phase if not macro_phase.is_empty() else "-"
+	_military_ai_v2_state = military_state if not military_state.is_empty() else "-"
+	_military_ai_v2_mission = mission if not mission.is_empty() else "-"
+	_military_ai_v2_executable_label = executable if not executable.is_empty() else "-"
+	_military_ai_v2_blocked = blocked if not blocked.is_empty() else "-"
+	_military_ai_v2_hero_label = hero_label if not hero_label.is_empty() else "-"
+	_military_ai_v2_army_label = army_label if not army_label.is_empty() else "-"
+	_military_ai_v2_camps_label = camps_label if not camps_label.is_empty() else "-"
+	_military_ai_v2_target_label = target_label if not target_label.is_empty() else "-"
+	_military_ai_v2_defense_label = defense_label if not defense_label.is_empty() else "-"
+	_military_ai_v2_threat_label = threat_label if not threat_label.is_empty() else "-"
+
+
+func get_military_ai_v2_macro() -> String:
+	return _military_ai_v2_macro
+
+
+func get_military_ai_v2_blocked() -> String:
+	return _military_ai_v2_blocked
+
+
+func get_military_ai_v2_hero_label() -> String:
+	return _military_ai_v2_hero_label
+
+
+func get_military_ai_v2_army_label() -> String:
+	return _military_ai_v2_army_label
+
+
+func get_military_ai_v2_camps_label() -> String:
+	return _military_ai_v2_camps_label
+
+
+func get_military_ai_v2_target_label() -> String:
+	return _military_ai_v2_target_label
+
+
+func get_military_ai_v2_defense_label() -> String:
+	return _military_ai_v2_defense_label
+
+
+func get_military_ai_v2_threat_label() -> String:
+	return _military_ai_v2_threat_label
+
+
+func get_military_ai_v2_executable_label() -> String:
+	return _military_ai_v2_executable_label
+
+
 func sample_fps(delta: float) -> void:
 	var fps: float = float(Engine.get_frames_per_second())
 	_last_fps = fps
@@ -596,6 +667,15 @@ func reset_all() -> void:
 	_military_ai_v2_last_order_time = "-"
 	_military_ai_v2_last_mission_change = "-"
 	_military_ai_v2_idle_time = 0.0
+	_military_ai_v2_macro = "-"
+	_military_ai_v2_blocked = "-"
+	_military_ai_v2_hero_label = "-"
+	_military_ai_v2_army_label = "-"
+	_military_ai_v2_camps_label = "-"
+	_military_ai_v2_target_label = "-"
+	_military_ai_v2_defense_label = "-"
+	_military_ai_v2_threat_label = "-"
+	_military_ai_v2_executable_label = "-"
 	_squad_nav_enabled = MilitaryAIConfig.is_shared_squad_nav_enabled()
 	_squad_nav_active_squads = 0
 	_squad_nav_member_count = 0
