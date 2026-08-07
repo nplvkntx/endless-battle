@@ -45,7 +45,8 @@ var exec_mission_start_msec: int = 0
 var allow_hostile_engagement: bool = false
 
 ## --- Mission-owned transient (watchdog / scratch; not durable strategy) ---
-var exec_objective_node: Node3D = null
+## Variant so freed objectives can be read before NodeSafety validation (typed Node3D getters cast first).
+var exec_objective_node: Variant = null
 var exec_last_progress_msec: int = 0
 var exec_last_distance: float = -1.0
 var exec_squad_ids: Array[int] = []

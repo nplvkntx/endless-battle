@@ -38,6 +38,7 @@ func _ready() -> void:
 	await _verify_command_feedback_reset_kills_effect_tweens(failures)
 	await _verify_match_restart_clears_stale_refs(failures)
 	await _verify_ai_attack_objective_clears_freed(failures)
+	await _verify_ai_exec_objective_clears_freed(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -511,6 +512,89 @@ func _verify_ai_attack_objective_clears_freed(failures: PackedStringArray) -> vo
 		failures,
 		"ai objective: position fallback retained after free",
 		EnemyArmyCommand.get_attack_objective_position() != Vector3.ZERO
+	)
+
+	EnemyArmyCommand.reset_match_state()
+	EnemyArmyCommand.unbind_match_composition()
+	state.queue_free()
+	await _settle()
+
+
+func _verify_ai_exec_objective_clears_freed(failures: PackedStringArray) -> void:
+	## Executable mission objective must be readable as Variant after free,
+	## validated before cast, and cleared by the real sanitize path.
+	var state := AIPlayerState.new()
+	add_child(state)
+	EnemyArmyCommand.bind_match_composition(state, state)
+	EnemyArmyCommand.reset_match_state()
+
+	var objective: Building = FARM_SCENE.instantiate() as Building
+	add_child(objective)
+	objective.global_position = Vector3(9.0, 0.0, 5.0)
+	objective.team_id = PLAYER_TEAM_ID
+	objective.building_state = Building.STATE_COMPLETED
+	await _settle()
+
+	var stored_position: Vector3 = objective.global_position
+	EnemyArmyCommand.set_executable_mission(
+		EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
+		"exec objective freed regression",
+		objective,
+		stored_position,
+		"farm",
+		"attack",
+		[],
+		false
+	)
+	_expect(
+		failures,
+		"exec objective: stored through set_executable_mission",
+		state.exec_objective_node == objective
+	)
+	_expect(
+		failures,
+		"exec objective: position stored",
+		state.exec_objective_position == stored_position
+	)
+	_expect(
+		failures,
+		"exec objective: name stored",
+		state.exec_objective_name == "farm"
+	)
+
+	objective.queue_free()
+	await _settle()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	## Real sanitation path used by mission report / watchdog.
+	EnemyArmyCommand.get_authoritative_mission_report(get_tree())
+
+	var stored_after: Variant = state.exec_objective_node
+	_expect(
+		failures,
+		"exec objective: no live objective after sanitize",
+		not NodeSafety.is_alive_node(stored_after)
+	)
+	_expect(
+		failures,
+		"exec objective: stale objective cleared from SoT",
+		stored_after == null
+	)
+	_expect(
+		failures,
+		"exec objective: position fallback retained after free",
+		state.exec_objective_position == stored_position
+	)
+	_expect(
+		failures,
+		"exec objective: name retained after free",
+		state.exec_objective_name == "farm"
+	)
+	_expect(
+		failures,
+		"exec objective: mission retained after free",
+		state.exec_mission == int(EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER)
 	)
 
 	EnemyArmyCommand.reset_match_state()

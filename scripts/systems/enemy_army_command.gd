@@ -661,7 +661,7 @@ static var _exec_mission: ExecutableMission:
 	set(value):
 		_rt().exec_mission = int(value)
 
-static var _exec_objective_node: Node3D:
+static var _exec_objective_node: Variant:
 	get:
 		return _rt().exec_objective_node
 	set(value):
@@ -6200,13 +6200,17 @@ static func set_executable_mission(
 	var now_msec: int = Time.get_ticks_msec()
 	var changed: bool = mission != _exec_mission
 	var objective_changed: bool = false
+	## Variant read first — typed Node3D getter would cast a freed instance before validation.
+	var previous_objective_ref: Variant = _exec_objective_node
+	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective_ref)
+	if previous_objective_ref != null and not previous_objective_alive:
+		_exec_objective_node = null
 	if objective_node != null and is_instance_valid(objective_node):
 		objective_changed = (
-			_exec_objective_node == null
-			or not is_instance_valid(_exec_objective_node)
-			or _exec_objective_node.get_instance_id() != objective_node.get_instance_id()
+			not previous_objective_alive
+			or (previous_objective_ref as Node).get_instance_id() != objective_node.get_instance_id()
 		)
-	elif _exec_objective_node != null:
+	elif previous_objective_ref != null:
 		objective_changed = true
 
 	_exec_mission = mission
@@ -6393,10 +6397,14 @@ static func _derive_display_mission_from_mode() -> String:
 
 
 static func _sanitize_executable_objective() -> void:
-	if _exec_objective_node != null and not is_instance_valid(_exec_objective_node):
-		_exec_objective_node = null
-		if _exec_mission == ExecutableMission.CREEPING:
-			_exec_camp_reserved = false
+	var objective_ref: Variant = _exec_objective_node
+	if objective_ref == null:
+		return
+	if NodeSafety.is_alive_node(objective_ref):
+		return
+	_exec_objective_node = null
+	if _exec_mission == ExecutableMission.CREEPING:
+		_exec_camp_reserved = false
 
 
 static func validate_creeping_mission(
