@@ -171,6 +171,9 @@ var _expansion_target_mine: GoldMine = null
 var _expansion_placement_cooldown_until: float = -1.0
 var _expansion_order_active: bool = false
 var _expansion_failed_mine_cooldowns: Dictionary = {}
+var _expansion_reservation_active: bool = false
+## Soft worker gate for second CC — do not wait for full midgame worker target.
+const EXPANSION_MIN_WORKERS: int = 14
 var _opening_first_farm_builder_logged: bool = false
 var _tier_2_upgrade_was_progressing: bool = false
 var _tier_2_upgrade_started_logged: bool = false
@@ -370,13 +373,82 @@ func _run_build_order() -> void:
 
 	_try_sustain_academy_research()
 
+	## Reserve second-base costs before military sustain so unit spam cannot starve expansion forever.
+	_update_expansion_reservation()
+
 	if not defer_military and _can_train_military_units():
-		_try_sustain_military_production()
-		_try_sustain_stable_production()
-		_try_sustain_artillery_production()
+		## While banking for expansion, only replace critical losses.
+		if _should_throttle_military_for_expansion():
+			if _count_living_military_units() < _get_critical_army_floor():
+				_try_sustain_military_production()
+		else:
+			_try_sustain_military_production()
+			_try_sustain_stable_production()
+			_try_sustain_artillery_production()
 
 	if _should_build_expansion_command_center():
 		_try_place_expansion_command_center()
+
+	## After expansion attempt, resume full late production if we still have budget.
+	if (
+		not defer_military
+		and _can_train_military_units()
+		and _should_throttle_military_for_expansion()
+		and EnemyResourceManager.can_afford(1, 0)
+	):
+		_try_sustain_stable_production()
+		_try_sustain_artillery_production()
+
+
+func _get_critical_army_floor() -> int:
+	if _director != null:
+		return maxi(6, _director.get_min_army_size_for_current_phase())
+	return 6
+
+
+func _should_throttle_military_for_expansion() -> bool:
+	if not _expansion_reservation_active:
+		return false
+	if _count_living_command_centers() >= 2:
+		return false
+	if _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER):
+		return false
+	return true
+
+
+func _update_expansion_reservation() -> void:
+	if (
+		_count_living_command_centers() >= 2
+		or _is_building_type_in_progress(PLACEMENT_COMMAND_CENTER)
+		or _director == null
+		or not _director.should_prioritize_expansion()
+	):
+		_release_expansion_reservation()
+		return
+
+	if _count_enemy_workers() < EXPANSION_MIN_WORKERS:
+		_release_expansion_reservation()
+		return
+
+	if _find_expansion_gold_mine_anchor() == null:
+		_release_expansion_reservation()
+		return
+
+	_ensure_expansion_reservation()
+
+
+func _ensure_expansion_reservation() -> void:
+	if _expansion_reservation_active:
+		return
+	EnemyResourceManager.reserve_resources(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+	_expansion_reservation_active = true
+
+
+func _release_expansion_reservation() -> void:
+	if not _expansion_reservation_active:
+		return
+	EnemyResourceManager.release_reservation(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+	_expansion_reservation_active = false
 
 
 func _is_opening_phase() -> bool:
@@ -1509,15 +1581,21 @@ func _should_build_artillery_depot() -> bool:
 	if _is_building_type_in_progress(PLACEMENT_ARTILLERY_DEPOT):
 		return false
 
-	## Finish barracks then stables before expanding siege production.
-	if _count_barracks() < AIDifficultyConfig.max_barracks():
+	## Finish at least one barracks; stables preferred but not a hard max-cap gate.
+	if _count_barracks() < 1:
 		return false
-	if _count_stables() < AIDifficultyConfig.max_stables():
-		return false
+	if AIDifficultyConfig.max_stables() > 0 and _count_stables() < 1:
+		## Prefer opening cavalry before siege, unless already late with excess bank.
+		if (
+			_director == null
+			or not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME)
+			or not _has_excess_resources()
+		):
+			return false
 
 	if (
 		_director != null
-		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME)
+		and not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.TIER_3)
 	):
 		return false
 
@@ -2538,13 +2616,19 @@ func _should_build_expansion_command_center() -> bool:
 	if not _has_completed_building(PLACEMENT_HERO_ALTAR) or not _has_living_enemy_hero():
 		return false
 
-	if _count_enemy_workers() < _get_target_worker_count():
+	## Soft gate: expand once the early economy is online — never wait for full mid target.
+	if _count_enemy_workers() < EXPANSION_MIN_WORKERS:
 		return false
 
 	if _find_expansion_gold_mine_anchor() == null:
 		return false
 
-	return EnemyResourceManager.can_afford(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+	## Spend against total stockpile while the expansion hold is active.
+	return EnemyResourceManager.can_afford(
+		COMMAND_CENTER_GOLD_COST,
+		COMMAND_CENTER_WOOD_COST,
+		not _expansion_reservation_active
+	)
 
 
 func _sync_expansion_order_state() -> void:
@@ -2796,7 +2880,9 @@ func _can_train_military_units() -> bool:
 		return false
 
 	if _should_rebuild_workers() and not _has_abundant_resources():
-		return false
+		## Keep replacing critical losses during worker rebuild — never freeze the army forever.
+		if _count_living_military_units() >= _get_critical_army_floor():
+			return false
 
 	return true
 
@@ -2907,24 +2993,23 @@ func _should_build_stable() -> bool:
 	if not _has_completed_building(PLACEMENT_BARRACKS):
 		return false
 
-	## Barracks-first progression: finish barracks cap before opening stables.
-	if _count_barracks() < AIDifficultyConfig.max_barracks():
+	## Barracks-first, but do not require the full difficulty barracks cap before cavalry.
+	if _count_barracks() < 1:
 		return false
 
 	if not TechTree.player_has_tier_2(ENEMY_TEAM_ID):
 		return false
 
-	if _director != null and not _director.should_prioritize_late_game_units():
-		if not _director.is_phase_at_least(EnemyStrategicDirector.StrategicPhase.LATE_GAME):
-			return false
+	## Cavalry unlocks with Tier 3 tech — do not wait exclusively for LATE_GAME + 3k bank.
+	if _director != null and not _director.is_phase_at_least(
+		EnemyStrategicDirector.StrategicPhase.TIER_3
+	):
+		return false
 
 	if _count_stables() > 0 and not _can_expand_military_production(PLACEMENT_STABLE):
 		return false
 
-	return (
-		_has_excess_resources()
-		and EnemyResourceManager.can_afford(STABLE_GOLD_COST, STABLE_WOOD_COST)
-	)
+	return EnemyResourceManager.can_afford(STABLE_GOLD_COST, STABLE_WOOD_COST)
 
 
 func _can_expand_military_production(building_type: StringName) -> bool:
@@ -3419,6 +3504,8 @@ func _try_place_expansion_command_center() -> bool:
 	if placed:
 		_expansion_order_active = true
 		_expansion_placement_cooldown_until = -1.0
+		## try_spend already released the reserved CC costs — only clear the flag.
+		_expansion_reservation_active = false
 		return true
 
 	# Placement failed: cool down this mine and clear the sticky target so the

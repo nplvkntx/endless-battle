@@ -72,6 +72,9 @@ var _military_ai_v2_defense_label: String = "-"
 var _military_ai_v2_threat_label: String = "-"
 var _military_ai_v2_executable_label: String = "-"
 var _military_ai_v2_target_dist: float = -1.0
+var _military_ai_v2_workers_label: String = "-"
+var _military_ai_v2_tier_label: String = "-"
+var _military_ai_v2_expansion_label: String = "-"
 var _fps_samples: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_times: PackedFloat32Array = PackedFloat32Array()
 var _fps_sample_elapsed: float = 0.0
@@ -472,6 +475,28 @@ func get_military_ai_v2_threat_label() -> String:
 
 func get_military_ai_v2_executable_label() -> String:
 	return _military_ai_v2_executable_label
+
+
+func set_military_ai_v2_macro_economy_status(
+	workers_label: String,
+	tier_label: String,
+	expansion_label: String
+) -> void:
+	_military_ai_v2_workers_label = workers_label if not workers_label.is_empty() else "-"
+	_military_ai_v2_tier_label = tier_label if not tier_label.is_empty() else "-"
+	_military_ai_v2_expansion_label = expansion_label if not expansion_label.is_empty() else "-"
+
+
+func get_military_ai_v2_workers_label() -> String:
+	return _military_ai_v2_workers_label
+
+
+func get_military_ai_v2_tier_label() -> String:
+	return _military_ai_v2_tier_label
+
+
+func get_military_ai_v2_expansion_label() -> String:
+	return _military_ai_v2_expansion_label
 
 
 func sample_fps(delta: float) -> void:

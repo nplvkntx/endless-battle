@@ -139,6 +139,9 @@ func _process(delta: float) -> void:
 
 	if _recent_loss_timer > 0.0:
 		_recent_loss_timer = maxf(0.0, _recent_loss_timer - delta)
+		## Failed-attack lock must expire with the loss timer — never permanent.
+		if _recent_loss_timer <= 0.0:
+			_recent_attack_failed = false
 
 	## Stagger strategic fast ticks onto even frames so production can use odd frames.
 	var frame: int = Engine.get_process_frames()
@@ -345,7 +348,11 @@ func should_prioritize_attack() -> bool:
 
 
 func should_prioritize_expansion() -> bool:
-	if _phase_interrupt_active or _recent_attack_failed:
+	if _phase_interrupt_active:
+		return false
+
+	## Brief post-loss pause only — never permanently block the second base.
+	if _recent_attack_failed and _recent_loss_timer > 0.0:
 		return false
 
 	if get_desire("defense") >= DESIRE_HIGH:
@@ -401,6 +408,74 @@ func should_boost_army_production() -> bool:
 
 func should_boost_worker_production() -> bool:
 	return get_desire("economy") >= DESIRE_MEDIUM or _strategic_phase == StrategicPhase.OPENING
+
+
+## Compact F3 reason when macro progression is stalled (not military execution).
+func get_macro_progress_block_reason() -> String:
+	if _phase_interrupt_active:
+		return "macro interrupt: %s" % (
+			_phase_interrupt_reason if not _phase_interrupt_reason.is_empty() else "defense"
+		)
+
+	match _strategic_phase:
+		StrategicPhase.OPENING:
+			if not snapshot.get("has_farm", false):
+				return "need farm"
+			if not snapshot.get("has_hero_altar", false):
+				return "need altar"
+			if not snapshot.get("has_barracks", false):
+				return "need barracks"
+		StrategicPhase.EARLY_ARMY:
+			if not snapshot.get("hero_alive", false):
+				return "need hero"
+			if int(snapshot.get("combat_unit_count", 0)) < EARLY_ARMY_MIN_PIKEMEN:
+				return "need escort army"
+			if not snapshot.get("early_army_rallied", false):
+				return "army rallying"
+		StrategicPhase.CREEPING:
+			if int(snapshot.get("cleared_early_camps", 0)) < CREEP_REQUIRED_EARLY_CAMPS_MIN:
+				return "need creep camps"
+			if int(snapshot.get("hero_level", 0)) < CREEP_HERO_LEVEL_REQUIREMENT:
+				return "need hero L%d" % CREEP_HERO_LEVEL_REQUIREMENT
+		StrategicPhase.TIER_2:
+			if int(snapshot.get("town_hall_tier", 1)) < 2:
+				return "need tier 2"
+		StrategicPhase.EXPANSION:
+			if not snapshot.get("expansion_completed", false):
+				if snapshot.get("expansion_unavailable", false):
+					return "no expansion site"
+				return "need expansion CC"
+			if not snapshot.get("economy_healthy", false):
+				return "expansion economy"
+			if int(snapshot.get("workers", 0)) < EXPANSION_SATURATION_WORKERS:
+				return "need workers %d/%d" % [
+					int(snapshot.get("workers", 0)),
+					EXPANSION_SATURATION_WORKERS,
+				]
+		StrategicPhase.MID_GAME:
+			if not snapshot.get("has_blacksmith", false):
+				return "need blacksmith"
+			if int(snapshot.get("combat_unit_count", 0)) < MID_GAME_MIN_ARMY:
+				return "need mid army"
+		StrategicPhase.TIER_3:
+			if int(snapshot.get("town_hall_tier", 1)) < 3:
+				return "need tier 3"
+		_:
+			pass
+	return ""
+
+
+func get_expansion_debug_label() -> String:
+	var count: int = int(snapshot.get("expansion_count", 0))
+	if count >= 1:
+		if snapshot.get("expansion_saturated", false):
+			return "yes sat"
+		return "yes"
+	if snapshot.get("expansion_unavailable", false):
+		return "none"
+	if _strategic_phase == StrategicPhase.EXPANSION or should_prioritize_expansion():
+		return "pending"
+	return "no"
 
 
 func notify_attack_launched() -> void:
@@ -794,14 +869,31 @@ func _has_required_tier_1_buildings_intact() -> bool:
 
 
 func _can_leave_expansion() -> bool:
+	## Ideal: second CC online and economy saturated at the expansion.
+	if snapshot.get("expansion_completed", false):
+		if snapshot.get("expansion_saturated", false):
+			return true
+		## Soft exit: do not softlock MID_GAME waiting for perfect gold-worker counts.
+		return (
+			int(snapshot.get("workers", 0)) >= EXPANSION_SATURATION_WORKERS
+			and snapshot.get("economy_healthy", false)
+		)
+
+	## Fallback: no reachable expansion site — still advance the macro chain.
 	return (
-		snapshot.get("expansion_completed", false)
-		and snapshot.get("expansion_saturated", false)
+		snapshot.get("expansion_unavailable", false)
+		and snapshot.get("economy_healthy", false)
+		and int(snapshot.get("workers", 0)) >= EXPANSION_SATURATION_WORKERS
+		and int(snapshot.get("combat_unit_count", 0)) >= MID_GAME_MIN_ARMY
 	)
 
 
 func _expansion_exit_reason() -> String:
-	return "Expansion completed and saturated"
+	if snapshot.get("expansion_completed", false):
+		if snapshot.get("expansion_saturated", false):
+			return "Expansion completed and saturated"
+		return "Expansion online, economy ready for midgame"
+	return "Expansion unavailable, advancing midgame"
 
 
 func _can_leave_mid_game() -> bool:
@@ -888,6 +980,11 @@ func _build_world_snapshot() -> Dictionary:
 		and gold_workers >= EXPANSION_MINE_MIN_WORKERS
 		and economy_healthy
 	)
+	## True when no valid second-base mine exists (do not softlock EXPANSION forever).
+	var expansion_unavailable: bool = (
+		expansion_count <= 0
+		and not _has_reachable_expansion_mine(tree, rally_position)
+	)
 	var pikemen_count: int = _count_pikemen(non_hero_army)
 	var early_army_rallied: bool = _is_early_army_rallied(
 		rally_position,
@@ -956,6 +1053,7 @@ func _build_world_snapshot() -> Dictionary:
 		"expansion_count": expansion_count,
 		"expansion_completed": expansion_count >= 1,
 		"expansion_saturated": expansion_saturated,
+		"expansion_unavailable": expansion_unavailable,
 		"base_under_attack": EnemyArmyCommand.is_enemy_base_threatened(tree),
 		"hero_alive": hero != null,
 		"hero_level": hero.level if hero != null else 0,
@@ -1059,7 +1157,6 @@ func _update_desires_from_snapshot() -> void:
 	if (
 		_phase_interrupt_active
 		or not hero_alive
-		or EnemyArmyCommand.is_rebuilding_army()
 		or (_recent_loss_timer > 0.0 and not EnemyAggression.is_aggression_mode_active())
 		or (_recent_attack_failed and not EnemyAggression.is_aggression_mode_active())
 		or not is_phase_at_least(StrategicPhase.EXPANSION)
@@ -1493,6 +1590,72 @@ func _count_pikemen(units: Array) -> int:
 		if unit is Spearman:
 			count += 1
 	return count
+
+
+## Lightweight expansion-site probe for macro fallback (not placement geometry).
+func _has_reachable_expansion_mine(tree: SceneTree, origin: Vector3) -> bool:
+	if tree == null or origin == Vector3.ZERO:
+		return false
+
+	var scene_root: Node = tree.current_scene
+	if scene_root == null:
+		return false
+
+	var primary: CommandCenter = null
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if node is CommandCenter and is_instance_valid(node):
+			var cc: CommandCenter = node as CommandCenter
+			if cc.building_state == Building.STATE_COMPLETED:
+				primary = cc
+				break
+	if primary == null:
+		return false
+
+	const NEAR_PRIMARY_MINE: float = 22.0
+	const NEAR_ANY_CC: float = 22.0
+	for child: Node in WorkerGathering._map_resource_children(scene_root):
+		if not NodeSafety.is_alive_node(child) or not child is GoldMine:
+			continue
+		var mine: GoldMine = child as GoldMine
+		if not mine.can_gather():
+			continue
+		## Skip starting mine next to the primary CC.
+		if (
+			EnemyArmyCommand.horizontal_distance(mine.global_position, primary.global_position)
+			<= NEAR_PRIMARY_MINE
+		):
+			continue
+		var blocked_by_cc: bool = false
+		for cc_node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+			if not cc_node is CommandCenter or not is_instance_valid(cc_node):
+				continue
+			if (
+				EnemyArmyCommand.horizontal_distance(
+					mine.global_position,
+					(cc_node as Node3D).global_position
+				)
+				<= NEAR_ANY_CC
+			):
+				blocked_by_cc = true
+				break
+		if blocked_by_cc:
+			continue
+		for cc_node: Node in tree.get_nodes_in_group(&"player_command_center"):
+			if not cc_node is CommandCenter or not is_instance_valid(cc_node):
+				continue
+			if (
+				EnemyArmyCommand.horizontal_distance(
+					mine.global_position,
+					(cc_node as Node3D).global_position
+				)
+				<= NEAR_ANY_CC
+			):
+				blocked_by_cc = true
+				break
+		if blocked_by_cc:
+			continue
+		return true
+	return false
 
 
 func _is_early_army_rallied(

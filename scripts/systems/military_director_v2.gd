@@ -680,9 +680,20 @@ func _transition_to(
 
 	if next_state == State.ATTACK and previous_state != State.ATTACK:
 		_begin_attack_tracking(get_tree())
+		## Clear stale rebuild locks so repeated attacks are not suppressed forever under V2.
+		EnemyArmyCommand.set_rebuilding_army(false)
+		var strategic: EnemyStrategicDirector = _resolve_strategic_director()
+		if strategic != null:
+			strategic.notify_attack_launched()
 	elif next_state == State.ATTACK:
 		## Keep lethal flag sticky while the attack continues.
 		pass
+
+	if previous_state == State.ATTACK and next_state == State.RETREAT:
+		var strategic_fail: EnemyStrategicDirector = _resolve_strategic_director()
+		if strategic_fail != null:
+			strategic_fail.notify_attack_failed()
+		EnemyArmyCommand.set_rebuilding_army(true)
 
 	if next_state == State.CREEP and previous_state != State.CREEP:
 		_begin_creep_fight_tracking()
@@ -695,6 +706,7 @@ func _transition_to(
 	if next_state == State.RECOVER and previous_state != State.RECOVER:
 		_recover_elapsed = 0.0
 		_admit_pending_reinforcements()
+		EnemyArmyCommand.set_rebuilding_army(true)
 		if target_position != Vector3.ZERO:
 			_designated_recovery_point = target_position
 		elif _designated_recovery_point == Vector3.ZERO:
@@ -1066,6 +1078,12 @@ func _resolve_creep_manager() -> EnemyCreepManager:
 	if get_parent() == null:
 		return null
 	return get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
+
+
+func _resolve_strategic_director() -> EnemyStrategicDirector:
+	if get_parent() == null:
+		return null
+	return get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 
 
 func _evaluate_defend_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
@@ -1648,6 +1666,10 @@ func _evaluate_recover_strategy(tree: SceneTree, rally_point: Vector3) -> void:
 			40
 		)
 		return
+
+	## Rebuild complete — allow offense desire / production to leave permanent rebuild mode.
+	if ready or timed_out:
+		EnemyArmyCommand.set_rebuilding_army(false)
 
 	## Resume: prefer CREEP while early hero XP is still valuable; ATTACK on interrupt
 	## or once the soft level/camp goals are met.
@@ -3735,9 +3757,7 @@ func _publish_perf_status() -> void:
 	## Keep legacy AI status fields filled so older overlay lines stay coherent under V2.
 	## AI Phase = macro strategic phase; V2 State / AI Combat carry military truth.
 	var macro_phase: String = display_state
-	var strategic: EnemyStrategicDirector = null
-	if get_parent() != null:
-		strategic = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	var strategic: EnemyStrategicDirector = _resolve_strategic_director()
 	if strategic != null:
 		macro_phase = strategic.get_strategic_phase_name()
 	PerfCounters.set_ai_status(macro_phase, display_state, "MilitaryDirectorV2")
@@ -3749,6 +3769,15 @@ func _publish_perf_status() -> void:
 	if strategic != null:
 		camps_target = strategic.get_creep_camps_target()
 	var blocked: String = _resolve_compact_blocked_reason(display_state)
+	## Prefer macro softlock reasons when military is idle/gathering.
+	if (
+		strategic != null
+		and _state in [State.ASSEMBLE, State.RECOVER, State.IDLE]
+		and (blocked == "-" or blocked == "gathering" or blocked.is_empty())
+	):
+		var macro_block: String = strategic.get_macro_progress_block_reason()
+		if not macro_block.is_empty():
+			blocked = macro_block
 	var target_label: String = objective
 	var target_dist: float = _watchdog_distance
 	if _mission != null:
@@ -3803,6 +3832,14 @@ func _publish_perf_status() -> void:
 			executable_label = "NO"
 			if blocked == "-" or blocked.is_empty():
 				blocked = "army empty"
+	var workers_label: String = "-"
+	var tier_label: String = "-"
+	var expansion_label: String = "-"
+	if strategic != null:
+		var snap: Dictionary = strategic.snapshot
+		workers_label = str(int(snap.get("workers", 0)))
+		tier_label = str(int(snap.get("town_hall_tier", 1)))
+		expansion_label = strategic.get_expansion_debug_label()
 	PerfCounters.set_military_ai_v2_compact_status(
 		macro_phase,
 		display_state,
@@ -3820,6 +3857,11 @@ func _publish_perf_status() -> void:
 		defense_label,
 		"yes" if threat_active else "no",
 		target_dist
+	)
+	PerfCounters.set_military_ai_v2_macro_economy_status(
+		workers_label,
+		tier_label,
+		expansion_label
 	)
 	PerfCounters.set_ai_mission_detail(
 		"V2 %s → %s (%s)%s" % [
