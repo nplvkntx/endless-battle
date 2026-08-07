@@ -273,6 +273,7 @@ func _on_build_tick() -> void:
 
 
 func _build_production_fingerprint() -> String:
+	## compatibility/telemetry only under V2 — fingerprint invalidation, not macro authority
 	return "%d|%d|%d|%d|%d|%d" % [
 		_count_enemy_workers(),
 		_count_living_military_units(),
@@ -821,11 +822,13 @@ func _is_tier_2_army_ready_for_upgrade() -> bool:
 	if EnemyArmyCommand.is_rebuilding_army():
 		return false
 
-	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
-		return false
-
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
-		return false
+	## Under V2, retreat gating uses MilitaryDirectorV2 via phase interrupt —
+	## stale EnemyArmyCommand RETREATING labels must not softlock Tier 2 upgrades.
+	if not MilitaryAIConfig.is_v2_enabled():
+		if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
+			return false
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+			return false
 
 	return true
 
@@ -834,11 +837,13 @@ func _is_tier_2_base_safe_for_upgrade() -> bool:
 	if _director != null and _director.is_phase_interrupted():
 		return false
 
-	if EnemyArmyCommand.is_emergency_defense_active():
-		return false
-
-	if EnemyArmyCommand.is_defense_blocking_offense():
-		return false
+	## Under V2, defense pause comes from MilitaryDirectorV2 (via phase interrupt) + live threat.
+	## Do not trust stale emergency/DEFENDING compatibility labels alone.
+	if not MilitaryAIConfig.is_v2_enabled():
+		if EnemyArmyCommand.is_emergency_defense_active():
+			return false
+		if EnemyArmyCommand.is_defense_blocking_offense():
+			return false
 
 	var tree: SceneTree = get_tree()
 	if EnemyArmyCommand.is_enemy_base_threatened(tree):
@@ -1744,6 +1749,7 @@ func _try_sustain_shop_purchases() -> void:
 		return
 
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		## compatibility/telemetry only under V2 — shop micro, not macro phase authority
 		return
 
 	var shop: Shop = _find_completed_enemy_shop()
@@ -2007,6 +2013,7 @@ func _should_send_hero_to_shop(hero: Hero) -> bool:
 		return false
 
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	## compatibility/telemetry only under V2 — hero shop routing, not macro phase authority
 	if (
 		army_mode == EnemyArmyCommand.ArmyMode.ATTACKING
 		or army_mode == EnemyArmyCommand.ArmyMode.ASSEMBLING
@@ -3171,6 +3178,7 @@ func _try_sustain_military_production() -> void:
 		- _count_pending_military_units()
 	)
 	var defending: bool = EnemyArmyCommand.get_army_mode() in [
+		## compatibility/telemetry only under V2 — production intensity hint, not macro gate
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]
@@ -3267,6 +3275,7 @@ func _should_train_cannons() -> bool:
 		return false
 
 	# Prefer siege when attacking player buildings.
+	## compatibility/telemetry only under V2 — production intensity hint, not macro gate
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.ATTACKING:
 		return true
 
@@ -3429,6 +3438,7 @@ func _count_pending_military_units() -> int:
 func _get_effective_desired_army_size() -> int:
 	var desired: int = _get_desired_army_size()
 	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.DEFENDING:
+		## compatibility/telemetry only under V2 — production intensity hint, not macro gate
 		desired += MILITARY_DEFENSE_EXTRA_DESIRED
 	elif _director != null and _director.should_boost_army_production():
 		desired += 8

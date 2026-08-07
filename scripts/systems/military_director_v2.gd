@@ -541,6 +541,16 @@ func is_defend_active() -> bool:
 	return _defend_active
 
 
+## Read-only macro/military query: true while V2 is in an active defense response.
+func is_currently_defending() -> bool:
+	return _state == State.DEFEND or _defend_active
+
+
+## Read-only macro/military query: true while V2 is executing a retreat.
+func is_currently_retreating() -> bool:
+	return _state == State.RETREAT
+
+
 func get_designated_recovery_point() -> Vector3:
 	if _designated_recovery_point != Vector3.ZERO:
 		return _designated_recovery_point

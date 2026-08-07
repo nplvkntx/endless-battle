@@ -189,6 +189,7 @@ func _publish_perf_status() -> void:
 	)
 	PerfCounters.set_ai_status(
 		get_strategic_phase_name(),
+		## compatibility/telemetry only under V2 — F3 military owned by MilitaryDirectorV2 above
 		EnemyArmyCommand.ArmyMode.keys()[EnemyArmyCommand.get_army_mode()],
 		mission_label
 	)
@@ -300,7 +301,12 @@ func should_prioritize_creep() -> bool:
 	if _strategic_phase in [StrategicPhase.OPENING, StrategicPhase.EARLY_ARMY]:
 		return false
 
-	if EnemyArmyCommand.get_army_mode() in [
+	if MilitaryAIConfig.is_v2_enabled():
+		var military_director_v2: MilitaryDirectorV2 = _resolve_military_director_v2()
+		if military_director_v2 != null and military_director_v2.is_currently_defending():
+			return false
+	elif EnemyArmyCommand.get_army_mode() in [
+		## compatibility/telemetry only under V2 — gated above
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]:
@@ -592,6 +598,28 @@ func _begin_phase_evaluation_gate() -> void:
 
 
 func _update_phase_interrupt() -> void:
+	## Under V2, only current MilitaryDirectorV2 defense/retreat may interrupt macro.
+	## Legacy EnemyArmyCommand strategic_state / army_mode labels must not freeze progression.
+	if MilitaryAIConfig.is_v2_enabled():
+		var military_director_v2: MilitaryDirectorV2 = _resolve_military_director_v2()
+		if military_director_v2 != null:
+			if military_director_v2.is_currently_defending():
+				_phase_interrupt_active = true
+				_phase_interrupt_reason = "defense"
+				return
+			if military_director_v2.is_currently_retreating():
+				_phase_interrupt_active = true
+				_phase_interrupt_reason = "retreat"
+				return
+			_phase_interrupt_active = false
+			_phase_interrupt_reason = ""
+			return
+		## V2 enabled but director missing — never block on stale compatibility labels.
+		_phase_interrupt_active = false
+		_phase_interrupt_reason = ""
+		return
+
+	## Legacy military ownership path.
 	var strategic_state: EnemyArmyCommand.StrategicState = EnemyArmyCommand.get_strategic_state()
 	if (
 		EnemyArmyCommand.is_emergency_defense_active()
@@ -835,11 +863,13 @@ func _can_leave_tier_2() -> bool:
 	if _phase_interrupt_active:
 		return false
 
-	if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
-		return false
-
-	if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
-		return false
+	## Legacy only — under V2, retreat interrupt is owned by MilitaryDirectorV2
+	## via _update_phase_interrupt (stale RETREATING labels must not softlock Tier 2).
+	if not MilitaryAIConfig.is_v2_enabled():
+		if EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.RETREATING:
+			return false
+		if EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.RETREATING:
+			return false
 
 	return true
 
@@ -1064,6 +1094,7 @@ func _build_world_snapshot() -> Dictionary:
 		"has_safe_creep_camp": has_safe_creep_camp,
 		"creeping_army_healthy": creeping_army_healthy,
 		"army_power": army_power,
+		## compatibility/telemetry only under V2 — not used for phase gating
 		"army_mode": EnemyArmyCommand.get_army_mode(),
 		"visible_enemy_power": visible_threat_power,
 		"economy_healthy": economy_healthy,
@@ -1283,6 +1314,10 @@ func _apply_phase_desire_baseline() -> void:
 
 
 func _recommend_main_army_mission() -> void:
+	if MilitaryAIConfig.is_v2_enabled():
+		## Main-army mission owned by MilitaryDirectorV2 — do not mirror legacy labels.
+		return
+
 	if (
 		_phase_interrupt_active
 		or EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.EMERGENCY_DEFENDING
@@ -1312,6 +1347,7 @@ func _recommend_main_army_mission() -> void:
 		return
 
 	if _strategic_phase == StrategicPhase.TIER_2:
+		## compatibility only under V2 — this branch is legacy-gated above
 		var army_mode_tier_2: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 		if army_mode_tier_2 in [
 			EnemyArmyCommand.ArmyMode.DEFENDING,
@@ -1331,6 +1367,7 @@ func _recommend_main_army_mission() -> void:
 		)
 		return
 
+	## compatibility only under V2 — this branch is legacy-gated above
 	var army_mode: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
 	match army_mode:
 		EnemyArmyCommand.ArmyMode.DEFENDING, EnemyArmyCommand.ArmyMode.INTERCEPTING:
@@ -1420,6 +1457,7 @@ func _run_recovery_checks() -> void:
 		return
 
 	if EnemyArmyCommand.get_army_mode() in [
+		## compatibility only under V2 — this method early-returns when V2 is enabled
 		EnemyArmyCommand.ArmyMode.DEFENDING,
 		EnemyArmyCommand.ArmyMode.INTERCEPTING,
 	]:
