@@ -40,6 +40,7 @@ func _ready() -> void:
 	await _verify_ai_attack_objective_clears_freed(failures)
 	await _verify_ai_exec_objective_clears_freed(failures)
 	await _verify_ai_command_authority_clears_freed(failures)
+	await _verify_ai_bound_player_state_clears_freed(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -680,4 +681,60 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 	EnemyArmyCommand.unbind_match_composition()
 	composition.free()
 	state.queue_free()
+	await _settle()
+
+
+func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> void:
+	## Persistent bound AIPlayerState must be readable as Variant after free,
+	## validated before cast, and cleared by the real getter without runtime errors.
+	## Intentionally skips unbind before free — MatchCompositionRoot happy-path
+	## unbinds first, but direct free of the bound state must not crash.
+	var state := AIPlayerState.new()
+	state.name = "TempBoundAIPlayerState"
+	add_child(state)
+	await _settle()
+
+	EnemyArmyCommand.bind_match_composition(state, state)
+	_expect(
+		failures,
+		"bound AI state: getter returns live state after bind",
+		EnemyArmyCommand.get_bound_ai_player_state() == state
+	)
+	_expect(
+		failures,
+		"bound AI state: _rt-backed helper uses bound SoT",
+		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
+	)
+
+	state.queue_free()
+	await _settle()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	## No unbind yet — getter / _rt must tolerate freed static storage.
+	_expect(
+		failures,
+		"bound AI state: getter null after free without unbind",
+		EnemyArmyCommand.get_bound_ai_player_state() == null
+	)
+	_expect(
+		failures,
+		"bound AI state: stale storage cleared",
+		EnemyArmyCommand._bound_player_state == null
+	)
+	## Public _rt()-using helper must fall back to unbound runtime, not crash.
+	var mode_after: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
+	_expect(
+		failures,
+		"bound AI state: _rt helper remains functional unbound",
+		mode_after == EnemyArmyCommand.ArmyMode.IDLE
+	)
+	_expect(
+		failures,
+		"bound AI state: still unbound after _rt helper",
+		EnemyArmyCommand.get_bound_ai_player_state() == null
+	)
+
+	EnemyArmyCommand.reset_match_state()
+	EnemyArmyCommand.unbind_match_composition()
 	await _settle()

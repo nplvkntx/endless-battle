@@ -740,22 +740,28 @@ static var _allow_hostile_engagement: bool:
 
 ## Match composition binding. Null outside an active MatchCompositionRoot.
 ## Migrated bags are SoT on AIPlayerState via _rt() — no dual-write.
-static var _bound_player_state: AIPlayerState = null
+## Variant so freed AIPlayerState can be read before validation (typed getters cast first).
+static var _bound_player_state: Variant = null
 ## Variant so freed authority can be read before validation (typed Node getters cast first).
 static var _declared_command_authority: Variant = null
 
 
 
 static func bind_match_composition(state: AIPlayerState, authority: Variant) -> void:
-	_bound_player_state = state
+	## Only persist a live AIPlayerState; stale/freed must not enter static storage.
+	if state != null and is_instance_valid(state):
+		_bound_player_state = state
+	else:
+		_bound_player_state = null
 	var raw: Variant = authority
 	if raw != null and is_instance_valid(raw) and raw is Node:
 		_declared_command_authority = raw as Node
 	else:
 		_declared_command_authority = null
 	## SoT is the bound AIPlayerState via _rt() — no dual-write copy.
-	if state != null:
-		state.set_military_command_authority(_declared_command_authority)
+	var bound: AIPlayerState = get_bound_ai_player_state()
+	if bound != null:
+		bound.set_military_command_authority(_declared_command_authority)
 
 
 static func unbind_match_composition() -> void:
@@ -769,8 +775,9 @@ static func unbind_match_composition() -> void:
 
 
 static func get_bound_ai_player_state() -> AIPlayerState:
-	if _bound_player_state != null and is_instance_valid(_bound_player_state):
-		return _bound_player_state
+	var raw: Variant = _bound_player_state
+	if raw != null and is_instance_valid(raw) and raw is AIPlayerState:
+		return raw as AIPlayerState
 	_bound_player_state = null
 	return null
 
