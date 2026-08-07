@@ -18,6 +18,7 @@ func _ready() -> void:
 
 	await _verify_cancelled_selected_building_clears_before_altar_refresh(failures)
 	await _verify_command_center_switching_survives_completion(failures)
+	await _verify_selection_pulse_survives_freed_cached_mesh(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -174,4 +175,98 @@ func _verify_command_center_switching_survives_completion(
 	)
 
 	world.queue_free()
+	await _settle()
+
+
+func _verify_selection_pulse_survives_freed_cached_mesh(failures: PackedStringArray) -> void:
+	## Reproduces TargetFeedback meta cache retaining a freed MeshInstance3D after
+	## construction/visual mesh replacement, then selecting again through the real pulse path.
+	var altar: HeroAltar = HERO_ALTAR_SCENE.instantiate() as HeroAltar
+	add_child(altar)
+	altar.team_id = PLAYER_TEAM_ID
+	altar.set_completed()
+	await _settle()
+
+	altar.set_selected(true)
+	await _settle()
+	_expect(
+		failures,
+		"selection pulse populated material cache",
+		altar.has_meta(&"target_feedback_visual_materials")
+	)
+
+	var cached_before: Array = altar.get_meta(&"target_feedback_visual_materials") as Array
+	_expect(failures, "material cache has entries before free", not cached_before.is_empty())
+	if cached_before.is_empty():
+		altar.queue_free()
+		await _settle()
+		return
+
+	var first_entry: Dictionary = cached_before[0]
+	var raw_mesh: Variant = first_entry.get("mesh")
+	_expect(failures, "cached mesh present before free", raw_mesh != null and is_instance_valid(raw_mesh))
+	if raw_mesh == null or not is_instance_valid(raw_mesh) or not raw_mesh is MeshInstance3D:
+		altar.queue_free()
+		await _settle()
+		return
+
+	## Leave the stale Dictionary entry in host meta; do not clear the cache here.
+	(raw_mesh as MeshInstance3D).free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_expect(failures, "cached mesh is invalid after free", not is_instance_valid(raw_mesh))
+	_expect(
+		failures,
+		"stale material cache still retained before second pulse",
+		altar.has_meta(&"target_feedback_visual_materials")
+	)
+
+	## Mirror normal visual replacement: a living mesh remains under Visuals for rebuild.
+	var visuals_root: Node3D = altar.get_node_or_null("Visuals") as Node3D
+	_expect(failures, "hero altar has Visuals root", visuals_root != null)
+	if visuals_root != null:
+		var replacement := MeshInstance3D.new()
+		replacement.name = "ReplacementPulseMesh"
+		var box := BoxMesh.new()
+		box.size = Vector3(1.0, 1.0, 1.0)
+		replacement.mesh = box
+		var replacement_material := StandardMaterial3D.new()
+		replacement_material.albedo_color = Color(0.52, 0.32, 0.72, 1.0)
+		replacement.material_override = replacement_material
+		visuals_root.add_child(replacement)
+
+	## Real public re-select path: deselect then select again (selection pulse).
+	altar.set_selected(false)
+	altar.set_selected(true)
+	await _settle()
+
+	_expect(failures, "altar still selected after freed-mesh pulse", altar.is_selected)
+	_expect(
+		failures,
+		"material cache rebuilt after stale discard",
+		altar.has_meta(&"target_feedback_visual_materials")
+	)
+
+	var cached_after: Array = altar.get_meta(&"target_feedback_visual_materials") as Array
+	var stale_retained := false
+	for entry_variant: Variant in cached_after:
+		if typeof(entry_variant) != TYPE_DICTIONARY:
+			continue
+		var entry: Dictionary = entry_variant
+		var entry_mesh: Variant = entry.get("mesh")
+		if entry_mesh != null and is_same(entry_mesh, raw_mesh):
+			stale_retained = true
+			break
+		if entry_mesh != null and not is_instance_valid(entry_mesh):
+			stale_retained = true
+			break
+	_expect(failures, "rebuilt cache has no freed mesh refs", not stale_retained)
+	_expect(failures, "rebuilt cache is usable", not cached_after.is_empty())
+
+	## Second pulse with rebuilt cache must also succeed.
+	altar.play_selection_pulse()
+	await _settle()
+	_expect(failures, "repeat selection pulse after rebuild", altar.is_selected)
+
+	altar.queue_free()
 	await _settle()

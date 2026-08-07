@@ -67,7 +67,12 @@ static func play_on_visuals(
 	visuals_root.scale = Vector3.ONE
 	var material_entries: Array = _ensure_visual_material_entries(host, visuals_root)
 	for entry: Dictionary in material_entries:
-		_apply_material_flash(entry["material"], entry["base_albedo"])
+		var raw_material: Variant = entry.get("material")
+		if raw_material == null or not is_instance_valid(raw_material):
+			continue
+		if not raw_material is StandardMaterial3D:
+			continue
+		_apply_material_flash(raw_material as StandardMaterial3D, entry["base_albedo"])
 
 	var feedback_tween: Tween = host.create_tween()
 	feedback_tween.tween_property(
@@ -97,6 +102,7 @@ static func _ensure_visual_material_entries(host: Node, visuals_root: Node3D) ->
 		var cached_entries: Array = host.get_meta(_VISUAL_MATERIALS_META) as Array
 		if _are_material_entries_valid(cached_entries):
 			return cached_entries
+		host.remove_meta(_VISUAL_MATERIALS_META)
 
 	var entries: Array = []
 	_collect_visible_mesh_materials(visuals_root, entries)
@@ -108,14 +114,28 @@ static func _are_material_entries_valid(entries: Array) -> bool:
 	if entries.is_empty():
 		return false
 
-	for entry: Dictionary in entries:
-		var mesh: MeshInstance3D = entry.get("mesh")
-		var material: StandardMaterial3D = entry.get("material")
-		if mesh == null or not is_instance_valid(mesh):
+	for entry_variant: Variant in entries:
+		if typeof(entry_variant) != TYPE_DICTIONARY:
 			return false
-		if material == null or not is_instance_valid(material):
+
+		var entry: Dictionary = entry_variant
+		var raw_mesh: Variant = entry.get("mesh")
+		var raw_material: Variant = entry.get("material")
+		if raw_mesh == null or not is_instance_valid(raw_mesh):
 			return false
-		if mesh.get_surface_override_material(entry["surface_index"]) != material:
+		if raw_material == null or not is_instance_valid(raw_material):
+			return false
+		if not raw_mesh is MeshInstance3D:
+			return false
+		if not raw_material is StandardMaterial3D:
+			return false
+
+		var mesh := raw_mesh as MeshInstance3D
+		var material := raw_material as StandardMaterial3D
+		var surface_index: int = int(entry.get("surface_index", -1))
+		if surface_index < 0:
+			return false
+		if mesh.get_surface_override_material(surface_index) != material:
 			return false
 
 	return true
@@ -176,10 +196,13 @@ static func _reset_visuals(visuals_root: Node3D, material_entries: Array) -> voi
 		visuals_root.scale = Vector3.ONE
 
 	for entry: Dictionary in material_entries:
-		var material: StandardMaterial3D = entry.get("material")
-		if material == null:
+		var raw_material: Variant = entry.get("material")
+		if raw_material == null or not is_instance_valid(raw_material):
+			continue
+		if not raw_material is StandardMaterial3D:
 			continue
 
+		var material := raw_material as StandardMaterial3D
 		material.albedo_color = entry["base_albedo"]
 		material.emission = entry["base_emission"]
 		material.emission_enabled = entry["base_emission_enabled"]
