@@ -76,7 +76,8 @@ var attack_wave_state_msec: int = 0
 var attack_wave_units: Array = []
 var attack_wave_staging_point: Vector3 = Vector3.ZERO
 var attack_wave_target_position: Vector3 = Vector3.ZERO
-var attack_wave_target_node: Node3D = null
+## Variant so freed buildings can be read before NodeSafety validation (typed Node3D getters cast first).
+var attack_wave_target_node: Variant = null
 var attack_wave_target_committed_until_msec: int = 0
 var attack_wave_gather_pull_timer: float = 0.0
 var attack_wave_hero_wait_timer: float = 0.0
@@ -89,7 +90,8 @@ var attack_wave_ready_to_advance: bool = false
 var attack_wave_pending_transition: int = 0
 var attack_wave_pending_transition_reason: String = ""
 var active_wave_start_unit_count: int = 0
-var active_wave_objective: Node3D = null
+## Variant so freed buildings can be read before NodeSafety validation (typed Node3D getters cast first).
+var active_wave_objective: Variant = null
 var active_wave_objective_position: Vector3 = Vector3.ZERO
 
 ## --- Formation / group-order cache ---
@@ -110,7 +112,8 @@ var group_order_generation: int = 0
 var finishing_mode_active: bool = false
 var finishing_mode_exit_cooldown: float = 0.0
 var finishing_mode_eval_timer: float = 0.0
-var last_finishing_objective: Node3D = null
+## Variant so freed buildings can be read before NodeSafety validation (typed Node3D getters cast first).
+var last_finishing_objective: Variant = null
 
 ## --- Command queue (sole owner; lifecycle = match + drain by ArmyCommanderV2) ---
 var pending_group_orders: Array = []

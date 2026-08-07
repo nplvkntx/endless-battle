@@ -37,6 +37,7 @@ func _ready() -> void:
 	await _verify_targeting_cancels_on_hero_free(failures)
 	await _verify_command_feedback_reset_kills_effect_tweens(failures)
 	await _verify_match_restart_clears_stale_refs(failures)
+	await _verify_ai_attack_objective_clears_freed(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -457,3 +458,62 @@ func _verify_match_restart_clears_stale_refs(failures: PackedStringArray) -> voi
 		"restart: construction slots cleared for freed farm",
 		not ConstructionReservations.has_build_slot_owners_for_id(farm_id)
 	)
+
+
+func _verify_ai_attack_objective_clears_freed(failures: PackedStringArray) -> void:
+	## Long-lived AI attack objective must be readable as Variant after free,
+	## validated before cast, and cleared by the real maintain path.
+	var state := AIPlayerState.new()
+	add_child(state)
+	EnemyArmyCommand.bind_match_composition(state, state)
+	EnemyArmyCommand.reset_match_state()
+	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING, true)
+
+	var objective: Building = FARM_SCENE.instantiate() as Building
+	add_child(objective)
+	objective.global_position = Vector3(12.0, 0.0, 8.0)
+	objective.team_id = PLAYER_TEAM_ID
+	objective.building_state = Building.STATE_COMPLETED
+	await _settle()
+
+	EnemyArmyCommand.set_attack_objective(objective, objective.global_position)
+	_expect(
+		failures,
+		"ai objective: stored through attack-objective API",
+		state.active_wave_objective == objective
+	)
+	_expect(
+		failures,
+		"ai objective: position stored",
+		EnemyArmyCommand.get_attack_objective_position() == objective.global_position
+	)
+
+	objective.queue_free()
+	await _settle()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	## Real maintain path: Variant read + NodeSafety before cast; clears stale.
+	EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), 1.0)
+
+	var stored_after: Variant = state.active_wave_objective
+	_expect(
+		failures,
+		"ai objective: no live objective after maintain",
+		not NodeSafety.is_alive_node(stored_after)
+	)
+	_expect(
+		failures,
+		"ai objective: stale objective cleared from SoT",
+		stored_after == null
+	)
+	_expect(
+		failures,
+		"ai objective: position fallback retained after free",
+		EnemyArmyCommand.get_attack_objective_position() != Vector3.ZERO
+	)
+
+	EnemyArmyCommand.reset_match_state()
+	EnemyArmyCommand.unbind_match_composition()
+	state.queue_free()
+	await _settle()

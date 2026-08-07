@@ -347,7 +347,7 @@ static var _active_wave_start_unit_count: int:
 	set(value):
 		_rt().active_wave_start_unit_count = value
 
-static var _active_wave_objective: Node3D:
+static var _active_wave_objective: Variant:
 	get:
 		return _rt().active_wave_objective
 	set(value):
@@ -393,7 +393,7 @@ static var _finishing_mode_eval_timer: float:
 	set(value):
 		_rt().finishing_mode_eval_timer = value
 
-static var _last_finishing_objective: Node3D:
+static var _last_finishing_objective: Variant:
 	get:
 		return _rt().last_finishing_objective
 	set(value):
@@ -579,7 +579,7 @@ static var _attack_wave_target_position: Vector3:
 	set(value):
 		_rt().attack_wave_target_position = value
 
-static var _attack_wave_target_node: Node3D:
+static var _attack_wave_target_node: Variant:
 	get:
 		return _rt().attack_wave_target_node
 	set(value):
@@ -2297,7 +2297,7 @@ static func try_begin_attack_wave_preparation(
 	_attack_wave_units = wave_units.duplicate()
 	_attack_wave_min_non_hero_units = min_non_hero_units
 	_attack_wave_target_position = target_position
-	_attack_wave_target_node = NodeSafety.safe_node(target_node) as Node3D
+	_attack_wave_target_node = NodeSafety.safe_node(target_node)
 	_attack_wave_staging_point = resolve_attack_staging_point(tree, rally_position, target_position)
 	_attack_wave_gather_pull_timer = 0.0
 	_attack_wave_hero_wait_timer = 0.0
@@ -2551,12 +2551,13 @@ static func _clear_attack_wave_unit_missions() -> void:
 
 
 static func _commit_attack_wave_target(target_node: Node3D, target_position: Vector3) -> void:
-	_attack_wave_target_node = NodeSafety.safe_node(target_node) as Node3D
+	var safe_target: Variant = NodeSafety.safe_node(target_node)
+	_attack_wave_target_node = safe_target
 	_attack_wave_target_position = target_position
 	_attack_wave_target_committed_until_msec = (
 		Time.get_ticks_msec() + int(ATTACK_WAVE_TARGET_COMMITMENT_SECONDS * 1000.0)
 	)
-	set_attack_objective(_attack_wave_target_node, _attack_wave_target_position)
+	set_attack_objective(safe_target, _attack_wave_target_position)
 
 
 static func _should_refresh_attack_wave_orders() -> bool:
@@ -3021,8 +3022,8 @@ static func begin_offensive_wave(wave_units: Array) -> void:
 		_transition_attack_wave_state(AttackWaveState.ENGAGING, "offensive wave committed")
 
 
-static func set_attack_objective(objective: Node3D, position: Vector3) -> void:
-	_active_wave_objective = NodeSafety.safe_node(objective) as Node3D
+static func set_attack_objective(objective: Variant, position: Vector3) -> void:
+	_active_wave_objective = NodeSafety.safe_node(objective)
 	_active_wave_objective_position = position
 	_objective_reissue_timer = 0.0
 	_objective_stuck_timer = 0.0
@@ -3117,6 +3118,8 @@ static func maintain_attack_wave_objective(tree: SceneTree, delta: float) -> voi
 
 	var previous_objective_ref: Variant = _active_wave_objective
 	var previous_objective_alive: bool = NodeSafety.is_alive_node(previous_objective_ref)
+	if previous_objective_ref != null and not previous_objective_alive:
+		_active_wave_objective = null
 	if previous_objective_alive and previous_objective_ref is Building:
 		previous_objective_alive = _is_living_building(previous_objective_ref as Building)
 
@@ -4842,7 +4845,7 @@ static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
 		objective_position = objective.get("position", Vector3.ZERO)
 		var objective_node_ref: Variant = objective.get("node")
 		if NodeSafety.is_alive_node(objective_node_ref) and objective_node_ref is Node3D:
-			set_attack_objective(objective_node_ref as Node3D, objective_position)
+			set_attack_objective(objective_node_ref, objective_position)
 
 	if objective_position == Vector3.ZERO:
 		return
@@ -4870,7 +4873,12 @@ static func pull_finishing_reinforcements_to_attack(tree: SceneTree) -> void:
 	if find_living_enemy_hero(tree) == null:
 		return
 
-	var objective_node: Node3D = NodeSafety.safe_node(_active_wave_objective) as Node3D
+	var objective_ref: Variant = _active_wave_objective
+	var objective_node: Node3D = null
+	if NodeSafety.is_alive_node(objective_ref) and objective_ref is Node3D:
+		objective_node = objective_ref as Node3D
+	elif objective_ref != null:
+		_active_wave_objective = null
 	if NodeSafety.is_alive_node(objective_node):
 		_command_focus_attack_objective(
 			reinforcements,
@@ -5445,15 +5453,16 @@ static func resolve_attack_objective(tree: SceneTree, fallback_position: Vector3
 	if EnemyAggression.should_prefer_town_hall_focus():
 		return EnemyAggression.resolve_aggression_attack_objective(tree, fallback_position)
 
-	if (
-		_attack_wave_target_node != null
-		and NodeSafety.is_alive_node(_attack_wave_target_node)
-		and Time.get_ticks_msec() < _attack_wave_target_committed_until_msec
+	var committed_target_ref: Variant = _attack_wave_target_node
+	if NodeSafety.is_alive_node(committed_target_ref) and (
+		Time.get_ticks_msec() < _attack_wave_target_committed_until_msec
 	):
 		return {
-			"node": _attack_wave_target_node,
+			"node": committed_target_ref,
 			"position": _attack_wave_target_position,
 		}
+	if committed_target_ref != null and not NodeSafety.is_alive_node(committed_target_ref):
+		_attack_wave_target_node = null
 
 	## During aggression, do not chase mid-map armies — go for the base.
 	if not EnemyAggression.is_aggression_mode_active():
@@ -6072,6 +6081,8 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				PerfCounters.record_ai_order()
 				issued += 1
 				continue
+			elif wave_objective_ref != null:
+				_active_wave_objective = null
 
 		if use_attack_move:
 			_issue_attack_move(unit, target)
@@ -7874,13 +7885,16 @@ static func _find_nearest_living_player_worker(
 
 
 static func _has_living_attack_building_objective() -> bool:
-	if not NodeSafety.is_alive_node(_active_wave_objective):
+	var objective_ref: Variant = _active_wave_objective
+	if not NodeSafety.is_alive_node(objective_ref):
+		if objective_ref != null:
+			_active_wave_objective = null
 		return false
 
-	if not _active_wave_objective is Building:
+	if not objective_ref is Building:
 		return false
 
-	return _is_living_building(_active_wave_objective as Building)
+	return _is_living_building(objective_ref as Building)
 
 
 static func _is_living_building(building) -> bool:
@@ -8065,7 +8079,13 @@ static func _log_finishing_objective(objective_node: Node3D) -> void:
 	if not NodeSafety.is_alive_node(objective_node):
 		return
 
-	if objective_node == _last_finishing_objective:
+	var last_ref: Variant = _last_finishing_objective
+	if not NodeSafety.is_alive_node(last_ref):
+		if last_ref != null:
+			_last_finishing_objective = null
+		last_ref = null
+
+	if objective_node == last_ref:
 		return
 
 	_last_finishing_objective = objective_node
