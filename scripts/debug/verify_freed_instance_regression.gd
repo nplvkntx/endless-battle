@@ -39,6 +39,7 @@ func _ready() -> void:
 	await _verify_match_restart_clears_stale_refs(failures)
 	await _verify_ai_attack_objective_clears_freed(failures)
 	await _verify_ai_exec_objective_clears_freed(failures)
+	await _verify_ai_command_authority_clears_freed(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -599,5 +600,84 @@ func _verify_ai_exec_objective_clears_freed(failures: PackedStringArray) -> void
 
 	EnemyArmyCommand.reset_match_state()
 	EnemyArmyCommand.unbind_match_composition()
+	state.queue_free()
+	await _settle()
+
+
+func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> void:
+	## Persistent military command-authority refs must be readable as Variant after free,
+	## validated before cast, and cleared by the real getters without runtime errors.
+	var state := AIPlayerState.new()
+	add_child(state)
+
+	var authority := Node.new()
+	authority.name = "TempMilitaryCommandAuthority"
+	add_child(authority)
+	await _settle()
+
+	EnemyArmyCommand.bind_match_composition(state, authority)
+	_expect(
+		failures,
+		"command authority: EAC declared live after bind",
+		EnemyArmyCommand.get_declared_command_authority() == authority
+	)
+	_expect(
+		failures,
+		"command authority: AIPlayerState live after bind",
+		state.get_military_command_authority() == authority
+	)
+	_expect(
+		failures,
+		"command authority: name preserved after bind",
+		state.military_command_authority_name == &"TempMilitaryCommandAuthority"
+	)
+
+	var composition := MatchCompositionRoot.new()
+	## Keep off-tree so _enter_tree/_ready do not redeclare/bind over the fixture.
+	composition.military_command_authority = authority
+	_expect(
+		failures,
+		"command authority: MatchCompositionRoot live after assign",
+		composition.get_military_command_authority() == authority
+	)
+
+	authority.queue_free()
+	await _settle()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	_expect(
+		failures,
+		"command authority: EAC getter null after free",
+		EnemyArmyCommand.get_declared_command_authority() == null
+	)
+	_expect(
+		failures,
+		"command authority: AIPlayerState getter null after free",
+		state.get_military_command_authority() == null
+	)
+	_expect(
+		failures,
+		"command authority: MatchCompositionRoot getter null after free",
+		composition.get_military_command_authority() == null
+	)
+	_expect(
+		failures,
+		"command authority: EAC stale storage cleared",
+		EnemyArmyCommand._declared_command_authority == null
+	)
+	_expect(
+		failures,
+		"command authority: AIPlayerState stale storage cleared",
+		state.get("_military_command_authority") == null
+	)
+	_expect(
+		failures,
+		"command authority: MatchCompositionRoot stale storage cleared",
+		composition.military_command_authority == null
+	)
+
+	EnemyArmyCommand.unbind_match_composition()
+	composition.free()
 	state.queue_free()
 	await _settle()

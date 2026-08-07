@@ -24,7 +24,8 @@ var build_manager: Node = null
 var match_manager: Node = null
 
 ## Sole node allowed to own main-army order issuance for this match.
-var military_command_authority: Node = null
+## Variant so freed authority can be read before validation (typed Node getters cast first).
+var military_command_authority: Variant = null
 
 
 func _enter_tree() -> void:
@@ -60,8 +61,10 @@ func get_ai_player_state() -> AIPlayerState:
 
 
 func get_military_command_authority() -> Node:
-	if military_command_authority != null and is_instance_valid(military_command_authority):
-		return military_command_authority
+	var raw: Variant = military_command_authority
+	if raw != null and is_instance_valid(raw) and raw is Node:
+		return raw as Node
+	military_command_authority = null
 	return null
 
 

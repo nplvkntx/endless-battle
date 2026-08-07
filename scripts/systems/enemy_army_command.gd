@@ -741,16 +741,21 @@ static var _allow_hostile_engagement: bool:
 ## Match composition binding. Null outside an active MatchCompositionRoot.
 ## Migrated bags are SoT on AIPlayerState via _rt() — no dual-write.
 static var _bound_player_state: AIPlayerState = null
-static var _declared_command_authority: Node = null
+## Variant so freed authority can be read before validation (typed Node getters cast first).
+static var _declared_command_authority: Variant = null
 
 
 
-static func bind_match_composition(state: AIPlayerState, authority: Node) -> void:
+static func bind_match_composition(state: AIPlayerState, authority: Variant) -> void:
 	_bound_player_state = state
-	_declared_command_authority = authority
+	var raw: Variant = authority
+	if raw != null and is_instance_valid(raw) and raw is Node:
+		_declared_command_authority = raw as Node
+	else:
+		_declared_command_authority = null
 	## SoT is the bound AIPlayerState via _rt() — no dual-write copy.
 	if state != null:
-		state.set_military_command_authority(authority)
+		state.set_military_command_authority(_declared_command_authority)
 
 
 static func unbind_match_composition() -> void:
@@ -771,8 +776,9 @@ static func get_bound_ai_player_state() -> AIPlayerState:
 
 
 static func get_declared_command_authority() -> Node:
-	if _declared_command_authority != null and is_instance_valid(_declared_command_authority):
-		return _declared_command_authority
+	var raw: Variant = _declared_command_authority
+	if raw != null and is_instance_valid(raw) and raw is Node:
+		return raw as Node
 	_declared_command_authority = null
 	return null
 
@@ -994,7 +1000,7 @@ static func reset_match_state() -> void:
 	EnemyUnitMission.reset_match_state()
 	var bound_state: AIPlayerState = get_bound_ai_player_state()
 	if bound_state != null:
-		bound_state.set_military_command_authority(_declared_command_authority)
+		bound_state.set_military_command_authority(get_declared_command_authority())
 
 
 ## Verify/debug: seed frame-local caches so reset can prove they do not survive.

@@ -140,7 +140,8 @@ var objective_eval_timer: float = 0.0
 var objective_stuck_check_timer: float = 0.0
 
 ## Declared sole military order issuer for this match (ArmyCommanderV2 under V2).
-var _military_command_authority: Node = null
+## Variant so freed authority can be read before validation (typed Node getters cast first).
+var _military_command_authority: Variant = null
 var military_command_authority_name: StringName = &""
 
 ## Intent bus — providers publish; director arbitrates (priority / TTL / ownership).
@@ -247,18 +248,21 @@ func reset() -> void:
 	clear_intents()
 
 
-func set_military_command_authority(authority: Node) -> void:
-	if authority == null or not is_instance_valid(authority):
+func set_military_command_authority(authority: Variant) -> void:
+	var raw: Variant = authority
+	if raw == null or not is_instance_valid(raw) or not raw is Node:
 		_military_command_authority = null
 		military_command_authority_name = &""
 		return
-	_military_command_authority = authority
-	military_command_authority_name = authority.name
+	var node: Node = raw as Node
+	_military_command_authority = node
+	military_command_authority_name = node.name
 
 
 func get_military_command_authority() -> Node:
-	if _military_command_authority != null and is_instance_valid(_military_command_authority):
-		return _military_command_authority
+	var raw: Variant = _military_command_authority
+	if raw != null and is_instance_valid(raw) and raw is Node:
+		return raw as Node
 	_military_command_authority = null
 	return null
 
