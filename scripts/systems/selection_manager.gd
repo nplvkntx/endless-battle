@@ -603,16 +603,21 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 		return
 
 	# Formation-aware destinations when any selected military unit is formed.
-	if FormationManager.issue_formation_ground_order(
-		commandable_units,
-		ground_position,
-		&"move",
-		queued
+	# Temporarily bypassed to isolate movement regression (formation system kept intact).
+	if (
+		not SharedSquadNavigation.are_player_formations_disabled()
+		and FormationManager.issue_formation_ground_order(
+			commandable_units,
+			ground_position,
+			&"move",
+			queued
+		)
 	):
 		CommandFeedback.show_move_marker(ground_position)
 		return
 
 	# Ordinary unformed multi-select: one shared strategic corridor + unique slots.
+	# With formations disabled: shared corridor + one destination for every unit.
 	if (
 		commandable_units.size() > 1
 		and SharedSquadNavigation.is_shared_navigation_enabled()
@@ -630,6 +635,14 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 			return
 
 	commandable_units.sort_custom(_compare_units_by_instance_id)
+	if SharedSquadNavigation.are_player_formations_disabled():
+		for unit: Unit in commandable_units:
+			if unit is Worker and not queued:
+				(unit as Worker).cancel_gathering()
+			unit.issue_order(UnitOrder.move(ground_position), queued)
+		CommandFeedback.show_move_marker(ground_position)
+		return
+
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()
@@ -689,11 +702,14 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 	if commandable_units.is_empty():
 		return
 
-	if FormationManager.issue_formation_ground_order(
-		commandable_units,
-		ground_position,
-		&"attack_move",
-		queued
+	if (
+		not SharedSquadNavigation.are_player_formations_disabled()
+		and FormationManager.issue_formation_ground_order(
+			commandable_units,
+			ground_position,
+			&"attack_move",
+			queued
+		)
 	):
 		CommandFeedback.show_attack_move_marker(ground_position)
 		return
@@ -725,6 +741,22 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 			return
 
 	commandable_units.sort_custom(_compare_units_by_instance_id)
+	if SharedSquadNavigation.are_player_formations_disabled():
+		var issued_attack_move_flat := false
+		for unit: Unit in commandable_units:
+			if _is_combat_order_unit(unit):
+				unit.issue_order(UnitOrder.attack_move(ground_position), queued)
+				issued_attack_move_flat = true
+			else:
+				if unit is Worker and not queued:
+					(unit as Worker).cancel_gathering()
+				unit.issue_order(UnitOrder.move(ground_position), queued)
+		if issued_attack_move_flat:
+			CommandFeedback.show_attack_move_marker(ground_position)
+		else:
+			CommandFeedback.show_move_marker(ground_position)
+		return
+
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
 		commandable_units.size()

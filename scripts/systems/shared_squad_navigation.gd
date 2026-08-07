@@ -3,6 +3,11 @@ extends Node
 ## Centralized shared squad navigation: one strategic route per group command,
 ## stable role slots, staggered local follower destinations.
 
+## Temporary debug switch: bypass player formation slots / continuous formation
+## corrections so Move and Attack-Move use one shared destination only.
+## AI squads are unaffected. Do not delete formation systems — flip this off to restore.
+const DEBUG_DISABLE_PLAYER_FORMATIONS := true
+
 const ANCHOR_TICK_INTERVAL := 0.25
 const UNIT_UPDATE_BUDGET_PER_SQUAD := 5
 const DEST_BUCKET_SIZE := 2.0
@@ -122,6 +127,11 @@ func _reset_player_move_telemetry() -> void:
 
 func is_shared_navigation_enabled() -> bool:
 	return MilitaryAIConfig.is_shared_squad_nav_enabled()
+
+
+## True while player Move/Attack-Move skip formation slots and steer to one destination.
+func are_player_formations_disabled() -> bool:
+	return DEBUG_DISABLE_PLAYER_FORMATIONS
 
 
 func get_squad_for_unit(unit: Variant) -> SquadNavContext:
@@ -371,6 +381,9 @@ func issue_formation_command(
 	}
 	if not is_shared_navigation_enabled():
 		return result
+	## Temporary: player formation ground orders are routed through group command instead.
+	if DEBUG_DISABLE_PLAYER_FORMATIONS:
+		return issue_player_group_command(members, destination, order_kind, false)
 	if members.size() <= 1 or destination == Vector3.ZERO or group == null:
 		return result
 
@@ -433,9 +446,15 @@ func issue_player_group_command(
 	if ordered_units.size() <= 1 or destination == Vector3.ZERO:
 		return result
 
-	# Shift-queued: stable unique slots only. Do not start a live shared route yet.
+	# Shift-queued: store destinations only. Do not start a live shared route yet.
 	if queued:
 		result["handled"] = true
+		if DEBUG_DISABLE_PLAYER_FORMATIONS:
+			for unit: Variant in ordered_units:
+				if not NodeSafety.is_alive_node(unit) or not unit is Unit:
+					continue
+				_issue_unit_ground_order(unit as Unit, destination, order_kind, true)
+			return result
 		var spacing: float = _compute_member_spacing(ordered_units)
 		var slot_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 			destination, ordered_units.size(), spacing
@@ -555,7 +574,13 @@ func _create_squad_context(
 
 	ctx.recompute_anchor_median()
 	ctx.last_progress_position = ctx.anchor_position
-	_assign_stable_slots(ctx, ordered_units, group)
+	if is_player and DEBUG_DISABLE_PLAYER_FORMATIONS:
+		## No formation / grid slots — every member shares the clicked destination.
+		ctx.uses_formation_layout = false
+		ctx.slot_locals.clear()
+		ctx.formation_size = ordered_units.size()
+	else:
+		_assign_stable_slots(ctx, ordered_units, group)
 	_calculate_shared_route(ctx, ordered_units)
 	_bind_members(ctx, ordered_units)
 	_squads[ctx.squad_id] = ctx
@@ -625,6 +650,16 @@ func _freeze_player_arrival_slots(ctx: SquadNavContext) -> void:
 	face.y = 0.0
 	if face.length_squared() >= 0.01:
 		ctx.formation_forward = face.normalized()
+
+	## Debug baseline: every unit shares the accepted destination (no slot offsets).
+	if DEBUG_DISABLE_PLAYER_FORMATIONS:
+		for unit_id: int in ctx.member_ids:
+			ctx.final_arrival_slots[unit_id] = accepted
+		ctx.arrival_slots_frozen = true
+		if ctx.is_player_squad:
+			_player_diag["stable_slot_count"] = 0
+			_player_diag["slot_generation_count"] = 0
+		return
 
 	var saved_anchor: Vector3 = ctx.anchor_position
 	var saved_compressed: bool = ctx.compressed_passage
@@ -820,6 +855,9 @@ func _tick_squads(delta: float) -> void:
 func _tick_player_squad(ctx: SquadNavContext, delta: float) -> void:
 	_tick_target_search(ctx, delta)
 	_note_player_squad_progress(ctx)
+	## Debug baseline: never replace movement targets after the initial issue.
+	if DEBUG_DISABLE_PLAYER_FORMATIONS:
+		return
 	if _detect_player_squad_stall(ctx):
 		_recover_player_squad_stall(ctx)
 
@@ -831,6 +869,14 @@ func _note_player_squad_progress(ctx: SquadNavContext) -> void:
 	var median: Vector3 = _compute_members_median(members)
 	if _horizontal_distance(median, ctx.last_progress_position) >= PROGRESS_EPSILON:
 		ctx.note_progress(median)
+	## Advance shared-route waypoint index for debug telemetry only (no retargeting).
+	if DEBUG_DISABLE_PLAYER_FORMATIONS and not ctx.route_waypoints.is_empty():
+		while (
+			ctx.waypoint_index < ctx.route_waypoints.size() - 1
+			and _horizontal_distance(median, ctx.route_waypoints[ctx.waypoint_index])
+			<= WAYPOINT_REACH_DISTANCE
+		):
+			ctx.waypoint_index += 1
 
 
 func _compute_members_median(members: Array) -> Vector3:

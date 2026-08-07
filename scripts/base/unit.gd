@@ -634,6 +634,22 @@ func get_player_squad_clicked_destination() -> Vector3:
 	return _player_squad_clicked_destination
 
 
+## Debug-only: current NavigationAgent3D path polyline (empty when unused).
+func get_debug_navigation_path() -> PackedVector3Array:
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		return PackedVector3Array()
+	return _navigation_agent.get_current_navigation_path()
+
+
+## Debug-only: true when the unit has no active move target or the agent finished.
+func is_debug_destination_reached() -> bool:
+	if not has_move_target:
+		return true
+	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
+		return false
+	return _navigation_agent.is_navigation_finished()
+
+
 func _invalidate_movement_generation() -> void:
 	_movement_generation += 1
 	_nav_velocity_request_generation = -1
