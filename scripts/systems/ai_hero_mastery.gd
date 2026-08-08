@@ -932,7 +932,9 @@ func _handle_escape_or_return(hero: Hero, situation: Dictionary, now: float) -> 
 	_last_micro_move_at = now
 	## Under V2 never call command_retreat_hero - it can initiate full-army retreat.
 	if VariantUtils.to_bool(situation.get("military_ai_v2", false)):
+		EnemyArmyCommand.push_diag_order_source("AIHeroMastery.strategic")
 		_micro_hold_toward(hero, destination, situation)
+		EnemyArmyCommand.pop_diag_order_source()
 		return
 	EnemyArmyCommand.command_retreat_hero(hero, destination)
 
@@ -992,7 +994,9 @@ func _apply_role_positioning(hero: Hero, situation: Dictionary, now: float) -> v
 			return
 
 	_last_micro_move_at = now
+	EnemyArmyCommand.push_diag_order_source("AIHeroMastery.strategic")
 	_micro_hold_toward(hero, anchor, situation)
+	EnemyArmyCommand.pop_diag_order_source()
 
 
 func _issue_attack_on_focus(hero: Hero, focus: Node3D) -> void:

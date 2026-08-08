@@ -60,7 +60,7 @@ ArmyCommanderV2              sole executable military authority
 EnemyArmyCommand             shared order bus / unit APIs
 ```
 
-**Invariant:** `MilitaryDirectorV2` never calls `EnemyArmyCommand.issue_*` / `command_*` / `with_authorized_orders`. Watchdog stall recovery goes through `ArmyCommanderV2.execute_watchdog_order_refresh()` → `_issue_stall_recovery_orders()`. Cancelled or completed missions are rejected so stale recovery cannot re-issue orders. Match reset clears director watchdog flags and commander reissue timers.
+**Invariant:** `MilitaryDirectorV2` never calls `EnemyArmyCommand.issue_*` / `command_*` / `with_authorized_orders`. Watchdog stall recovery goes through `ArmyCommanderV2.execute_watchdog_order_refresh()` → `_issue_stall_recovery_orders()`. Cancelled or completed missions are rejected so stale recovery cannot re-issue orders. Match reset clears director watchdog flags and commander reissue timers. Legacy `EnemyArmyCommand.tick_mission_watchdog` is a no-op while V2 is enabled (it previously competed with commander orders via `tick_perf_diagnostics`).
 
 ---
 

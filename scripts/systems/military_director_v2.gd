@@ -35,6 +35,8 @@ const V2_CREEP_MEDIUM_POWER_THRESHOLD: int = 170
 
 var _state: State = State.IDLE
 var _mission: ArmyMissionV2 = null
+## Increments each time a new ArmyMissionV2 payload is published (diagnostic reuse).
+var _mission_generation: int = 0
 var _last_transition_reason: String = "match start"
 var _match_start_msec: int = 0
 var _tick_timer: float = 0.0
@@ -121,7 +123,8 @@ func _ready() -> void:
 func reset_match_state() -> void:
 	_state = State.IDLE
 	_last_transition_reason = "match start"
-	_mission = ArmyMissionV2.new(
+	_mission_generation = 0
+	_publish_new_mission(
 		ArmyMissionV2.MissionType.IDLE,
 		Vector3.ZERO,
 		null,
@@ -410,6 +413,27 @@ func get_mission() -> ArmyMissionV2:
 	return _mission
 
 
+func get_mission_generation() -> int:
+	return _mission_generation
+
+
+func _publish_new_mission(
+	mission_type: ArmyMissionV2.MissionType,
+	target_position: Vector3,
+	target_object: Variant,
+	priority: int,
+	reason: String
+) -> void:
+	_mission_generation += 1
+	_mission = ArmyMissionV2.new(
+		mission_type,
+		target_position,
+		target_object,
+		priority,
+		reason
+	)
+
+
 func get_last_transition_reason() -> String:
 	return _last_transition_reason
 
@@ -669,7 +693,7 @@ func _transition_to(
 			if EnemyArmyCommand.is_creeping_executable_active():
 				EnemyArmyCommand.clear_executable_mission("creep state updated")
 		_last_transition_reason = reason if not reason.is_empty() else "unspecified"
-		_mission = ArmyMissionV2.new(
+		_publish_new_mission(
 			next_mission_type,
 			target_position,
 			safe_target,
@@ -726,7 +750,7 @@ func _transition_to(
 
 	_state = next_state
 	_last_transition_reason = reason if not reason.is_empty() else "unspecified"
-	_mission = ArmyMissionV2.new(
+	_publish_new_mission(
 		next_mission_type,
 		target_position,
 		safe_target,
@@ -5341,6 +5365,7 @@ func get_rts_diagnostic_snapshot() -> Dictionary:
 			if _mission != null
 			else "-"
 		),
+		"mission_generation": _mission_generation,
 		"mission_age": _mission.get_age_seconds() if _mission != null else 0.0,
 		"transition_reason": _last_transition_reason,
 		"objective": objective_label,

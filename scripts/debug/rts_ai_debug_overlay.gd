@@ -262,7 +262,7 @@ func _update_panels() -> void:
 	var has_unit: bool = unit != null
 	_apply_layout(has_unit)
 
-	_label.text = _format_global_panel(snap, commander, has_unit)
+	_label.text = _format_global_panel(snap, commander, has_unit, unit)
 	_unit_label.text = _format_unit_panel(tree, unit, director, snap, has_unit)
 	_update_world_labels(tree, director, selection, snap)
 
@@ -283,7 +283,12 @@ func _bb_header(text: String) -> String:
 	return "[color=#7ec8ff]%s[/color]" % text
 
 
-func _format_global_panel(snap: Dictionary, commander: ArmyCommanderV2, has_unit: bool) -> String:
+func _format_global_panel(
+	snap: Dictionary,
+	commander: ArmyCommanderV2,
+	has_unit: bool,
+	selected_unit: Unit = null
+) -> String:
 	if snap.is_empty():
 		return _bb_primary("%s\n(V2 director unavailable)" % _bb_header("AI BRAIN"))
 
@@ -422,7 +427,17 @@ func _format_global_panel(snap: Dictionary, commander: ArmyCommanderV2, has_unit
 			_short(String(snap.get("last_order_label", "-")), 20),
 			_format_age(float(snap.get("last_order_age", INF))),
 		])
-		secondary.append("Repl(2s):%d Conflict:UNKNOWN" % _count_order_replacements_2s())
+		var army_conflict := "UNKNOWN"
+		if selected_unit != null and selected_unit.has_method("get_strategic_order_provenance"):
+			army_conflict = String(
+				selected_unit.get_strategic_order_provenance().get("conflict", "UNKNOWN")
+			)
+		secondary.append(
+			"Repl(3s):%d Conflict:%s" % [
+				_count_order_replacements_2s(),
+				army_conflict,
+			]
+		)
 		chunks.append(_bb_secondary("\n".join(secondary)))
 
 	## Events stay smaller than primary diagnostics; cap feed length by space.
@@ -479,6 +494,28 @@ func _format_unit_panel(
 		if alive_t != null:
 			order_target = alive_t.name
 
+	var prov: Dictionary = {}
+	if unit.has_method("get_strategic_order_provenance"):
+		prov = unit.get_strategic_order_provenance()
+	var src: String = String(prov.get("source", "UNKNOWN"))
+	var ord_type: String = String(prov.get("type", order_text))
+	var ord_age: float = float(prov.get("age", INF))
+	var prev_src: String = String(prov.get("prev_source", "-"))
+	var prev_type: String = String(prov.get("prev_type", "-"))
+	var prev_age: float = float(prov.get("prev_age", INF))
+	var repl_3s: int = int(prov.get("replacements_3s", 0))
+	var conflict: String = String(prov.get("conflict", "UNKNOWN"))
+	var mission_gen: int = int(snap.get("mission_generation", 0))
+	var unit_mission_gen: int = int(prov.get("mission_gen", 0))
+	var gen_text: String = str(unit_mission_gen) if unit_mission_gen > 0 else str(mission_gen)
+	var dest: Vector3 = unit.get_movement_destination()
+	var prov_target: String = "-"
+	var prov_dest: Vector3 = prov.get("target", Vector3.ZERO) as Vector3
+	if prov_dest != Vector3.ZERO:
+		prov_target = "(%.0f, %.0f)" % [prov_dest.x, prov_dest.z]
+	elif unit.has_move_target:
+		prov_target = "(%.0f, %.0f)" % [dest.x, dest.z]
+
 	var idle_reason: String = "-"
 	if (
 		int(snap.get("idle_military", 0)) > 0
@@ -487,7 +524,6 @@ func _format_unit_panel(
 	):
 		idle_reason = _derive_idle_reason(unit, ownership, mission_label, _read_nav_state(unit))
 
-	var dest: Vector3 = unit.get_movement_destination()
 	var dest_text: String = "-"
 	if unit.has_move_target:
 		dest_text = "(%.0f, %.0f)" % [dest.x, dest.z]
@@ -500,10 +536,20 @@ func _format_unit_panel(
 		"%s #%d" % [_short(unit.name, 16), unit.get_instance_id()],
 		"Squad: %s" % squad_label,
 		"Mission: %s" % mission_label,
+		"Mission gen: %s" % gen_text,
 		"Order: %s" % _short(order_text, 28 if _layout_compact else 40),
 		"Objective: %s" % _short(String(snap.get("objective", "-")), 24),
 		"Target: %s" % _read_attack_target_name(unit),
 		"Idle: %s" % idle_reason,
+		_bb_header("ORDER AUTHORITY"),
+		"Cur: %s" % _short(ord_type, 18),
+		"Source: %s" % _short(src, 22),
+		"Target: %s" % prov_target,
+		"Age: %s" % _format_age(ord_age),
+		"Prev: %s / %s" % [_short(prev_src, 14), _short(prev_type, 12)],
+		"Prev age: %s" % _format_age(prev_age),
+		"Repl(3s): %d" % repl_3s,
+		"CONFLICT: %s" % conflict,
 		_bb_header("NAV"),
 		"Dest: %s" % dest_text,
 		"Blocked: %s" % String(nav.get("blocked", "NO")),
@@ -519,9 +565,6 @@ func _format_unit_panel(
 			String(combat.get("can_attack", "-")),
 		],
 		"Atk state: %s" % String(combat.get("state", "-")),
-		_bb_header("LAST ORDER"),
-		"src:UNKNOWN type:%s" % _short(order_text, 18),
-		"age:UNKNOWN conf:UNKNOWN",
 	])
 
 	var chunks: PackedStringArray = PackedStringArray([_bb_primary("\n".join(primary))])
@@ -547,7 +590,7 @@ func _format_unit_panel(
 				String(combat.get("cooldown", "-")),
 			],
 			"Ord tgt: %s" % order_target,
-			"Repl(2s): %d" % _count_order_replacements_2s(),
+			"Repl(3s): %d Conflict:%s" % [repl_3s, conflict],
 		])
 		var route_fail: String = EnemyArmyCommand.get_last_squad_route_failure_reason()
 		if not route_fail.is_empty():

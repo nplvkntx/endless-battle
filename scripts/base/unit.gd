@@ -144,9 +144,164 @@ var _issuing_order: bool = false
 ## Combat stealth — skipped by auto-targeting; area damage and manual orders still work.
 var _combat_hidden: bool = false
 
+## Debug-only strategic order provenance. Observational — never influences gameplay.
+const _DIAG_ORDER_HISTORY_MAX := 6
+var _diag_order_source: String = ""
+var _diag_order_type: String = ""
+var _diag_order_msec: int = 0
+var _diag_order_target: Vector3 = Vector3.ZERO
+var _diag_order_mission_gen: int = 0
+var _diag_prev_order_source: String = ""
+var _diag_prev_order_type: String = ""
+var _diag_prev_order_msec: int = 0
+var _diag_prev_order_mission_gen: int = 0
+## Bounded recent strategic replacements: [{source, type, msec, mission_gen}, ...]
+var _diag_order_history: Array = []
+
 
 func is_combat_hidden() -> bool:
 	return _combat_hidden
+
+
+## Observational strategic-order provenance for O overlay / authority regressions.
+func record_strategic_order_provenance_for_tests(
+	source: String,
+	order_type: String,
+	destination: Vector3 = Vector3.ZERO,
+	mission_gen: int = 0
+) -> void:
+	EnemyArmyCommand.push_diag_order_source(source, mission_gen)
+	_record_strategic_order_provenance(StringName(order_type), destination)
+	EnemyArmyCommand.pop_diag_order_source()
+
+
+func get_strategic_order_provenance() -> Dictionary:
+	var now_msec: int = Time.get_ticks_msec()
+	return {
+		"source": _diag_order_source if not _diag_order_source.is_empty() else "UNKNOWN",
+		"type": _diag_order_type if not _diag_order_type.is_empty() else "NONE",
+		"msec": _diag_order_msec,
+		"age": (
+			float(now_msec - _diag_order_msec) / 1000.0
+			if _diag_order_msec > 0
+			else INF
+		),
+		"target": _diag_order_target,
+		"mission_gen": _diag_order_mission_gen,
+		"prev_source": (
+			_diag_prev_order_source if not _diag_prev_order_source.is_empty() else "-"
+		),
+		"prev_type": _diag_prev_order_type if not _diag_prev_order_type.is_empty() else "-",
+		"prev_msec": _diag_prev_order_msec,
+		"prev_age": (
+			float(now_msec - _diag_prev_order_msec) / 1000.0
+			if _diag_prev_order_msec > 0
+			else INF
+		),
+		"prev_mission_gen": _diag_prev_order_mission_gen,
+		"replacements_3s": count_strategic_order_replacements(3.0),
+		"conflict": get_strategic_order_conflict_status(),
+	}
+
+
+func count_strategic_order_replacements(window_seconds: float = 3.0) -> int:
+	if window_seconds <= 0.0 or _diag_order_history.is_empty():
+		return 0
+	var cutoff: int = Time.get_ticks_msec() - int(window_seconds * 1000.0)
+	var count: int = 0
+	for entry: Variant in _diag_order_history:
+		if entry is Dictionary and int((entry as Dictionary).get("msec", 0)) >= cutoff:
+			count += 1
+	return count
+
+
+## Proven conflict = different strategic authorities replacing each other recently
+## while neither is tagged as legitimate tactical micro.
+func get_strategic_order_conflict_status() -> String:
+	if _diag_order_source.is_empty() or _diag_prev_order_source.is_empty():
+		return "UNKNOWN"
+	if _is_diag_tactical_micro_source(_diag_order_source):
+		return "NO"
+	if _is_diag_tactical_micro_source(_diag_prev_order_source):
+		return "NO"
+	if _diag_order_source == _diag_prev_order_source:
+		return "NO"
+	## Same authority family refreshes are not conflicts.
+	if _diag_strategic_authority_family(_diag_order_source) == _diag_strategic_authority_family(
+		_diag_prev_order_source
+	):
+		return "NO"
+	var age_gap: float = absf(float(_diag_order_msec - _diag_prev_order_msec) / 1000.0)
+	if age_gap > 3.0:
+		return "NO"
+	## Mission transition (different mission gens) is not automatic conflict.
+	if (
+		_diag_order_mission_gen > 0
+		and _diag_prev_order_mission_gen > 0
+		and _diag_order_mission_gen != _diag_prev_order_mission_gen
+	):
+		return "NO"
+	return "YES"
+
+
+func _record_strategic_order_provenance(order_type: StringName, destination: Vector3) -> void:
+	var source: String = EnemyArmyCommand.get_diag_order_source()
+	if source.is_empty():
+		source = "UNKNOWN"
+	var mission_gen: int = EnemyArmyCommand.get_diag_order_mission_generation()
+	var type_label: String = String(order_type)
+	## Skip no-op refresh of identical source/type/near destination.
+	if (
+		source == _diag_order_source
+		and type_label == _diag_order_type
+		and _diag_order_msec > 0
+	):
+		var delta: Vector3 = destination - _diag_order_target
+		delta.y = 0.0
+		if delta.length() <= MOVE_DEST_TOLERANCE:
+			return
+
+	if not _diag_order_source.is_empty():
+		_diag_prev_order_source = _diag_order_source
+		_diag_prev_order_type = _diag_order_type
+		_diag_prev_order_msec = _diag_order_msec
+		_diag_prev_order_mission_gen = _diag_order_mission_gen
+
+	_diag_order_source = source
+	_diag_order_type = type_label
+	_diag_order_msec = Time.get_ticks_msec()
+	_diag_order_target = destination
+	_diag_order_mission_gen = mission_gen
+
+	_diag_order_history.push_front({
+		"source": source,
+		"type": type_label,
+		"msec": _diag_order_msec,
+		"mission_gen": mission_gen,
+	})
+	while _diag_order_history.size() > _DIAG_ORDER_HISTORY_MAX:
+		_diag_order_history.pop_back()
+
+
+func _is_diag_tactical_micro_source(source: String) -> bool:
+	return source.begins_with("AIHeroMastery.micro") or source == "AIHeroMastery.micro"
+
+
+func _diag_strategic_authority_family(source: String) -> String:
+	if source.begins_with("ArmyCommanderV2"):
+		return "ArmyCommanderV2"
+	if source.begins_with("EnemyArmyCommand.watchdog"):
+		return "EnemyArmyCommand.watchdog"
+	if source.begins_with("EnemyArmyCommand.reinforcement"):
+		return "EnemyArmyCommand.reinforcement"
+	if (
+		source.begins_with("MilitaryDirectorV2")
+		or source.begins_with("EnemyArmyCommand.complete_retreat")
+	):
+		return "MilitaryDirectorV2.direct"
+	if source.begins_with("AIHeroMastery"):
+		return "AIHeroMastery"
+	return source
 
 
 func set_combat_hidden(hidden: bool) -> void:

@@ -286,6 +286,8 @@ func command_attack_move(
 	_attack_move_destination = flat_destination
 	_has_attack_move_destination = true
 	cancel_attack()
+	if urgency != RepathUrgency.PLAYER_ORDER:
+		_record_strategic_order_provenance(&"ATTACK_MOVE", flat_destination)
 	_set_move_destination(flat_destination, urgency)
 
 
@@ -408,6 +410,8 @@ func set_movement_target(
 		_clear_auto_acquire_leash()
 		cancel_attack_move()
 		cancel_attack()
+	if urgency != RepathUrgency.PLAYER_ORDER:
+		_record_strategic_order_provenance(&"MOVE", target)
 	return _set_move_destination(target, urgency)
 
 

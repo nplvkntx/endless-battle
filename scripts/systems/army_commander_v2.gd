@@ -132,7 +132,12 @@ func execute_watchdog_order_refresh() -> bool:
 
 	request_watchdog_order_refresh()
 	var squad: ArmySquadV2 = _receive_squad_from_director()
+	EnemyArmyCommand.push_diag_order_source(
+		"ArmyCommanderV2",
+		director.get_mission_generation()
+	)
 	_issue_stall_recovery_orders(director, mission, squad)
+	EnemyArmyCommand.pop_diag_order_source()
 	return true
 
 
@@ -168,10 +173,18 @@ func _process(delta: float) -> void:
 	_hero_micro_timer += delta
 	if _hero_micro_timer >= HERO_MICRO_INTERVAL_SECONDS:
 		_hero_micro_timer = 0.0
+		EnemyArmyCommand.push_diag_order_source("AIHeroMastery.micro")
 		_tick_hero_micro()
+		EnemyArmyCommand.pop_diag_order_source()
 
+	var mission_gen: int = 0
+	var director_for_gen: MilitaryDirectorV2 = _resolve_director()
+	if director_for_gen != null:
+		mission_gen = director_for_gen.get_mission_generation()
+	EnemyArmyCommand.push_diag_order_source("ArmyCommanderV2", mission_gen)
 	_execute_current_mission(delta)
 	_tick_squad_idle_guard(delta)
+	EnemyArmyCommand.pop_diag_order_source()
 	PerfCounters.record_ai_combat_update()
 
 

@@ -37,6 +37,7 @@ func _ready() -> void:
 		for key: String in [
 			"state",
 			"mission",
+			"mission_generation",
 			"decision_lines",
 			"director_power",
 			"commander_power",
@@ -54,6 +55,23 @@ func _ready() -> void:
 			failures.append("snapshot mutated director state")
 		if String(snap2.get("state", "")) != state_before:
 			failures.append("snapshot state mismatch")
+
+	## Overlay must expose ORDER AUTHORITY provenance fields (source-level).
+	var overlay_src := FileAccess.open(
+		"res://scripts/debug/rts_ai_debug_overlay.gd",
+		FileAccess.READ
+	)
+	if overlay_src == null:
+		failures.append("overlay source unreadable")
+	else:
+		var overlay_text: String = overlay_src.get_as_text()
+		overlay_src.close()
+		if not overlay_text.contains("ORDER AUTHORITY"):
+			failures.append("overlay missing ORDER AUTHORITY")
+		if not overlay_text.contains("get_strategic_order_provenance"):
+			failures.append("overlay missing provenance reader")
+		if not overlay_text.contains("CONFLICT:"):
+			failures.append("overlay missing CONFLICT")
 
 	var overlay = get_node_or_null("/root/RtsAiDebugOverlay")
 	if overlay == null:

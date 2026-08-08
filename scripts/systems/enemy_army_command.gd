@@ -745,6 +745,43 @@ static var _bound_player_state: Variant = null
 ## Variant so freed authority can be read before validation (typed Node getters cast first).
 static var _declared_command_authority: Variant = null
 
+## Debug-only strategic order provenance context (stack). Never influences gameplay.
+static var _diag_order_source_stack: Array[String] = []
+static var _diag_order_mission_gen_stack: Array[int] = []
+
+
+static func push_diag_order_source(source: String, mission_gen: int = 0) -> void:
+	_diag_order_source_stack.append(source)
+	_diag_order_mission_gen_stack.append(mission_gen)
+
+
+static func pop_diag_order_source() -> void:
+	if not _diag_order_source_stack.is_empty():
+		_diag_order_source_stack.pop_back()
+	if not _diag_order_mission_gen_stack.is_empty():
+		_diag_order_mission_gen_stack.pop_back()
+
+
+static func get_diag_order_source() -> String:
+	if _diag_order_source_stack.is_empty():
+		return ""
+	return _diag_order_source_stack[_diag_order_source_stack.size() - 1]
+
+
+static func get_diag_order_mission_generation() -> int:
+	if _diag_order_mission_gen_stack.is_empty():
+		return 0
+	return _diag_order_mission_gen_stack[_diag_order_mission_gen_stack.size() - 1]
+
+
+static func with_diag_order_source(
+	source: String,
+	callback: Callable,
+	mission_gen: int = 0
+) -> void:
+	push_diag_order_source(source, mission_gen)
+	callback.call()
+	pop_diag_order_source()
 
 
 static func bind_match_composition(state: AIPlayerState, authority: Variant) -> void:
@@ -1709,7 +1746,9 @@ static func complete_retreat_to_regroup(tree: SceneTree) -> void:
 	release_army_mode(ArmyMode.RETREATING)
 	if try_claim_army_mode(ArmyMode.REGROUPING):
 		set_rebuilding_army(true)
-		command_regroup_at_rally(tree, rally)
+		with_diag_order_source("EnemyArmyCommand.complete_retreat", func() -> void:
+			command_regroup_at_rally(tree, rally)
+		)
 		EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.RALLY, "post-retreat")
 		var recover_state: StrategicState = (
 			StrategicState.ECONOMY
@@ -4799,11 +4838,13 @@ static func assign_reinforcement_regroup(tree: SceneTree, unit) -> void:
 	if rally_position == Vector3.ZERO:
 		return
 
-	if _emergency_defense_active and _is_emergency_threat_near_base(tree, rally_position):
-		_assign_reinforcement_to_emergency_defense(tree, unit)
-		return
+	with_diag_order_source("EnemyArmyCommand.reinforcement", func() -> void:
+		if _emergency_defense_active and _is_emergency_threat_near_base(tree, rally_position):
+			_assign_reinforcement_to_emergency_defense(tree, unit)
+			return
 
-	_register_reinforcement_waiting(tree, unit, rally_position, "spawn_complete")
+		_register_reinforcement_waiting(tree, unit, rally_position, "spawn_complete")
+	)
 
 
 static func _count_pending_reinforcement_units(tree: SceneTree) -> int:
@@ -5762,6 +5803,8 @@ static func _issue_spaced_group_orders(
 					"mission": order.get("mission", mission),
 					"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
 					"priority": _mission_order_priority(mission),
+					"diag_source": get_diag_order_source(),
+					"diag_mission_gen": get_diag_order_mission_generation(),
 				})
 			var had_pending: bool = not _pending_group_orders.is_empty()
 			_enqueue_pending_group_orders(wrapped)
@@ -5803,6 +5846,8 @@ static func _issue_spaced_group_orders(
 			"mission": mission,
 			"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
 			"priority": _mission_order_priority(mission),
+			"diag_source": get_diag_order_source(),
+			"diag_mission_gen": get_diag_order_mission_generation(),
 		})
 
 	if pending_orders.is_empty():
@@ -6056,6 +6101,13 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 		if not NodeSafety.is_alive_node(unit):
 			continue
 
+		var diag_source: String = String(entry.get("diag_source", ""))
+		var diag_mission_gen: int = int(entry.get("diag_mission_gen", 0))
+		var pushed_diag: bool = false
+		if not diag_source.is_empty():
+			push_diag_order_source(diag_source, diag_mission_gen)
+			pushed_diag = true
+
 		var command_generation: int = int(entry.get("command_generation", -1))
 		var squad_id: int = int(entry.get("squad_id", -1))
 		if command_generation >= 0 and squad_id >= 0:
@@ -6065,6 +6117,8 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				or squad_ctx.squad_id != squad_id
 				or squad_ctx.command_generation != command_generation
 			):
+				if pushed_diag:
+					pop_diag_order_source()
 				continue
 
 		if (
@@ -6086,6 +6140,8 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				EnemyArmyCommandTelemetry.record_order_issued()
 				PerfCounters.record_ai_order()
 				issued += 1
+				if pushed_diag:
+					pop_diag_order_source()
 				continue
 
 		if (
@@ -6101,6 +6157,8 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 				EnemyArmyCommandTelemetry.record_order_issued()
 				PerfCounters.record_ai_order()
 				issued += 1
+				if pushed_diag:
+					pop_diag_order_source()
 				continue
 			elif wave_objective_ref != null:
 				_active_wave_objective = null
@@ -6123,6 +6181,8 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 		EnemyArmyCommandTelemetry.record_order_issued()
 		PerfCounters.record_ai_order()
 		issued += 1
+		if pushed_diag:
+			pop_diag_order_source()
 
 	return index
 
@@ -6748,6 +6808,11 @@ static func refresh_stalled_mission_order(tree: SceneTree) -> bool:
 
 
 static func tick_mission_watchdog(tree: SceneTree, delta: float) -> void:
+	## Under V2, MilitaryDirectorV2 + ArmyCommanderV2 own stall recovery.
+	## Legacy EAC mission watchdog must not independently re-order the army.
+	if MilitaryAIConfig.is_v2_enabled():
+		return
+
 	_exec_watchdog_timer += delta
 	if _exec_watchdog_timer < MISSION_WATCHDOG_INTERVAL_SECONDS:
 		return
@@ -6782,7 +6847,10 @@ static func tick_mission_watchdog(tree: SceneTree, delta: float) -> void:
 	## One safe refresh, then cancel and fall back.
 	if not _exec_watchdog_refreshed:
 		_exec_watchdog_refreshed = true
-		if refresh_stalled_mission_order(tree):
+		push_diag_order_source("EnemyArmyCommand.watchdog")
+		var refreshed: bool = refresh_stalled_mission_order(tree)
+		pop_diag_order_source()
+		if refreshed:
 			_exec_last_progress_msec = Time.get_ticks_msec()
 			EnemyAIDebug.log_once(
 				"mission_watchdog",
@@ -6790,7 +6858,9 @@ static func tick_mission_watchdog(tree: SceneTree, delta: float) -> void:
 			)
 			return
 
+	push_diag_order_source("EnemyArmyCommand.watchdog")
 	_resolve_stalled_mission_fallback(tree, units, army_center)
+	pop_diag_order_source()
 
 
 static func _resolve_stalled_mission_fallback(
