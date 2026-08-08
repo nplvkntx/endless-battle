@@ -1142,6 +1142,16 @@ func _admit_pending_reinforcements() -> void:
 	if _pending_reinforcements.is_empty():
 		return
 
+	## Heroes first — CREEP/ATTACK/REGROUP must not leave the living hero pending
+	## while soldiers form the field body alone.
+	_pending_reinforcements.sort_custom(func(a: Variant, b: Variant) -> bool:
+		var a_hero: bool = a is Hero
+		var b_hero: bool = b is Hero
+		if a_hero == b_hero:
+			return false
+		return a_hero
+	)
+
 	var remaining: Array = []
 	for entry: Variant in _pending_reinforcements:
 		if not ArmySquadV2.is_roster_eligible(entry as Node):

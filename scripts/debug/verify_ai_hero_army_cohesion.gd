@@ -427,6 +427,175 @@ func _ready() -> void:
 	)
 	EnemyArmyCommand._emergency_defense_active = false
 
+	## --- CASE 6: ATTACK_PLAYER must damage the live player Building objective ---
+	## Reset to a clean post-creep attack: hero + superior pike force vs undefended CC.
+	for entry: Variant in player_pikes:
+		if NodeSafety.is_alive_node(entry):
+			(entry as Node).queue_free()
+	player_pikes.clear()
+	if NodeSafety.is_alive_node(player_hero):
+		player_hero.queue_free()
+	await get_tree().process_frame
+
+	director.debug_refresh_roster_for_tests()
+	director.debug_admit_pending_for_tests()
+	squad = director.get_main_squad()
+	squad.recompute_metrics()
+	_expect(failures, "case6: hero in main squad before attack", squad.hero_present and squad.has_member(hero))
+
+	var cc_health_before: int = CombatTargetValidation.get_target_current_health(player_cc)
+	_expect(failures, "case6: player CC starts with positive HP", cc_health_before > 0)
+
+	## Place the authoritative squad on the building footprint edge (surface in range,
+	## center often outside raw melee range for outer slots — the observed failure mode).
+	var building_radius: float = 1.75
+	var collision: CollisionShape3D = player_cc.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision != null and collision.shape is BoxShape3D:
+		var box := collision.shape as BoxShape3D
+		building_radius = maxf(box.size.x, box.size.z) * 0.5
+	var edge_pos: Vector3 = player_cc.global_position + Vector3(building_radius + 0.9, 0.0, 0.0)
+	hero.global_position = edge_pos + Vector3(0.0, 0.0, 1.2)
+	var member_i: int = 0
+	for entry: Variant in squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D or entry is Hero:
+			continue
+		(entry as Node3D).global_position = edge_pos + Vector3(
+			0.15 * float(member_i % 3),
+			0.0,
+			0.7 * float(member_i)
+		)
+		member_i += 1
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	CombatTargetValidation._group_cache_frame = -1
+
+	## Prove the range gate: surface distance must be the attack metric for player CC.
+	var probe_spear: Node3D = null
+	for entry: Variant in squad.get_members_copy():
+		if entry is Spearman and NodeSafety.is_alive_node(entry):
+			probe_spear = entry as Node3D
+			break
+	_expect(failures, "case6: probe spearman present", probe_spear != null)
+	if probe_spear != null:
+		var center_dist: float = CombatTargetValidation.get_horizontal_center_distance(
+			probe_spear,
+			player_cc
+		)
+		var surface_dist: float = CombatTargetValidation.get_horizontal_attack_distance_to_surface(
+			probe_spear,
+			player_cc
+		)
+		var spear_range: float = float(probe_spear.get("attack_range"))
+		_expect(
+			failures,
+			"case6: player CC uses building surface attack distance",
+			CombatTargetValidation.uses_building_surface_attack_distance(player_cc)
+		)
+		_expect(
+			failures,
+			"case6: attack distance equals surface not center",
+			is_equal_approx(
+				CombatTargetValidation.get_horizontal_attack_distance(probe_spear, player_cc),
+				surface_dist
+			)
+		)
+		_expect(
+			failures,
+			"case6: spearman in surface attack range at CC edge",
+			CombatTargetValidation.is_within_attack_range(probe_spear, player_cc, spear_range)
+		)
+		print(
+			"[HERO ARMY ATTACK] edge center=%.2f surface=%.2f range=%.2f in_range=%s"
+			% [
+				center_dist,
+				surface_dist,
+				spear_range,
+				str(CombatTargetValidation.is_within_attack_range(probe_spear, player_cc, spear_range)),
+			]
+		)
+
+	director._cleared_creep_camp_ids.clear()
+	director._transition_to(MilitaryDirectorV2.State.ASSEMBLE, "case6 assemble", rally)
+	var attack_ok: bool = director._evaluate_attack_strategy(get_tree(), rally)
+	_expect(failures, "case6: ATTACK_PLAYER selected", attack_ok)
+	_expect(failures, "case6: state ATTACK", director.get_state_name() == "ATTACK")
+	attack_mission = director.get_mission()
+	_expect(
+		failures,
+		"case6: mission objective is player CC Building",
+		attack_mission != null
+		and attack_mission.get_alive_target_object() == player_cc
+	)
+	squad = director.get_main_squad()
+	attack_army = commander._collect_attack_army(squad)
+	_expect(failures, "case6: hero in attack army", attack_army.has(hero))
+	_expect(failures, "case6: pikes in attack army", attack_army.size() >= 8)
+
+	## Issue focus attack on the live Building (authoritative ATTACK execution path).
+	commander._attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
+	commander._attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
+	commander._execute_attack_mission(director, attack_mission, squad)
+	for _drain_atk in range(6):
+		EnemyArmyCommand.tick_group_order_batch(get_tree())
+		await get_tree().process_frame
+
+	EnemyArmyCommand.with_authorized_orders(func() -> void:
+		EnemyArmyCommand.command_focus_attack(
+			attack_army,
+			player_cc,
+			EnemyUnitMission.Mission.ATTACK
+		)
+	)
+	for _drain_focus in range(8):
+		EnemyArmyCommand.tick_group_order_batch(get_tree())
+		await get_tree().process_frame
+
+	## Direct command_attack on the probe proves the damage path once range is valid.
+	if probe_spear != null and probe_spear.has_method("command_attack"):
+		probe_spear.call("command_attack", player_cc)
+
+	var damaged: bool = false
+	var acquired: bool = false
+	var start_msec: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_msec < 4500:
+		await get_tree().physics_frame
+		if probe_spear != null and probe_spear.get("_attack_target") == player_cc:
+			acquired = true
+		var hp_now: int = CombatTargetValidation.get_target_current_health(player_cc)
+		if hp_now < cc_health_before:
+			damaged = true
+			break
+		## Keep commander ticking so focus reissues stay live.
+		commander._attack_focus_reissue_timer = MilitaryAIConfig.V2_ATTACK_FOCUS_REISSUE_SECONDS
+		commander._execute_attack_mission(director, director.get_mission(), director.get_main_squad())
+		EnemyArmyCommand.tick_group_order_batch(get_tree())
+
+	var cc_health_after: int = CombatTargetValidation.get_target_current_health(player_cc)
+	print(
+		"[HERO ARMY ATTACK] cc_hp %d -> %d acquired=%s damaged=%s hero_squad=%s"
+		% [
+			cc_health_before,
+			cc_health_after,
+			str(acquired),
+			str(damaged),
+			str(director.get_main_squad().has_member(hero)),
+		]
+	)
+	_expect(failures, "case6: spearman acquires player CC", acquired)
+	_expect(failures, "case6: player CC HP decreases", damaged)
+	_expect(
+		failures,
+		"case6: objective not completed merely by proximity",
+		director.get_state_name() == "ATTACK"
+		and NodeSafety.is_alive_node(player_cc)
+		and cc_health_after > 0
+	)
+	_expect(
+		failures,
+		"case6: hero remains in authoritative attack squad",
+		director.get_main_squad().has_member(hero)
+	)
+
 	var report: String
 	if failures.is_empty():
 		report = "PASS ai_hero_army_cohesion\n"

@@ -200,6 +200,19 @@ static func is_attackable_enemy_building(target: Variant) -> bool:
 	return building_node.is_in_group(ENEMY_BUILDING_GROUP)
 
 
+## True for any solid Building footprint that must be struck at the collision edge
+## (player CC under AI ATTACK_PLAYER, enemy barracks under player attack, etc.).
+## Do not key this off faction group names — surface reach is geometric.
+static func uses_building_surface_attack_distance(target: Variant) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+	if not target is Building:
+		return false
+	if target is GatherableResource:
+		return false
+	return true
+
+
 static func is_player_selectable_building(target: Variant) -> bool:
 	if target == null or not is_instance_valid(target):
 		return false
@@ -525,7 +538,7 @@ static func is_within_attack_range(
 	var target_node: Node3D = target as Node3D
 	var effective_range: float = get_effective_attack_range(attack_range)
 
-	if is_attackable_enemy_building(target_node):
+	if uses_building_surface_attack_distance(target_node):
 		return (
 			get_horizontal_attack_distance_to_surface(attacker_node, target_node)
 			<= effective_range
@@ -569,7 +582,7 @@ static func get_horizontal_attack_distance(attacker: Variant, target: Variant) -
 	if not NodeSafety.is_alive_node(attacker) or not NodeSafety.is_alive_node(target):
 		return INF
 
-	if is_attackable_enemy_building(target):
+	if uses_building_surface_attack_distance(target):
 		return get_horizontal_attack_distance_to_surface(attacker, target)
 
 	return get_horizontal_center_distance(attacker, target)
@@ -1133,10 +1146,11 @@ static func get_preferred_attack_standoff(
 	if attacker is CollisionObject3D:
 		attacker_radius = _get_collision_xz_radius(attacker as CollisionObject3D)
 
-	if target != null and is_attackable_enemy_building(target) and target is CollisionObject3D:
+	if target != null and uses_building_surface_attack_distance(target) and target is CollisionObject3D:
 		# Stand at the visible collision edge — not the building center, and not
 		# attacker_radius past the edge (that previously landed outside strike reach
-		# after soft-arrival shortfall).
+		# after soft-arrival shortfall). Applies to any hostile Building footprint
+		# (player CC under AI attack included — not only enemy_command_center group).
 		var building_radius: float = _get_collision_xz_radius(target as CollisionObject3D)
 		var building_effective: float = get_effective_attack_range(attack_range)
 		var edge_offset: float = minf(
@@ -1177,7 +1191,7 @@ static func compute_attack_close_position(
 		effective_range - MELEE_CLOSE_IN_ARRIVAL_MARGIN,
 		stopping_distance
 	)
-	if is_attackable_enemy_building(target) and target is CollisionObject3D:
+	if uses_building_surface_attack_distance(target) and target is CollisionObject3D:
 		close_standoff = (
 			_get_collision_xz_radius(target as CollisionObject3D)
 			+ maxf(MELEE_BUILDING_EDGE_OFFSET, stopping_distance)

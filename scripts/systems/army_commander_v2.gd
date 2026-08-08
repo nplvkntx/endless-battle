@@ -47,6 +47,7 @@ var _retreat_cover_elapsed: float = 0.0
 var _recover_order_reissue_timer: float = 0.0
 var _squad_idle_seconds: float = 0.0
 var _last_force_order_msec: int = 0
+var _last_attack_trace_signature: String = ""
 
 
 func _ready() -> void:
@@ -86,6 +87,7 @@ func reset_match_state() -> void:
 	_attack_chase_handle = EntityHandle.empty()
 	_attack_chase_anchor = Vector3.ZERO
 	_attack_chase_start_msec = 0
+	_last_attack_trace_signature = ""
 	_retreat_order_reissue_timer = MilitaryAIConfig.V2_RETREAT_ORDER_REISSUE_SECONDS
 	_retreat_cover_elapsed = 0.0
 	_recover_order_reissue_timer = MilitaryAIConfig.V2_RECOVER_ORDER_REISSUE_SECONDS
@@ -1724,8 +1726,11 @@ func _execute_attack_mission(
 	## Only truly pending (not yet admitted) units stage at base.
 	_stage_pending_reinforcements(director)
 
-	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
 	var rally_point: Vector3 = director.get_assemble_rally_point()
+	## Prefer the committed field body for engage/focus geometry. A living hero
+	## still parked at the CC must not pull army_center off the objective and
+	## suppress building focus-fire for soldiers already in contact.
+	var army_center: Vector3 = _resolve_attack_engage_center(attack_army, rally_point)
 	## Fresh escorts admitted mid-ATTACK still hold RALLY — or are stranded at base
 	## after a claim-without-move skip — force a prompt objective order.
 	if _attack_army_needs_objective_orders(attack_army, rally_point):
@@ -1815,7 +1820,22 @@ func _execute_attack_mission(
 			army_center,
 			focus.global_position
 		)
-		if focus_distance <= MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS:
+		var in_focus_contact: bool = (
+			focus_distance <= MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+		)
+		## Large buildings: field units may already be on the footprint while the
+		## diluted army center is still outside the engage radius.
+		if (
+			not in_focus_contact
+			and focus is Building
+			and _any_attack_unit_near_building(
+				attack_army,
+				focus as Building,
+				MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS
+			)
+		):
+			in_focus_contact = true
+		if in_focus_contact:
 			_attack_focus_reissue_timer = 0.0
 			EnemyArmyCommand.with_authorized_orders(func() -> void:
 				EnemyArmyCommand.command_focus_attack(
@@ -1827,6 +1847,14 @@ func _execute_attack_mission(
 			mission.note_progress("started combat")
 			EnemyArmyCommand.note_mission_progress(army_center, true, attack_army.size())
 
+	_maybe_log_attack_execution_trace(
+		director,
+		mission,
+		attack_army,
+		focus,
+		army_center,
+		rally_point
+	)
 
 func _execute_retreat_mission(
 	director: MilitaryDirectorV2,
@@ -2081,6 +2109,204 @@ func _collect_attack_army(squad: ArmySquadV2) -> Array:
 			continue
 		units.append(entry)
 	return NodeSafety.clean_node_array(units)
+
+
+## Prefer units already away from base so a stranded hero does not dilute engage geometry.
+func _resolve_attack_engage_center(attack_army: Array, rally_point: Vector3) -> Vector3:
+	var full_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+	if rally_point == Vector3.ZERO:
+		return full_center
+	var away_units: Array = []
+	var away_threshold: float = EnemyArmyCommand.WAVE_REGROUP_MAX_DISTANCE * 1.5
+	for entry: Variant in attack_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		if (
+			EnemyArmyCommand.horizontal_distance(
+				(entry as Node3D).global_position,
+				rally_point
+			)
+			> away_threshold
+		):
+			away_units.append(entry)
+	if away_units.is_empty():
+		return full_center
+	var field_center: Vector3 = EnemyArmyCommand.compute_army_center(away_units)
+	return field_center if field_center != Vector3.ZERO else full_center
+
+
+func _any_attack_unit_near_building(
+	attack_army: Array,
+	building: Building,
+	radius: float
+) -> bool:
+	if not NodeSafety.is_alive_node(building) or radius <= 0.0:
+		return false
+	for entry: Variant in attack_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		var distance: float = CombatTargetValidation.get_horizontal_attack_distance(
+			entry as Node3D,
+			building
+		)
+		if distance <= radius:
+			return true
+	return false
+
+
+## Change-only ATTACK execution probe for hero cohesion + building contact.
+func _maybe_log_attack_execution_trace(
+	director: MilitaryDirectorV2,
+	mission: ArmyMissionV2,
+	attack_army: Array,
+	focus: Node3D,
+	army_center: Vector3,
+	rally_point: Vector3
+) -> void:
+	if director == null or mission == null:
+		return
+	if mission.mission_type != ArmyMissionV2.MissionType.ATTACK:
+		return
+
+	var tree: SceneTree = get_tree()
+	var hero: Hero = null
+	var hero_in_squad: bool = false
+	for entry: Variant in attack_army:
+		if entry is Hero and NodeSafety.is_alive_node(entry):
+			hero = entry as Hero
+			hero_in_squad = true
+			break
+	if hero == null and tree != null:
+		hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+
+	var objective_label: String = "-"
+	var objective_alive: String = "no"
+	var objective_distance: float = -1.0
+	if NodeSafety.is_alive_node(focus):
+		objective_label = "%s#%d" % [focus.name, focus.get_instance_id()]
+		objective_alive = "yes"
+		if army_center != Vector3.ZERO:
+			objective_distance = EnemyArmyCommand.horizontal_distance(
+				army_center,
+				focus.global_position
+			)
+	elif mission.target_position != Vector3.ZERO and army_center != Vector3.ZERO:
+		objective_label = "pos"
+		objective_distance = EnemyArmyCommand.horizontal_distance(
+			army_center,
+			mission.target_position
+		)
+
+	var hero_label: String = "-"
+	var hero_state: String = "missing"
+	var hero_squad: String = "no"
+	if hero != null:
+		hero_label = "%s#%d" % [hero.name, hero.get_instance_id()]
+		hero_state = EnemyUnitMission.mission_to_label(
+			EnemyUnitMission.get_unit_mission(hero)
+		)
+		hero_squad = "yes" if hero_in_squad else "no"
+
+	var unassigned: int = 0
+	if director != null:
+		unassigned = director.get_pending_reinforcements_copy().size()
+
+	var signature: String = "%s|%s|%s|%d|%s|%.0f|%d" % [
+		director.get_state_name(),
+		hero_label,
+		hero_squad,
+		attack_army.size(),
+		objective_label,
+		objective_distance,
+		unassigned,
+	]
+	if signature == _last_attack_trace_signature:
+		return
+	_last_attack_trace_signature = signature
+
+	print(
+		"[AI MAIN] mission=%s hero=%s hero_state=%s hero_squad=%s army_total=%d squad_members=%d unassigned=%d objective=%s objective_alive=%s objective_distance=%.1f"
+		% [
+			director.get_state_name(),
+			hero_label,
+			hero_state,
+			hero_squad,
+			EnemyArmyCommand.collect_living_combat_units(tree).size() if tree != null else 0,
+			attack_army.size(),
+			unassigned,
+			objective_label,
+			objective_alive,
+			objective_distance,
+		]
+	)
+
+	## One pikeman near a building objective: prove acquire/range/damage gate.
+	if not (NodeSafety.is_alive_node(focus) and focus is Building):
+		return
+	var probe: Node3D = null
+	var best_dist: float = INF
+	for entry: Variant in attack_army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		if entry is Hero:
+			continue
+		var dist: float = CombatTargetValidation.get_horizontal_attack_distance(
+			entry as Node3D,
+			focus
+		)
+		if dist < best_dist:
+			best_dist = dist
+			probe = entry as Node3D
+	if probe == null or best_dist > MilitaryAIConfig.V2_ATTACK_LOCAL_ENGAGE_RADIUS:
+		return
+
+	var current_target: Variant = null
+	if probe.has_method("get_attack_target"):
+		current_target = probe.call("get_attack_target")
+	elif probe.get("_attack_target") != null:
+		current_target = probe.get("_attack_target")
+
+	var target_label: String = "-"
+	var target_type: String = "-"
+	if NodeSafety.is_alive_node(current_target):
+		target_label = String((current_target as Node).name)
+		target_type = (current_target as Object).get_class()
+		if current_target is Building:
+			target_type = "Building"
+
+	var in_range: String = "no"
+	var attack_range: float = 0.0
+	if "attack_range" in probe:
+		attack_range = float(probe.get("attack_range"))
+	if CombatTargetValidation.is_within_attack_range(probe, focus, attack_range):
+		in_range = "yes"
+
+	var block: String = "ok"
+	if not NodeSafety.is_alive_node(current_target):
+		block = "no_current_target"
+	elif current_target != focus and not (current_target is Building):
+		block = "fighting_other_target"
+	elif in_range == "no":
+		block = "outside_attack_range"
+	elif not CombatTargetValidation.is_attack_target_for_attacker(probe, focus):
+		block = "building_filtered"
+
+	print(
+		"[AI ATTACK TRACE] unit=%s#%d mission=%s objective=%s distance=%.1f move_order=%s current_target=%s target_type=%s in_attack_range=%s attack_state=%s block=%s"
+		% [
+			probe.name,
+			probe.get_instance_id(),
+			EnemyUnitMission.mission_to_label(EnemyUnitMission.get_unit_mission(probe)),
+			objective_label,
+			best_dist,
+			"attack" if EnemyUnitMission.get_unit_mission(probe) == EnemyUnitMission.Mission.ATTACK else "other",
+			target_label,
+			target_type,
+			in_range,
+			"has_target" if NodeSafety.is_alive_node(current_target) else "none",
+			block,
+		]
+	)
 
 
 ## True when any squad member still lacks the active ATTACK mission, or is stranded
