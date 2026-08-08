@@ -88,6 +88,9 @@ var _last_creep_block_reason: String = ""
 var _last_offense_diag_signature: String = ""
 ## Change-only strategy telemetry signature.
 var _last_strategy_diag_signature: String = ""
+## Low-frequency CREEP pipeline probe (temporary diagnostic).
+var _creep_probe_timer: float = 0.0
+var _last_creep_probe_signature: String = ""
 ## Seconds remaining in the short post-defense regroup window.
 var _post_defend_regroup_remaining: float = 0.0
 ## Seconds spent in a passive (non-offensive) state with a healthy army.
@@ -133,6 +136,8 @@ func reset_match_state() -> void:
 	_last_creep_block_reason = ""
 	_last_offense_diag_signature = ""
 	_last_strategy_diag_signature = ""
+	_creep_probe_timer = 0.0
+	_last_creep_probe_signature = ""
 	_post_defend_regroup_remaining = 0.0
 	_passive_army_seconds = 0.0
 	_logged_hard_runtime_values = false
@@ -167,6 +172,8 @@ func _clear_roster_state() -> void:
 	_last_creep_block_reason = ""
 	_last_offense_diag_signature = ""
 	_last_strategy_diag_signature = ""
+	_creep_probe_timer = 0.0
+	_last_creep_probe_signature = ""
 	_post_defend_regroup_remaining = 0.0
 	_passive_army_seconds = 0.0
 	_unbind_mission_target_exit()
@@ -186,6 +193,7 @@ func _process(delta: float) -> void:
 	_refresh_army_roster()
 	_tick_mission_watchdog(TICK_SECONDS)
 	_evaluate_strategy()
+	_maybe_log_creep_pipeline_probe(TICK_SECONDS)
 	_publish_perf_status()
 	PerfCounters.record_ai_decision_update()
 
@@ -501,7 +509,16 @@ func notify_execution_route_failed(reason: String, objective_id: int = 0) -> voi
 	match _state:
 		State.CREEP:
 			_note_creep_block(reason)
-			if reason != "nav_map_not_ready" and objective_id != 0:
+			## Projection / sync failures mean the navmesh is not usable yet — not that
+			## this camp is permanently impossible. Only blacklist real no_path after a
+			## successful projection onto the mesh.
+			var temporary_nav_failure: bool = reason in [
+				"nav_map_not_ready",
+				"start_not_on_nav",
+				"destination_not_on_nav",
+				"destination_projection_failed",
+			]
+			if not temporary_nav_failure and objective_id != 0:
 				_route_failed_creep_camp_ids[objective_id] = true
 			_release_creep_reservation()
 			if _mission != null:
@@ -3255,6 +3272,8 @@ func _describe_no_camp_block(
 	var strong_blocked: int = 0
 	var underpowered: int = 0
 	var contested: int = 0
+	var unreachable: int = 0
+	var route_failed: int = 0
 	var army_power: float = maxf(float(EnemyArmyCommand.estimate_military_power(creep_army)), 1.0)
 	var hero: Hero = _find_creep_hero(creep_army)
 	var hero_level: int = hero.level if hero != null else 1
@@ -3273,10 +3292,16 @@ func _describe_no_camp_block(
 		if creep_manager._is_player_contesting_camp(tree, camp):
 			contested += 1
 			continue
+		if _route_failed_creep_camp_ids.has(camp.get_instance_id()):
+			route_failed += 1
+			continue
 		var distance: float = EnemyArmyCommand.horizontal_distance(origin, camp.global_position)
 		if distance > EnemyCreepManager.CREEP_SEARCH_RANGE:
 			continue
 		in_range += 1
+		if not _is_creep_camp_reachable(origin, camp.global_position):
+			unreachable += 1
+			continue
 		var camp_power: int = creep_manager._estimate_camp_power(camp)
 		if _is_strong_creep_camp(camp) and hero_level < 3:
 			strong_blocked += 1
@@ -3298,11 +3323,88 @@ func _describe_no_camp_block(
 		return "no camps in range (%.0f)" % EnemyCreepManager.CREEP_SEARCH_RANGE
 	if contested > 0 and contested >= in_range:
 		return "camps contested by player"
-	if strong_blocked > 0 and underpowered <= 0:
+	if unreachable > 0 and unreachable >= in_range - strong_blocked - underpowered:
+		return "camps unreachable from army (%d)" % unreachable
+	if route_failed > 0 and in_range <= 0:
+		return "camps route-failed (%d)" % route_failed
+	if strong_blocked > 0 and underpowered <= 0 and unreachable <= 0:
 		return "strong camps need hero L3 (have L%d)" % hero_level
 	if underpowered > 0:
 		return "army power %.0f too low for %d camp(s)" % [army_power, underpowered]
 	return "no worthwhile creep camps"
+
+
+## Low-frequency CREEP pipeline probe for ASSEMBLE stalls (temporary diagnostic).
+func _maybe_log_creep_pipeline_probe(delta: float) -> void:
+	_creep_probe_timer += delta
+	if _creep_probe_timer < 2.0:
+		return
+	_creep_probe_timer = 0.0
+	if _state != State.ASSEMBLE and _state != State.CREEP:
+		return
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var rally_point: Vector3 = get_assemble_rally_point()
+	var creep_manager: EnemyCreepManager = _resolve_creep_manager()
+	var creep_army: Array = _get_creep_squad_units()
+	var origin: Vector3 = _main_squad.center
+	if origin == Vector3.ZERO:
+		origin = EnemyArmyCommand.compute_army_center(creep_army)
+	if origin == Vector3.ZERO:
+		origin = rally_point
+	var commit_block: String = ""
+	if creep_manager != null:
+		commit_block = _describe_creep_commit_block(tree, creep_army, creep_manager)
+	var camp: Node3D = null
+	if creep_manager != null and commit_block.is_empty():
+		camp = _select_best_creep_camp(tree, creep_manager, creep_army, origin, rally_point)
+	var camp_name: String = "-"
+	var camp_valid: String = "no"
+	var camp_reach: String = "-"
+	if camp != null:
+		camp_name = String(camp.name)
+		camp_valid = "yes"
+		camp_reach = "yes" if _is_creep_camp_reachable(origin, camp.global_position) else "no"
+	var block: String = commit_block
+	if block.is_empty():
+		block = _last_creep_block_reason
+	if block.is_empty() and camp == null and creep_manager != null:
+		block = _describe_no_camp_block(tree, creep_manager, creep_army, origin, rally_point)
+	if block.is_empty():
+		block = "-"
+	var mission_name: String = "-"
+	if _mission != null:
+		mission_name = _mission.get_mission_type_name()
+	var exec_label: String = EnemyArmyCommand.executable_mission_to_label(
+		EnemyArmyCommand.get_executable_mission()
+	)
+	var signature: String = "%s|%s|%d|%s|%s|%s" % [
+		get_state_name(),
+		str(is_creep_ready()),
+		get_military_unit_count(),
+		camp_name,
+		mission_name,
+		block,
+	]
+	if signature == _last_creep_probe_signature:
+		return
+	_last_creep_probe_signature = signature
+	print(
+		"[AI CREEP] state=%s hero=%s army=%d ready=%s camp=%s valid=%s reach=%s mission=%s exec=%s block=%s"
+		% [
+			get_state_name(),
+			"yes" if _main_squad.hero_present else "no",
+			get_military_unit_count(),
+			"yes" if is_creep_ready() else "no",
+			camp_name,
+			camp_valid,
+			camp_reach,
+			mission_name,
+			exec_label,
+			block,
+		]
+	)
 
 
 func _is_strong_creep_camp(camp: Node3D) -> bool:
@@ -3468,6 +3570,15 @@ func _is_creep_camp_reachable(from_position: Vector3, to_position: Vector3) -> b
 		return true
 	var start: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, from_position)
 	var target: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, to_position)
+	## Empty / unsynced navmeshes project every query to the origin (or far away).
+	## That must not soft-lock CREEP selection forever — commander already rejects
+	## invalid routes at execution and can blacklist via notify_execution_route_failed.
+	const PROJECTION_TOLERANCE: float = 8.0
+	if (
+		EnemyArmyCommand.horizontal_distance(start, from_position) > PROJECTION_TOLERANCE
+		or EnemyArmyCommand.horizontal_distance(target, to_position) > PROJECTION_TOLERANCE
+	):
+		return true
 	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, start, target, true)
 	if path.is_empty():
 		return false
