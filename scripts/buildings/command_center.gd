@@ -17,6 +17,8 @@ const TRAIN_SECONDS: float = UnitStats.WORKER_TRAIN_SECONDS
 const MAX_ENEMY_WORKER_QUEUE: int = 2
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
+## Lateral spacing for sequential worker exit slots at the Command Center.
+const WORKER_SPAWN_SLOT_SPACING: float = 1.0
 const ENEMY_TEAM_ID: int = 1
 
 const MIN_TIER: int = 1
@@ -57,6 +59,7 @@ var _rally_resource: GatherableResource = null
 var _rally_resource_handle: EntityHandle = EntityHandle.empty()
 var _rally_marker: MeshInstance3D = null
 var _rally_next_slot: int = 0
+var _worker_spawn_next_slot: int = 0
 
 var command_center_tier: int = MIN_TIER
 var _is_upgrading: bool = false
@@ -792,12 +795,30 @@ func _spawn_worker() -> void:
 		return
 
 	spawn_parent.add_child(worker)
-	worker.global_position = global_position + worker_spawn_offset
+	worker.global_position = _claim_worker_spawn_position()
 
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_worker(worker)
 	else:
 		_apply_worker_rally(worker)
+
+
+## Preferred export offset can sit inside this building's inflated custom-grid clearance.
+## Pick a deterministic nearby walkable exit cell, then diversify sequential spawns.
+func _claim_worker_spawn_position() -> Vector3:
+	var preferred: Vector3 = global_position + worker_spawn_offset
+	var slot_index: int = _worker_spawn_next_slot
+	_worker_spawn_next_slot += 1
+	var candidate: Vector3 = GroupMoveSpacing.compute_slot_target(
+		preferred,
+		slot_index,
+		WORKER_SPAWN_SLOT_SPACING
+	)
+	PlayerRouteNavigation.ensure_grid_ready()
+	if PlayerRouteNavigation.is_world_walkable(candidate):
+		return candidate
+	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(candidate)
+	return Vector3(exit_pos.x, preferred.y, exit_pos.z)
 
 
 func _finalize_enemy_worker(worker: Worker) -> void:
@@ -850,7 +871,7 @@ func _apply_worker_rally(worker: Worker) -> void:
 
 	match _rally_target_type:
 		RallyTargetType.GROUND:
-			worker.set_movement_target(_claim_ground_rally_target())
+			issue_production_rally_move(worker, _claim_ground_rally_target())
 		RallyTargetType.RESOURCE:
 			_assign_worker_to_rally_resource(worker)
 
