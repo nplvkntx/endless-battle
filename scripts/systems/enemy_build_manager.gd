@@ -251,10 +251,11 @@ func _on_build_tick() -> void:
 		_tick_active = false
 		return
 
-	## Stagger production away from strategic fast ticks (odd process frames).
+	## Stagger production onto odd process frames. A fixed 0.05s SceneTreeTimer can
+	## land forever on even frames at some FPS values (e.g. ~160fps → +8 frames) and
+	## permanently skip EnemyBuildManager production (opening soft-lock).
 	if (Engine.get_process_frames() % 2) == 0:
-		var defer_timer: SceneTreeTimer = get_tree().create_timer(0.05)
-		defer_timer.timeout.connect(_on_build_tick, CONNECT_ONE_SHOT)
+		get_tree().process_frame.connect(_on_build_tick, CONNECT_ONE_SHOT)
 		return
 
 	var fingerprint: String = _build_production_fingerprint()
@@ -274,6 +275,7 @@ func _on_build_tick() -> void:
 
 func _build_production_fingerprint() -> String:
 	## compatibility/telemetry only under V2 — fingerprint invalidation, not macro authority
+	_refresh_building_cache_if_needed()
 	return "%d|%d|%d|%d|%d|%d" % [
 		_count_enemy_workers(),
 		_count_living_military_units(),
@@ -978,12 +980,21 @@ func _try_place_opening_first_farm() -> bool:
 	if _count_enemy_workers() < OPENING_FIRST_FARM_WORKER_COUNT:
 		return false
 
-	if not EnemyResourceManager.can_afford(FARM_GOLD_COST, FARM_WOOD_COST):
+	## Soft farm hold from `_sync_farm_reservation()` must not double-count against spendable.
+	## Spend from total while the hold is active (mirrors `_try_place_farm`).
+	if not EnemyResourceManager.can_afford(
+		FARM_GOLD_COST,
+		FARM_WOOD_COST,
+		not _farm_reservation_active
+	):
 		return false
 
-	if not _try_place_building(PLACEMENT_FARM, false, false):
+	if not _try_place_building(PLACEMENT_FARM, false, true):
 		return false
 
+	if _farm_reservation_active:
+		_farm_reservation_active = false
+		_farm_reservation_msec = 0
 	_prefer_non_gold_opening_farm_builder()
 	_log_opening_first_farm_builder_if_needed()
 	return true
@@ -3821,6 +3832,8 @@ func _try_place_building_at_anchor(
 	)
 	ConstructionReservations.release_footprint(footprint_reservation_id)
 	_assign_nearest_builder(building)
+	## New foundations must be visible to same-tick opening/progress queries.
+	_building_scan_frame = -1
 	_log_building_started(building_type)
 	if building_type == PLACEMENT_BARRACKS and _has_excess_resources():
 		EnemyArmyCommand.debug_combat_log("building additional barracks: excess resources")

@@ -867,6 +867,14 @@ func _sync_construction_timer_state() -> void:
 
 func _pause_construction_timer() -> void:
 	_construction_timer_active = false
+	## Unfinished foundations must keep processing. A single failed in-range check used
+	## to call set_process(false), which permanently froze AI opening farms while the
+	## worker remained in CONSTRUCTION_WAIT and never re-registered.
+	if (
+		building_state == STATE_UNDER_CONSTRUCTION
+		or building_state == STATE_CONSTRUCTING
+	):
+		return
 	set_process(false)
 
 

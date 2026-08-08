@@ -52,6 +52,9 @@ func _ready() -> void:
 	await _verify_cancelled_construction_refund(failures)
 	await _verify_destroyed_unfinished_building(failures)
 	await _verify_ai_construction_stages(failures)
+	await _verify_nav_snap_does_not_false_commit(failures)
+	await _verify_construction_timer_survives_brief_range_loss(failures)
+	await _verify_build_tick_stagger_advances_parity(failures)
 	_verify_ai_farm_reservation_recovery(failures)
 	_verify_compact_ai_placement_smoke(failures)
 
@@ -521,6 +524,137 @@ func _has_stage_host(building: Building) -> bool:
 	return visuals.get_node_or_null("ConstructionStageHost") != null
 
 
+func _verify_nav_snap_does_not_false_commit(failures: PackedStringArray) -> void:
+	## Regression: nav-snapped approach points far from the building must not count as
+	## build-start range. That false commit left AI opening farms permanently unfinished.
+	print("verify: nav-snapped standee does not false-commit construction")
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	var farm: Building = FARM_SCENE.instantiate() as Building
+	root.add_child(farm)
+	farm.global_position = Vector3(18.0, EnemyBuildPlacement.FARM_GROUND_Y, 18.0)
+	farm.set_construction_cost(80, 20, true)
+	farm.start_under_construction()
+	farm.setup_construction(2.0)
+
+	var worker: Worker = _spawn_worker(root, Vector3(0.0, 0.5, 0.0), true)
+	await _wait_nav_ready(worker)
+	worker.start_construction_order(farm)
+
+	## Simulate a bad nav snap: standee beside the worker, far from the farm.
+	worker._building_target = farm
+	worker._build_trip_state = Worker.BuildTripState.TO_BUILDING
+	worker._construction_target_point = worker.global_position
+	worker._construction_target_point_valid = true
+
+	_expect(
+		failures,
+		"false-snap: not in real build range while far from farm",
+		not worker._is_in_build_start_range()
+	)
+	_expect(
+		failures,
+		"false-snap: does not commit construction",
+		not worker._try_commit_construction_if_in_range()
+	)
+	_expect(
+		failures,
+		"false-snap: remains TO_BUILDING",
+		worker._build_trip_state == Worker.BuildTripState.TO_BUILDING
+	)
+
+	## Real arrival beside the farm must still commit.
+	var standee: Vector3 = farm.get_nearest_construction_point(worker.global_position)
+	worker.global_position = standee
+	worker._construction_target_point = standee
+	worker._construction_target_point_valid = true
+	_expect(failures, "near farm: in build range", worker._is_in_build_start_range())
+	_expect(failures, "near farm: commits", worker._try_commit_construction_if_in_range())
+	_expect(failures, "near farm: constructing", worker.is_constructing())
+
+	await _free_harness(harness)
+
+
+func _verify_construction_timer_survives_brief_range_loss(
+	failures: PackedStringArray
+) -> void:
+	## Regression: unfinished buildings must keep processing after a brief out-of-range
+	## check. Disabling _process froze AI opening farms with the builder still assigned.
+	print("verify: construction timer survives brief range loss")
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	var farm: Building = FARM_SCENE.instantiate() as Building
+	root.add_child(farm)
+	farm.global_position = Vector3(22.0, EnemyBuildPlacement.FARM_GROUND_Y, 22.0)
+	farm.set_construction_cost(80, 20, true)
+	farm.start_under_construction()
+	farm.setup_construction(4.0)
+
+	var worker: Worker = _spawn_worker(root, farm.global_position + Vector3(2.0, 0.5, 0.0), true)
+	await _wait_nav_ready(worker)
+	worker.start_construction_order(farm)
+	worker.global_position = farm.get_nearest_construction_point(worker.global_position)
+	worker._building_target = farm
+	worker._try_commit_construction_if_in_range()
+	_expect(failures, "range-loss: worker constructing", worker.is_constructing())
+	_expect(
+		failures,
+		"range-loss: actively constructing after commit",
+		worker.is_actively_constructing_building(farm)
+	)
+
+	## Let progress advance, then leave range for a few frames (old bug: set_process false).
+	for _i: int in range(90):
+		await get_tree().process_frame
+	var progress_before: float = farm.get_construction_progress_ratio()
+	_expect(failures, "range-loss: made initial progress", progress_before > 0.02)
+
+	worker.global_position = farm.global_position + Vector3(40.0, 0.5, 40.0)
+	for _j: int in range(6):
+		await get_tree().process_frame
+	_expect(
+		failures,
+		"range-loss: unfinished building keeps processing",
+		farm.is_processing()
+	)
+
+	## Return without re-registering — progress must resume from kept _process.
+	worker.global_position = farm.get_nearest_construction_point(
+		farm.global_position + Vector3(2.0, 0.0, 0.0)
+	)
+	for _k: int in range(120):
+		await get_tree().process_frame
+	_expect(
+		failures,
+		"range-loss: progress resumes after returning to range",
+		farm.get_construction_progress_ratio() > progress_before + 0.05
+	)
+
+	await _free_harness(harness)
+
+
+func _verify_build_tick_stagger_advances_parity(failures: PackedStringArray) -> void:
+	## Regression for EnemyBuildManager even-frame stagger: defer via process_frame so
+	## parity always flips. A fixed 0.05s timer can land forever on even frames at some
+	## FPS values and permanently skip AI production / opening.
+	print("verify: build-tick stagger advances frame parity")
+	while Engine.get_process_frames() % 2 != 0:
+		await get_tree().process_frame
+	_expect(
+		failures,
+		"stagger: start on even process frame",
+		Engine.get_process_frames() % 2 == 0
+	)
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"stagger: next process frame is odd",
+		Engine.get_process_frames() % 2 == 1
+	)
+
+
 func _verify_ai_farm_reservation_recovery(failures: PackedStringArray) -> void:
 	print("verify: AI recovers after failed farm placement / reservation TTL")
 	EnemyResourceManager.reset_to_starting_values()
@@ -545,6 +679,19 @@ func _verify_ai_farm_reservation_recovery(failures: PackedStringArray) -> void:
 		failures,
 		"ai farm: double-count blocked with respect_reservations",
 		not EnemyResourceManager.can_afford(80, 20, true) or gold_before >= 160
+	)
+
+	## Opening first-farm used spendable-only afford after `_sync_farm_reservation()`,
+	## which double-counts the soft hold and can block placement while totals are enough.
+	_expect(
+		failures,
+		"ai farm: opening-style spendable check blocked while reserved",
+		not EnemyResourceManager.can_afford(80, 20, true) or gold_before >= 160
+	)
+	_expect(
+		failures,
+		"ai farm: reservation-aware afford allows opening farm",
+		EnemyResourceManager.can_afford(80, 20, false)
 	)
 
 	EnemyResourceManager.release_reservation(80, 20)

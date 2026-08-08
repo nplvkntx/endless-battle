@@ -23,11 +23,19 @@ func complete_construction() -> void:
 
 func _ready() -> void:
 	super._ready()
+	## Map-placed farms ship completed. Runtime foundations call
+	## start_under_construction() in the same frame after add_child — defer the
+	## default so we do not flash-complete and emit construction_completed first.
 	if building_state.is_empty():
-		set_completed()
+		call_deferred("_complete_if_still_unstarted")
 
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
+
+
+func _complete_if_still_unstarted() -> void:
+	if building_state.is_empty():
+		set_completed()
 
 
 ## Keep Quaternius Farm materials untouched; team identity comes from the selection ring.

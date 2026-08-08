@@ -1250,10 +1250,20 @@ func _is_in_build_start_range() -> bool:
 	var effective_range: float = BUILD_START_RANGE + worker_radius
 	var effective_range_sq: float = effective_range * effective_range
 
+	## Nav snaps can move approach points far from the building (off-mesh sites).
+	## Reaching a snapped standee is not enough — the worker must also be near the
+	## real footprint / construction points or construction falsely "starts" forever.
 	if _construction_target_point_valid:
 		var to_spot: Vector3 = global_position - _construction_target_point
 		to_spot.y = 0.0
-		if to_spot.length_squared() <= effective_range_sq:
+		if (
+			to_spot.length_squared() <= effective_range_sq
+			and _building_target.is_position_in_construction_range(
+				global_position,
+				Building.BUILD_RANGE,
+				worker_radius
+			)
+		):
 			return true
 
 	# Prefer claimed construction point, then footprint proximity as fallback.
@@ -1375,6 +1385,20 @@ func _snap_construction_target_to_navigation(target: Vector3) -> Vector3:
 	var snapped: Vector3 = _snap_task_target_to_navigation(target)
 	if _building_target.is_position_inside_footprint(
 		snapped, _get_collision_xz_radius(self)
+	):
+		return target
+
+	## Reject nav snaps that drift far from the intended standee / building site.
+	## Otherwise workers path to a distant mesh point and may false-commit.
+	var drift: Vector3 = snapped - target
+	drift.y = 0.0
+	if drift.length_squared() > 2.25:
+		return target
+
+	if not _building_target.is_position_in_construction_range(
+		snapped,
+		Building.BUILD_RANGE,
+		_get_collision_xz_radius(self)
 	):
 		return target
 
