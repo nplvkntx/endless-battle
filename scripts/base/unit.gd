@@ -25,7 +25,6 @@ const REPATH_COOLDOWN_CHASE_SECONDS := 1.35
 const REPATH_COOLDOWN_URGENT_SECONDS := 0.55
 const REPATH_COOLDOWN_STUCK_SECONDS := 1.0
 const REPATH_STAGGER_OFFSET_SECONDS := 0.14
-const PATH_VALIDITY_CHECK_INTERVAL := 0.7
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
@@ -87,18 +86,13 @@ var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
 var _visual_animator: UnitVisualAnimator
 var _population_food_released: bool = false
-var _navigation_agent: NavigationAgent3D
-var _navigation_active: bool = false
-var _path_validity_timer: float = 0.0
 var _feedback_tween: Tween
 var _smoothed_move_velocity: Vector3 = Vector3.ZERO
 var _desired_move_facing: Vector3 = Vector3.ZERO
 var _stable_move_facing: Vector3 = Vector3.ZERO
 var _blocked_arrival_time: float = 0.0
 ## Bumped whenever movement starts, changes destination, arrives, or is cancelled.
-## Stale NavigationAgent avoidance callbacks must match this generation.
 var _movement_generation: int = 0
-var _nav_velocity_request_generation: int = -1
 var _arrival_completed_generation: int = -1
 ## Authoritative player group-command token from PlayerRouteNavigation.
 var _player_squad_command_generation: int = -1
@@ -106,7 +100,7 @@ var _player_squad_clicked_destination: Vector3 = Vector3.ZERO
 var _player_squad_final_arrival: Vector3 = Vector3.ZERO
 var _player_squad_command_type: StringName = &""
 
-## Custom RTS route follow (sole strategic/combat locomotion). Workers may still use NavigationAgent for tasks.
+## Custom RTS route follow — sole strategic/combat locomotion backend.
 const CUSTOM_RTS_WAYPOINT_RADIUS := 0.9
 const CUSTOM_RTS_ARRIVE_RADIUS := 0.7
 const CUSTOM_RTS_SEPARATION_RADIUS := 1.35
@@ -332,7 +326,6 @@ func _set_node_albedo_alpha(node: Node, alpha: float) -> void:
 func _ready() -> void:
 	_combat_target_scan_timer = randf() * (COMBAT_TARGET_SCAN_INTERVAL + COMBAT_TARGET_SCAN_JITTER)
 	_combat_target_validate_timer = randf() * COMBAT_TARGET_VALIDATE_INTERVAL
-	_path_validity_timer = randf() * PATH_VALIDITY_CHECK_INTERVAL
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.UNITS
 	collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
@@ -342,7 +335,6 @@ func _ready() -> void:
 	_visual_pivot = get_node_or_null("MeshInstance3D") as Node3D
 	_visual_facing_yaw_offset = _detect_visual_facing_yaw_offset()
 	_setup_visual_animator()
-	_setup_navigation_agent()
 	BuffComponent.ensure_on(self)
 	_apply_unit_data()
 	call_deferred("apply_team_visuals")
@@ -679,11 +671,11 @@ func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency
 	return request_movement_target(target, urgency)
 
 
-## Clears movement and navigation without canceling combat orders.
+## Clears movement without canceling combat orders.
 ## When `preserve_custom_rts` is true, waypoint route is kept so attack-move can
-## resume on the custom backend after combat pause (no NavigationAgent handoff).
+## resume on the custom backend after combat pause.
 func clear_move_target(preserve_custom_rts: bool = false) -> void:
-	if has_move_target or _nav_velocity_request_generation >= 0:
+	if has_move_target:
 		_invalidate_movement_generation()
 	has_move_target = false
 	if preserve_custom_rts and not _custom_rts_route.is_empty():
@@ -692,13 +684,10 @@ func clear_move_target(preserve_custom_rts: bool = false) -> void:
 	else:
 		clear_custom_rts_route()
 	_clear_residual_movement()
-	_navigation_active = false
-	_set_navigation_avoidance_enabled(false)
-	_clear_navigation_agent()
 	_reset_unstuck_state()
 
 
-## Full stop: clears movement/navigation and the order queue. Combat subclasses also cancel orders.
+## Full stop: clears movement and the order queue. Combat subclasses also cancel orders.
 func stop_movement() -> void:
 	if not _issuing_order:
 		_order_queue.clear()
@@ -842,9 +831,6 @@ func _activate_pending_custom_rts_route(destination: Vector3) -> void:
 	_custom_rts_pending = false
 	_custom_rts_active = true
 	_custom_rts_route_index = 0
-	_clear_navigation_agent()
-	_set_navigation_avoidance_enabled(false)
-	_navigation_active = false
 	_movement_target = destination
 	_original_move_destination = destination
 	has_move_target = true
@@ -859,25 +845,18 @@ func _activate_custom_rts_direct_target(destination: Vector3) -> void:
 	_custom_rts_active = true
 	# Past last waypoint → route direction falls through to _movement_target.
 	_custom_rts_route_index = _custom_rts_route.size()
-	_clear_navigation_agent()
-	_set_navigation_avoidance_enabled(false)
-	_navigation_active = false
 	_movement_target = destination
 	has_move_target = true
 	_reset_unstuck_state()
 	_blocked_arrival_time = 0.0
 
 
-## True when current move target is combat micro (chase), not the strategic final slot.
 ## Direct custom locomotion with no shared strategic route (chase / micro / fallback).
 func _activate_custom_rts_direct_move(destination: Vector3) -> void:
 	_custom_rts_pending = false
 	_custom_rts_active = true
 	_custom_rts_route = PackedVector3Array()
 	_custom_rts_route_index = 0
-	_clear_navigation_agent()
-	_set_navigation_avoidance_enabled(false)
-	_navigation_active = false
 	_movement_target = destination
 	_original_move_destination = destination
 	has_move_target = true
@@ -1073,13 +1052,11 @@ func _horizontal_distance_xz(a: Vector3, b: Vector3) -> float:
 
 func _invalidate_movement_generation() -> void:
 	_movement_generation += 1
-	_nav_velocity_request_generation = -1
 
 
 func _begin_movement_generation() -> void:
 	_movement_generation += 1
 	_arrival_completed_generation = -1
-	_nav_velocity_request_generation = _movement_generation
 
 
 ## Authoritative locomotion step: optional separation, velocity smoothing, then move_and_slide.
@@ -1227,8 +1204,8 @@ func request_movement_target(
 	_last_requested_destination = next_target
 	var now_msec: int = Time.get_ticks_msec()
 
-	# Pending custom RTS bind always wins for this player order (shared route ready).
-	if _custom_rts_pending and urgency == RepathUrgency.PLAYER_ORDER:
+	# Pending custom RTS bind always wins (shared route already prepared).
+	if _custom_rts_pending and urgency != RepathUrgency.CHASE:
 		var began_custom: bool = not has_move_target
 		_begin_movement_generation()
 		_last_issued_move_destination = next_target
@@ -1291,47 +1268,28 @@ func request_movement_target(
 	if CombatTargetValidation.is_enemy_faction(self):
 		next_target = BearTrap.adjust_destination_away_from_traps(self, next_target)
 
-	# Workers on task moves keep NavigationAgent for gather/build reachability only.
-	var worker_task_nav: bool = (
-		self is Worker
-		and urgency != RepathUrgency.PLAYER_ORDER
-		and not _custom_rts_pending
-		and _custom_rts_route.is_empty()
-	)
-
 	# Custom RTS is the sole strategic/combat locomotion backend.
-	if not worker_task_nav:
-		var began_custom_owned: bool = not has_move_target
-		_begin_movement_generation()
-		_last_issued_move_destination = next_target
-		_last_path_request_msec = now_msec
-		_last_move_order_msec = now_msec
-		if urgency == RepathUrgency.CHASE:
-			if _custom_rts_route.is_empty():
-				_activate_custom_rts_direct_move(next_target)
-			else:
-				_activate_custom_rts_direct_target(next_target)
-		elif not _custom_rts_route.is_empty():
-			_activate_pending_custom_rts_route(next_target)
-		else:
-			_activate_custom_rts_direct_move(next_target)
-		if began_custom_owned:
-			CommandFeedback.notify_movement_started(self)
-		return true
-
-	var began_moving: bool = not has_move_target
+	var began_custom_owned: bool = not has_move_target
 	_begin_movement_generation()
-	_movement_target = next_target
-	_original_move_destination = next_target
-	has_move_target = true
 	_last_issued_move_destination = next_target
 	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
-
-	clear_custom_rts_route()
-	_apply_navigation_destination(next_target)
-	_reset_unstuck_state()
-	if began_moving:
+	if urgency == RepathUrgency.CHASE:
+		if _custom_rts_route.is_empty():
+			_activate_custom_rts_direct_move(next_target)
+		else:
+			_activate_custom_rts_direct_target(next_target)
+	else:
+		# Fresh strategic travel: compute grid route then follow (workers, AI, chase-resume).
+		var source: StringName = &"worker_task" if self is Worker else &"strategic"
+		PlayerRouteNavigation.bind_unit_strategic_route(self, next_target, source)
+		# Snap destination to the walkable slot bound with the route.
+		var bound_dest: Vector3 = _player_squad_final_arrival
+		if bound_dest.length_squared() > 0.0001:
+			next_target = Vector3(bound_dest.x, global_position.y, bound_dest.z)
+			_last_issued_move_destination = next_target
+		_activate_pending_custom_rts_route(next_target)
+	if began_custom_owned:
 		CommandFeedback.notify_movement_started(self)
 	return true
 
@@ -1359,7 +1317,7 @@ func is_confirmed_stuck() -> bool:
 
 
 func uses_navigation_agent() -> bool:
-	return _navigation_agent != null and UnitNavigation.can_use(_navigation_agent)
+	return false
 
 
 func get_repath_stagger_offset_seconds() -> float:
@@ -1512,60 +1470,10 @@ func _physics_process(delta: float) -> void:
 		_complete_movement_arrival()
 		return
 
-	# Custom RTS executor: shared waypoints + local separation (sole strategic/combat path).
-	if is_custom_rts_movement_active():
-		_process_custom_rts_movement(delta)
-		return
-
-	# Worker task NavigationAgent path (gather/build only).
-	_update_navigation_path_validity(delta)
-
-	var position_before: Vector3 = global_position
-	_previous_position = position_before
-	var direction: Vector3 = offset.normalized() if distance > 0.0001 else Vector3.ZERO
-	var separation_blend: float = get_move_separation_blend()
-
-	if _navigation_agent != null and _is_navigation_path_executable():
-		_navigation_active = true
-		var arrived: bool = UnitNavigation.process_movement(
-			self,
-			_navigation_agent,
-			_movement_target,
-			move_speed,
-			stopping_distance,
-			separation_blend > 0.0
-		)
-		if arrived:
-			_complete_movement_arrival()
-			return
-		if _desired_move_facing.length_squared() > 0.0001:
-			direction = _desired_move_facing
-	elif _navigation_agent != null:
-		_navigation_active = false
-		_hold_for_navigation_path()
-		return
-	else:
-		if direction.length_squared() < 0.0001:
-			_complete_movement_arrival()
-			return
-		var arrival_speed: float = move_speed
-		var slow_start: float = maxf(stopping_distance * 2.0, UnitNavigation.ARRIVAL_SLOWDOWN_DISTANCE)
-		if distance < slow_start:
-			var t: float = clampf(
-				(distance - stopping_distance) / maxf(0.001, slow_start - stopping_distance),
-				0.0,
-				1.0
-			)
-			arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
-		apply_steered_velocity(direction * arrival_speed, delta, separation_blend)
-
-	if _try_complete_blocked_arrival(delta, position_before, direction, distance):
-		return
-
-	if _try_complete_soft_arrival():
-		return
-
-	CommandFeedback.notify_unit_moving(self)
+	# Custom RTS executor: sole strategic/combat locomotion path.
+	if not is_custom_rts_movement_active():
+		_activate_custom_rts_direct_move(_movement_target)
+	_process_custom_rts_movement(delta)
 
 
 func _process(delta: float) -> void:
@@ -1765,178 +1673,6 @@ func _should_skip_stuck_recovery() -> bool:
 func _reset_unstuck_state() -> void:
 	_blocked_arrival_time = 0.0
 	# Keep _crowd_yield_seconds ticking — do not clear mid-yield.
-
-
-func _setup_navigation_agent() -> void:
-	_navigation_agent = get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-	if _navigation_agent == null:
-		_navigation_active = false
-		return
-
-	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
-	_set_navigation_avoidance_enabled(false)
-	if not _navigation_agent.velocity_computed.is_connected(_on_navigation_velocity_computed):
-		_navigation_agent.velocity_computed.connect(_on_navigation_velocity_computed)
-	call_deferred("_sync_navigation_agent_position")
-
-
-func _sync_navigation_agent_position() -> void:
-	if not NodeSafety.is_alive_node(self):
-		return
-
-	if _navigation_agent == null:
-		return
-
-	UnitNavigation.clear(_navigation_agent, global_position)
-
-
-func _apply_navigation_destination(destination: Vector3) -> void:
-	if _navigation_agent == null:
-		_navigation_active = false
-		return
-
-	UnitNavigation.configure_agent(_navigation_agent, stopping_distance)
-	# Keep RVO off — manual UnitSeparation handles moving units only.
-	_set_navigation_avoidance_enabled(false)
-	UnitNavigation.apply_destination(_navigation_agent, destination)
-	_nav_velocity_request_generation = _movement_generation
-	# Path data may be invalid same-frame after target_position — poll next frame.
-	# Never treat early unreachability as permission to direct-steer.
-	_navigation_active = _is_navigation_path_executable()
-	# Brief grace before validity re-request so we do not reset an in-flight query.
-	_path_validity_timer = 0.15
-	call_deferred("_refresh_navigation_active_state")
-
-
-func _is_navigation_path_executable() -> bool:
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		return false
-	if not UnitNavigation.can_use(_navigation_agent):
-		return false
-	if not _navigation_agent.is_target_reachable():
-		return false
-	if _navigation_agent.is_navigation_finished():
-		return false
-	return true
-
-
-## Hold still while NavigationAgent path/map syncs. Preserves the player command.
-func _hold_for_navigation_path() -> void:
-	_smoothed_move_velocity = Vector3.ZERO
-	velocity = Vector3.ZERO
-	if _navigation_agent != null and is_instance_valid(_navigation_agent):
-		if _navigation_agent.has_method("set_velocity_forced"):
-			_navigation_agent.set_velocity_forced(Vector3.ZERO)
-
-
-func _refresh_navigation_active_state() -> void:
-	if not NodeSafety.is_alive_node(self):
-		return
-
-	if not has_move_target or _navigation_agent == null:
-		_navigation_active = false
-		return
-
-	# false = path not currently executable. Never means "use direct steering".
-	_navigation_active = _is_navigation_path_executable()
-
-
-func _clear_navigation_agent() -> void:
-	if _navigation_agent == null:
-		return
-
-	_set_navigation_avoidance_enabled(false)
-	UnitNavigation.clear(_navigation_agent, global_position)
-
-
-func _set_navigation_avoidance_enabled(enabled: bool) -> void:
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		return
-	_navigation_agent.avoidance_enabled = enabled
-	if not enabled and _navigation_agent.has_method("set_velocity_forced"):
-		_navigation_agent.set_velocity_forced(Vector3.ZERO)
-
-
-## Guard for delayed NavigationAgent avoidance callbacks.
-## Even with avoidance disabled, a stale safe-velocity must never restart idle motion.
-func _on_navigation_velocity_computed(safe_velocity: Vector3) -> void:
-	if not is_movement_active():
-		_reject_navigation_velocity()
-		return
-	if _nav_velocity_request_generation != _movement_generation:
-		_reject_navigation_velocity()
-		return
-	if _navigation_agent == null or not is_instance_valid(_navigation_agent):
-		_reject_navigation_velocity()
-		return
-	if _navigation_agent.is_navigation_finished():
-		_reject_navigation_velocity()
-		return
-
-	var remaining: Vector3 = _movement_target - global_position
-	remaining.y = 0.0
-	var arrive_distance: float = maxf(stopping_distance, 0.5)
-	if remaining.length() <= arrive_distance:
-		_reject_navigation_velocity()
-		return
-
-	var horizontal: Vector3 = Vector3(safe_velocity.x, 0.0, safe_velocity.z)
-	if horizontal.length_squared() < ROTATION_VELOCITY_MIN_SQ:
-		_reject_navigation_velocity()
-		return
-
-	# Avoidance is intentionally disabled project-wide; if re-enabled later, still
-	# route through the authoritative steered path with generation checks above.
-	apply_steered_velocity(horizontal, -1.0, 0.0, true)
-
-
-func _reject_navigation_velocity() -> void:
-	_smoothed_move_velocity = Vector3.ZERO
-	velocity = Vector3.ZERO
-	if _navigation_agent != null and is_instance_valid(_navigation_agent):
-		if _navigation_agent.has_method("set_velocity_forced"):
-			_navigation_agent.set_velocity_forced(Vector3.ZERO)
-
-
-func _update_navigation_path_validity(delta: float) -> void:
-	if not has_move_target or _navigation_agent == null:
-		return
-
-	_path_validity_timer -= delta
-	if _path_validity_timer > 0.0:
-		return
-
-	# Poll sooner while waiting for map/path sync so units do not idle for the full interval.
-	var interval: float = PATH_VALIDITY_CHECK_INTERVAL
-	if not _navigation_active:
-		interval = 0.05
-	_path_validity_timer = interval + get_repath_stagger_offset_seconds()
-
-	if not UnitNavigation.can_use(_navigation_agent):
-		_navigation_active = false
-		# Map may activate on a later frame — keep command, retry activation.
-		call_deferred("_refresh_navigation_active_state")
-		return
-
-	if not _navigation_agent.is_target_reachable():
-		_navigation_active = false
-		# Preserve destination & generation; re-request when the agent has no live path.
-		# Do not direct-steer. Early false after set is timing, not bypass permission.
-		if _navigation_agent.is_navigation_finished():
-			UnitNavigation.apply_destination(_navigation_agent, _movement_target)
-		call_deferred("_refresh_navigation_active_state")
-		return
-
-	_navigation_active = not _navigation_agent.is_navigation_finished()
-	# Force a repath when the agent finished early but destination is still distant.
-	var remaining: Vector3 = _movement_target - global_position
-	remaining.y = 0.0
-	if (
-		_navigation_agent.is_navigation_finished()
-		and remaining.length() > stopping_distance + MOVE_DEST_TOLERANCE
-	):
-		UnitNavigation.apply_destination(_navigation_agent, _movement_target)
-		call_deferred("_refresh_navigation_active_state")
 
 
 ## Loads runtime state from unit_data when the data pipeline is available.

@@ -231,8 +231,8 @@ func _ready() -> void:
 				continue
 			var unit: Unit = entry as Unit
 			var dest: Vector3 = Vector3.ZERO
-			if unit._navigation_agent != null:
-				dest = unit._navigation_agent.target_position
+			if unit.has_move_target:
+				dest = unit.get_movement_destination()
 			if not unit.has_move_target or dest == Vector3.ZERO:
 				continue
 			var dest_to_camp: float = EnemyArmyCommand.horizontal_distance(

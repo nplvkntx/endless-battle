@@ -363,12 +363,9 @@ func get_ability_definition(_ability_id: StringName) -> HeroAbilityDefinition:
 
 func snap_ability_navigation_point(desired: Vector3) -> Vector3:
 	var result: Vector3 = Vector3(desired.x, global_position.y, desired.z)
-	if _navigation_agent != null and UnitNavigation.can_use(_navigation_agent):
-		var nav_map: RID = _navigation_agent.get_navigation_map()
-		if nav_map != RID():
-			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, result)
-			result = Vector3(snapped.x, global_position.y, snapped.z)
-	return result
+	PlayerRouteNavigation.ensure_grid_ready()
+	var snapped: Vector3 = PlayerRouteNavigation.nearest_walkable_world(result)
+	return Vector3(snapped.x, global_position.y, snapped.z)
 
 
 func begin_move_to_cast(ability_id: StringName, target: Node3D) -> void:
@@ -1400,10 +1397,8 @@ func _needs_attack_close_in(approach_position: Vector3) -> bool:
 			return true
 
 	if (
-		_navigation_agent != null
-		and is_instance_valid(_navigation_agent)
-		and has_move_target
-		and not _navigation_agent.is_target_reachable()
+		has_move_target
+		and not PlayerRouteNavigation.is_world_walkable(_movement_target)
 	):
 		return true
 
@@ -1428,13 +1423,8 @@ func _should_reclaim_approach_slot(_approach_position: Vector3) -> bool:
 	if not NodeSafety.is_alive_node(_attack_target):
 		return false
 
-	# Only rotate slots when the current approach destination is unreachable.
-	return (
-		_navigation_agent != null
-		and is_instance_valid(_navigation_agent)
-		and has_move_target
-		and not _navigation_agent.is_target_reachable()
-	)
+	# Only rotate slots when the current approach destination is not walkable.
+	return has_move_target and not PlayerRouteNavigation.is_world_walkable(_movement_target)
 
 
 func _reclaim_unreachable_approach_slot() -> void:

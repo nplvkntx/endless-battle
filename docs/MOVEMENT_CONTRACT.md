@@ -24,14 +24,15 @@ Movement should be boring, predictable, and trustworthy.
 
 ## Keep (Low-Level Infrastructure)
 
-- NavigationServer / navmesh
-- NavigationAgent
 - physical collision
-- building navigation obstacles
+- building occupancy / custom RTS grid obstacles
 - selection (`SelectionManager`)
 - command queue
 - attack-move command concept
 - path debug visualization
+- `PlayerRouteNavigation` custom RTS occupancy grid + route follow
+
+NavigationAgent3D is **not** used for strategic unit travel.
 
 ---
 
@@ -125,11 +126,12 @@ They do not need to preserve formation during travel.
 
 ## Workers
 
-Reliability over path-query optimization.
+Workers use the same custom RTS strategic travel backend as military units.
 
-Small worker selections may use individual NavigationAgent paths if that is simpler and more reliable.
+Task systems decide **where** (mine / tree / drop-off / build approach points).
+`PlayerRouteNavigation` / custom RTS decide **how** to get there.
 
-Do not force workers into complicated squad movement.
+Do not give workers a separate NavigationAgent pathfinder.
 
 ---
 

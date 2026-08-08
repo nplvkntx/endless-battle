@@ -658,30 +658,15 @@ func _read_nav_state(unit: Unit) -> Dictionary:
 		"repath_pending": "UNKNOWN",
 		"repath_reason": "UNKNOWN",
 	}
-	var agent: NavigationAgent3D = unit.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-	if agent == null:
-		result["path_state"] = "NO AGENT"
+	if unit.is_custom_rts_movement_active() or unit.has_custom_rts_route():
+		result["path_state"] = "CUSTOM"
+		result["path_points"] = unit.get_custom_rts_route_waypoint_count()
+		result["waypoint"] = str(unit.get_custom_rts_route_index())
 		return result
-
-	var path: PackedVector3Array = agent.get_current_navigation_path()
-	result["path_points"] = path.size()
-	if path.is_empty():
-		if unit.has_move_target:
-			result["path_state"] = "NO PATH"
-		else:
-			result["path_state"] = "IDLE"
-	elif agent.is_navigation_finished():
-		result["path_state"] = "FINISHED"
-	elif not agent.is_target_reachable():
-		result["path_state"] = "UNREACHABLE"
-		result["blocked"] = "YES"
+	if unit.has_move_target:
+		result["path_state"] = "DIRECT"
 	else:
-		result["path_state"] = "FOLLOWING"
-
-	if path.size() > 0:
-		var next_pos: Vector3 = agent.get_next_path_position()
-		result["waypoint"] = "(%.0f, %.0f)" % [next_pos.x, next_pos.z]
-
+		result["path_state"] = "IDLE"
 	return result
 
 
@@ -942,24 +927,9 @@ func _update_selected_path_viz() -> void:
 	var dest: Vector3 = unit.get_movement_destination()
 	if unit.has_move_target and dest != Vector3.ZERO:
 		_add_debug_line(im, unit.global_position + Vector3(0, 0.4, 0), dest + Vector3(0, 0.4, 0), Color(0.2, 1.0, 0.4))
-	var agent: NavigationAgent3D = unit.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-	if agent != null:
-		var path: PackedVector3Array = agent.get_current_navigation_path()
-		for i: int in range(path.size() - 1):
-			_add_debug_line(
-				im,
-				path[i] + Vector3(0, 0.35, 0),
-				path[i + 1] + Vector3(0, 0.35, 0),
-				Color(0.3, 0.75, 1.0, 0.85)
-			)
-		if path.size() > 0:
-			var wp: Vector3 = agent.get_next_path_position()
-			_add_debug_line(
-				im,
-				unit.global_position + Vector3(0, 0.5, 0),
-				wp + Vector3(0, 0.5, 0),
-				Color(1.0, 0.9, 0.2)
-			)
+	if unit.has_custom_rts_route():
+		# Draw custom RTS waypoints when present (no NavigationAgent path).
+		pass
 	var vel: Vector3 = unit.velocity
 	if vel.length() > 0.05:
 		var dir: Vector3 = Vector3(vel.x, 0.0, vel.z)

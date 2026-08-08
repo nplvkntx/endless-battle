@@ -315,7 +315,7 @@ func _verify_idle_cluster_no_slide(failures: PackedStringArray) -> void:
 
 
 func _verify_stale_move_callback_ignored(failures: PackedStringArray) -> void:
-	print("verify: stale move callback ignored after stop")
+	print("verify: stop clears custom RTS; no leftover locomotion")
 	var harness: Dictionary = await _spawn_nav_harness()
 	var unit: Swordsman = harness["unit"]
 	unit.global_position = Vector3(-5.0, 0.0, 0.0)
@@ -327,17 +327,12 @@ func _verify_stale_move_callback_ignored(failures: PackedStringArray) -> void:
 	await get_tree().physics_frame
 	_expect(failures, "stop: generation advanced", unit.get_movement_generation() != gen_before_stop)
 	_expect(failures, "stop: not movement-active", not unit.is_movement_active())
-
-	# Simulate a delayed NavigationAgent avoidance callback from an old worker-era path.
-	unit._nav_velocity_request_generation = gen_before_stop
-	unit._on_navigation_velocity_computed(Vector3(3.0, 0.0, 0.0))
-	await get_tree().physics_frame
+	_expect(failures, "stop: custom RTS cleared", not unit.is_custom_rts_movement_active())
 	_expect(
 		failures,
-		"stale callback: velocity stays zero",
+		"stop: velocity stays zero",
 		Vector3(unit.velocity.x, 0.0, unit.velocity.z).length() < 0.05
 	)
-	_expect(failures, "stale callback: still not movement-active", not unit.is_movement_active())
 	await _free_harness(harness)
 
 
@@ -408,10 +403,11 @@ func _verify_standing_uses_authoritative_path(failures: PackedStringArray) -> vo
 	)
 	_expect(
 		failures,
-		"movement generation + velocity_computed guard present",
+		"movement generation + custom RTS authority present",
 		source.contains("func is_movement_active")
-		and source.contains("_on_navigation_velocity_computed")
+		and source.contains("func prepare_custom_rts_route")
 		and source.contains("_movement_generation")
+		and not source.contains("_on_navigation_velocity_computed")
 	)
 	var sep_source: String = FileAccess.get_file_as_string("res://scripts/systems/unit_separation.gd")
 	_expect(
@@ -526,12 +522,10 @@ func _bake_nav_mesh(region: NavigationRegion3D, parent: Node) -> void:
 	await get_tree().physics_frame
 
 
-func _wait_nav_ready(unit: Unit) -> void:
-	var deadline_msec: int = Time.get_ticks_msec() + 1500
-	while Time.get_ticks_msec() < deadline_msec:
-		if unit._navigation_agent != null and UnitNavigation.can_use(unit._navigation_agent):
-			return
-		await get_tree().physics_frame
+func _wait_nav_ready(_unit: Unit) -> void:
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	await get_tree().physics_frame
 
 
 func _free_harness(harness: Dictionary) -> void:

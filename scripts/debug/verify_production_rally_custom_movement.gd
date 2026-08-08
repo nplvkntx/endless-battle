@@ -85,7 +85,7 @@ func _test_barracks_rally_around_obstacle(failures: PackedStringArray) -> void:
 	_expect(
 		failures,
 		"old NavigationAgent not authoritative",
-		not bool(unit.get("_navigation_active"))
+		not unit.uses_navigation_agent()
 	)
 
 	var prov: Dictionary = unit.get_strategic_order_provenance()

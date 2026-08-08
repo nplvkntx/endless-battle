@@ -59,7 +59,6 @@ var _task_nudge_direction: Vector3 = Vector3.ZERO
 var _task_nudge_start_position: Vector3 = Vector3.ZERO
 var _task_nudge_side_sign: float = 1.0
 var _task_nudge_side_attempts: int = 0
-var _task_navigation_active: bool = false
 var _gather_stuck_watch_position: Vector3 = Vector3.ZERO
 var _gather_stuck_watch_time: float = 0.0
 var _gather_stuck_recovery_cooldown: float = 0.0
@@ -117,7 +116,6 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_update_health_bar(_health_component.current_health, _health_component.max_health)
 	_configure_faction_groups()
-	_configure_task_navigation_agent()
 	if _is_enemy_worker():
 		call_deferred("_notify_enemy_worker_needs_gather_job")
 	call_deferred("_hide_worker_team_accent_marker")
@@ -435,29 +433,16 @@ func _physics_process(delta: float) -> void:
 		WorkerAiUnstuck.process_movement(self, delta)
 	elif _task_nudge_active:
 		_process_task_corner_nudge(delta)
-	elif _is_on_task_movement() and has_move_target:
-		var arrived: bool = false
-		if _task_navigation_active:
-			arrived = _process_task_navigation_movement()
-		else:
-			arrived = WorkerTaskNavigation.process_direct_movement(
-				self,
-				_task_movement_destination,
-				move_speed,
-				stopping_distance
-			)
-
-		if arrived:
-			if not _attempt_task_proximity_resolve():
-				has_move_target = false
-			velocity = Vector3.ZERO
-		else:
+	elif has_move_target:
+		# Sole strategic travel backend: custom RTS (gather/return/build included).
+		super._physics_process(delta)
+		if _is_on_task_movement():
 			if _build_trip_state == BuildTripState.TO_BUILDING:
 				_try_commit_construction_if_in_range()
-			elif not _is_enemy_worker():
+			else:
+				_attempt_task_proximity_resolve()
+			if _is_on_task_movement() and has_move_target and not _is_enemy_worker():
 				_update_task_corner_stuck_detection(delta, position_before)
-	elif has_move_target:
-		super._physics_process(delta)
 	else:
 		velocity = Vector3.ZERO
 
@@ -509,7 +494,6 @@ func set_movement_target(
 	if _is_on_task_movement():
 		_task_movement_destination = Vector3(target.x, global_position.y, target.z)
 		_task_has_saved_destination = true
-		_refresh_task_navigation()
 	_reset_task_corner_nudge()
 	return true
 
@@ -569,87 +553,8 @@ func _reset_gather_stuck_watch() -> void:
 	_gather_stuck_watch_time = 0.0
 
 
-func _configure_task_navigation_agent() -> void:
-	if _navigation_agent == null:
-		_navigation_agent = get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-	if _navigation_agent == null:
-		return
-
-	WorkerTaskNavigation.configure_agent(_navigation_agent, stopping_distance)
-	call_deferred("_sync_navigation_agent_position")
-
-
-func _sync_navigation_agent_position() -> void:
-	if not NodeSafety.is_alive_node(self):
-		return
-
-	if _navigation_agent == null:
-		return
-
-	UnitNavigation.clear(_navigation_agent, global_position)
-
-
-func _refresh_task_navigation() -> void:
-	_task_navigation_active = false
-	if not _is_on_task_movement() or not _task_has_saved_destination:
-		return
-
-	if _build_trip_state == BuildTripState.TO_BUILDING:
-		if _try_commit_construction_if_in_range():
-			return
-
-	if not WorkerTaskNavigation.can_use(_navigation_agent):
-		if _build_trip_state == BuildTripState.TO_BUILDING:
-			if _try_commit_construction_if_in_range():
-				return
-			call_deferred("_try_repath_construction_movement")
-		else:
-			call_deferred("_try_repath_task_movement")
-		return
-
-	var previous_target: Vector3 = _navigation_agent.target_position
-	var refresh_delta: Vector3 = _task_movement_destination - previous_target
-	refresh_delta.y = 0.0
-	if refresh_delta.length_squared() >= 0.04:
-		_navigation_agent.target_position = _task_movement_destination
-		PerfCounters.record_navigation_path_request()
-	_check_task_navigation_reachable.call_deferred()
-
-
-func _check_task_navigation_reachable() -> void:
-	if not NodeSafety.is_alive_node(self):
-		return
-
-	if not _is_on_task_movement() or not has_move_target:
-		_task_navigation_active = false
-		return
-
-	if not WorkerTaskNavigation.can_use(_navigation_agent):
-		_task_navigation_active = false
-		return
-
-	_task_navigation_active = _navigation_agent.is_target_reachable()
-	if not _task_navigation_active:
-		if _build_trip_state == BuildTripState.TO_BUILDING:
-			if _try_commit_construction_if_in_range():
-				return
-			call_deferred("_try_repath_construction_movement")
-		else:
-			call_deferred("_try_repath_task_movement")
-
-
-func _process_task_navigation_movement() -> bool:
-	return WorkerTaskNavigation.process_movement(
-		self,
-		_navigation_agent,
-		_task_movement_destination,
-		move_speed,
-		stopping_distance
-	)
-
-
 func _disable_task_navigation() -> void:
-	_task_navigation_active = false
+	pass
 
 
 func _update_task_corner_stuck_detection(delta: float, position_before: Vector3) -> void:
@@ -2201,7 +2106,7 @@ func _update_enemy_worker_validation(delta: float) -> void:
 
 		if _is_in_build_start_range():
 			_enemy_build_unreachable_time = 0.0
-		elif has_move_target or _task_has_saved_destination or _task_navigation_active:
+		elif has_move_target or _task_has_saved_destination:
 			_enemy_build_unreachable_time += delta
 			if _enemy_build_unreachable_time >= GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT:
 				_release_invalid_build_assignment("build task invalid, returning worker to economy")
@@ -2249,7 +2154,7 @@ func _is_on_enemy_stuck_eligible_movement() -> bool:
 	if not _is_on_task_movement():
 		return false
 
-	return has_move_target or _task_has_saved_destination or _task_navigation_active
+	return has_move_target or _task_has_saved_destination
 
 
 func _reset_enemy_stuck_watch() -> void:
@@ -2923,10 +2828,13 @@ func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
 
 
 func _is_wood_chop_spot_reachable(chop_spot: Vector3) -> bool:
-	if not WorkerTaskNavigation.can_use(_navigation_agent):
-		return true
-
-	return WorkerTaskNavigation.is_target_reachable(_navigation_agent, chop_spot)
+	PlayerRouteNavigation.ensure_grid_ready()
+	var walkable: Vector3 = PlayerRouteNavigation.nearest_walkable_world(chop_spot)
+	var snap_delta: Vector3 = walkable - chop_spot
+	snap_delta.y = 0.0
+	if snap_delta.length_squared() > 4.0:
+		return false
+	return PlayerRouteNavigation.has_path(global_position, walkable)
 
 
 func _get_gather_approach_base_slot() -> int:
@@ -3070,10 +2978,13 @@ func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 
 
 func _is_gather_approach_reachable(approach_position: Vector3) -> bool:
-	if not WorkerTaskNavigation.can_use(_navigation_agent):
-		return true
-
-	return WorkerTaskNavigation.is_target_reachable(_navigation_agent, approach_position)
+	PlayerRouteNavigation.ensure_grid_ready()
+	var walkable: Vector3 = PlayerRouteNavigation.nearest_walkable_world(approach_position)
+	var snap_delta: Vector3 = walkable - approach_position
+	snap_delta.y = 0.0
+	if snap_delta.length_squared() > 4.0:
+		return false
+	return PlayerRouteNavigation.has_path(global_position, walkable)
 
 
 func _compute_command_center_dropoff_position(command_center: CommandCenter) -> Vector3:
@@ -3156,14 +3067,8 @@ func _apply_approach_candidate_offset(direction: Vector3, candidate_index: int) 
 
 
 func _snap_task_target_to_navigation(target: Vector3) -> Vector3:
-	if not WorkerTaskNavigation.can_use(_navigation_agent):
-		return target
-
-	var nav_map: RID = _navigation_agent.get_navigation_map()
-	if nav_map == RID():
-		return target
-
-	var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, target)
+	PlayerRouteNavigation.ensure_grid_ready()
+	var snapped: Vector3 = PlayerRouteNavigation.nearest_walkable_world(target)
 	snapped.y = target.y
 	return snapped
 

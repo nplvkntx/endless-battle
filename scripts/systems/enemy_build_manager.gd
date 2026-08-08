@@ -4125,17 +4125,12 @@ func _find_nearest_available_enemy_worker(
 
 
 func _get_navigation_map() -> RID:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
-		if not node is Worker:
-			continue
-
-		var agent: NavigationAgent3D = (
-			node.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-		)
-		if agent != null and WorkerTaskNavigation.can_use(agent):
-			return agent.get_navigation_map()
-
-	return RID()
+	if not is_inside_tree():
+		return RID()
+	var world: World3D = get_viewport().world_3d if get_viewport() != null else null
+	if world == null:
+		return RID()
+	return world.navigation_map
 
 
 func _resolve_primary_command_center() -> CommandCenter:

@@ -183,6 +183,60 @@ func issue_player_group_command(
 	return request_group_move(units, destination, order_kind, queued, command_source)
 
 
+## Bind a fresh custom grid route on one unit without issuing orders or
+## canceling worker gather/build tasks. Used by Unit.request_movement_target
+## for strategic travel that was not pre-bound by issue_player_group_command.
+func bind_unit_strategic_route(
+	unit: Unit,
+	destination: Vector3,
+	command_source: StringName = &"strategic"
+) -> bool:
+	if not NodeSafety.is_alive_node(unit) or not unit.is_inside_tree():
+		return false
+
+	ensure_grid_ready()
+	var dest := Vector3(destination.x, GROUND_Y, destination.z)
+	if not grid.is_world_walkable(dest):
+		dest = grid.nearest_walkable_world(dest)
+
+	var origin := Vector3(unit.global_position.x, GROUND_Y, unit.global_position.z)
+	if not grid.is_world_walkable(origin):
+		origin = grid.nearest_walkable_world(origin)
+
+	var route: PackedVector3Array = grid.find_path(origin, dest)
+	path_calculations_this_command += 1
+	total_path_calculations += 1
+	_global_command_generation += 1
+
+	if route.is_empty():
+		route = PackedVector3Array([dest])
+
+	unit.prepare_custom_rts_route(
+		route,
+		dest,
+		_global_command_generation,
+		dest,
+		&"move"
+	)
+	_record_command_telemetry(1, route.size(), command_source)
+	return true
+
+
+func find_path(from: Vector3, to: Vector3) -> PackedVector3Array:
+	ensure_grid_ready()
+	var start := Vector3(from.x, GROUND_Y, from.z)
+	var goal := Vector3(to.x, GROUND_Y, to.z)
+	if not grid.is_world_walkable(start):
+		start = grid.nearest_walkable_world(start)
+	if not grid.is_world_walkable(goal):
+		goal = grid.nearest_walkable_world(goal)
+	return grid.find_path(start, goal)
+
+
+func has_path(from: Vector3, to: Vector3) -> bool:
+	return not find_path(from, to).is_empty()
+
+
 func get_command_generation() -> int:
 	return _global_command_generation
 

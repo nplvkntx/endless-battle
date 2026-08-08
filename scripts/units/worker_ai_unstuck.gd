@@ -92,7 +92,7 @@ static func process_movement(worker: Worker, delta: float) -> void:
 
 	worker._ai_unstuck_time += delta
 
-	var arrived: bool = WorkerTaskNavigation.process_direct_movement(
+	var arrived: bool = UnitNavigation.process_direct_movement(
 		worker,
 		worker._ai_unstuck_target,
 		worker.move_speed,
@@ -606,27 +606,13 @@ static func _is_inside_any_building_footprint(worker: Worker, point: Vector3) ->
 
 
 static func _is_reachable_escape_point(worker: Worker, point: Vector3) -> bool:
-	if not WorkerTaskNavigation.can_use(worker._navigation_agent):
-		return true
-
-	var nav_map: RID = worker._navigation_agent.get_navigation_map()
-	if nav_map == RID():
+	PlayerRouteNavigation.ensure_grid_ready()
+	var walkable: Vector3 = PlayerRouteNavigation.nearest_walkable_world(point)
+	var snap_delta: Vector3 = walkable - point
+	snap_delta.y = 0.0
+	if snap_delta.length_squared() > 2.25:
 		return false
-
-	var from: Vector3 = NavigationServer3D.map_get_closest_point(
-		nav_map, worker.global_position
-	)
-	var to: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, point)
-
-	if from.distance_squared_to(worker.global_position) > 4.0:
-		return false
-
-	if to.distance_squared_to(point) > 2.25:
-		return false
-
-	var path: PackedVector3Array = NavigationServer3D.map_get_path(nav_map, from, to, true)
-	return path.size() >= 2
-
+	return PlayerRouteNavigation.has_path(worker.global_position, walkable)
 
 static func _score_escape_candidate(
 	worker: Worker,

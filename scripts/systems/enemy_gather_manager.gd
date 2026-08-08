@@ -293,17 +293,8 @@ func _assign_starting_workers() -> void:
 
 
 func _is_enemy_navigation_ready() -> bool:
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
-		if not _is_valid_worker(node):
-			continue
-
-		var agent: NavigationAgent3D = (
-			node.get_node_or_null("NavigationAgent3D") as NavigationAgent3D
-		)
-		if agent != null and WorkerTaskNavigation.can_use(agent):
-			return true
-
-	return false
+	PlayerRouteNavigation.ensure_grid_ready()
+	return PlayerRouteNavigation.grid != null
 
 
 func _append_worker_to_gather_bucket(

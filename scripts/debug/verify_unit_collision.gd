@@ -460,10 +460,8 @@ func _bake_nav_mesh(region: NavigationRegion3D, parent: Node, parse_obstacles: b
 func _wait_nav_ready(unit: Unit) -> void:
 	var deadline_msec: int = Time.get_ticks_msec() + 1500
 	while Time.get_ticks_msec() < deadline_msec:
-		if unit._navigation_agent != null:
-			if UnitNavigation.can_use(unit._navigation_agent):
-				return
-			await get_tree().physics_frame
+		PlayerRouteNavigation.ensure_grid_ready()
+		if PlayerRouteNavigation.grid != null:
 			return
 		await get_tree().process_frame
 

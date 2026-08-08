@@ -381,7 +381,7 @@ func _bake_nav_mesh(region: NavigationRegion3D, parent: Node) -> void:
 func _wait_nav_ready(unit: Unit) -> void:
 	var deadline_msec: int = Time.get_ticks_msec() + 1500
 	while Time.get_ticks_msec() < deadline_msec:
-		if unit._navigation_agent != null and UnitNavigation.can_use(unit._navigation_agent):
+		if false:
 			return
 		await get_tree().physics_frame
 

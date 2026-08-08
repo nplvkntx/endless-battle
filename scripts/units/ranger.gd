@@ -849,9 +849,8 @@ func _get_horizontal_move_direction() -> Vector3:
 	if vel.length() >= RangerStats.CAMOUFLAGE_HUNT_MIN_MOVE_SPEED:
 		return vel.normalized()
 
-	if has_move_target and _navigation_agent != null:
-		var target_pos: Vector3 = _navigation_agent.target_position
-		var to_target: Vector3 = target_pos - global_position
+	if has_move_target:
+		var to_target: Vector3 = _movement_target - global_position
 		to_target.y = 0.0
 		if to_target.length_squared() > 0.04:
 			return to_target.normalized()
@@ -1146,14 +1145,9 @@ func _get_mouse_ground_position() -> Vector3:
 func _snap_to_navigation(desired: Vector3) -> Vector3:
 	var result: Vector3 = desired
 	result.y = global_position.y
-
-	if _navigation_agent != null and UnitNavigation.can_use(_navigation_agent):
-		var nav_map: RID = _navigation_agent.get_navigation_map()
-		if nav_map != RID():
-			var snapped: Vector3 = NavigationServer3D.map_get_closest_point(nav_map, result)
-			result = Vector3(snapped.x, global_position.y, snapped.z)
-
-	return result
+	PlayerRouteNavigation.ensure_grid_ready()
+	var snapped: Vector3 = PlayerRouteNavigation.nearest_walkable_world(result)
+	return Vector3(snapped.x, global_position.y, snapped.z)
 
 
 func _face_direction(direction: Vector3) -> void:
