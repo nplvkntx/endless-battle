@@ -130,6 +130,44 @@ func get_rts_occupancy_half_extents() -> Vector3:
 	return Vector3(half_xz.x, 1.0, half_xz.y)
 
 
+## Production rally uses the same custom RTS move backend as player RMB.
+## Returns true when custom routing handled the order.
+func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
+	if unit == null or not is_instance_valid(unit) or not unit.is_inside_tree():
+		return false
+	if destination == Vector3.ZERO:
+		return false
+
+	if PlayerRouteNavigation.is_custom_rts_movement_enabled():
+		_place_unit_on_walkable_custom_cell(unit)
+		var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+			[unit],
+			destination,
+			&"move",
+			false,
+			&"rally"
+		)
+		if result.get("handled", false):
+			unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
+			return true
+
+	unit.set_movement_target(destination)
+	unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
+	return false
+
+
+## Production spawn offsets can land inside this building's inflated occupancy.
+## Snap onto the nearest walkable custom-grid cell before owning a custom route.
+func _place_unit_on_walkable_custom_cell(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	PlayerRouteNavigation.ensure_grid_ready()
+	if PlayerRouteNavigation.is_world_walkable(unit.global_position):
+		return
+	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(unit.global_position)
+	unit.global_position = Vector3(exit_pos.x, unit.global_position.y, exit_pos.z)
+
+
 func _register_with_entity_registry() -> void:
 	if not is_inside_tree():
 		return

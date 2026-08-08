@@ -356,7 +356,7 @@ func _spawn_hero() -> void:
 	HeroProgressionStore.register_living_hero(hero)
 
 	if _has_rally_point:
-		hero.set_movement_target(_claim_rally_move_target())
+		issue_production_rally_move(hero, _claim_rally_move_target())
 
 
 func _spawn_enemy_hero() -> void:

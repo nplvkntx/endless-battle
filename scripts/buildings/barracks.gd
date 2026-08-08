@@ -776,7 +776,7 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 		EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
-		unit.set_movement_target(_claim_rally_move_target())
+		issue_production_rally_move(unit, _claim_rally_move_target())
 	else:
 		_finalize_spawned_unit(unit)
 

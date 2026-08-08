@@ -92,11 +92,13 @@ func refresh_static_obstacle(body: Node3D) -> void:
 
 ## Canonical shared group / single-unit Move / Attack-Move / Patrol for the player.
 ## Returns handled=true when custom routing issued orders.
+## `command_source` is telemetry/provenance context (e.g. &"player", &"rally").
 func request_group_move(
 	units: Array,
 	destination: Vector3,
 	order_kind: StringName,
-	queued: bool = false
+	queued: bool = false,
+	command_source: StringName = &"player"
 ) -> Dictionary:
 	var result: Dictionary = {
 		"handled": false,
@@ -130,7 +132,7 @@ func request_group_move(
 			if not grid.is_world_walkable(slot):
 				slot = grid.nearest_walkable_world(slot)
 			_issue_unit_ground_order(unit, slot, order_kind, true)
-		_record_command_telemetry(ordered_units.size(), 0)
+		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		return result
 
 	_global_command_generation += 1
@@ -149,7 +151,7 @@ func request_group_move(
 
 	if shared_route.is_empty():
 		result["route_failure_reason"] = "no_path"
-		_record_command_telemetry(ordered_units.size(), 0)
+		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		# Fall through to legacy caller path when route cannot be built.
 		return result
 
@@ -178,18 +180,19 @@ func request_group_move(
 	result["route_valid"] = true
 	result["accepted_destination"] = group_destination
 	result["slot_targets"] = slot_targets_out
-	_record_command_telemetry(ordered_units.size(), shared_route.size())
+	_record_command_telemetry(ordered_units.size(), shared_route.size(), command_source)
 	return result
 
 
-## Player SelectionManager / FormationManager entry.
+## Player SelectionManager / FormationManager / production-rally entry.
 func issue_player_group_command(
 	units: Array,
 	destination: Vector3,
 	order_kind: StringName,
-	queued: bool = false
+	queued: bool = false,
+	command_source: StringName = &"player"
 ) -> Dictionary:
-	return request_group_move(units, destination, order_kind, queued)
+	return request_group_move(units, destination, order_kind, queued, command_source)
 
 
 func get_command_generation() -> int:
@@ -208,8 +211,12 @@ func get_last_squad_size() -> int:
 	return last_squad_size
 
 
-func _record_command_telemetry(squad_size: int, waypoints: int) -> void:
-	last_command_source = &"player"
+func _record_command_telemetry(
+	squad_size: int,
+	waypoints: int,
+	command_source: StringName = &"player"
+) -> void:
+	last_command_source = command_source
 	last_squad_size = squad_size
 	last_route_waypoints = waypoints
 
