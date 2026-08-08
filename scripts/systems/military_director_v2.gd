@@ -5113,3 +5113,327 @@ func debug_get_last_attack_block_reason_for_tests() -> String:
 
 func debug_note_attack_block_for_tests(reason: String) -> void:
 	_note_attack_block(reason)
+
+
+## READ-ONLY RTS (O-key) diagnostic snapshot. Observes state; never issues orders.
+func get_rts_diagnostic_snapshot() -> Dictionary:
+	var tree: SceneTree = get_tree()
+	var rally_point: Vector3 = get_assemble_rally_point()
+	var combat_alive: int = 0
+	var combat_available: int = 0
+	var main_squad: int = 0
+	var defense_reserved: int = 0
+	var other_owned: int = 0
+	var unassigned: int = 0
+	var idle_military: int = 0
+	var squad_ids: Dictionary = {}
+	var pending_ids: Dictionary = {}
+	var member_ids: Dictionary = {}
+
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		var member: Node = entry as Node
+		var mid: int = member.get_instance_id()
+		squad_ids[mid] = true
+		member_ids[mid] = true
+		main_squad += 1
+
+	for entry: Variant in _pending_reinforcements:
+		if NodeSafety.is_alive_node(entry):
+			pending_ids[(entry as Node).get_instance_id()] = true
+
+	for entry: Variant in _roster:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		combat_alive += 1
+		var unit: Node = entry as Node
+		var reason: String = _classify_main_army_unit_reason(
+			unit,
+			squad_ids,
+			pending_ids,
+			rally_point
+		)
+		match reason:
+			"defense_reserved":
+				defense_reserved += 1
+			"no_squad", "reinforcement_pool", "pending_reinforcement":
+				unassigned += 1
+			"mission_owned", "stale_squad":
+				other_owned += 1
+			"in_main_squad":
+				combat_available += 1
+		if (
+			unit is Unit
+			and not (unit as Unit).is_movement_active()
+			and (unit as Unit).get_active_order() == null
+			and reason != "defense_reserved"
+		):
+			idle_military += 1
+
+	var balance: Dictionary = {}
+	if tree != null:
+		balance = _evaluate_main_army_vs_player(tree, rally_point)
+	var director_units: Array = balance.get("attack_army", []) as Array
+	var director_power: float = float(balance.get("ai_strength", 0.0))
+	var player_power: float = float(balance.get("player_strength", 0.0))
+	var power_ratio: float = float(balance.get("ratio", 0.0))
+	var commander_units: Array = _main_squad.get_members_copy()
+	var commander_power: float = EnemyArmyCommand.estimate_combat_strength(commander_units)
+	var mismatch: float = absf(director_power - commander_power)
+
+	var hero: Hero = null
+	if tree != null:
+		hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	var hero_with_main: bool = false
+	var hero_away_reason: String = "unknown"
+	var hero_hp_ratio: float = 0.0
+	var hero_level: int = 0
+	var hero_state: String = "missing"
+	var hero_mission: String = "-"
+	var hero_name: String = "-"
+	var hero_dist_main: float = -1.0
+	if hero != null:
+		hero_name = hero.name
+		hero_level = hero.level
+		hero_hp_ratio = EnemyArmyCommand.get_health_ratio(hero)
+		hero_state = EnemyUnitMission.mission_to_label(EnemyUnitMission.get_unit_mission(hero))
+		hero_mission = hero_state
+		hero_with_main = _main_squad.has_member(hero)
+		if hero_with_main:
+			hero_away_reason = ""
+		elif EnemyArmyCommand.is_reinforcement_waiting(hero):
+			hero_away_reason = "unassigned"
+		elif pending_ids.has(hero.get_instance_id()):
+			hero_away_reason = "unassigned"
+		elif EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.DEFEND:
+			hero_away_reason = "defense-owned"
+		elif EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.RETREAT:
+			hero_away_reason = "recovering"
+		elif hero_hp_ratio > 0.0 and hero_hp_ratio < MilitaryAIConfig.V2_CREEP_HERO_HEALTHY_RATIO:
+			hero_away_reason = "recovering"
+		else:
+			hero_away_reason = "different squad" if not member_ids.has(hero.get_instance_id()) else "unknown"
+		if _main_squad.center != Vector3.ZERO:
+			hero_dist_main = EnemyArmyCommand.horizontal_distance(
+				hero.global_position,
+				_main_squad.center
+			)
+
+	## Use cached threat evaluators only — never _resolve_v2_defense_threat (accepts intents).
+	var threat: Dictionary = {"threatened": false}
+	if tree != null:
+		threat = EnemyArmyCommand.evaluate_emergency_defense_threat(tree)
+		if not bool(threat.get("threatened", false)):
+			threat = EnemyArmyCommand.evaluate_defense_threat(tree)
+	var threat_focus: Node3D = null
+	if threat.has("focus"):
+		threat_focus = NodeSafety.safe_node(threat.get("focus")) as Node3D
+	elif threat.has("target"):
+		threat_focus = NodeSafety.safe_node(threat.get("target")) as Node3D
+	elif threat.has("threat_unit"):
+		threat_focus = NodeSafety.safe_node(threat.get("threat_unit")) as Node3D
+	var threat_target_label: String = "-"
+	if threat_focus != null:
+		threat_target_label = threat_focus.name
+	elif String(threat.get("reason", "")) != "":
+		threat_target_label = String(threat.get("reason", ""))
+
+	var objective_label: String = "-"
+	var objective_valid: bool = false
+	if _mission != null:
+		var alive_target: Node3D = _mission.get_alive_target_object()
+		if alive_target != null:
+			objective_label = alive_target.name
+			objective_valid = true
+		elif _mission.target_position != Vector3.ZERO:
+			objective_label = "(%.0f, %.0f)" % [
+				_mission.target_position.x,
+				_mission.target_position.z,
+			]
+			objective_valid = true
+
+	var prefer_early_creep: bool = false
+	var interrupt_for_attack: bool = false
+	if tree != null:
+		prefer_early_creep = _should_prefer_early_creeping(tree, rally_point)
+		interrupt_for_attack = _should_interrupt_creeping_for_attack(tree, rally_point)
+
+	var decision_lines: PackedStringArray = PackedStringArray()
+	var attack_gate: String = "ALLOWED"
+	if not _last_attack_block_reason.is_empty():
+		attack_gate = "BLOCKED — %s" % _last_attack_block_reason
+	elif not is_attack_ready() and not is_lethal_attack_ready():
+		attack_gate = "BLOCKED — army %d/%d (hero=%s)" % [
+			get_military_unit_count(),
+			MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS,
+			"yes" if _main_squad.hero_present else "no",
+		]
+	elif power_ratio < MilitaryAIConfig.V2_ATTACK_COMMIT_STRENGTH_RATIO and not interrupt_for_attack:
+		attack_gate = "BLOCKED — power ratio %.2f < %.2f" % [
+			power_ratio,
+			MilitaryAIConfig.V2_ATTACK_COMMIT_STRENGTH_RATIO,
+		]
+	decision_lines.append("ATTACK: %s" % attack_gate)
+
+	var creep_gate: String = "ALLOWED"
+	if not _last_creep_block_reason.is_empty():
+		creep_gate = "BLOCKED — %s" % _last_creep_block_reason
+	elif not is_creep_ready():
+		creep_gate = "BLOCKED — army %d/%d (hero=%s)" % [
+			get_military_unit_count(),
+			MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS,
+			"yes" if _main_squad.hero_present else "no",
+		]
+	decision_lines.append("CREEP: %s" % creep_gate)
+
+	var defend_gate: String = "BLOCKED — no threat"
+	if bool(threat.get("threatened", false)):
+		defend_gate = "ALLOWED — threat active"
+	elif _state == State.DEFEND or _defend_active:
+		defend_gate = "ACTIVE — %s" % String(_defend_reason)
+	decision_lines.append("DEFEND: %s" % defend_gate)
+
+	var regroup_gate: String = "BLOCKED — cohesion acceptable"
+	if _post_defend_regroup_remaining > 0.0:
+		regroup_gate = "ACTIVE — post-defense %.1fs" % _post_defend_regroup_remaining
+	elif _state == State.RECOVER:
+		regroup_gate = "ACTIVE — RECOVER"
+	elif _state == State.RETREAT:
+		regroup_gate = "ACTIVE — RETREAT"
+	decision_lines.append("REGROUP: %s" % regroup_gate)
+
+	var camp_label: String = "-"
+	var camp_alive: bool = false
+	var camp_distance: float = -1.0
+	if _state == State.CREEP and _mission != null:
+		var camp: Node3D = _mission.get_alive_target_object()
+		if camp != null:
+			camp_label = camp.name
+			camp_alive = true
+			if _main_squad.center != Vector3.ZERO:
+				camp_distance = EnemyArmyCommand.horizontal_distance(
+					_main_squad.center,
+					camp.global_position
+				)
+
+	var attack_members: int = director_units.size()
+	var attack_moving: int = 0
+	var attack_idle: int = 0
+	var attack_with_targets: int = 0
+	for entry: Variant in director_units:
+		if not entry is Unit:
+			continue
+		var u: Unit = entry as Unit
+		if u.is_movement_active():
+			attack_moving += 1
+		elif u.get_active_order() == null:
+			attack_idle += 1
+		if u is MilitaryUnit:
+			var atk: Variant = u.get("_attack_target")
+			if NodeSafety.is_alive_node(atk):
+				attack_with_targets += 1
+
+	return {
+		"state": get_state_name(),
+		"mission": (
+			_mission.get_mission_type_name()
+			if _mission != null
+			else "-"
+		),
+		"mission_age": _mission.get_age_seconds() if _mission != null else 0.0,
+		"transition_reason": _last_transition_reason,
+		"objective": objective_label,
+		"objective_valid": objective_valid,
+		"watchdog_objective_valid": _watchdog_objective_valid,
+		"executable": EnemyArmyCommand.executable_mission_to_label(
+			EnemyArmyCommand.get_executable_mission()
+		),
+		"executable_reason": EnemyArmyCommand.get_executable_mission_reason(),
+		"commander_idle_seconds": (
+			_resolve_commander().get_squad_idle_seconds()
+			if _resolve_commander() != null
+			else 0.0
+		),
+		"hero_name": hero_name,
+		"hero_level": hero_level,
+		"hero_hp_ratio": hero_hp_ratio,
+		"hero_state": hero_state,
+		"hero_mission": hero_mission,
+		"hero_with_main": hero_with_main,
+		"hero_away_reason": hero_away_reason,
+		"hero_dist_main": hero_dist_main,
+		"combat_alive": combat_alive,
+		"combat_available": combat_available,
+		"main_squad": main_squad,
+		"defense_reserved": defense_reserved,
+		"other_owned": other_owned,
+		"unassigned": unassigned,
+		"pending": _pending_reinforcements.size(),
+		"idle_military": idle_military,
+		"director_power": director_power,
+		"player_power": player_power,
+		"power_ratio": power_ratio,
+		"commander_power": commander_power,
+		"power_mismatch": mismatch,
+		"director_unit_count": director_units.size(),
+		"commander_unit_count": commander_units.size(),
+		"decision_lines": decision_lines,
+		"attack_block": _last_attack_block_reason,
+		"creep_block": _last_creep_block_reason,
+		"prefer_early_creep": prefer_early_creep,
+		"interrupt_for_attack": interrupt_for_attack,
+		"creep_ready": is_creep_ready(),
+		"attack_ready": is_attack_ready(),
+		"lethal_ready": is_lethal_attack_ready(),
+		"threat_active": bool(threat.get("threatened", false)),
+		"threat_target": threat_target_label,
+		"threat_power": float(threat.get("threat_power", threat.get("player_strength", 0.0))),
+		"defense_power": float(threat.get("defense_power", threat.get("ai_strength", 0.0))),
+		"defend_reason": String(_defend_reason),
+		"defend_active": _defend_active or _state == State.DEFEND,
+		"hero_defending": (
+			hero != null
+			and EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.DEFEND
+		),
+		"camp": camp_label,
+		"camp_alive": camp_alive,
+		"camp_distance": camp_distance,
+		"cleared_camps": _cleared_creep_camp_ids.size(),
+		"reserved_camp_id": _reserved_creep_camp_id,
+		"post_defend_regroup": _post_defend_regroup_remaining,
+		"post_retreat_cooldown": _post_retreat_attack_cooldown,
+		"squad_ids": member_ids,
+		"pending_ids": pending_ids.duplicate(),
+		"attack_members": attack_members,
+		"attack_moving": attack_moving,
+		"attack_idle": attack_idle,
+		"attack_with_targets": attack_with_targets,
+		"role_counts": _main_squad.get_role_counts_label(),
+		"last_order_label": EnemyArmyCommandTelemetry.get_last_issued_order_label(),
+		"last_order_age": EnemyArmyCommandTelemetry.get_seconds_since_last_order(),
+		"authority": (
+			EnemyArmyCommand.get_declared_command_authority().name
+			if EnemyArmyCommand.get_declared_command_authority() != null
+			else "UNKNOWN"
+		),
+	}
+
+
+func classify_unit_ownership_for_diagnostics(unit: Node) -> String:
+	if not NodeSafety.is_alive_node(unit):
+		return "unknown"
+	var squad_ids: Dictionary = {}
+	for entry: Variant in _main_squad.get_members_copy():
+		if NodeSafety.is_alive_node(entry):
+			squad_ids[(entry as Node).get_instance_id()] = true
+	var pending_ids: Dictionary = {}
+	for entry: Variant in _pending_reinforcements:
+		if NodeSafety.is_alive_node(entry):
+			pending_ids[(entry as Node).get_instance_id()] = true
+	return _classify_main_army_unit_reason(
+		unit,
+		squad_ids,
+		pending_ids,
+		get_assemble_rally_point()
+	)

@@ -36,6 +36,7 @@ HeroAbilityTargetingController="*res://autoloads/hero_ability_targeting_controll
 TooltipManager="*res://scripts/ui/tooltip_manager.gd"
 PerfCounters="*res://scripts/debug/perf_counters.gd"
 PerfDebugOverlay="*res://scripts/debug/perf_debug_overlay.gd"
+RtsAiDebugOverlay="*res://scripts/debug/rts_ai_debug_overlay.gd"
 
 [display]
 
