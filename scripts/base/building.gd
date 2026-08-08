@@ -157,8 +157,9 @@ func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
 	return false
 
 
-## Production spawn offsets can land inside this building's inflated occupancy.
-## Snap onto the nearest walkable custom-grid cell before owning a custom route.
+## Production spawn offsets and post-construction builders can land inside this
+## building's inflated custom-grid occupancy. Snap once onto the nearest walkable
+## cell (no recurring unstuck / repath). Normal PlayerRouteNavigation continues after.
 func _place_unit_on_walkable_custom_cell(unit: Unit) -> void:
 	if unit == null or not is_instance_valid(unit):
 		return
@@ -665,6 +666,7 @@ func unregister_builder(worker: Worker) -> void:
 func register_builder(worker: Worker) -> void:
 	if building_state == STATE_COMPLETED:
 		if worker != null and is_instance_valid(worker):
+			_place_unit_on_walkable_custom_cell(worker)
 			worker.on_building_construction_finished()
 		return
 
@@ -752,10 +754,14 @@ func _on_construction_timer_finished() -> void:
 	if building_state == STATE_COMPLETED:
 		return
 
+	## Occupancy registers on complete; builders may still stand on standees that
+	## are inside the inflated blocked ring. Eject once before clearing build state.
 	complete_construction()
 	for builder_ref: Variant in _registered_builders:
 		if NodeSafety.is_alive_node(builder_ref):
-			(builder_ref as Worker).on_building_construction_finished()
+			var builder: Worker = builder_ref as Worker
+			_place_unit_on_walkable_custom_cell(builder)
+			builder.on_building_construction_finished()
 	_registered_builders.clear()
 
 

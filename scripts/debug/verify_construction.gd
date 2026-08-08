@@ -54,6 +54,7 @@ func _ready() -> void:
 	await _verify_ai_construction_stages(failures)
 	await _verify_nav_snap_does_not_false_commit(failures)
 	await _verify_enemy_hero_altar_construction_handoff(failures)
+	await _verify_builder_exits_completed_barracks_walkable(failures)
 	await _verify_construction_timer_survives_brief_range_loss(failures)
 	await _verify_build_tick_stagger_advances_parity(failures)
 	_verify_ai_farm_reservation_recovery(failures)
@@ -671,6 +672,97 @@ func _verify_enemy_hero_altar_construction_handoff(failures: PackedStringArray) 
 		if node is HeroAltar and (node as Building).is_being_constructed():
 			unfinished_altars += 1
 	_expect(failures, "altar handoff: no unfinished altar remains", unfinished_altars == 0)
+
+	await _free_harness(harness)
+
+
+func _verify_builder_exits_completed_barracks_walkable(failures: PackedStringArray) -> void:
+	## Construction standees sit at footprint + CONSTRUCTION_EDGE_STANDOFF (0.75),
+	## but completed occupancy inflates by unit_radius + clearance (1.15). Without a
+	## one-shot exit correction the builder is left on a blocked custom-grid cell.
+	print("verify: builder exits completed Barracks onto walkable cells")
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	## Corners + mid-edges — fresh foundation each sample so deferred occupancy
+	## from a prior completed Barracks cannot pollute unfinished standee checks.
+	for sample_index: int in 8:
+		PlayerRouteNavigation.clear_all()
+		await get_tree().process_frame
+
+		var barracks: Building = BARRACKS_SCENE.instantiate() as Building
+		root.add_child(barracks)
+		barracks.global_position = Vector3(0.0, EnemyBuildPlacement.BARRACKS_GROUND_Y, 0.0)
+		barracks.start_under_construction()
+		barracks.setup_construction(0.35)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		PlayerRouteNavigation.ensure_grid_ready()
+		barracks._register_rts_occupancy()
+
+		var points: Array[Vector3] = barracks.get_construction_points()
+		_expect(
+			failures,
+			"barracks exit[%d]: has standees" % sample_index,
+			points.size() >= 8
+		)
+		if sample_index >= points.size():
+			barracks.free()
+			continue
+
+		var standee: Vector3 = points[sample_index]
+		_expect(
+			failures,
+			"barracks exit[%d]: unfinished standee walkable" % sample_index,
+			PlayerRouteNavigation.is_world_walkable(standee)
+		)
+
+		var worker: Worker = _spawn_worker(
+			root,
+			Vector3(standee.x, 0.5, standee.z),
+			false
+		)
+		await _wait_nav_ready(worker)
+		worker.start_construction_order(barracks)
+		worker.global_position = Vector3(standee.x, 0.5, standee.z)
+		worker._construction_target_point = standee
+		worker._construction_target_point_valid = true
+		if worker._build_trip_state == Worker.BuildTripState.TO_BUILDING:
+			worker._try_commit_construction_if_in_range()
+		await get_tree().physics_frame
+		_expect(
+			failures,
+			"barracks exit[%d]: constructing at standee" % sample_index,
+			worker.is_constructing()
+		)
+
+		barracks.force_construction_progress_for_verify(1.0)
+		await get_tree().process_frame
+
+		_expect(
+			failures,
+			"barracks exit[%d]: barracks completed" % sample_index,
+			barracks.building_state == Building.STATE_COMPLETED
+		)
+		_expect(
+			failures,
+			"barracks exit[%d]: builder left construction trip" % sample_index,
+			not worker.is_constructing() and not worker.is_on_construction_trip()
+		)
+		_expect(
+			failures,
+			"barracks exit[%d]: builder on walkable cell" % sample_index,
+			PlayerRouteNavigation.is_world_walkable(worker.global_position)
+		)
+		_expect(
+			failures,
+			"barracks exit[%d]: builder outside raw footprint" % sample_index,
+			not barracks.is_position_inside_footprint(worker.global_position)
+		)
+
+		worker.free()
+		barracks.free()
+		await get_tree().process_frame
 
 	await _free_harness(harness)
 
