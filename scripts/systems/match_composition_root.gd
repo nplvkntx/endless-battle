@@ -19,6 +19,7 @@ var enemy_wave_manager: EnemyWaveManager = null
 var enemy_defense_manager: EnemyDefenseManager = null
 var enemy_build_manager: EnemyBuildManager = null
 var enemy_gather_manager: EnemyGatherManager = null
+var simple_wc3_ai: SimpleWc3AI = null
 var selection_manager: Node = null
 var build_manager: Node = null
 var match_manager: Node = null
@@ -37,8 +38,13 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	## Bind after children have entered so authority nodes are fully constructed.
 	_resolve_systems()
+	if _uses_simple_wc3_ai():
+		_disable_old_military_runtime()
 	_declare_military_command_authority()
 	_bind_ai_runtime()
+	## Children may re-enable process in their own _ready; force-disable after.
+	if _uses_simple_wc3_ai():
+		call_deferred("_disable_old_military_runtime")
 
 
 func _exit_tree() -> void:
@@ -73,7 +79,36 @@ func get_system(node_name: StringName) -> Node:
 
 
 func is_v2_military_active() -> bool:
+	if _uses_simple_wc3_ai():
+		return false
 	return MilitaryAIConfig.is_v2_enabled() and army_commander_v2 != null
+
+
+func _uses_simple_wc3_ai() -> bool:
+	return (
+		MilitaryAIConfig.is_simple_wc3_ai_enabled()
+		and simple_wc3_ai != null
+	)
+
+
+func _disable_old_military_runtime() -> void:
+	## Prevent old military controllers from commanding units.
+	## Keep nodes in the scene (wiring / economy helpers) but stop their process.
+	## Intent publishers stay off too so nothing queues military work for a dead V2 consumer.
+	const OLD_MILITARY_NODES: Array[StringName] = [
+		&"MilitaryDirectorV2",
+		&"ArmyCommanderV2",
+		&"EnemyCombatController",
+		&"EnemyCreepManager",
+		&"EnemyWaveManager",
+		&"EnemyDefenseManager",
+	]
+	for node_name: StringName in OLD_MILITARY_NODES:
+		var node: Node = get_node_or_null(NodePath(String(node_name)))
+		if node == null:
+			continue
+		node.set_process(false)
+		node.set_physics_process(false)
 
 
 func _ensure_ai_player_state() -> void:
@@ -99,6 +134,7 @@ func _resolve_systems() -> void:
 	enemy_defense_manager = get_node_or_null("EnemyDefenseManager") as EnemyDefenseManager
 	enemy_build_manager = get_node_or_null("EnemyBuildManager") as EnemyBuildManager
 	enemy_gather_manager = get_node_or_null("EnemyGatherManager") as EnemyGatherManager
+	simple_wc3_ai = get_node_or_null("SimpleWc3AI") as SimpleWc3AI
 	selection_manager = get_node_or_null("SelectionManager")
 	build_manager = get_node_or_null("BuildManager")
 	match_manager = get_node_or_null("MatchManager")
@@ -106,7 +142,9 @@ func _resolve_systems() -> void:
 
 func _declare_military_command_authority() -> void:
 	## PHASE 2 item 3: exactly one main-army order issuer per match.
-	if MilitaryAIConfig.is_v2_enabled():
+	if _uses_simple_wc3_ai():
+		military_command_authority = simple_wc3_ai
+	elif MilitaryAIConfig.is_v2_enabled():
 		military_command_authority = army_commander_v2
 	else:
 		military_command_authority = enemy_combat_controller

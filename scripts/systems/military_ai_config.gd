@@ -2,7 +2,12 @@ class_name MilitaryAIConfig
 extends RefCounted
 
 ## Feature toggle for the Military AI V2 stack.
-## PRODUCTION DEFAULT: true — MilitaryDirectorV2 + ArmyCommanderV2 own the main army.
+## PRODUCTION DEFAULT: true — MilitaryDirectorV2 + ArmyCommanderV2 own the main army
+## when Simple WC3 AI is off.
+##
+## Experimental branch default: Simple WC3 AI replaces V2/legacy military control.
+## USE_SIMPLE_WC3_AI = true → MatchCompositionRoot disables old military controllers
+## and starts SimpleWc3AI. Legacy stays suspended via is_v2_enabled() remaining true.
 ##
 ## Developer-only legacy switch:
 ## Set USE_MILITARY_AI_V2 = false to run the pre-V2 military controllers for comparison.
@@ -26,14 +31,18 @@ extends RefCounted
 
 const USE_MILITARY_AI_V2: bool = true
 
+## Experimental Simple WC3 melee AI (Stage 1). When true and SimpleWc3AI is present,
+## old military runtime is disabled at MatchCompositionRoot bootstrap.
+const USE_SIMPLE_WC3_AI: bool = true
+
 ## Shared squad navigation: one strategic route per multi-unit command.
 ## PRODUCTION DEFAULT: true — reduces per-unit repath storms for large armies.
 const USE_SHARED_SQUAD_NAVIGATION: bool = true
 
-## Custom RTS movement (Movement Lab architecture) for PLAYER strategic travel only.
+## Custom RTS movement (Movement Lab architecture) for player / rally / SimpleWc3AI.
 ## DEVELOPMENT DEFAULT ON: shared grid route + slots + local separation.
-## AI continues to use SharedSquadNavigation / NavigationAgent. Set false to compare
-## player custom movement against legacy SharedSquadNavigation player pathing.
+## Legacy military AI path still uses SharedSquadNavigation / NavigationAgent when active.
+## Set false to compare custom movement against legacy SharedSquadNavigation pathing.
 const CUSTOM_RTS_MOVEMENT: bool = true
 ## Test / A-B override: -1 use const, 0 force off, 1 force on.
 static var _custom_rts_movement_override: int = -1
@@ -161,7 +170,13 @@ const V2_SQUAD_IDLE_SECONDS: float = 2.0
 
 
 static func is_v2_enabled() -> bool:
+	## Remains true under Simple WC3 AI so legacy military owners stay suspended.
+	## V2 nodes themselves are process-disabled by MatchCompositionRoot.
 	return USE_MILITARY_AI_V2
+
+
+static func is_simple_wc3_ai_enabled() -> bool:
+	return USE_SIMPLE_WC3_AI
 
 
 static func is_shared_squad_nav_enabled() -> bool:
@@ -183,4 +198,6 @@ static func clear_custom_rts_movement_override() -> void:
 
 
 static func ai_version_label() -> String:
+	if USE_SIMPLE_WC3_AI:
+		return "SimpleWC3"
 	return "V2" if USE_MILITARY_AI_V2 else "Legacy"

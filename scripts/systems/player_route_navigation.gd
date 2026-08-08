@@ -1,9 +1,10 @@
 extends Node
 
-## Player custom RTS movement authority (Movement Lab architecture).
+## Custom RTS movement authority (Movement Lab architecture).
 ## One shared strategic grid route per group command + personal slots +
-## lightweight local separation. Used by player SelectionManager / FormationManager.
-## Does not own AI strategic travel — AI keeps SharedSquadNavigation / NavigationAgent.
+## lightweight local separation.
+## Used by player SelectionManager / FormationManager, production rally, and
+## SimpleWc3AI Stage 1 strategic travel (same API — AI chooses destination only).
 ##
 ## Feature switch: MilitaryAIConfig.CUSTOM_RTS_MOVEMENT
 ## When false, callers keep using SharedSquadNavigation / NavigationAgent.

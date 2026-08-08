@@ -15,12 +15,16 @@
 [ext_resource type="Script" path="res://scripts/systems/army_commander_v2.gd" id="13_army_commander_v2"]
 [ext_resource type="Script" path="res://scripts/systems/match_composition_root.gd" id="14_match_composition_root"]
 [ext_resource type="Script" path="res://scripts/systems/ai_player_state.gd" id="15_ai_player_state"]
+[ext_resource type="Script" path="res://scripts/systems/simple_wc3_ai.gd" id="16_simple_wc3_ai"]
 
 [node name="MatchSystems" type="Node"]
 script = ExtResource("14_match_composition_root")
 
 [node name="AIPlayerState" type="Node" parent="."]
 script = ExtResource("15_ai_player_state")
+
+[node name="SimpleWc3AI" type="Node" parent="."]
+script = ExtResource("16_simple_wc3_ai")
 
 [node name="EnemyStrategicDirector" type="Node" parent="."]
 script = ExtResource("10_enemy_strategic_director")
