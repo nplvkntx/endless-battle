@@ -107,8 +107,6 @@ func _exit_tree() -> void:
 func _register_rts_occupancy() -> void:
 	if not is_inside_tree():
 		return
-	if not PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		return
 	PlayerRouteNavigation.register_static_obstacle(self)
 
 
@@ -119,8 +117,6 @@ func _unregister_rts_occupancy() -> void:
 func _refresh_rts_occupancy() -> void:
 	if not is_inside_tree():
 		return
-	if not PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		return
 	PlayerRouteNavigation.refresh_static_obstacle(self)
 
 
@@ -130,28 +126,27 @@ func get_rts_occupancy_half_extents() -> Vector3:
 	return Vector3(half_xz.x, 1.0, half_xz.y)
 
 
-## Production rally uses the same custom RTS move backend as player RMB.
-## Returns true when custom routing handled the order.
+## Production rally uses the same PlayerRouteNavigation backend as player RMB.
+## Returns true when routing handled the order.
 func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
 	if unit == null or not is_instance_valid(unit) or not unit.is_inside_tree():
 		return false
 	if destination == Vector3.ZERO:
 		return false
 
-	if PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		_place_unit_on_walkable_custom_cell(unit)
-		var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-			[unit],
-			destination,
-			&"move",
-			false,
-			&"rally"
-		)
-		if result.get("handled", false):
-			unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
-			return true
+	_place_unit_on_walkable_custom_cell(unit)
+	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		[unit],
+		destination,
+		&"move",
+		false,
+		&"rally"
+	)
+	if result.get("handled", false):
+		unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
+		return true
 
-	unit.set_movement_target(destination)
+	unit.issue_order(UnitOrder.move(destination))
 	unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
 	return false
 

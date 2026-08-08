@@ -198,9 +198,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 	var entity_count: int = 0
 	if EntityRegistry != null:
 		entity_count = EntityRegistry.get_registered_ids().size()
-	var squad_count: int = 0
-	if SharedSquadNavigation != null:
-		squad_count = SharedSquadNavigation.get_active_squad_count()
 	var formation_count: int = _formation_count()
 	var footprint_reserved: bool = ConstructionReservations.overlaps_reserved_footprint(
 		Vector3(20.0, 0.0, 20.0),
@@ -243,7 +240,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		and attack_path_clean
 		and EnemyBuildPlacement.preferred_tower_lane == &""
 		and entity_count == 0
-		and squad_count == 0
 		and formation_count == 0
 		and not footprint_reserved
 		and AIHeroMastery.get_tactical_state() == AIHeroMastery.TacticalState.FOLLOW_ARMY
@@ -282,7 +278,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		"attack_path_lane_threat": lane_threat,
 		"preferred_tower_lane": String(EnemyBuildPlacement.preferred_tower_lane),
 		"entity_registry_count": entity_count,
-		"shared_squad_count": squad_count,
 		"formation_count": formation_count,
 		"footprint_reserved": footprint_reserved,
 		"ai_hero_tactical_state": int(AIHeroMastery.get_tactical_state()),
@@ -356,7 +351,6 @@ func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number:
 		"attack_path_clean",
 		"preferred_tower_lane",
 		"entity_registry_count",
-		"shared_squad_count",
 		"formation_count",
 		"footprint_reserved",
 		"ai_hero_tactical_state",

@@ -248,9 +248,6 @@ func _camp_has_living_creeps(camp: Node3D) -> bool:
 func _issue_army_to_camp(units: Array) -> void:
 	if units.is_empty() or _camp_destination == Vector3.ZERO:
 		return
-	if not PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		last_move_handled = false
-		return
 
 	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
 		units,

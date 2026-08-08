@@ -5757,60 +5757,22 @@ static func _issue_spaced_group_orders(
 				PerfCounters.warn_duplicate_group_order()
 				return true
 
-	if MilitaryAIConfig.is_shared_squad_nav_enabled() and ordered_units.size() > 1:
-		var squad_result: Dictionary = SharedSquadNavigation.issue_group_command(
-			ordered_units,
-			center,
-			use_attack_move,
-			int(mission),
-			_group_order_generation + 1
-		)
-		if squad_result.get("handled", false):
-			var route_ok: bool = VariantUtils.to_bool(squad_result.get("route_valid", false))
-			var equiv_skip: bool = VariantUtils.to_bool(squad_result.get("equivalent_skip", false))
-			if not route_ok and not equiv_skip:
-				_last_squad_route_failure_reason = String(
-					squad_result.get("route_failure_reason", "no_path")
-				)
-				## Do not record a success signature — allow controlled reissue cadence
-				## (and director reevaluation) without falling through to direct formation.
-				return false
-			if equiv_skip:
-				_record_group_order_signature(ordered_units, center, mission, use_attack_move)
-				_last_squad_route_failure_reason = ""
-				return true
-			var squad_pending: Array = squad_result.get("pending_orders", [])
-			_record_group_order_signature(ordered_units, center, mission, use_attack_move)
-			_last_squad_route_failure_reason = ""
-			if squad_pending.is_empty():
-				return true
-			var wrapped: Array = []
-			for entry: Variant in squad_pending:
-				if not entry is Dictionary:
-					continue
-				var order: Dictionary = entry
-				var unit: Variant = _resolve_pending_order_unit(order)
-				if not NodeSafety.is_alive_node(unit):
-					continue
-				var target: Vector3 = order.get("target", Vector3.ZERO)
-				wrapped.append({
-					"unit": unit,
-					"unit_id": (unit as Node).get_instance_id(),
-					"command_generation": int(order.get("command_generation", -1)),
-					"squad_id": int(order.get("squad_id", -1)),
-					"target": target,
-					"use_attack_move": VariantUtils.to_bool(order.get("use_attack_move", use_attack_move)),
-					"mission": order.get("mission", mission),
-					"dedupe_key": _build_pending_order_dedupe_key(unit, mission, target),
-					"priority": _mission_order_priority(mission),
-					"diag_source": get_diag_order_source(),
-					"diag_mission_gen": get_diag_order_mission_generation(),
-				})
-			var had_pending: bool = not _pending_group_orders.is_empty()
-			_enqueue_pending_group_orders(wrapped)
-			if not had_pending and not _issuing_group_order_batch:
-				tick_group_order_batch(null)
-			return true
+	var order_kind: StringName = &"attack_move" if use_attack_move else &"move"
+	var route_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		ordered_units,
+		center,
+		order_kind,
+		false,
+		&"enemy_army"
+	)
+	if route_result.get("handled", false):
+		_record_group_order_signature(ordered_units, center, mission, use_attack_move)
+		_last_squad_route_failure_reason = ""
+		return true
+	var failure_reason: String = String(route_result.get("route_failure_reason", ""))
+	if failure_reason == "no_path":
+		_last_squad_route_failure_reason = failure_reason
+		return false
 
 	var move_targets: Array[Vector3] = _get_or_compute_formation_targets(
 		ordered_units,
@@ -6107,19 +6069,6 @@ static func _issue_group_order_batch(orders: Array, start_index: int) -> int:
 		if not diag_source.is_empty():
 			push_diag_order_source(diag_source, diag_mission_gen)
 			pushed_diag = true
-
-		var command_generation: int = int(entry.get("command_generation", -1))
-		var squad_id: int = int(entry.get("squad_id", -1))
-		if command_generation >= 0 and squad_id >= 0:
-			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(unit)
-			if (
-				squad_ctx == null
-				or squad_ctx.squad_id != squad_id
-				or squad_ctx.command_generation != command_generation
-			):
-				if pushed_diag:
-					pop_diag_order_source()
-				continue
 
 		if (
 			use_attack_move

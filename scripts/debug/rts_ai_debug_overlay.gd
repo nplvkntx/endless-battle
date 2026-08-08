@@ -682,18 +682,6 @@ func _read_nav_state(unit: Unit) -> Dictionary:
 		var next_pos: Vector3 = agent.get_next_path_position()
 		result["waypoint"] = "(%.0f, %.0f)" % [next_pos.x, next_pos.z]
 
-	var squad_ctx: SquadNavContext = null
-	if SharedSquadNavigation != null:
-		squad_ctx = SharedSquadNavigation.get_squad_for_unit(unit)
-	if squad_ctx != null:
-		if not squad_ctx.route_failure_reason.is_empty():
-			result["repath_reason"] = squad_ctx.route_failure_reason
-			if squad_ctx.route_failure_reason.contains("project"):
-				result["path_state"] = "NAV PROJECTION INVALID"
-			elif squad_ctx.route_failure_reason.contains("no_path"):
-				result["path_state"] = "NO PATH"
-		if not squad_ctx.route_valid:
-			result["blocked"] = "YES"
 	return result
 
 

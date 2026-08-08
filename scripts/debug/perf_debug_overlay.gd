@@ -151,15 +151,6 @@ func _update_label() -> void:
 		"Pending AI Orders: %d" % PerfCounters.get_pending_group_orders(),
 		"Orders/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),
 		"Repaths/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_REPATH_REQUESTS),
-		"Squad Nav: %s" % ("on" if PerfCounters.is_squad_nav_enabled() else "off"),
-		"Active Squads: %d (%d members)" % [
-			PerfCounters.get_squad_nav_active_squads(),
-			PerfCounters.get_squad_nav_member_count(),
-		],
-		"Squad Routes/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_SQUAD_STRATEGIC_ROUTES),
-		"Local Repaths/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_SQUAD_LOCAL_REPATHS),
-		"Route Cache Hits/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_SQUAD_ROUTE_CACHE_HITS),
-		"Squad Stalls: %d" % PerfCounters.get_squad_nav_stalls(),
 		"Target Searches/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_TARGET_SEARCHES),
 	]))
 

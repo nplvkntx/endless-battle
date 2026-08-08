@@ -17,7 +17,7 @@ func _ready() -> void:
 	print("verify_simple_wc3_ai_stage1: start")
 
 	_expect(failures, "Simple WC3 AI config on", MilitaryAIConfig.is_simple_wc3_ai_enabled())
-	_expect(failures, "custom RTS movement on", MilitaryAIConfig.is_custom_rts_movement_enabled())
+	_expect(failures, "autoload PlayerRouteNavigation present", PlayerRouteNavigation != null)
 	_expect(
 		failures,
 		"V2 flag remains true (legacy military suspended)",

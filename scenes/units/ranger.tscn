@@ -135,9 +135,3 @@ shape = SubResource("BoxShape3D_body")
 script = ExtResource("2_health_component")
 max_health = 170
 
-[node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
-path_desired_distance = 0.25
-target_desired_distance = 0.25
-radius = 0.5
-height = 2.0
-avoidance_enabled = false

@@ -710,7 +710,7 @@ func reset_all() -> void:
 	_military_ai_v2_defense_label = "-"
 	_military_ai_v2_threat_label = "-"
 	_military_ai_v2_executable_label = "-"
-	_squad_nav_enabled = MilitaryAIConfig.is_shared_squad_nav_enabled()
+	_squad_nav_enabled = false
 	_squad_nav_active_squads = 0
 	_squad_nav_member_count = 0
 	_squad_nav_stalls = 0

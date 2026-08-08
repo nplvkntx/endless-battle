@@ -12,17 +12,7 @@ func _ready() -> void:
 	var failures: PackedStringArray = []
 	print("verify_player_custom_rts_movement: start")
 
-	_expect(failures, "CUSTOM_RTS_MOVEMENT default on", MilitaryAIConfig.CUSTOM_RTS_MOVEMENT)
-	_expect(
-		failures,
-		"PlayerRouteNavigation.enabled mirrors config",
-		PlayerRouteNavigation.is_custom_rts_movement_enabled()
-	)
-	_expect(
-		failures,
-		"autoload PlayerRouteNavigation present",
-		PlayerRouteNavigation != null
-	)
+	_expect(failures, "autoload PlayerRouteNavigation present", PlayerRouteNavigation != null)
 
 	await _test_grid_building_footprint(failures)
 	await _test_group_one_path_calc(failures)

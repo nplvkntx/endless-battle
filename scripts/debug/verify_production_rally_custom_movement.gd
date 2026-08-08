@@ -15,7 +15,7 @@ func _ready() -> void:
 	var failures: PackedStringArray = []
 	print("verify_production_rally_custom_movement: start")
 
-	_expect(failures, "CUSTOM_RTS_MOVEMENT on", MilitaryAIConfig.is_custom_rts_movement_enabled())
+	_expect(failures, "autoload PlayerRouteNavigation present", PlayerRouteNavigation != null)
 
 	await _test_barracks_rally_around_obstacle(failures)
 	await _test_sequential_rally_group(failures)

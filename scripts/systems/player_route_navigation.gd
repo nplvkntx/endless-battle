@@ -1,13 +1,10 @@
 extends Node
 
-## Custom RTS movement authority (Movement Lab architecture).
+## Custom RTS movement authority (sole strategic movement foundation).
 ## One shared strategic grid route per group command + personal slots +
 ## lightweight local separation.
 ## Used by player SelectionManager / FormationManager, production rally, and
 ## SimpleWc3AI Stage 1 strategic travel (same API — AI chooses destination only).
-##
-## Feature switch: MilitaryAIConfig.CUSTOM_RTS_MOVEMENT
-## When false, callers keep using SharedSquadNavigation / NavigationAgent.
 
 const SLOT_SPACING := 1.4
 const GROUND_Y := 0.0
@@ -32,10 +29,6 @@ func _ready() -> void:
 	set_process(false)
 
 
-func is_custom_rts_movement_enabled() -> bool:
-	return MilitaryAIConfig.is_custom_rts_movement_enabled()
-
-
 func clear_all() -> void:
 	_global_command_generation = 0
 	path_calculations_this_command = 0
@@ -58,8 +51,6 @@ func ensure_grid_ready() -> void:
 
 func register_static_obstacle(body: Node3D) -> void:
 	if body == null or not is_instance_valid(body):
-		return
-	if not is_custom_rts_movement_enabled():
 		return
 	ensure_grid_ready()
 	var footprint: Dictionary = _resolve_footprint(body)
@@ -111,9 +102,6 @@ func request_group_move(
 		"slot_targets": [],
 		"route_failure_reason": "",
 	}
-	if not is_custom_rts_movement_enabled():
-		return result
-
 	var ordered_units: Array = _filter_movable_units(units)
 	if ordered_units.is_empty() or destination == Vector3.ZERO:
 		return result
@@ -153,7 +141,6 @@ func request_group_move(
 	if shared_route.is_empty():
 		result["route_failure_reason"] = "no_path"
 		_record_command_telemetry(ordered_units.size(), 0, command_source)
-		# Fall through to legacy caller path when route cannot be built.
 		return result
 
 	var slots: Array[Vector3] = _make_destination_slots(

@@ -612,37 +612,20 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 		CommandFeedback.show_move_marker(ground_position)
 		return
 
-	# Custom player RTS movement (lab architecture) — single or multi unit.
-	if PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"move",
-			queued
+	# PlayerRouteNavigation — single or multi unit strategic group move.
+	var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		commandable_units,
+		ground_position,
+		&"move",
+		queued
+	)
+	if custom_result.get("handled", false):
+		CommandFeedback.show_move_marker(
+			custom_result.get("accepted_destination", ground_position) as Vector3
 		)
-		if custom_result.get("handled", false):
-			CommandFeedback.show_move_marker(
-				custom_result.get("accepted_destination", ground_position) as Vector3
-			)
-			return
+		return
 
-	# Ordinary unformed multi-select: one shared strategic corridor + unique slots.
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"move",
-			queued
-		)
-		if shared_result.get("handled", false):
-			CommandFeedback.show_move_marker(
-				shared_result.get("accepted_destination", ground_position) as Vector3
-			)
-			return
-
+	# Last-resort: spaced per-unit orders (Unit uses custom direct locomotion).
 	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
 		ground_position,
@@ -712,54 +695,27 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 		CommandFeedback.show_attack_move_marker(ground_position)
 		return
 
-	if PlayerRouteNavigation.is_custom_rts_movement_enabled():
-		var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"attack_move",
-			queued
-		)
-		if custom_result.get("handled", false):
-			var any_combat := false
-			for unit: Unit in commandable_units:
-				if _is_combat_order_unit(unit):
-					any_combat = true
-					break
-			if any_combat:
-				CommandFeedback.show_attack_move_marker(
-					custom_result.get("accepted_destination", ground_position) as Vector3
-				)
-			else:
-				CommandFeedback.show_move_marker(
-					custom_result.get("accepted_destination", ground_position) as Vector3
-				)
-			return
-
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"attack_move",
-			queued
-		)
-		if shared_result.get("handled", false):
-			var any_combat := false
-			for unit: Unit in commandable_units:
-				if _is_combat_order_unit(unit):
-					any_combat = true
-					break
-			if any_combat:
-				CommandFeedback.show_attack_move_marker(
-					shared_result.get("accepted_destination", ground_position) as Vector3
-				)
-			else:
-				CommandFeedback.show_move_marker(
-					shared_result.get("accepted_destination", ground_position) as Vector3
-				)
-			return
+	var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		commandable_units,
+		ground_position,
+		&"attack_move",
+		queued
+	)
+	if custom_result.get("handled", false):
+		var any_combat := false
+		for unit: Unit in commandable_units:
+			if _is_combat_order_unit(unit):
+				any_combat = true
+				break
+		if any_combat:
+			CommandFeedback.show_attack_move_marker(
+				custom_result.get("accepted_destination", ground_position) as Vector3
+			)
+		else:
+			CommandFeedback.show_move_marker(
+				custom_result.get("accepted_destination", ground_position) as Vector3
+			)
+		return
 
 	commandable_units.sort_custom(_compare_units_by_instance_id)
 	var move_targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
@@ -799,7 +755,7 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 		CommandFeedback.show_patrol_marker(ground_position)
 		return
 
-	if PlayerRouteNavigation.is_custom_rts_movement_enabled() and not queued:
+	if not queued:
 		var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
 			commandable_units,
 			ground_position,
@@ -809,23 +765,6 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 		if custom_result.get("handled", false):
 			CommandFeedback.show_patrol_marker(
 				custom_result.get("accepted_destination", ground_position) as Vector3
-			)
-			return
-
-	if (
-		commandable_units.size() > 1
-		and SharedSquadNavigation.is_shared_navigation_enabled()
-		and not queued
-	):
-		var shared_result: Dictionary = SharedSquadNavigation.issue_player_group_command(
-			commandable_units,
-			ground_position,
-			&"patrol",
-			false
-		)
-		if shared_result.get("handled", false):
-			CommandFeedback.show_patrol_marker(
-				shared_result.get("accepted_destination", ground_position) as Vector3
 			)
 			return
 

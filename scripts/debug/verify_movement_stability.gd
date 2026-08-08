@@ -20,11 +20,11 @@ func _ready() -> void:
 	await _verify_arrival_settles(failures)
 	await _verify_blocked_near_building_settles(failures)
 	await _verify_idle_cluster_no_slide(failures)
-	await _verify_stale_avoidance_callback_ignored(failures)
+	await _verify_stale_move_callback_ignored(failures)
 	_verify_separation_forward_preserve(failures)
 	_verify_standing_uses_authoritative_path(failures)
 	_verify_movement_active_gate(failures)
-	_verify_progress_stuck_and_arrival_api(failures)
+	_verify_custom_rts_api(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -314,8 +314,8 @@ func _verify_idle_cluster_no_slide(failures: PackedStringArray) -> void:
 	await _free_harness(harness)
 
 
-func _verify_stale_avoidance_callback_ignored(failures: PackedStringArray) -> void:
-	print("verify: stale avoidance callback ignored after stop")
+func _verify_stale_move_callback_ignored(failures: PackedStringArray) -> void:
+	print("verify: stale move callback ignored after stop")
 	var harness: Dictionary = await _spawn_nav_harness()
 	var unit: Swordsman = harness["unit"]
 	unit.global_position = Vector3(-5.0, 0.0, 0.0)
@@ -328,7 +328,7 @@ func _verify_stale_avoidance_callback_ignored(failures: PackedStringArray) -> vo
 	_expect(failures, "stop: generation advanced", unit.get_movement_generation() != gen_before_stop)
 	_expect(failures, "stop: not movement-active", not unit.is_movement_active())
 
-	# Simulate a delayed NavigationAgent avoidance callback from the old order.
+	# Simulate a delayed NavigationAgent avoidance callback from an old worker-era path.
 	unit._nav_velocity_request_generation = gen_before_stop
 	unit._on_navigation_velocity_computed(Vector3(3.0, 0.0, 0.0))
 	await get_tree().physics_frame
@@ -355,8 +355,8 @@ func _verify_separation_forward_preserve(failures: PackedStringArray) -> void:
 	body.free()
 
 
-func _verify_progress_stuck_and_arrival_api(failures: PackedStringArray) -> void:
-	print("verify: progress stuck + arrival API present")
+func _verify_custom_rts_api(failures: PackedStringArray) -> void:
+	print("verify: custom RTS movement API present")
 	var source: String = FileAccess.get_file_as_string("res://scripts/base/unit.gd")
 	_expect(
 		failures,
@@ -365,13 +365,13 @@ func _verify_progress_stuck_and_arrival_api(failures: PackedStringArray) -> void
 	)
 	_expect(
 		failures,
-		"progress-based stuck anchor present",
-		source.contains("_stuck_progress_anchor_distance")
+		"custom RTS executor present",
+		source.contains("func _process_custom_rts_movement")
 	)
 	_expect(
 		failures,
-		"staged stuck recovery present",
-		source.contains("func _advance_stuck_recovery")
+		"custom RTS prepare present",
+		source.contains("func prepare_custom_rts_route")
 	)
 	_expect(
 		failures,
