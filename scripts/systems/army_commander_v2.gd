@@ -59,7 +59,7 @@ func _ready() -> void:
 		_director = get_parent().get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
 		_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_hero_micro_timer = HERO_MICRO_INTERVAL_SECONDS * 0.4
-	set_process(MilitaryAIConfig.is_v2_enabled())
+	set_process(MilitaryAIConfig.is_v2_runtime_active())
 
 
 func reset_match_state() -> void:
@@ -146,7 +146,7 @@ func get_squad_idle_seconds() -> float:
 
 
 func _process(delta: float) -> void:
-	if not MilitaryAIConfig.is_v2_enabled():
+	if not MilitaryAIConfig.is_v2_runtime_active():
 		set_process(false)
 		return
 

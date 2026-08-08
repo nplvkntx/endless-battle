@@ -38,6 +38,10 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	## Bind after children have entered so authority nodes are fully constructed.
 	_resolve_systems()
+	## Disable any old military siblings before SimpleWc3AI logs authority proof.
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		_disable_old_military_runtime()
+	_ensure_simple_wc3_ai()
 	if _uses_simple_wc3_ai():
 		_disable_old_military_runtime()
 	_declare_military_command_authority()
@@ -81,14 +85,45 @@ func get_system(node_name: StringName) -> Node:
 func is_v2_military_active() -> bool:
 	if _uses_simple_wc3_ai():
 		return false
-	return MilitaryAIConfig.is_v2_enabled() and army_commander_v2 != null
+	return MilitaryAIConfig.is_v2_runtime_active() and army_commander_v2 != null
+
+
+func is_old_military_runtime_active() -> bool:
+	## True if any old military controller is still processing.
+	if not _uses_simple_wc3_ai():
+		return is_v2_military_active()
+	const OLD_MILITARY_NODES: Array[StringName] = [
+		&"MilitaryDirectorV2",
+		&"ArmyCommanderV2",
+		&"EnemyCombatController",
+		&"EnemyCreepManager",
+		&"EnemyWaveManager",
+		&"EnemyDefenseManager",
+	]
+	for node_name: StringName in OLD_MILITARY_NODES:
+		var node: Node = get_node_or_null(NodePath(String(node_name)))
+		if node == null:
+			continue
+		if node.is_processing() or node.is_physics_processing():
+			return true
+	return false
 
 
 func _uses_simple_wc3_ai() -> bool:
-	return (
-		MilitaryAIConfig.is_simple_wc3_ai_enabled()
-		and simple_wc3_ai != null
-	)
+	return MilitaryAIConfig.is_simple_wc3_ai_enabled() and simple_wc3_ai != null
+
+
+func _ensure_simple_wc3_ai() -> void:
+	if not MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		return
+	if simple_wc3_ai != null and is_instance_valid(simple_wc3_ai):
+		return
+	simple_wc3_ai = get_node_or_null("SimpleWc3AI") as SimpleWc3AI
+	if simple_wc3_ai != null:
+		return
+	simple_wc3_ai = SimpleWc3AI.new()
+	simple_wc3_ai.name = "SimpleWc3AI"
+	add_child(simple_wc3_ai)
 
 
 func _disable_old_military_runtime() -> void:
@@ -141,10 +176,10 @@ func _resolve_systems() -> void:
 
 
 func _declare_military_command_authority() -> void:
-	## PHASE 2 item 3: exactly one main-army order issuer per match.
+	## Exactly one main-army order issuer per match. Simple WC3 owns production.
 	if _uses_simple_wc3_ai():
 		military_command_authority = simple_wc3_ai
-	elif MilitaryAIConfig.is_v2_enabled():
+	elif MilitaryAIConfig.is_v2_runtime_active():
 		military_command_authority = army_commander_v2
 	else:
 		military_command_authority = enemy_combat_controller

@@ -1,38 +1,34 @@
 class_name MilitaryAIConfig
 extends RefCounted
 
-## Feature toggle for the Military AI V2 stack.
-## PRODUCTION DEFAULT: true — MilitaryDirectorV2 + ArmyCommanderV2 own the main army
-## when Simple WC3 AI is off.
+## Military AI authority configuration.
 ##
-## Experimental branch default: Simple WC3 AI replaces V2/legacy military control.
+## PRODUCTION: Simple WC3 AI is the ONLY runtime military authority.
 ## USE_SIMPLE_WC3_AI = true → MatchCompositionRoot disables old military controllers
-## and starts SimpleWc3AI. Legacy stays suspended via is_v2_enabled() remaining true.
+## and declares SimpleWc3AI as sole military_command_authority.
+## No coexistence: V2 / legacy must not issue strategic military orders.
 ##
-## Developer-only legacy switch:
-## Set USE_MILITARY_AI_V2 = false to run the pre-V2 military controllers for comparison.
-## Never ship with both stacks issuing main-army orders at once.
+## USE_MILITARY_AI_V2 remains true so legacy mission owners stay suspended via
+## is_v2_enabled() / is_legacy_military_suspended(). V2 nodes themselves are
+## process-disabled under Simple WC3 (they do not run).
 ##
-## When true (default), these legacy main-army mission / order owners are suspended:
-##   - EnemyCreepManager._process          (legacy creep mission owner)
-##   - EnemyWaveManager._process           (attack-wave / lethal / finishing mission owner)
-##   - EnemyCombatController._process      (legacy regroup + retreat + combat mission owner)
-##   - EnemyDefenseManager._process        (competing defense mission owner)
+## Suspended under Simple WC3 (and under V2 when Simple is off):
+##   - MilitaryDirectorV2 / ArmyCommanderV2 process
+##   - EnemyCreepManager / EnemyWaveManager / EnemyDefenseManager process
+##   - EnemyCombatController process
 ##   - EnemyStrategicDirector._set_main_mission / _run_recovery_checks
-##                                         (competing mission + recovery owners)
-## Low-level helpers on those scripts (camp queries, army math, spawn rally helpers)
-## remain available for V2 reuse.
+##   - AIHeroMastery strategic ticks (only reached via ArmyCommanderV2)
 ##
-## Kept active under V2 (non-military / economy boundary):
+## Kept active (non-military / economy boundary):
+##   EnemyStrategicDirector phase/desires for economy,
 ##   EnemyBuildManager, EnemyGatherManager, EnemyResourceManager, TechTree,
 ##   UpgradeManager, EnemyBuildPlacement, worker / construction / production AI.
 ##
-## See docs/MILITARY_AI_V2.md for ownership, transitions, and extension rules.
+## See docs/MILITARY_AI_V2.md for historical V2 ownership (inactive under Simple).
 
 const USE_MILITARY_AI_V2: bool = true
 
-## Experimental Simple WC3 melee AI (Stage 1). When true and SimpleWc3AI is present,
-## old military runtime is disabled at MatchCompositionRoot bootstrap.
+## Sole production military authority. When true, old military runtime is OFF.
 const USE_SIMPLE_WC3_AI: bool = true
 
 ## V2 readiness thresholds.
@@ -158,13 +154,24 @@ const V2_SQUAD_IDLE_SECONDS: float = 2.0
 
 
 static func is_v2_enabled() -> bool:
-	## Remains true under Simple WC3 AI so legacy military owners stay suspended.
-	## V2 nodes themselves are process-disabled by MatchCompositionRoot.
+	## True while the V2 stack is the configured military design path.
+	## Under Simple WC3 this stays true so legacy military owners remain suspended,
+	## but V2 nodes must not process (MatchCompositionRoot + is_v2_runtime_active).
 	return USE_MILITARY_AI_V2
 
 
 static func is_simple_wc3_ai_enabled() -> bool:
 	return USE_SIMPLE_WC3_AI
+
+
+static func is_v2_runtime_active() -> bool:
+	## V2 may process only when it is the sole military authority (Simple off).
+	return USE_MILITARY_AI_V2 and not USE_SIMPLE_WC3_AI
+
+
+static func is_legacy_military_suspended() -> bool:
+	## Legacy creep/wave/combat/defense mission owners stay off under Simple or V2.
+	return USE_SIMPLE_WC3_AI or USE_MILITARY_AI_V2
 
 
 static func ai_version_label() -> String:

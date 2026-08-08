@@ -25,9 +25,14 @@ func _ready() -> void:
 	_tick_timer = DEFENSE_TICK_INTERVAL_SECONDS * 0.55
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		set_process(false)
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		## Simple WC3 owns military — no defense intents / orders.
+		return
 	if MilitaryAIConfig.is_v2_enabled():
 		## Intent provider under Military AI V2 (no unit orders).
 		## Publishes DEFEND intents; MilitaryDirectorV2 arbitrates and ArmyCommanderV2 executes.

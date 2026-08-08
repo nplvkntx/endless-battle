@@ -100,6 +100,11 @@ func _verify_scene_wiring(failures: PackedStringArray) -> void:
 		"MilitaryDirectorV2 child present",
 		root != null and root.get_node_or_null("MilitaryDirectorV2") is MilitaryDirectorV2
 	)
+	_expect(
+		failures,
+		"SimpleWc3AI child present",
+		root != null and root.get_node_or_null("SimpleWc3AI") is SimpleWc3AI
+	)
 	systems.free()
 
 
@@ -138,25 +143,29 @@ func _verify_authority_declaration(failures: PackedStringArray) -> void:
 	var root: MatchCompositionRoot = _make_minimal_composition()
 	add_child(root)
 	await get_tree().process_frame
+	await get_tree().process_frame
 
-	_expect(failures, "authority: V2 enabled in production config", MilitaryAIConfig.is_v2_enabled())
+	_expect(failures, "authority: Simple WC3 config on", MilitaryAIConfig.is_simple_wc3_ai_enabled())
+	_expect(failures, "authority: V2 config flag still true", MilitaryAIConfig.is_v2_enabled())
+	_expect(failures, "authority: V2 runtime inactive", not MilitaryAIConfig.is_v2_runtime_active())
 	_expect(
 		failures,
-		"authority: declared ArmyCommanderV2",
-		root.military_command_authority is ArmyCommanderV2
+		"authority: declared SimpleWc3AI",
+		root.military_command_authority is SimpleWc3AI
 	)
 	_expect(
 		failures,
 		"authority: EnemyArmyCommand sees same issuer",
-		EnemyArmyCommand.get_declared_command_authority() == root.army_commander_v2
+		EnemyArmyCommand.get_declared_command_authority() == root.simple_wc3_ai
 	)
 	_expect(
 		failures,
-		"authority: AIPlayerState records commander name",
+		"authority: AIPlayerState records SimpleWc3AI name",
 		root.ai_player_state != null
-		and root.ai_player_state.military_command_authority_name == &"ArmyCommanderV2"
+		and root.ai_player_state.military_command_authority_name == &"SimpleWc3AI"
 	)
-	_expect(failures, "authority: is_v2_military_active", root.is_v2_military_active())
+	_expect(failures, "authority: is_v2_military_active false", not root.is_v2_military_active())
+	_expect(failures, "authority: old military inactive", not root.is_old_military_runtime_active())
 
 	await _free_composition(root)
 
@@ -402,7 +411,7 @@ func _verify_identity_sync_and_unbind(failures: PackedStringArray) -> void:
 	_expect(
 		failures,
 		"identity: authority name preserved across reset",
-		state.military_command_authority_name == &"ArmyCommanderV2"
+		state.military_command_authority_name == &"SimpleWc3AI"
 	)
 
 	await _free_composition(root)
@@ -826,28 +835,31 @@ func _verify_authority_and_providers(
 	root: MatchCompositionRoot,
 	state: AIPlayerState
 ) -> void:
-	_expect(failures, "authority: V2 enabled", MilitaryAIConfig.is_v2_enabled())
+	_expect(failures, "authority: Simple WC3 on", MilitaryAIConfig.is_simple_wc3_ai_enabled())
+	_expect(failures, "authority: V2 flag still true", MilitaryAIConfig.is_v2_enabled())
+	_expect(failures, "authority: V2 runtime inactive", not MilitaryAIConfig.is_v2_runtime_active())
 	_expect(
 		failures,
-		"authority: declared ArmyCommanderV2",
-		root.military_command_authority is ArmyCommanderV2
-		and EnemyArmyCommand.get_declared_command_authority() == root.army_commander_v2
+		"authority: declared SimpleWc3AI",
+		root.military_command_authority is SimpleWc3AI
+		and EnemyArmyCommand.get_declared_command_authority() == root.simple_wc3_ai
 	)
 	_expect(
 		failures,
-		"authority: AIPlayerState records commander",
-		state.military_command_authority_name == &"ArmyCommanderV2"
+		"authority: AIPlayerState records SimpleWc3AI",
+		state.military_command_authority_name == &"SimpleWc3AI"
 	)
 	_expect(
 		failures,
-		"authority: is_v2_military_active",
-		root.is_v2_military_active()
+		"authority: is_v2_military_active false",
+		not root.is_v2_military_active()
 	)
-	## Under V2, only the declared commander is the executable military authority.
+	## Sole executable military authority under Simple WC3.
 	_expect(
 		failures,
 		"authority: sole executable owner name",
-		String(state.military_command_authority_name) == root.army_commander_v2.name
+		root.simple_wc3_ai != null
+		and String(state.military_command_authority_name) == root.simple_wc3_ai.name
 	)
 	## Providers publish intents only — they must not enqueue unit orders.
 	state.pending_group_orders.clear()
@@ -915,7 +927,7 @@ func _verify_authority_and_providers(
 			and commander_text.contains("issue_group_combat_move")
 		)
 
-	## Runtime: cancelled / completed missions cannot resurrect recovery orders.
+	## Under Simple WC3, V2 must refuse live strategic control / watchdog recovery.
 	var director: MilitaryDirectorV2 = root.military_director_v2
 	var commander: ArmyCommanderV2 = root.army_commander_v2
 	_expect(
@@ -926,27 +938,28 @@ func _verify_authority_and_providers(
 	if director != null and commander != null:
 		director.reset_match_state()
 		commander.reset_match_state()
-		director.request_state(
+		var accepted: bool = director.request_state(
 			MilitaryDirectorV2.State.ATTACK,
 			"authority watchdog probe",
 			Vector3(22.0, 0.0, 11.0)
 		)
 		_expect(
 			failures,
-			"authority: live attack accepts watchdog refresh request",
-			commander.execute_watchdog_order_refresh()
+			"authority: V2 request_state refused under Simple",
+			not accepted
 		)
-		director.get_mission().mark_cancelled("authority stale recovery probe")
-		EnemyArmyCommandTelemetry.clear_issued_order()
-		state.pending_group_orders.clear()
 		_expect(
 			failures,
-			"authority: cancelled mission rejects stale recovery orders",
-			not commander.execute_watchdog_order_refresh()
-			and state.pending_group_orders.is_empty()
-			and EnemyArmyCommand.get_pending_group_order_count() == 0
-			and EnemyArmyCommandTelemetry.get_last_issued_order_label() == "-"
+			"authority: director stays IDLE under Simple",
+			director.get_state() == MilitaryDirectorV2.State.IDLE
 		)
+		_expect(
+			failures,
+			"authority: watchdog refresh refused without live V2 mission",
+			not commander.execute_watchdog_order_refresh()
+		)
+		_expect(failures, "authority: director process off", not director.is_processing())
+		_expect(failures, "authority: commander process off", not commander.is_processing())
 		director.debug_set_watchdog_refreshed_for_tests(true)
 		director.reset_match_state()
 		commander.reset_match_state()

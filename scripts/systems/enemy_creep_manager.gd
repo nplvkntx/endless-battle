@@ -73,6 +73,8 @@ func _ready() -> void:
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
 	_combat_controller = get_parent().get_node_or_null("EnemyCombatController") as EnemyCombatController
 	reset_match_state()
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		set_process(false)
 
 
 func reset_match_state() -> void:
@@ -96,6 +98,9 @@ func reset_match_state() -> void:
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		## Simple WC3 owns military — no creep intents / orders.
+		return
 	if MilitaryAIConfig.is_v2_enabled():
 		## Intent provider under Military AI V2 (no unit orders / creep mission ownership).
 		## Publishes CREEP / SUSPEND_CREEP intents for MilitaryDirectorV2 arbitration.

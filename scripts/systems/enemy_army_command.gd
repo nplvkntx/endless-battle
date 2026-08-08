@@ -1039,6 +1039,7 @@ static func reset_match_state() -> void:
 	_combat_units_cache_frame = -1
 	_cached_offensive_wave_units_frame = -1
 	_cached_offensive_wave_units.clear()
+	reset_legacy_military_strategic_order_counter()
 	## Telemetry lives on EnemyArmyCommandTelemetry — never match SoT.
 	EnemyArmyCommandTelemetry.reset_match_state()
 	EnemyUnitMission.reset_match_state()
@@ -1385,11 +1386,27 @@ static func purge_and_rebuild_main_army(tree: SceneTree) -> void:
 
 
 static func with_authorized_orders(callback: Callable) -> void:
+	## When SimpleWc3AI is the declared match authority, refuse old military order batches.
+	var authority: Node = get_declared_command_authority()
+	if authority is SimpleWc3AI:
+		_legacy_military_strategic_orders_issued += 1
+		return
 	_orders_authorized = true
 	_sync_player_state_identity()
 	callback.call()
 	_orders_authorized = false
 	_sync_player_state_identity()
+
+
+static var _legacy_military_strategic_orders_issued: int = 0
+
+
+static func get_legacy_military_strategic_orders_issued() -> int:
+	return _legacy_military_strategic_orders_issued
+
+
+static func reset_legacy_military_strategic_order_counter() -> void:
+	_legacy_military_strategic_orders_issued = 0
 
 
 static func _combat_orders_allowed(mission: EnemyUnitMission.Mission) -> bool:

@@ -116,7 +116,7 @@ func _ready() -> void:
 	else:
 		_commander = get_parent().get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
 	reset_match_state()
-	set_process(MilitaryAIConfig.is_v2_enabled())
+	set_process(MilitaryAIConfig.is_v2_runtime_active())
 	_publish_perf_status()
 
 
@@ -188,7 +188,7 @@ func _clear_roster_state() -> void:
 
 
 func _process(delta: float) -> void:
-	if not MilitaryAIConfig.is_v2_enabled():
+	if not MilitaryAIConfig.is_v2_runtime_active():
 		set_process(false)
 		return
 
@@ -611,7 +611,7 @@ func request_state(
 	target_object: Variant = null,
 	priority: int = 0
 ) -> bool:
-	if not MilitaryAIConfig.is_v2_enabled():
+	if not MilitaryAIConfig.is_v2_runtime_active():
 		return false
 	return _transition_to(next_state, reason, target_position, target_object, priority)
 
@@ -4275,7 +4275,7 @@ func _building_local_offset_to_world(building: Building, local_offset: Vector3) 
 
 
 func _publish_perf_status() -> void:
-	if not MilitaryAIConfig.is_v2_enabled():
+	if not MilitaryAIConfig.is_v2_runtime_active():
 		return
 
 	var mission: ArmyMissionV2 = _mission

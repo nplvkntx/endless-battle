@@ -238,6 +238,8 @@ static func update(tree: SceneTree, delta: float) -> void:
 
 ## First-class MilitaryIntent publisher under V2 (no unit orders).
 static func _publish_military_intents_v2() -> void:
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		return
 	if not MilitaryAIConfig.is_v2_enabled():
 		return
 	var state: AIPlayerState = EnemyArmyCommand.get_bound_ai_player_state()

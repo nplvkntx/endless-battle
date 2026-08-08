@@ -56,9 +56,14 @@ func _ready() -> void:
 			CONNECT_ONE_SHOT
 		)
 	_schedule_next_wave()
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		set_process(false)
 
 
 func _process(delta: float) -> void:
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		## Simple WC3 owns military — no wave / attack intents.
+		return
 	if MilitaryAIConfig.is_v2_enabled():
 		## Intent provider under Military AI V2 (no wave launches / hero micro).
 		## Publishes ATTACK / FINISH intents from aggression + finishing signals.

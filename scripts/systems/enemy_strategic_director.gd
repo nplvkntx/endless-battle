@@ -1314,8 +1314,8 @@ func _apply_phase_desire_baseline() -> void:
 
 
 func _recommend_main_army_mission() -> void:
-	if MilitaryAIConfig.is_v2_enabled():
-		## Main-army mission owned by MilitaryDirectorV2 — do not mirror legacy labels.
+	if MilitaryAIConfig.is_legacy_military_suspended():
+		## Main-army mission owned by Simple WC3 / MilitaryDirectorV2 — do not mirror legacy labels.
 		return
 
 	if (
@@ -1418,9 +1418,8 @@ func _recommend_main_army_mission() -> void:
 
 
 func _set_main_mission(mission: EnemyUnitMission.Mission, reason: String) -> void:
-	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (competing main-army mission owner).
-		## Main-army mission ownership moves to MilitaryDirectorV2.
+	if MilitaryAIConfig.is_legacy_military_suspended():
+		## DISABLED under Simple WC3 / Military AI V2 (competing main-army mission owner).
 		return
 
 	if not EnemyUnitMission.set_main_army_mission(mission, reason):
@@ -1443,9 +1442,8 @@ func _sync_hero_to_main_mission() -> void:
 
 
 func _run_recovery_checks() -> void:
-	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (legacy recovery / idle-army mission owner).
-		## RECOVER / ASSEMBLE after fights are owned by MilitaryDirectorV2.
+	if MilitaryAIConfig.is_legacy_military_suspended():
+		## DISABLED under Simple WC3 / Military AI V2 (legacy recovery / idle-army mission owner).
 		return
 
 	if EnemyArmyCommand.is_attack_wave_controlling_hero():

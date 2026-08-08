@@ -28,12 +28,13 @@ func _ready() -> void:
 	_tick_timer = TICK_INTERVAL_SECONDS * 0.35
 	_creep_manager = get_parent().get_node_or_null("EnemyCreepManager") as EnemyCreepManager
 	_director = get_parent().get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
+	if MilitaryAIConfig.is_legacy_military_suspended():
+		set_process(false)
 
 
 func _process(delta: float) -> void:
-	if MilitaryAIConfig.is_v2_enabled():
-		## DISABLED under Military AI V2 (legacy regroup + retreat + combat mission owner).
-		## ArmyCommanderV2 drains the shared order batch and executes missions instead.
+	if MilitaryAIConfig.is_legacy_military_suspended():
+		## DISABLED under Simple WC3 / Military AI V2 (legacy regroup + retreat + combat).
 		return
 
 	EnemyArmyCommand.apply_pending_strategic_transition()
