@@ -905,11 +905,15 @@ func _execute_creep_mission(
 		return
 
 	if _creep_regroup_hold_timer > 0.0 or creep_manager._needs_army_regroup(creep_army):
-		EnemyArmyCommand.clear_executable_mission("creep regroup")
-		if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
-			_regroup_creep_army(creep_manager, creep_army, rally_point)
-		mission.note_progress("creep regroup")
-		return
+		## Fresh base escorts still need the camp objective — do not yank the hero
+		## squad home just because reinforcements have not arrived yet.
+		if not _creep_army_needs_objective_orders(creep_army):
+			EnemyArmyCommand.clear_executable_mission("creep regroup")
+			if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
+				_regroup_creep_army(creep_manager, creep_army, rally_point)
+			mission.note_progress("creep regroup")
+			return
+		_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
 
 	if creep_manager._is_camp_cleared(tree, camp):
 		EnemyArmyCommand.clear_executable_mission("creep camp cleared")
@@ -1671,7 +1675,12 @@ func _execute_attack_mission(
 	if attack_army.is_empty():
 		return
 
+	## Only truly pending (not yet admitted) units stage at base.
 	_stage_pending_reinforcements(director)
+
+	## Fresh escorts admitted mid-ATTACK still hold RALLY — force a prompt objective order.
+	if _attack_army_needs_objective_orders(attack_army):
+		_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
 
 	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
 	var strategic_target: Node3D = mission.get_alive_target_object()
@@ -2024,6 +2033,16 @@ func _collect_attack_army(squad: ArmySquadV2) -> Array:
 			continue
 		units.append(entry)
 	return NodeSafety.clean_node_array(units)
+
+
+## True when any squad member still lacks the active ATTACK mission (fresh reinforce).
+func _attack_army_needs_objective_orders(attack_army: Array) -> bool:
+	for entry: Variant in attack_army:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		if EnemyUnitMission.get_unit_mission(entry as Node) != EnemyUnitMission.Mission.ATTACK:
+			return true
+	return false
 
 
 func _pick_local_attack_focus(

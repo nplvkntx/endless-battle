@@ -46,7 +46,8 @@ const V2_CREEP_PREFERRED_CAMPS_BEFORE_ATTACK: int = 2
 ## Greed score (0–100) that outranks early creeping for a punish attack.
 const V2_CREEP_GREED_INTERRUPT_SCORE: float = 45.0
 ## AI/player strength ratio that outranks early creeping (clear advantage).
-const V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT: float = 1.45
+## Aligned with V2_ATTACK_COMMIT_STRENGTH_RATIO so interrupt and commit agree.
+const V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT: float = 1.25
 const V2_CREEP_HERO_HEALTHY_RATIO: float = 0.55
 ## Nearby camp chaining after a clear (horizontal units).
 const V2_CREEP_CHAIN_NEAR_RADIUS: float = 26.0

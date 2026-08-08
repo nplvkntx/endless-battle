@@ -1039,12 +1039,14 @@ func _verify_attack_config_and_source(failures: PackedStringArray) -> void:
 		_expect(failures, "creep interrupt helper", text.contains("_should_interrupt_creeping_for_attack"))
 		_expect(failures, "early creep goals helper", text.contains("_are_early_creep_goals_met"))
 		_expect(failures, "first pressure after soft goals", text.contains("first real pressure"))
+		_expect(failures, "clear combat advantage helper", text.contains("_has_clear_combat_advantage_vs_player"))
+		_expect(failures, "new attack commit gate", text.contains("_should_commit_new_attack"))
 		_expect(failures, "camp chain reason", text.contains("chain %s"))
 		_expect(failures, "hero xp creep priority", text.contains("hero_xp_priority"))
 		_expect(failures, "attack exits to retreat when losing", text.contains("army clearly losing"))
 		_expect(failures, "attack exits when hero endangered", text.contains("hero in serious danger"))
 		_expect(failures, "attack exits when scattered", text.contains("attack army too scattered"))
-		_expect(failures, "attack admits no mid-fight reinforcements", text.contains("_can_admit_reinforcements"))
+		_expect(failures, "attack admits reinforcements into main squad", text.contains("_can_admit_reinforcements"))
 		_expect(failures, "attack commits to town hall", text.contains("_should_commit_to_town_hall"))
 		_expect(failures, "attack prefers expansion before main TC", text.contains("_find_player_expansion"))
 		_expect(failures, "commitment blocks false contact retreat", text.contains("false first-attack abort"))
@@ -1113,7 +1115,8 @@ func _verify_early_creep_priority_config(failures: PackedStringArray) -> void:
 	_expect(
 		failures,
 		"strength advantage interrupt configured",
-		MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT >= 1.3
+		MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT
+		>= MilitaryAIConfig.V2_ATTACK_COMMIT_STRENGTH_RATIO - 0.001
 	)
 
 	var director := MilitaryDirectorV2.new()

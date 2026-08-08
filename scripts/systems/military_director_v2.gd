@@ -928,11 +928,17 @@ func _state_to_mission_type(state: State) -> ArmyMissionV2.MissionType:
 			return ArmyMissionV2.MissionType.NONE
 
 
-## True while assembling / recovering / idle / creeping.
-## CREEP may fold in fresh escorts so they do not sit forever at the base rally.
-## ATTACK / DEFEND / RETREAT still block mid-fight reshuffles.
+## True while assembling / recovering / idle / creeping / attacking.
+## Fresh military must join the hero's main squad on the active mission.
+## DEFEND / RETREAT still block mid-fight reshuffles (emergency ownership).
 func _can_admit_reinforcements() -> bool:
-	return _state in [State.IDLE, State.ASSEMBLE, State.RECOVER, State.CREEP]
+	return _state in [
+		State.IDLE,
+		State.ASSEMBLE,
+		State.RECOVER,
+		State.CREEP,
+		State.ATTACK,
+	]
 
 
 func _refresh_army_roster() -> void:
@@ -1917,6 +1923,20 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 		)
 		return false
 
+	## New ATTACK commits require a favorable fight (or lethal / empty player).
+	## Continuing an already-committed ATTACK skips this gate.
+	if _state != State.ATTACK and not lethal and not _should_commit_new_attack(tree, rally_point):
+		var balance: Dictionary = _evaluate_main_army_vs_player(tree, rally_point)
+		_note_attack_block(
+			"no clear advantage ratio=%.2f need=%.2f ai=%.0f player=%.0f" % [
+				float(balance.get("ratio", 0.0)),
+				MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT,
+				float(balance.get("ai_strength", 0.0)),
+				float(balance.get("player_strength", 0.0)),
+			]
+		)
+		return false
+
 	var origin: Vector3 = _main_squad.center
 	if origin == Vector3.ZERO:
 		origin = EnemyArmyCommand.compute_army_center(attack_army)
@@ -1962,6 +1982,30 @@ func _evaluate_attack_strategy(tree: SceneTree, rally_point: Vector3) -> bool:
 	)
 	_maybe_log_offense_diag(tree, rally_point, "accepted ATTACK: %s" % reason)
 	return true
+
+
+## True when a fresh ATTACK_PLAYER commit is strategically justified.
+func _should_commit_new_attack(tree: SceneTree, rally_point: Vector3) -> bool:
+	if _has_clear_combat_advantage_vs_player(tree, rally_point):
+		return true
+
+	var balance: Dictionary = _evaluate_main_army_vs_player(tree, rally_point)
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ai_strength: float = float(balance.get("ai_strength", 0.0))
+	var player_military: Array = balance.get("player_military", []) as Array
+
+	## No known fighting force nearby — soft first pressure after early creep goals.
+	if player_strength <= 0.0 and is_attack_ready() and _are_early_creep_goals_met(tree):
+		return true
+
+	var tiny_player_army: bool = (
+		player_military.size() <= 2
+		and player_strength <= 120.0
+	)
+	if tiny_player_army and ai_strength >= maxf(player_strength, 1.0) * 1.15:
+		return true
+
+	return false
 
 
 func _maybe_exit_attack(tree: SceneTree, rally_point: Vector3, attack_army: Array) -> bool:
@@ -3009,7 +3053,14 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 	if not is_attack_ready() and not is_lethal_attack_ready():
 		return false
 
-	## Soft early window: keep camping until ≈L3 / a few clears unless greed/lethal above.
+	## Clear combat advantage always outranks soft early camping.
+	## Uses EnemyArmyForceMath via EAC — same evaluator as attack commit.
+	if _has_clear_combat_advantage_vs_player(tree, rally_point):
+		return true
+
+	## Soft early window: keep camping until ≈L3 / a few clears unless greed/lethal/advantage above.
+	## After soft goals, equal-power fights keep creeping — only favorable / weak-player windows interrupt.
+	## Soft goals done + clear advantage (or tiny/empty player) → first real pressure attack.
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
 	var hero_level: int = hero.level if hero != null else 1
 	var early_creep_window: bool = (
@@ -3020,31 +3071,11 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 	if early_creep_window:
 		return false
 
-	## Soft goals done + attack-ready army → launch the first real pressure attack.
-	## Do not require a perfect strength-advantage score or keep chaining camps forever.
-	if is_attack_ready():
-		return true
-
-	var attack_army: Array = _get_attack_squad_units()
-	if attack_army.is_empty():
-		return false
-
-	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
-	var probe: Vector3 = rally_point
-	if player_cc != null:
-		probe = player_cc.global_position
-	elif _main_squad.center != Vector3.ZERO:
-		probe = _main_squad.center
-
-	var player_military: Array = EnemyArmyCommand.collect_player_military_near(tree, probe, 90.0)
-	player_military = NodeSafety.clean_node_array(player_military)
-	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(attack_army)
-	var player_strength: float = EnemyArmyCommand.estimate_combat_strength(player_military)
-	var known_player_strength: float = float(
-		EnemyArmyCommand.estimate_known_player_army_strength(tree, rally_point)
-	)
-	if known_player_strength > player_strength:
-		player_strength = known_player_strength
+	## Soft goals done: only interrupt for a favorable / weak-player fight — never equal-power suicide.
+	var balance: Dictionary = _evaluate_main_army_vs_player(tree, rally_point)
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ai_strength: float = float(balance.get("ai_strength", 0.0))
+	var player_military: Array = balance.get("player_military", []) as Array
 
 	## Player has almost no army (visible + known memory), not merely "away creeping".
 	var tiny_player_army: bool = (
@@ -3054,17 +3085,10 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 	if tiny_player_army and ai_strength >= maxf(player_strength, 1.0) * 1.15:
 		return true
 
-	## Army clearly stronger than the player.
-	if (
-		player_strength > 0.0
-		and ai_strength
-		>= player_strength * MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT
-	):
-		return true
-
 	## Player Town Hall vulnerable: undefended AND (damaged / greed / preferred army).
 	## Empty TH alone while the player fields an army elsewhere is not enough —
 	## that is a normal mutual-creep opening, not a punish window.
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
 	if player_cc != null:
 		var defenders: Array = EnemyArmyCommand.collect_player_military_near(
 			tree,
@@ -3091,6 +3115,71 @@ func _should_interrupt_creeping_for_attack(tree: SceneTree, rally_point: Vector3
 			return true
 
 	return false
+
+
+## Living main-squad strength vs nearby / remembered player fighting force.
+func _evaluate_main_army_vs_player(tree: SceneTree, rally_point: Vector3) -> Dictionary:
+	var attack_army: Array = _get_attack_squad_units()
+	var player_cc: CommandCenter = EnemyArmyCommand.find_living_player_command_center(tree)
+	var probe: Vector3 = rally_point
+	if player_cc != null:
+		probe = player_cc.global_position
+	elif _main_squad.center != Vector3.ZERO:
+		probe = _main_squad.center
+
+	var player_military: Array = EnemyArmyCommand.collect_player_military_near(tree, probe, 90.0)
+	player_military = NodeSafety.clean_node_array(player_military)
+	var ai_strength: float = EnemyArmyCommand.estimate_combat_strength(attack_army)
+	var player_strength: float = EnemyArmyCommand.estimate_combat_strength(player_military)
+	var known_player_strength: float = float(
+		EnemyArmyCommand.estimate_known_player_army_strength(tree, rally_point)
+	)
+	if known_player_strength > player_strength:
+		player_strength = known_player_strength
+
+	var ratio: float = ai_strength / maxf(player_strength, 1.0)
+	return {
+		"ai_strength": ai_strength,
+		"player_strength": player_strength,
+		"ratio": ratio,
+		"player_military": player_military,
+		"attack_army": attack_army,
+	}
+
+
+## True when the main hero squad has a clear fighting-power advantage.
+func _has_clear_combat_advantage_vs_player(tree: SceneTree, rally_point: Vector3) -> bool:
+	var balance: Dictionary = _evaluate_main_army_vs_player(tree, rally_point)
+	var player_strength: float = float(balance.get("player_strength", 0.0))
+	var ai_strength: float = float(balance.get("ai_strength", 0.0))
+	if ai_strength <= 0.0:
+		return false
+	if player_strength <= 0.0:
+		return false
+	return (
+		ai_strength
+		>= player_strength * MilitaryAIConfig.V2_CREEP_STRENGTH_ADVANTAGE_INTERRUPT
+	)
+
+
+## Test helper: expose the authoritative power comparison used for attack-vs-creep.
+func debug_evaluate_main_army_vs_player_for_tests(rally_point: Vector3 = Vector3.ZERO) -> Dictionary:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return {}
+	if rally_point == Vector3.ZERO:
+		rally_point = get_assemble_rally_point()
+	return _evaluate_main_army_vs_player(tree, rally_point)
+
+
+## Test helper: expose clear-advantage interrupt gate.
+func debug_has_clear_combat_advantage_for_tests(rally_point: Vector3 = Vector3.ZERO) -> bool:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return false
+	if rally_point == Vector3.ZERO:
+		rally_point = get_assemble_rally_point()
+	return _has_clear_combat_advantage_vs_player(tree, rally_point)
 
 
 func _can_commit_to_creeping(

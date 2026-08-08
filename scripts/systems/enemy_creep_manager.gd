@@ -630,14 +630,24 @@ func _hold_army_until_rallied(
 	_army_moving_logged = false
 
 	## If already in the field with a reserved camp, regroup locally — not back to base.
+	## V2 may leave `_active_camp` unset while still passing the living field army.
 	var cleaned_field: Array = NodeSafety.clean_node_array(field_army)
-	if (
-		_active_camp != null
-		and is_instance_valid(_active_camp)
-		and not cleaned_field.is_empty()
-	):
+	if not cleaned_field.is_empty():
 		var field_center: Vector3 = EnemyArmyCommand.compute_army_center(cleaned_field)
-		if field_center != Vector3.ZERO:
+		var use_local_field: bool = (
+			_active_camp != null
+			and is_instance_valid(_active_camp)
+		)
+		if (
+			not use_local_field
+			and field_center != Vector3.ZERO
+			and rally_position != Vector3.ZERO
+			and EnemyArmyCommand.horizontal_distance(field_center, rally_position)
+			> CREEP_REGROUP_MAX_DISTANCE * 1.5
+		):
+			## Main body is already away from base — meet reinforcements locally.
+			use_local_field = true
+		if use_local_field and field_center != Vector3.ZERO:
 			EnemyArmyCommand.with_authorized_orders(func() -> void:
 				EnemyArmyCommand.command_hold_at_rally(
 					cleaned_field,

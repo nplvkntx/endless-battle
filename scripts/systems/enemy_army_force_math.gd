@@ -113,15 +113,24 @@ static func get_unit_type_strength_weight(unit) -> float:
 	return 1.0
 
 
+## True for any living combatant that can contribute fighting power.
+## Unlike `is_living_combat_unit`, this does NOT require the enemy roster group —
+## player armies passed into strength comparisons must score correctly.
+static func is_strength_eligible_unit(unit) -> bool:
+	if not NodeSafety.is_alive_node(unit):
+		return false
+	if unit is Worker or unit is Building or unit is NeutralCreep:
+		return false
+	if not is_combat_unit(unit as Node):
+		return false
+	return has_positive_health(unit as Node)
+
+
 static func estimate_combat_strength(units: Array) -> float:
 	var strength: float = 0.0
 
 	for unit: Variant in NodeSafety.clean_node_array(units):
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		if not is_living_combat_unit(unit as Node):
-			continue
-		if unit is Worker:
+		if not is_strength_eligible_unit(unit):
 			continue
 
 		var base_weight: float = get_unit_type_strength_weight(unit as Node)
@@ -135,10 +144,7 @@ static func estimate_military_power(units: Array) -> int:
 	var power: int = 0
 
 	for unit: Variant in units:
-		if not NodeSafety.is_alive_node(unit):
-			continue
-
-		if not is_living_combat_unit(unit as Node):
+		if not is_strength_eligible_unit(unit):
 			continue
 
 		var health_component: HealthComponent = (unit as Node).get_node_or_null(
