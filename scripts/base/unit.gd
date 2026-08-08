@@ -710,8 +710,8 @@ func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency
 
 
 ## Clears movement and navigation without canceling combat orders.
-## When `preserve_custom_rts` is true, waypoint route is kept for attack-move resume
-## after combat micro (chase / in-range stop) without NavAgent strategic takeover.
+## When `preserve_custom_rts` is true, waypoint route is kept so attack-move can
+## resume on the custom backend after combat pause (no NavigationAgent handoff).
 func clear_move_target(preserve_custom_rts: bool = false) -> void:
 	if has_move_target or _nav_velocity_request_generation >= 0:
 		_invalidate_movement_generation()
@@ -888,6 +888,39 @@ func _activate_pending_custom_rts_route(destination: Vector3) -> void:
 	_blocked_arrival_time = 0.0
 
 
+## Chase / close-distance while a strategic custom route is preserved.
+## Stays on the custom backend: steer toward the chase point; keep route for resume.
+func _activate_custom_rts_direct_target(destination: Vector3) -> void:
+	_custom_rts_pending = false
+	_custom_rts_active = true
+	# Past last waypoint → route direction falls through to _movement_target.
+	_custom_rts_route_index = _custom_rts_route.size()
+	_clear_navigation_agent()
+	_set_navigation_avoidance_enabled(false)
+	_navigation_active = false
+	_movement_target = destination
+	has_move_target = true
+	_reset_unstuck_state()
+	_blocked_arrival_time = 0.0
+
+
+## True when current move target is combat micro (chase), not the strategic final slot.
+func _custom_rts_is_intermediate_target() -> bool:
+	if _custom_rts_route.is_empty():
+		return false
+	var final_slot: Vector3 = _player_squad_final_arrival
+	if final_slot.length_squared() <= 0.0001:
+		final_slot = _original_move_destination
+	if final_slot.length_squared() <= 0.0001:
+		return false
+	return _horizontal_distance_xz(_movement_target, final_slot) > CUSTOM_RTS_ARRIVE_RADIUS
+
+
+## Pause custom locomotion without dissolving the strategic route (chase arrive / micro stop).
+func _pause_custom_rts_preserving_route() -> void:
+	clear_move_target(true)
+
+
 func _process_custom_rts_movement(delta: float) -> void:
 	if not _custom_rts_active:
 		return
@@ -897,6 +930,9 @@ func _process_custom_rts_movement(delta: float) -> void:
 	var dist_to_slot: float = to_slot.length()
 	var arrive_radius: float = maxf(get_movement_acceptance_radius(), CUSTOM_RTS_ARRIVE_RADIUS)
 	if dist_to_slot <= arrive_radius:
+		if _custom_rts_is_intermediate_target():
+			_pause_custom_rts_preserving_route()
+			return
 		_complete_movement_arrival()
 		return
 
@@ -919,6 +955,9 @@ func _process_custom_rts_movement(delta: float) -> void:
 	if desired.length_squared() < 0.0001:
 		desired = slot_dir if slot_dir.length_squared() > 0.0 else route_dir
 	if desired.length_squared() < 0.0001:
+		if _custom_rts_is_intermediate_target():
+			_pause_custom_rts_preserving_route()
+			return
 		_complete_movement_arrival()
 		return
 	desired = desired.normalized()
@@ -1188,11 +1227,18 @@ func _complete_movement_arrival() -> void:
 			_stuck_recovery_cooldown = 0.0
 			_crowd_yield_seconds = maxf(_crowd_yield_seconds, UNSTUCK_YIELD_SECONDS * 0.5)
 			if not request_movement_target(resume, RepathUrgency.STUCK_RECOVERY):
-				_begin_movement_generation()
-				_movement_target = resume
-				_original_move_destination = resume
-				has_move_target = true
-				_apply_navigation_destination(resume)
+				# Never fall back to NavigationAgent while a custom strategic route owns us.
+				if (
+					MilitaryAIConfig.is_custom_rts_movement_enabled()
+					and not _custom_rts_route.is_empty()
+				):
+					_activate_pending_custom_rts_route(resume)
+				else:
+					_begin_movement_generation()
+					_movement_target = resume
+					_original_move_destination = resume
+					has_move_target = true
+					_apply_navigation_destination(resume)
 			return
 
 	# Complete once per movement generation — never re-fire every settle frame.
@@ -1220,13 +1266,8 @@ func request_movement_target(
 	_last_requested_destination = next_target
 	var now_msec: int = Time.get_ticks_msec()
 
-	# Pending custom RTS bind always wins for this order (shared route already computed).
-	# PLAYER_ORDER covers player issue_order; FORMATION covers any AI path that still
-	# lands here with a prepared route (custom AI path uses issue_order / PLAYER_ORDER).
-	if _custom_rts_pending and (
-		urgency == RepathUrgency.PLAYER_ORDER
-		or urgency == RepathUrgency.FORMATION
-	):
+	# Pending custom RTS bind always wins for this player order (shared route ready).
+	if _custom_rts_pending and urgency == RepathUrgency.PLAYER_ORDER:
 		var began_custom: bool = not has_move_target
 		_begin_movement_generation()
 		_last_issued_move_destination = next_target
@@ -1289,17 +1330,27 @@ func request_movement_target(
 	if CombatTargetValidation.is_enemy_faction(self):
 		next_target = BearTrap.adjust_destination_away_from_traps(self, next_target)
 
-	# Stuck recovery while a custom route is preserved: re-enter custom locomotion.
+	# While a custom strategic route owns this unit, never hand off to NavigationAgent.
 	if (
-		urgency == RepathUrgency.STUCK_RECOVERY
-		and MilitaryAIConfig.is_custom_rts_movement_enabled()
+		MilitaryAIConfig.is_custom_rts_movement_enabled()
 		and not _custom_rts_route.is_empty()
 	):
+		var began_custom_owned: bool = not has_move_target
 		_begin_movement_generation()
 		_last_issued_move_destination = next_target
 		_last_path_request_msec = now_msec
 		_last_move_order_msec = now_msec
-		_activate_pending_custom_rts_route(next_target)
+		if urgency == RepathUrgency.CHASE:
+			_activate_custom_rts_direct_target(next_target)
+		else:
+			_activate_pending_custom_rts_route(next_target)
+		if urgency == RepathUrgency.STUCK_RECOVERY:
+			_stuck_repath_attempted = true
+			_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
+			_stuck_time = 0.0
+			_stuck_progress_anchor_distance = -1.0
+		if began_custom_owned:
+			CommandFeedback.notify_movement_started(self)
 		return true
 
 	var began_moving: bool = not has_move_target
@@ -1311,13 +1362,7 @@ func request_movement_target(
 	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
 
-	# Chase / combat micro may temporarily use NavigationAgent while preserving the
-	# strategic custom route for attack-move resume. Other destinations clear it.
-	if urgency == RepathUrgency.CHASE and not _custom_rts_route.is_empty():
-		_custom_rts_active = false
-		_custom_rts_pending = false
-	else:
-		clear_custom_rts_route()
+	clear_custom_rts_route()
 	_apply_navigation_destination(next_target)
 
 	if urgency == RepathUrgency.STUCK_RECOVERY:
@@ -1845,6 +1890,10 @@ func _try_complete_soft_arrival() -> bool:
 	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
 	if horizontal_velocity.length_squared() > SOFT_ARRIVAL_SPEED_SQ:
 		return false
+
+	if is_custom_rts_movement_active() and _custom_rts_is_intermediate_target():
+		_pause_custom_rts_preserving_route()
+		return true
 
 	_complete_movement_arrival()
 	return true

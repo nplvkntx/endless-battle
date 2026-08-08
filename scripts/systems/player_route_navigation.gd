@@ -1,10 +1,9 @@
 extends Node
 
-## Shared custom RTS movement authority (Movement Lab architecture).
+## Player custom RTS movement authority (Movement Lab architecture).
 ## One shared strategic grid route per group command + personal slots +
-## lightweight local separation. Used by player SelectionManager orders and
-## AI military strategic travel (ArmyCommanderV2 → EnemyArmyCommand).
-## Does not own MilitaryDirector / ArmyCommander mission decisions.
+## lightweight local separation. Used by player SelectionManager / FormationManager.
+## Does not own AI strategic travel — AI keeps SharedSquadNavigation / NavigationAgent.
 ##
 ## Feature switch: MilitaryAIConfig.CUSTOM_RTS_MOVEMENT
 ## When false, callers keep using SharedSquadNavigation / NavigationAgent.
@@ -20,11 +19,10 @@ var total_path_calculations: int = 0
 var _grid_ready: bool = false
 var _scan_pending: bool = false
 
-## Last group-move telemetry (player or AI) for compact diagnostics.
+## Last player group-move telemetry for compact diagnostics.
 var last_command_source: StringName = &""
 var last_squad_size: int = 0
 var last_route_waypoints: int = 0
-var last_ai_used_custom: bool = false
 
 
 func _ready() -> void:
@@ -44,7 +42,6 @@ func clear_all() -> void:
 	last_command_source = &""
 	last_squad_size = 0
 	last_route_waypoints = 0
-	last_ai_used_custom = false
 	grid.clear_all()
 	_grid_ready = true
 	_scan_pending = true
@@ -93,16 +90,13 @@ func refresh_static_obstacle(body: Node3D) -> void:
 	register_static_obstacle(body)
 
 
-## Canonical shared group / single-unit Move / Attack-Move / Patrol.
-## Used by player SelectionManager and AI EnemyArmyCommand strategic travel.
+## Canonical shared group / single-unit Move / Attack-Move / Patrol for the player.
 ## Returns handled=true when custom routing issued orders.
-## `source`: &"player" or &"ai" (diagnostics only).
 func request_group_move(
 	units: Array,
 	destination: Vector3,
 	order_kind: StringName,
-	queued: bool = false,
-	source: StringName = &"player"
+	queued: bool = false
 ) -> Dictionary:
 	var result: Dictionary = {
 		"handled": false,
@@ -136,7 +130,7 @@ func request_group_move(
 			if not grid.is_world_walkable(slot):
 				slot = grid.nearest_walkable_world(slot)
 			_issue_unit_ground_order(unit, slot, order_kind, true)
-		_record_command_telemetry(source, ordered_units.size(), 0, false)
+		_record_command_telemetry(ordered_units.size(), 0)
 		return result
 
 	_global_command_generation += 1
@@ -155,7 +149,7 @@ func request_group_move(
 
 	if shared_route.is_empty():
 		result["route_failure_reason"] = "no_path"
-		_record_command_telemetry(source, ordered_units.size(), 0, false)
+		_record_command_telemetry(ordered_units.size(), 0)
 		# Fall through to legacy caller path when route cannot be built.
 		return result
 
@@ -184,23 +178,18 @@ func request_group_move(
 	result["route_valid"] = true
 	result["accepted_destination"] = group_destination
 	result["slot_targets"] = slot_targets_out
-	_record_command_telemetry(
-		source,
-		ordered_units.size(),
-		shared_route.size(),
-		source == &"ai"
-	)
+	_record_command_telemetry(ordered_units.size(), shared_route.size())
 	return result
 
 
-## Player SelectionManager / FormationManager entry — same backend as AI.
+## Player SelectionManager / FormationManager entry.
 func issue_player_group_command(
 	units: Array,
 	destination: Vector3,
 	order_kind: StringName,
 	queued: bool = false
 ) -> Dictionary:
-	return request_group_move(units, destination, order_kind, queued, &"player")
+	return request_group_move(units, destination, order_kind, queued)
 
 
 func get_command_generation() -> int:
@@ -219,20 +208,10 @@ func get_last_squad_size() -> int:
 	return last_squad_size
 
 
-func was_last_ai_custom_move() -> bool:
-	return last_ai_used_custom
-
-
-func _record_command_telemetry(
-	source: StringName,
-	squad_size: int,
-	waypoints: int,
-	ai_used: bool
-) -> void:
-	last_command_source = source
+func _record_command_telemetry(squad_size: int, waypoints: int) -> void:
+	last_command_source = &"player"
 	last_squad_size = squad_size
 	last_route_waypoints = waypoints
-	last_ai_used_custom = ai_used
 
 
 func is_world_walkable(world: Vector3) -> bool:

@@ -30,9 +30,10 @@ const USE_MILITARY_AI_V2: bool = true
 ## PRODUCTION DEFAULT: true — reduces per-unit repath storms for large armies.
 const USE_SHARED_SQUAD_NAVIGATION: bool = true
 
-## Custom RTS movement (Movement Lab architecture) for player + AI military strategic travel.
+## Custom RTS movement (Movement Lab architecture) for PLAYER strategic travel only.
 ## DEVELOPMENT DEFAULT ON: shared grid route + slots + local separation.
-## Set false to compare against legacy SharedSquadNavigation / NavigationAgent strategic movement.
+## AI continues to use SharedSquadNavigation / NavigationAgent. Set false to compare
+## player custom movement against legacy SharedSquadNavigation player pathing.
 const CUSTOM_RTS_MOVEMENT: bool = true
 ## Test / A-B override: -1 use const, 0 force off, 1 force on.
 static var _custom_rts_movement_override: int = -1

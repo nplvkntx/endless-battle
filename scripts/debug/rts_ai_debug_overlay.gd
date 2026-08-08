@@ -317,16 +317,6 @@ func _format_global_panel(
 		"Mismatch: %d" % int(round(float(snap.get("power_mismatch", 0.0)))),
 		"Objective: %s" % _short(String(snap.get("objective", "-")), 28 if _layout_compact else 40),
 		"Commander: %s" % String(snap.get("executable", "-")),
-		_bb_header("MOVEMENT"),
-		"Custom RTS movement: %s" % (
-			"ON" if MilitaryAIConfig.is_custom_rts_movement_enabled() else "OFF"
-		),
-		"AI squad using custom: %s" % (
-			"YES" if PlayerRouteNavigation.was_last_ai_custom_move() else "NO"
-		),
-		"Squad size: %d" % PlayerRouteNavigation.get_last_squad_size(),
-		"Shared path calcs: %d" % PlayerRouteNavigation.get_path_calculations_this_command(),
-		"Route waypoints: %d" % PlayerRouteNavigation.get_last_route_waypoints(),
 	])
 
 	## On tiny viewports with a unit panel, keep only the densest primary block.
@@ -354,10 +344,6 @@ func _format_global_panel(
 			],
 			"Obj: %s" % _short(String(snap.get("objective", "-")), 26),
 			"Commander: %s" % String(snap.get("executable", "-")),
-			"CustomRTS:%s AI:%s" % [
-				"ON" if MilitaryAIConfig.is_custom_rts_movement_enabled() else "OFF",
-				"Y" if PlayerRouteNavigation.was_last_ai_custom_move() else "N",
-			],
 		])
 
 	var chunks: PackedStringArray = PackedStringArray([_bb_primary("\n".join(primary))])
@@ -566,11 +552,6 @@ func _format_unit_panel(
 		"CONFLICT: %s" % conflict,
 		_bb_header("NAV"),
 		"Backend: %s" % unit.get_movement_backend_label(),
-		"Custom active: %s" % ("YES" if unit.is_custom_rts_movement_active() else "NO"),
-		"Route WP: %d/%d" % [
-			unit.get_custom_rts_route_index(),
-			unit.get_custom_rts_route_waypoint_count(),
-		],
 		"Dest: %s" % dest_text,
 		"Blocked: %s" % String(nav.get("blocked", "NO")),
 		"Stuck: %.1fs" % float(unit.get("_stuck_time")),

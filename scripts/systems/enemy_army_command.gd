@@ -5757,53 +5757,6 @@ static func _issue_spaced_group_orders(
 				PerfCounters.warn_duplicate_group_order()
 				return true
 
-	## Custom RTS movement (same backend as player) — one shared strategic grid route.
-	## When enabled, do not also run SharedSquadNavigation / per-unit NavAgent strategic orders.
-	if MilitaryAIConfig.is_custom_rts_movement_enabled():
-		var order_kind: StringName = &"attack_move" if use_attack_move else &"move"
-		var custom_result: Dictionary = PlayerRouteNavigation.request_group_move(
-			ordered_units,
-			center,
-			order_kind,
-			false,
-			&"ai"
-		)
-		if VariantUtils.to_bool(custom_result.get("route_valid", false)):
-			_record_group_order_signature(ordered_units, center, mission, use_attack_move)
-			_last_squad_route_failure_reason = ""
-			var slot_targets: Array = custom_result.get("slot_targets", [])
-			for index: int in ordered_units.size():
-				var unit: Variant = ordered_units[index]
-				if not NodeSafety.is_alive_node(unit):
-					continue
-				var slot: Vector3 = center
-				if index < slot_targets.size() and slot_targets[index] is Vector3:
-					slot = slot_targets[index] as Vector3
-				EnemyUnitMission.try_set_mission(unit as Node, mission)
-				EnemyUnitMission.record_move_order(unit as Node, slot, mission)
-				EnemyArmyCommandTelemetry.record_order_issued()
-				PerfCounters.record_ai_order()
-				if (
-					use_attack_move
-					and mission in [EnemyUnitMission.Mission.ATTACK, EnemyUnitMission.Mission.CREEP]
-				):
-					log_ai_order(
-						unit,
-						"custom_rts_group_move",
-						EnemyUnitMission.mission_to_label(mission),
-						slot,
-						"field_combat"
-					)
-			return true
-		## Custom attempted but no valid route — keep strategic ownership; do not fabricate
-		## per-unit NavigationAgent strategic paths while the feature flag is on.
-		_last_squad_route_failure_reason = String(
-			custom_result.get("route_failure_reason", "no_path")
-		)
-		if _last_squad_route_failure_reason.is_empty():
-			_last_squad_route_failure_reason = "no_path"
-		return false
-
 	if MilitaryAIConfig.is_shared_squad_nav_enabled() and ordered_units.size() > 1:
 		var squad_result: Dictionary = SharedSquadNavigation.issue_group_command(
 			ordered_units,
