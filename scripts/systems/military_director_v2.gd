@@ -1006,14 +1006,14 @@ func _maybe_log_main_army_cohesion() -> void:
 		return
 
 	var rally_point: Vector3 = get_assemble_rally_point()
-	var combat_total: int = 0
+	var combat_alive: int = 0
+	var combat_available: int = 0
 	var main_squad: int = 0
 	var defense_reserved: int = 0
 	var other_owned: int = 0
 	var unassigned: int = 0
-	var reinforcements: int = _pending_reinforcements.size()
-	var idle_near_base: int = 0
 	var reason_counts: Dictionary = {}
+	var excluded_details: PackedStringArray = []
 
 	var squad_ids: Dictionary = {}
 	for entry: Variant in _main_squad.get_members_copy():
@@ -1030,7 +1030,7 @@ func _maybe_log_main_army_cohesion() -> void:
 	for entry: Variant in _roster:
 		if not NodeSafety.is_alive_node(entry):
 			continue
-		combat_total += 1
+		combat_alive += 1
 		var unit: Node = entry as Node
 		var reason: String = _classify_main_army_unit_reason(
 			unit,
@@ -1046,53 +1046,93 @@ func _maybe_log_main_army_cohesion() -> void:
 				unassigned += 1
 			"mission_owned", "stale_squad":
 				other_owned += 1
-		if (
-			reason in ["no_squad", "reinforcement_pool", "pending_reinforcement", "stale_squad"]
-			and rally_point != Vector3.ZERO
-			and unit is Node3D
-			and EnemyArmyCommand.horizontal_distance(
-				(unit as Node3D).global_position,
-				rally_point
+			"in_main_squad":
+				combat_available += 1
+		if reason != "in_main_squad" and excluded_details.size() < 8:
+			var owner_label: String = "-"
+			if EnemyArmyCommand.is_reinforcement_waiting(unit):
+				owner_label = "reinforcement_pool"
+			elif squad_ids.has(unit.get_instance_id()):
+				owner_label = "main_squad"
+			elif pending_ids.has(unit.get_instance_id()):
+				owner_label = "pending"
+			else:
+				owner_label = "none"
+			excluded_details.append(
+				"unit=%s#%d owner=%s state=%s reason=%s" % [
+					unit.name,
+					unit.get_instance_id(),
+					owner_label,
+					EnemyUnitMission.mission_to_label(EnemyUnitMission.get_unit_mission(unit)),
+					reason,
+				]
 			)
-			<= EnemyArmyCommand.WAVE_REGROUP_MAX_DISTANCE
-		):
-			idle_near_base += 1
 
 	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
 	var hero_label: String = "-"
+	var hero_state: String = "missing"
+	var hero_squad: String = "no"
 	if hero != null:
 		hero_label = "%s#%d" % [hero.name, hero.get_instance_id()]
-	var signature: String = "%s|%s|%d|%d|%d|%d|%d|%d|%d" % [
+		hero_state = EnemyUnitMission.mission_to_label(EnemyUnitMission.get_unit_mission(hero))
+		hero_squad = "yes" if _main_squad.has_member(hero) else "no"
+
+	var balance: Dictionary = _evaluate_main_army_vs_player(tree, rally_point)
+	var ai_power: float = float(balance.get("ai_strength", 0.0))
+	var player_power: float = float(balance.get("player_strength", 0.0))
+	var power_ratio: float = float(balance.get("ratio", 0.0))
+	var objective_label: String = "-"
+	if _mission != null:
+		var mission_target: Node3D = _mission.get_alive_target_object()
+		if NodeSafety.is_alive_node(mission_target):
+			objective_label = "%s#%d" % [mission_target.name, mission_target.get_instance_id()]
+		elif _mission.target_position != Vector3.ZERO:
+			objective_label = "pos"
+	var decision: String = _last_transition_reason if not _last_transition_reason.is_empty() else get_state_name()
+
+	var signature: String = "%s|%s|%s|%d|%d|%d|%d|%d|%d|%.0f|%.0f|%.2f|%s" % [
 		get_state_name(),
 		hero_label,
-		combat_total,
+		hero_squad,
+		combat_alive,
+		combat_available,
 		main_squad,
 		defense_reserved,
 		other_owned,
 		unassigned,
-		reinforcements,
-		idle_near_base,
+		ai_power,
+		player_power,
+		power_ratio,
+		decision,
 	]
 	if signature == _last_main_army_diag_signature:
 		return
 	_last_main_army_diag_signature = signature
 
 	print(
-		"[AI MAIN ARMY] mission=%s hero=%s hero_alive=%s combat_total=%d main_squad=%d defense_reserved=%d other_owned=%d unassigned=%d reinforcements=%d idle_near_base=%d"
+		"[AI MAIN FORCE] mission=%s objective=%s hero=%s hero_state=%s hero_squad=%s combat_alive=%d combat_available=%d main_squad=%d defense_reserved=%d other_owned=%d unassigned=%d ai_power=%.0f player_power=%.0f power_ratio=%.2f decision=%s"
 		% [
 			get_state_name(),
+			objective_label,
 			hero_label,
-			"yes" if hero != null else "no",
-			combat_total,
+			hero_state,
+			hero_squad,
+			combat_alive,
+			combat_available,
 			main_squad,
 			defense_reserved,
 			other_owned,
 			unassigned,
-			reinforcements,
-			idle_near_base,
+			ai_power,
+			player_power,
+			power_ratio,
+			decision,
 		]
 	)
-	if unassigned > 0 or idle_near_base > 0:
+	if not excluded_details.is_empty():
+		for detail: String in excluded_details:
+			print("[AI MAIN FORCE] excluded %s" % detail)
+	if unassigned > 0 or defense_reserved > 0 or other_owned > 0:
 		var reason_parts: PackedStringArray = []
 		for reason_key: Variant in reason_counts.keys():
 			var key_name: String = String(reason_key)
@@ -1100,7 +1140,7 @@ func _maybe_log_main_army_cohesion() -> void:
 				continue
 			reason_parts.append("%s=%d" % [key_name, int(reason_counts[reason_key])])
 		if not reason_parts.is_empty():
-			print("[AI MAIN ARMY] reasons %s" % " ".join(reason_parts))
+			print("[AI MAIN FORCE] reasons %s" % " ".join(reason_parts))
 
 
 ## Actual ownership reason from current roster/squad/mission/pool state.
@@ -1153,17 +1193,28 @@ func _admit_pending_reinforcements() -> void:
 	)
 
 	var remaining: Array = []
+	var defense_authoritative: bool = (
+		_defend_active
+		or _state == State.DEFEND
+		or EnemyArmyCommand.is_emergency_defense_active()
+	)
 	for entry: Variant in _pending_reinforcements:
 		if not ArmySquadV2.is_roster_eligible(entry as Node):
 			continue
 		var unit: Node = entry as Node
 		if _main_squad.has_member(unit):
 			continue
-		## Preserve emergency / higher-priority ownership — do not steal defenders.
+		## Preserve live emergency / retreat ownership — do not steal active defenders.
+		## Stale DEFEND after defense ends must not permanently orphan reinforcements.
 		var unit_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
-		if unit_mission in [EnemyUnitMission.Mission.DEFEND, EnemyUnitMission.Mission.RETREAT]:
+		if unit_mission == EnemyUnitMission.Mission.RETREAT and _state == State.RETREAT:
 			remaining.append(unit)
 			continue
+		if unit_mission == EnemyUnitMission.Mission.DEFEND:
+			if defense_authoritative:
+				remaining.append(unit)
+				continue
+			EnemyUnitMission.clear_unit_mission(unit)
 		var role: ArmySquadV2.UnitRole = ArmySquadV2.classify_role(unit)
 		if not _main_squad.try_add_member(unit, role):
 			remaining.append(unit)
@@ -1280,6 +1331,11 @@ func debug_refresh_roster_for_tests() -> void:
 ## Uses the lightweight alive/type gate so stub nodes can exercise membership.
 func debug_admit_pending_for_tests() -> void:
 	var remaining: Array = []
+	var defense_authoritative: bool = (
+		_defend_active
+		or _state == State.DEFEND
+		or EnemyArmyCommand.is_emergency_defense_active()
+	)
 	for entry: Variant in _pending_reinforcements:
 		if not NodeSafety.is_alive_node(entry):
 			continue
@@ -1291,9 +1347,14 @@ func debug_admit_pending_for_tests() -> void:
 		if _main_squad.has_member(unit):
 			continue
 		var unit_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
-		if unit_mission in [EnemyUnitMission.Mission.DEFEND, EnemyUnitMission.Mission.RETREAT]:
+		if unit_mission == EnemyUnitMission.Mission.RETREAT and _state == State.RETREAT:
 			remaining.append(unit)
 			continue
+		if unit_mission == EnemyUnitMission.Mission.DEFEND:
+			if defense_authoritative:
+				remaining.append(unit)
+				continue
+			EnemyUnitMission.clear_unit_mission(unit)
 		var role: ArmySquadV2.UnitRole = ArmySquadV2.classify_role(unit)
 		if not _main_squad.try_add_member(unit, role):
 			remaining.append(unit)
@@ -1628,6 +1689,37 @@ func _deactivate_v2_defend(_reason: String) -> void:
 	if EnemyArmyCommand.is_emergency_defense_active():
 		EnemyArmyCommand.deactivate_emergency_defense()
 	_defend_active = false
+	## CREEP / ATTACK / RALLY cannot override per-unit DEFEND ownership.
+	## Leaving defense without releasing leaves the director counting a full army
+	## while the commander silently fails to claim most members.
+	_release_stale_defend_unit_missions()
+
+
+## Drop per-unit DEFEND locks once defense authority ends.
+## Does not touch RETREAT (owned by an active withdrawal).
+func _release_stale_defend_unit_missions() -> void:
+	var released: int = 0
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		var unit: Node = entry as Node
+		if EnemyUnitMission.get_unit_mission(unit) != EnemyUnitMission.Mission.DEFEND:
+			continue
+		EnemyUnitMission.clear_unit_mission(unit)
+		released += 1
+	for entry: Variant in _pending_reinforcements:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		var pending: Node = entry as Node
+		if EnemyUnitMission.get_unit_mission(pending) != EnemyUnitMission.Mission.DEFEND:
+			continue
+		EnemyUnitMission.clear_unit_mission(pending)
+		released += 1
+	if released > 0:
+		EnemyAIDebug.log_event(
+			"[AI MAIN FORCE] released stale DEFEND missions count=%d reason=defense_authority_ended"
+			% released
+		)
 
 
 func _is_main_squad_damaged() -> bool:

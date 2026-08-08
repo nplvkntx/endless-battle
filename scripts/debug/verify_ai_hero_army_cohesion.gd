@@ -427,6 +427,71 @@ func _ready() -> void:
 	)
 	EnemyArmyCommand._emergency_defense_active = false
 
+	## --- CASE 5b: after defense clears, stale DEFEND must not orphan the main force ---
+	## Simulates the observed mismatch: director counts hero+army while CREEP/ATTACK
+	## cannot claim units still locked on DEFEND (which never auto-expires).
+	for entry: Variant in director.get_main_squad().get_members_copy():
+		if NodeSafety.is_alive_node(entry):
+			EnemyUnitMission.try_set_mission(entry as Node, EnemyUnitMission.Mission.DEFEND, 30.0)
+	var sticky_pending: Spearman = _spawn_enemy_spear(rally + Vector3(8.0, 0.0, 4.0), 510)
+	EnemyArmyCommand.register_combat_unit(sticky_pending)
+	EnemyUnitMission.try_set_mission(sticky_pending, EnemyUnitMission.Mission.DEFEND, 30.0)
+	director.debug_enqueue_pending_for_tests(sticky_pending)
+	_expect(
+		failures,
+		"case5b: pre-clear squad holds DEFEND",
+		EnemyUnitMission.get_unit_mission(hero) == EnemyUnitMission.Mission.DEFEND
+	)
+	_expect(
+		failures,
+		"case5b: CREEP cannot claim while DEFEND sticks",
+		not EnemyUnitMission.can_override_mission(hero, EnemyUnitMission.Mission.CREEP)
+	)
+	_expect(
+		failures,
+		"case5b: ATTACK cannot claim while DEFEND sticks",
+		not EnemyUnitMission.can_override_mission(hero, EnemyUnitMission.Mission.ATTACK)
+	)
+
+	director._state = MilitaryDirectorV2.State.DEFEND
+	director._defend_active = true
+	EnemyArmyCommand._emergency_defense_active = true
+	director.debug_exit_defend_after_clear_for_tests(rally)
+	_expect(
+		failures,
+		"case5b: hero DEFEND released after defense exit",
+		EnemyUnitMission.get_unit_mission(hero) != EnemyUnitMission.Mission.DEFEND
+	)
+	var defend_left: int = 0
+	for entry: Variant in director.get_main_squad().get_members_copy():
+		if (
+			NodeSafety.is_alive_node(entry)
+			and EnemyUnitMission.get_unit_mission(entry as Node) == EnemyUnitMission.Mission.DEFEND
+		):
+			defend_left += 1
+	_expect(failures, "case5b: no main-squad DEFEND leftovers", defend_left == 0)
+	director.debug_admit_pending_for_tests()
+	_expect(
+		failures,
+		"case5b: stale DEFEND pending joins main squad after clear",
+		director.get_main_squad().has_member(sticky_pending)
+	)
+	_expect(
+		failures,
+		"case5b: CREEP claimable after defense release",
+		EnemyUnitMission.can_override_mission(hero, EnemyUnitMission.Mission.CREEP)
+	)
+	_expect(
+		failures,
+		"case5b: ATTACK claimable after defense release",
+		EnemyUnitMission.can_override_mission(hero, EnemyUnitMission.Mission.ATTACK)
+	)
+	_expect(
+		failures,
+		"case5b: no large orphan pending pile after defense",
+		director.get_pending_reinforcements_copy().size() <= 1
+	)
+
 	## --- CASE 6: ATTACK_PLAYER must damage the live player Building objective ---
 	## Reset to a clean post-creep attack: hero + superior pike force vs undefended CC.
 	for entry: Variant in player_pikes:
