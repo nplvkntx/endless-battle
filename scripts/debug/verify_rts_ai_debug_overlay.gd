@@ -12,7 +12,7 @@ func _ready() -> void:
 	add_child(root)
 
 	var composition := MatchCompositionRoot.new()
-	composition.name = "MatchCompositionRoot"
+	composition.name = "MatchSystems"
 	root.add_child(composition)
 
 	var director := MilitaryDirectorV2.new()
@@ -59,14 +59,24 @@ func _ready() -> void:
 	if overlay == null:
 		failures.append("RtsAiDebugOverlay autoload missing")
 	else:
-		overlay.show_overlay()
-		await get_tree().process_frame
-		if not overlay.is_overlay_visible():
-			failures.append("overlay failed to show")
-		overlay.hide_overlay()
-		await get_tree().process_frame
-		if overlay.is_overlay_visible():
-			failures.append("overlay failed to hide")
+		for size: Vector2i in [Vector2i(1920, 1080), Vector2i(1106, 512)]:
+			if overlay.has_method("set_layout_size_override_for_tests"):
+				overlay.call("set_layout_size_override_for_tests", Vector2(size))
+			overlay.show_overlay()
+			await get_tree().process_frame
+			if not overlay.is_overlay_visible():
+				failures.append("overlay failed to show @ %dx%d" % [size.x, size.y])
+			else:
+				_check_overlay_layout(overlay, size, failures)
+			overlay.hide_overlay()
+			await get_tree().process_frame
+			if overlay.is_overlay_visible():
+				failures.append("overlay failed to hide @ %dx%d" % [size.x, size.y])
+			var world := get_tree().root.find_child("RtsAiDebugWorld", true, false)
+			if world != null and is_instance_valid(world):
+				failures.append("stale world debug after hide @ %dx%d" % [size.x, size.y])
+		if overlay.has_method("set_layout_size_override_for_tests"):
+			overlay.call("set_layout_size_override_for_tests", Vector2.ZERO)
 
 	if failures.is_empty():
 		print("PASS rts_ai_debug_overlay")
@@ -76,3 +86,44 @@ func _ready() -> void:
 		for f: String in failures:
 			print(" - %s" % f)
 		get_tree().quit(1)
+
+
+func _check_overlay_layout(overlay: Node, size: Vector2i, failures: PackedStringArray) -> void:
+	var panel: PanelContainer = overlay.get("_panel") as PanelContainer
+	var label: RichTextLabel = overlay.get("_label") as RichTextLabel
+	if panel == null or label == null:
+		failures.append("overlay panel/label missing @ %dx%d" % [size.x, size.y])
+		return
+	var panel_w: float = absf(panel.offset_right - panel.offset_left)
+	var panel_h: float = absf(panel.offset_bottom - panel.offset_top)
+	var width_frac: float = panel_w / float(size.x)
+	var height_frac: float = panel_h / float(size.y)
+	if width_frac > 0.34:
+		failures.append(
+			"panel too wide %.0f%% @ %dx%d" % [width_frac * 100.0, size.x, size.y]
+		)
+	if height_frac > 0.52:
+		failures.append(
+			"panel too tall %.0f%% @ %dx%d" % [height_frac * 100.0, size.x, size.y]
+		)
+	## Prefer BBCode source; parsed text can lag one frame in headless.
+	var text: String = String(label.text)
+	for needle: String in ["AI BRAIN", "Mission:", "Decision:", "Why:"]:
+		if text.find(needle) < 0:
+			failures.append("missing '%s' @ %dx%d" % [needle, size.x, size.y])
+	if text.find("Dir power:") < 0 and text.find("Dir:") < 0:
+		failures.append("missing director power line @ %dx%d" % [size.x, size.y])
+	if text.find("Cmd power:") < 0 and text.find("Cmd:") < 0 and text.find("Commander:") < 0:
+		failures.append("missing commander power/state @ %dx%d" % [size.x, size.y])
+	var primary_font: int = int(overlay.get("_primary_font"))
+	if size.y <= 520 and primary_font < 14:
+		failures.append("primary font too small (%d) @ %dx%d" % [primary_font, size.x, size.y])
+	print(
+		"layout ok @ %dx%d w=%.0f%% h=%.0f%% font=%d" % [
+			size.x,
+			size.y,
+			width_frac * 100.0,
+			height_frac * 100.0,
+			primary_font,
+		]
+	)

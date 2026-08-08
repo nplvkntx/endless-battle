@@ -6,14 +6,14 @@ extends CanvasLayer
 
 const TOGGLE_KEY := KEY_O
 const REFRESH_INTERVAL_SECONDS := 0.22
-const EVENT_FEED_MAX := 7
+const EVENT_FEED_MAX := 5
 const EVENT_AGE_SECONDS := 18.0
 const WORLD_LABEL_MAX := 14
 
 var _panel: PanelContainer
-var _label: Label
+var _label: RichTextLabel
 var _unit_panel: PanelContainer
-var _unit_label: Label
+var _unit_label: RichTextLabel
 var _refresh_timer: float = 0.0
 var _visible_overlay: bool = false
 var _prev_state: String = ""
@@ -27,6 +27,14 @@ var _world_root: Node3D = null
 var _path_mesh: MeshInstance3D = null
 var _label_pool: Array = []
 var _order_replace_times: Array = []
+var _layout_compact: bool = false
+var _primary_font: int = 14
+var _secondary_font: int = 11
+var _event_font: int = 10
+var _show_secondary: bool = true
+var _panel_width: float = 360.0
+## When set (tests / headless smoke), layout uses this instead of live viewport size.
+var _layout_size_override: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -34,6 +42,9 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process_unhandled_input(true)
 	_build_ui()
+	var viewport := get_viewport()
+	if viewport != null:
+		viewport.size_changed.connect(_on_viewport_size_changed)
 	set_process(false)
 	hide_overlay()
 
@@ -74,6 +85,7 @@ func show_overlay() -> void:
 	_refresh_timer = REFRESH_INTERVAL_SECONDS
 	set_process(true)
 	_ensure_world_root()
+	_apply_layout(false)
 	_update_panels()
 
 
@@ -89,31 +101,30 @@ func is_overlay_visible() -> bool:
 	return _visible_overlay
 
 
+func _on_viewport_size_changed() -> void:
+	if _visible_overlay:
+		_update_panels()
+
+
 func _build_ui() -> void:
-	_panel = _make_panel(Color(0.05, 0.08, 0.12, 0.90), Color(0.35, 0.65, 0.85, 1.0))
-	_label = _make_label(12)
+	_panel = _make_panel(Color(0.04, 0.07, 0.11, 0.94), Color(0.40, 0.72, 0.92, 1.0))
+	_label = _make_rich_label()
 	_panel.add_child(_label)
 	add_child(_panel)
 	_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_panel.offset_right = -10.0
-	_panel.offset_top = 10.0
-	_panel.offset_left = -420.0
-	_panel.offset_bottom = 420.0
-	_panel.custom_minimum_size = Vector2(360, 0)
+	_panel.clip_contents = true
 
-	_unit_panel = _make_panel(Color(0.06, 0.05, 0.08, 0.90), Color(0.85, 0.55, 0.35, 1.0))
-	_unit_label = _make_label(11)
+	_unit_panel = _make_panel(Color(0.06, 0.05, 0.08, 0.94), Color(0.90, 0.60, 0.38, 1.0))
+	_unit_label = _make_rich_label()
 	_unit_panel.add_child(_unit_label)
 	add_child(_unit_panel)
 	_unit_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_unit_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_unit_panel.offset_right = -10.0
-	_unit_panel.offset_top = 430.0
-	_unit_panel.offset_left = -420.0
-	_unit_panel.custom_minimum_size = Vector2(360, 0)
+	_unit_panel.clip_contents = true
 	_panel.visible = false
 	_unit_panel.visible = false
+	_apply_layout(false)
 
 
 func _make_panel(bg: Color, border: Color) -> PanelContainer:
@@ -126,28 +137,111 @@ func _make_panel(bg: Color, border: Color) -> PanelContainer:
 	style.border_width_right = 1
 	style.border_width_bottom = 1
 	style.border_color = border
-	style.content_margin_left = 8.0
-	style.content_margin_top = 6.0
-	style.content_margin_right = 8.0
-	style.content_margin_bottom = 6.0
+	style.content_margin_left = 6.0
+	style.content_margin_top = 4.0
+	style.content_margin_right = 6.0
+	style.content_margin_bottom = 4.0
 	panel.add_theme_stylebox_override("panel", style)
 	return panel
 
 
-func _make_label(font_size: int) -> Label:
-	var label := Label.new()
+func _make_rich_label() -> RichTextLabel:
+	var label := RichTextLabel.new()
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.add_theme_font_size_override("font_size", font_size)
-	label.add_theme_color_override("font_color", Color(0.88, 0.93, 0.96, 1.0))
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.bbcode_enabled = true
+	label.fit_content = true
+	label.scroll_active = false
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.add_theme_color_override("default_color", Color(0.92, 0.95, 0.98, 1.0))
+	label.add_theme_constant_override("line_separation", 2)
 	return label
+
+
+func set_layout_size_override_for_tests(size: Vector2) -> void:
+	_layout_size_override = size
+
+
+func _resolve_layout_size() -> Vector2:
+	if _layout_size_override.x > 1.0 and _layout_size_override.y > 1.0:
+		return _layout_size_override
+	var viewport := get_viewport()
+	if viewport == null:
+		return Vector2.ZERO
+	return viewport.get_visible_rect().size
+
+
+func _apply_layout(has_unit: bool) -> void:
+	var vp: Vector2 = _resolve_layout_size()
+	if vp.x < 1.0 or vp.y < 1.0:
+		return
+
+	_layout_compact = vp.y <= 640.0 or vp.x <= 1200.0
+	## Keep ~25–30% width; avoid huge panels on 1080p.
+	var width_frac: float = 0.30 if _layout_compact else 0.24
+	_panel_width = clampf(vp.x * width_frac, 250.0, 400.0)
+
+	## Prefer readable primary text; shrink secondary first on tiny viewports.
+	if vp.y <= 520.0:
+		_primary_font = 15
+		_secondary_font = 10
+		_event_font = 10
+		_show_secondary = false
+	elif _layout_compact:
+		_primary_font = 14
+		_secondary_font = 11
+		_event_font = 10
+		_show_secondary = true
+	else:
+		_primary_font = 13
+		_secondary_font = 11
+		_event_font = 10
+		_show_secondary = true
+
+	var margin: float = 8.0
+	var bottom_ui_reserve: float = maxf(vp.y * 0.22, 88.0)
+	var max_total_h: float = minf(vp.y * 0.48, vp.y - margin - bottom_ui_reserve)
+	max_total_h = maxf(max_total_h, 140.0)
+
+	## Top-right anchored: height is offset_bottom - offset_top.
+	_panel.offset_right = -margin
+	_panel.offset_top = margin
+	_panel.offset_left = -margin - _panel_width
+	_panel.custom_minimum_size = Vector2(_panel_width, 0)
+	_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+	_unit_panel.offset_right = -margin
+	_unit_panel.offset_left = -margin - _panel_width
+	_unit_panel.custom_minimum_size = Vector2(_panel_width, 0)
+	_unit_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+	if has_unit:
+		var brain_h: float = max_total_h * (0.48 if _layout_compact else 0.52)
+		var gap: float = 4.0
+		var unit_top: float = margin + brain_h + gap
+		_panel.offset_bottom = margin + brain_h
+		_label.custom_maximum_size = Vector2(_panel_width - 12.0, maxf(brain_h - 12.0, 40.0))
+		_unit_panel.offset_top = unit_top
+		_unit_panel.offset_bottom = margin + max_total_h
+		_unit_label.custom_maximum_size = Vector2(
+			_panel_width - 12.0,
+			maxf(max_total_h - brain_h - gap - 12.0, 40.0)
+		)
+		_unit_panel.visible = _visible_overlay
+	else:
+		_panel.offset_bottom = margin + max_total_h
+		_label.custom_maximum_size = Vector2(_panel_width - 12.0, maxf(max_total_h - 12.0, 40.0))
+		_unit_panel.offset_top = margin + max_total_h + 4.0
+		_unit_panel.offset_bottom = margin + max_total_h + 4.0
+		if _visible_overlay:
+			_unit_panel.visible = false
 
 
 func _update_panels() -> void:
 	var tree: SceneTree = get_tree()
 	if tree == null:
-		_label.text = "RTS AI Debug (O)\n(no scene tree)"
+		_label.text = _bb_primary("RTS AI Debug (O)\n(no scene tree)")
 		_unit_label.text = ""
+		_apply_layout(false)
 		return
 
 	var composition: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(tree)
@@ -163,215 +257,202 @@ func _update_panels() -> void:
 	if director != null and MilitaryAIConfig.is_v2_enabled():
 		snap = director.get_rts_diagnostic_snapshot()
 	_note_events(snap)
-	_label.text = _format_global_panel(snap, commander)
-	_unit_label.text = _format_unit_panel(tree, selection, director, snap)
+
+	var unit: Unit = _resolve_inspected_unit(selection)
+	var has_unit: bool = unit != null
+	_apply_layout(has_unit)
+
+	_label.text = _format_global_panel(snap, commander, has_unit)
+	_unit_label.text = _format_unit_panel(tree, unit, director, snap, has_unit)
 	_update_world_labels(tree, director, selection, snap)
 
 
-func _format_global_panel(snap: Dictionary, commander: ArmyCommanderV2) -> String:
-	if snap.is_empty():
-		return "RTS AI Debug (O)\nAI BRAIN\n(V2 director unavailable)"
+func _bb_primary(body: String) -> String:
+	return "[font_size=%d]%s[/font_size]" % [_primary_font, body]
 
-	var lines: PackedStringArray = PackedStringArray([
-		"RTS AI Debug (O)",
-		"AI BRAIN",
+
+func _bb_secondary(body: String) -> String:
+	return "[font_size=%d][color=#a8b4bc]%s[/color][/font_size]" % [_secondary_font, body]
+
+
+func _bb_events(body: String) -> String:
+	return "[font_size=%d][color=#c5d0d8]%s[/color][/font_size]" % [_event_font, body]
+
+
+func _bb_header(text: String) -> String:
+	return "[color=#7ec8ff]%s[/color]" % text
+
+
+func _format_global_panel(snap: Dictionary, commander: ArmyCommanderV2, has_unit: bool) -> String:
+	if snap.is_empty():
+		return _bb_primary("%s\n(V2 director unavailable)" % _bb_header("AI BRAIN"))
+
+	var with_main: bool = bool(snap.get("hero_with_main", false))
+	var hero_squad: String = "MAIN" if with_main else "AWAY"
+	var primary: PackedStringArray = PackedStringArray([
+		_bb_header("AI BRAIN"),
 		"Mission: %s" % String(snap.get("mission", "-")),
-		"State: %s" % String(snap.get("state", "-")),
-		"Prev reason: %s" % _short(_prev_reason if not _prev_reason.is_empty() else String(snap.get("transition_reason", "-")), 42),
-		"Objective: %s" % String(snap.get("objective", "-")),
-		"Mission age: %.1fs" % float(snap.get("mission_age", 0.0)),
-		"Objective valid: %s" % ("YES" if bool(snap.get("objective_valid", false)) else "NO"),
-		"",
-		"HERO: %s L%d HP=%d%%" % [
-			String(snap.get("hero_name", "-")),
+		"Decision: %s" % String(snap.get("state", "-")),
+		"Why: %s" % _short(String(snap.get("transition_reason", "-")), 36 if _layout_compact else 48),
+		"Hero: %s L%d %d%%" % [
+			_short(String(snap.get("hero_name", "-")), 14),
 			int(snap.get("hero_level", 0)),
 			int(round(float(snap.get("hero_hp_ratio", 0.0)) * 100.0)),
 		],
-		"state=%s squad=%s" % [
-			String(snap.get("hero_state", "-")),
-			"MAIN" if bool(snap.get("hero_with_main", false)) else "NO",
-		],
-		"WITH MAIN ARMY: %s" % ("YES" if bool(snap.get("hero_with_main", false)) else "NO"),
+		"WITH MAIN: %s" % ("YES" if with_main else "NO"),
+		"Hero state: %s" % String(snap.get("hero_state", "-")),
+		"Hero squad: %s" % hero_squad,
+		"Army: %d" % int(snap.get("combat_alive", 0)),
+		"Available: %d" % int(snap.get("combat_available", 0)),
+		"Main: %d" % int(snap.get("main_squad", 0)),
+		"Unassigned: %d" % int(snap.get("unassigned", 0)),
+		"Idle: %d" % int(snap.get("idle_military", 0)),
+		"Dir power: %d" % int(round(float(snap.get("director_power", 0.0)))),
+		"Cmd power: %d" % int(round(float(snap.get("commander_power", 0.0)))),
+		"Mismatch: %d" % int(round(float(snap.get("power_mismatch", 0.0)))),
+		"Objective: %s" % _short(String(snap.get("objective", "-")), 28 if _layout_compact else 40),
+		"Commander: %s" % String(snap.get("executable", "-")),
 	])
-	if not bool(snap.get("hero_with_main", false)):
-		var away: String = String(snap.get("hero_away_reason", "unknown")).to_upper()
-		if away.is_empty():
-			away = "UNKNOWN"
-		lines.append("reason=%s" % away)
-	var dist: float = float(snap.get("hero_dist_main", -1.0))
-	if dist >= 0.0:
-		lines.append("distance_to_main: %.1f" % dist)
 
-	lines.append("")
-	lines.append(
-		"Army alive:%d avail:%d main:%d def:%d other:%d unassign:%d idle:%d" % [
-			int(snap.get("combat_alive", 0)),
-			int(snap.get("combat_available", 0)),
-			int(snap.get("main_squad", 0)),
-			int(snap.get("defense_reserved", 0)),
-			int(snap.get("other_owned", 0)),
-			int(snap.get("unassigned", 0)),
-			int(snap.get("idle_military", 0)),
-		]
-	)
-	lines.append("Pending: %d  Roles: %s" % [
-		int(snap.get("pending", 0)),
-		String(snap.get("role_counts", "-")),
-	])
-	lines.append("IDLE MILITARY: %d" % int(snap.get("idle_military", 0)))
-	lines.append("")
-	lines.append("POWER")
-	lines.append(
-		"Director avail: %d  Power: %.0f" % [
-			int(snap.get("director_unit_count", 0)),
-			float(snap.get("director_power", 0.0)),
-		]
-	)
-	lines.append(
-		"Commander squad: %d  Power: %.0f" % [
-			int(snap.get("commander_unit_count", 0)),
-			float(snap.get("commander_power", 0.0)),
-		]
-	)
-	lines.append(
-		"Player power: %.0f  Ratio: %.2f" % [
-			float(snap.get("player_power", 0.0)),
-			float(snap.get("power_ratio", 0.0)),
-		]
-	)
-	lines.append("Mismatch: %.0f" % float(snap.get("power_mismatch", 0.0)))
-	lines.append("")
-	lines.append("Decision: %s" % String(snap.get("state", "-")))
-	lines.append("Why: %s" % _short(String(snap.get("transition_reason", "-")), 48))
-	var decision_lines: Variant = snap.get("decision_lines", PackedStringArray())
-	if decision_lines is PackedStringArray:
-		for line: String in decision_lines:
-			lines.append(line)
-	elif decision_lines is Array:
-		for entry: Variant in decision_lines:
-			lines.append(str(entry))
-	lines.append("prefer_early_creep=%s interrupt_atk=%s" % [
-		str(bool(snap.get("prefer_early_creep", false))),
-		str(bool(snap.get("interrupt_for_attack", false))),
-	])
-	lines.append("")
-	lines.append("Commander: %s" % String(snap.get("executable", "-")))
-	lines.append("Exec reason: %s" % _short(String(snap.get("executable_reason", "-")), 40))
-	lines.append("Authority: %s" % String(snap.get("authority", "UNKNOWN")))
-	var idle_s: float = float(snap.get("commander_idle_seconds", 0.0))
-	if commander != null:
-		idle_s = commander.get_squad_idle_seconds()
-	lines.append("Squad idle: %.1fs" % idle_s)
-
-	lines.append("")
-	lines.append("DEFENSE")
-	lines.append("Threat: %s  target=%s" % [
-		"YES" if bool(snap.get("threat_active", false)) else "NO",
-		String(snap.get("threat_target", "-")),
-	])
-	lines.append(
-		"ThreatP:%.0f DefP:%.0f mission=%s hero_def=%s" % [
-			float(snap.get("threat_power", 0.0)),
-			float(snap.get("defense_power", 0.0)),
-			String(snap.get("defend_reason", "-")) if bool(snap.get("defend_active", false)) else "-",
-			"YES" if bool(snap.get("hero_defending", false)) else "NO",
-		]
-	)
-	lines.append("Defenders assigned: %d" % int(snap.get("defense_reserved", 0)))
-
-	var state_name: String = String(snap.get("state", ""))
-	if state_name == "CREEP" or not String(snap.get("creep_block", "")).is_empty():
-		lines.append("")
-		lines.append("CREEP")
-		lines.append("Camp: %s alive=%s dist=%.1f" % [
-			String(snap.get("camp", "-")),
-			"YES" if bool(snap.get("camp_alive", false)) else "NO",
-			float(snap.get("camp_distance", -1.0)),
-		])
-		lines.append(
-			"Ready=%s squad=%d hero_in=%s cleared=%d" % [
-				str(bool(snap.get("creep_ready", false))),
+	## On tiny viewports with a unit panel, keep only the densest primary block.
+	if _layout_compact and has_unit:
+		primary = PackedStringArray([
+			_bb_header("AI BRAIN"),
+			"Mission: %s" % String(snap.get("mission", "-")),
+			"Decision: %s" % String(snap.get("state", "-")),
+			"Why: %s" % _short(String(snap.get("transition_reason", "-")), 32),
+			"Hero: %s  MAIN:%s" % [
+				_short(String(snap.get("hero_name", "-")), 12),
+				"YES" if with_main else "NO",
+			],
+			"State:%s Squad:%s" % [String(snap.get("hero_state", "-")), hero_squad],
+			"Avail:%d Main:%d Unas:%d Idle:%d" % [
+				int(snap.get("combat_available", 0)),
 				int(snap.get("main_squad", 0)),
-				"YES" if bool(snap.get("hero_with_main", false)) else "NO",
-				int(snap.get("cleared_camps", 0)),
-			]
-		)
-		var creep_block: String = String(snap.get("creep_block", ""))
-		if not creep_block.is_empty():
-			lines.append("Block: %s" % _short(creep_block, 48))
+				int(snap.get("unassigned", 0)),
+				int(snap.get("idle_military", 0)),
+			],
+			"Dir:%d Cmd:%d Δ%d" % [
+				int(round(float(snap.get("director_power", 0.0)))),
+				int(round(float(snap.get("commander_power", 0.0)))),
+				int(round(float(snap.get("power_mismatch", 0.0)))),
+			],
+			"Obj: %s" % _short(String(snap.get("objective", "-")), 26),
+			"Commander: %s" % String(snap.get("executable", "-")),
+		])
 
-	if state_name == "ATTACK":
-		lines.append("")
-		lines.append("ATTACK")
-		lines.append("Target: %s" % String(snap.get("objective", "-")))
-		lines.append(
-			"Squad:%d hero=%s power:%.0f moving:%d idle:%d targets:%d" % [
-				int(snap.get("attack_members", 0)),
-				"YES" if bool(snap.get("hero_with_main", false)) else "NO",
-				float(snap.get("director_power", 0.0)),
+	var chunks: PackedStringArray = PackedStringArray([_bb_primary("\n".join(primary))])
+
+	var include_secondary: bool = _show_secondary and not (_layout_compact and has_unit)
+	if include_secondary:
+		var secondary: PackedStringArray = PackedStringArray()
+		secondary.append("Prev: %s" % _short(_prev_mission if not _prev_mission.is_empty() else "-", 28))
+		secondary.append("Age: %.1fs  Valid: %s" % [
+			float(snap.get("mission_age", 0.0)),
+			"YES" if bool(snap.get("objective_valid", false)) else "NO",
+		])
+		var dist: float = float(snap.get("hero_dist_main", -1.0))
+		if dist >= 0.0:
+			secondary.append("Hero dist: %.1fm" % dist)
+		if not with_main:
+			var away: String = String(snap.get("hero_away_reason", "unknown")).to_upper()
+			if away.is_empty():
+				away = "UNKNOWN"
+			secondary.append("Away: %s" % _short(away, 28))
+		secondary.append("Pending: %d  Roles: %s" % [
+			int(snap.get("pending", 0)),
+			_short(String(snap.get("role_counts", "-")), 24),
+		])
+		secondary.append("Player P: %d  Ratio: %.2f" % [
+			int(round(float(snap.get("player_power", 0.0)))),
+			float(snap.get("power_ratio", 0.0)),
+		])
+		var decision_lines: Variant = snap.get("decision_lines", PackedStringArray())
+		if decision_lines is PackedStringArray:
+			for line: String in decision_lines:
+				secondary.append(_short(line, 40))
+		elif decision_lines is Array:
+			for entry: Variant in decision_lines:
+				secondary.append(_short(str(entry), 40))
+		secondary.append("Early creep: %s  Int.atks: %s" % [
+			"Y" if bool(snap.get("prefer_early_creep", false)) else "N",
+			"Y" if bool(snap.get("interrupt_for_attack", false)) else "N",
+		])
+		secondary.append("Exec: %s" % _short(String(snap.get("executable_reason", "-")), 36))
+		secondary.append("Auth: %s" % String(snap.get("authority", "UNKNOWN")))
+		var idle_s: float = float(snap.get("commander_idle_seconds", 0.0))
+		if commander != null:
+			idle_s = commander.get_squad_idle_seconds()
+		secondary.append("Squad idle: %.1fs" % idle_s)
+
+		secondary.append("DEF Threat:%s %s" % [
+			"YES" if bool(snap.get("threat_active", false)) else "NO",
+			_short(String(snap.get("threat_target", "-")), 18),
+		])
+		secondary.append("ThreatP:%d DefP:%d hero_def:%s" % [
+			int(round(float(snap.get("threat_power", 0.0)))),
+			int(round(float(snap.get("defense_power", 0.0)))),
+			"Y" if bool(snap.get("hero_defending", false)) else "N",
+		])
+		if bool(snap.get("defend_active", false)):
+			secondary.append("Def why: %s" % _short(String(snap.get("defend_reason", "-")), 32))
+
+		var state_name: String = String(snap.get("state", ""))
+		if state_name == "CREEP" or not String(snap.get("creep_block", "")).is_empty():
+			secondary.append("CREEP %s alive=%s d=%.1f" % [
+				_short(String(snap.get("camp", "-")), 14),
+				"Y" if bool(snap.get("camp_alive", false)) else "N",
+				float(snap.get("camp_distance", -1.0)),
+			])
+			var creep_block: String = String(snap.get("creep_block", ""))
+			if not creep_block.is_empty():
+				secondary.append("Creep block: %s" % _short(creep_block, 36))
+
+		if state_name == "ATTACK":
+			secondary.append("ATK move:%d idle:%d tgt:%d" % [
 				int(snap.get("attack_moving", 0)),
 				int(snap.get("attack_idle", 0)),
 				int(snap.get("attack_with_targets", 0)),
-			]
-		)
-		var atk_block: String = String(snap.get("attack_block", ""))
-		if not atk_block.is_empty():
-			lines.append("Block: %s" % _short(atk_block, 48))
+			])
+			var atk_block: String = String(snap.get("attack_block", ""))
+			if not atk_block.is_empty():
+				secondary.append("Atk block: %s" % _short(atk_block, 36))
 
-	lines.append("")
-	lines.append("LAST ORDER: %s age=%s" % [
-		String(snap.get("last_order_label", "-")),
-		_format_age(float(snap.get("last_order_age", INF))),
-	])
-	lines.append("Order source: UNKNOWN")
-	var replacements: int = _count_order_replacements_2s()
-	lines.append("ORDER REPLACEMENTS (2s): %d" % replacements)
-	## Without durable per-issuer metadata, never claim CONFLICT: YES.
-	lines.append("CONFLICT: UNKNOWN")
+		secondary.append("Last ord: %s %s" % [
+			_short(String(snap.get("last_order_label", "-")), 20),
+			_format_age(float(snap.get("last_order_age", INF))),
+		])
+		secondary.append("Repl(2s):%d Conflict:UNKNOWN" % _count_order_replacements_2s())
+		chunks.append(_bb_secondary("\n".join(secondary)))
 
-	lines.append("")
-	lines.append("EVENTS")
+	## Events stay smaller than primary diagnostics; cap feed length by space.
+	var event_cap: int = 3 if (_layout_compact and has_unit) else (4 if _layout_compact else EVENT_FEED_MAX)
 	_prune_events()
+	var event_lines: PackedStringArray = PackedStringArray([_bb_header("EVENTS")])
 	if _event_feed.is_empty():
-		lines.append("(none)")
+		event_lines.append("(none)")
 	else:
+		var shown: int = 0
 		for entry: Variant in _event_feed:
+			if shown >= event_cap:
+				break
 			if entry is Dictionary:
-				lines.append(
-					"%.1f %s" % [
-						float((entry as Dictionary).get("t", 0.0)),
-						String((entry as Dictionary).get("msg", "")),
-					]
-				)
+				event_lines.append(String((entry as Dictionary).get("msg", "")))
+				shown += 1
+	chunks.append(_bb_events("\n".join(event_lines)))
 
-	return "\n".join(lines)
+	return "\n".join(chunks)
 
 
 func _format_unit_panel(
 	tree: SceneTree,
-	selection: Node,
+	unit: Unit,
 	director: MilitaryDirectorV2,
-	snap: Dictionary
+	snap: Dictionary,
+	has_unit: bool
 ) -> String:
-	var unit: Unit = _resolve_inspected_unit(selection)
-	if unit == null:
-		return "UNIT DEBUG\n(select a unit)"
-
-	var lines: PackedStringArray = PackedStringArray([
-		"UNIT DEBUG",
-		"%s #%d" % [unit.name, unit.get_instance_id()],
-		"Team: %d  Type: %s" % [unit.team_id, unit.get_class()],
-	])
-	var hp_text: String = "-"
-	if unit is MilitaryUnit:
-		var mu: MilitaryUnit = unit as MilitaryUnit
-		hp_text = str(mu.get_current_health())
-	elif unit.get("_current_health") != null:
-		hp_text = "%.0f/%.0f" % [
-			float(unit.get("_current_health")),
-			float(unit.get("_max_health")),
-		]
-	lines.append("HP: %s" % hp_text)
+	if not has_unit or unit == null:
+		return _bb_secondary("(select a unit)")
 
 	var ownership: String = "UNKNOWN"
 	if director != null:
@@ -389,10 +470,6 @@ func _format_unit_panel(
 	else:
 		squad_label = ownership.to_upper()
 
-	lines.append("AI owner: %s" % ownership)
-	lines.append("Squad: %s" % squad_label)
-	lines.append("Mission: %s" % mission_label)
-
 	var order: UnitOrder = unit.get_active_order()
 	var order_text: String = "NONE"
 	var order_target: String = "-"
@@ -401,84 +478,86 @@ func _format_unit_panel(
 		var alive_t: Node3D = order.get_alive_target()
 		if alive_t != null:
 			order_target = alive_t.name
-	lines.append("Current order: %s" % order_text)
-	lines.append("Current objective: %s" % String(snap.get("objective", "-")))
-	lines.append("Attack target: %s" % _read_attack_target_name(unit))
 
-	var dest: Vector3 = unit.get_movement_destination()
-	var dist_rem: float = -1.0
-	if unit.has_move_target and dest != Vector3.ZERO:
-		dist_rem = EnemyArmyCommand.horizontal_distance(unit.global_position, dest)
-	lines.append(
-		"Move dest: %s" % (
-			"(%.0f, %.0f)" % [dest.x, dest.z] if unit.has_move_target else "-"
-		)
-	)
-	lines.append("Distance remaining: %s" % ("%.1f" % dist_rem if dist_rem >= 0.0 else "-"))
-
-	var nav: Dictionary = _read_nav_state(unit)
-	lines.append("")
-	lines.append("NAV")
-	lines.append("Path state: %s" % String(nav.get("path_state", "-")))
-	lines.append("Path points: %d" % int(nav.get("path_points", 0)))
-	lines.append("Waypoint: %s" % String(nav.get("waypoint", "-")))
-	lines.append("Blocked: %s" % String(nav.get("blocked", "NO")))
-	lines.append("Blocker: %s" % String(nav.get("blocker", "-")))
-	lines.append(
-		"Moving: %s  Vel: %.1f" % [
-			"yes" if unit.is_movement_active() else "no",
-			unit.velocity.length(),
-		]
-	)
-	lines.append(
-		"Stuck: %s  time=%.2f" % [
-			"yes" if unit.is_confirmed_stuck() else "no",
-			float(unit.get("_stuck_time")),
-		]
-	)
-	lines.append("Repath pending: %s" % String(nav.get("repath_pending", "UNKNOWN")))
-	lines.append("Last repath reason: %s" % String(nav.get("repath_reason", "UNKNOWN")))
-	var route_fail: String = EnemyArmyCommand.get_last_squad_route_failure_reason()
-	if not route_fail.is_empty():
-		lines.append("Squad route fail: %s" % route_fail)
-
-	lines.append("")
-	lines.append("COMBAT")
-	var combat: Dictionary = _read_combat_state(unit)
-	lines.append("State: %s" % String(combat.get("state", "-")))
-	lines.append("Target: %s" % String(combat.get("target", "NONE")))
-	lines.append("Target type: %s" % String(combat.get("target_type", "-")))
-	lines.append("Target alive: %s" % String(combat.get("target_alive", "-")))
-	lines.append("Hostile: %s" % String(combat.get("hostile", "-")))
-	lines.append("Distance: %s" % String(combat.get("distance", "-")))
-	lines.append("Attack range: %s" % String(combat.get("range", "-")))
-	lines.append("In range: %s" % String(combat.get("in_range", "-")))
-	lines.append("Cooldown: %s" % String(combat.get("cooldown", "-")))
-	lines.append("Can attack: %s" % String(combat.get("can_attack", "-")))
-	lines.append("Last damage time: UNKNOWN")
-
-	lines.append("")
-	lines.append("LAST ORDER:")
-	lines.append("source=UNKNOWN")
-	lines.append("type=%s" % order_text)
-	lines.append("target=%s" % order_target)
-	lines.append("age=UNKNOWN")
-	lines.append("PREVIOUS ORDER: UNKNOWN")
-	lines.append("Order replacements (2s): %d" % _count_order_replacements_2s())
-	lines.append("CONFLICT: UNKNOWN")
-
+	var idle_reason: String = "-"
 	if (
 		int(snap.get("idle_military", 0)) > 0
 		and not unit.is_movement_active()
 		and order == null
 	):
-		lines.append("")
-		lines.append("Idle reason: %s" % _derive_idle_reason(unit, ownership, mission_label, nav))
+		idle_reason = _derive_idle_reason(unit, ownership, mission_label, _read_nav_state(unit))
+
+	var dest: Vector3 = unit.get_movement_destination()
+	var dest_text: String = "-"
+	if unit.has_move_target:
+		dest_text = "(%.0f, %.0f)" % [dest.x, dest.z]
+
+	var nav: Dictionary = _read_nav_state(unit)
+	var combat: Dictionary = _read_combat_state(unit)
+
+	var primary: PackedStringArray = PackedStringArray([
+		_bb_header("UNIT"),
+		"%s #%d" % [_short(unit.name, 16), unit.get_instance_id()],
+		"Squad: %s" % squad_label,
+		"Mission: %s" % mission_label,
+		"Order: %s" % _short(order_text, 28 if _layout_compact else 40),
+		"Objective: %s" % _short(String(snap.get("objective", "-")), 24),
+		"Target: %s" % _read_attack_target_name(unit),
+		"Idle: %s" % idle_reason,
+		_bb_header("NAV"),
+		"Dest: %s" % dest_text,
+		"Blocked: %s" % String(nav.get("blocked", "NO")),
+		"Stuck: %.1fs" % float(unit.get("_stuck_time")),
+		"Repath: %s" % _short(String(nav.get("repath_reason", "UNKNOWN")), 24),
+		"Blocker: %s" % _short(String(nav.get("blocker", "-")), 20),
+		_bb_header("COMBAT"),
+		"Target: %s" % String(combat.get("target", "NONE")),
+		"Type: %s" % String(combat.get("target_type", "-")),
+		"Dist: %s  Rng: %s" % [String(combat.get("distance", "-")), String(combat.get("range", "-"))],
+		"In rng: %s  Can: %s" % [
+			String(combat.get("in_range", "-")),
+			String(combat.get("can_attack", "-")),
+		],
+		"Atk state: %s" % String(combat.get("state", "-")),
+		_bb_header("LAST ORDER"),
+		"src:UNKNOWN type:%s" % _short(order_text, 18),
+		"age:UNKNOWN conf:UNKNOWN",
+	])
+
+	var chunks: PackedStringArray = PackedStringArray([_bb_primary("\n".join(primary))])
+
+	if _show_secondary and not _layout_compact:
+		var secondary: PackedStringArray = PackedStringArray([
+			"Owner: %s" % ownership,
+			"Path: %s pts:%d" % [
+				String(nav.get("path_state", "-")),
+				int(nav.get("path_points", 0)),
+			],
+			"WP: %s  Vel: %.1f" % [
+				String(nav.get("waypoint", "-")),
+				unit.velocity.length(),
+			],
+			"Moving: %s  Stuck?: %s" % [
+				"Y" if unit.is_movement_active() else "N",
+				"Y" if unit.is_confirmed_stuck() else "N",
+			],
+			"Alive: %s Hostile: %s CD: %s" % [
+				String(combat.get("target_alive", "-")),
+				String(combat.get("hostile", "-")),
+				String(combat.get("cooldown", "-")),
+			],
+			"Ord tgt: %s" % order_target,
+			"Repl(2s): %d" % _count_order_replacements_2s(),
+		])
+		var route_fail: String = EnemyArmyCommand.get_last_squad_route_failure_reason()
+		if not route_fail.is_empty():
+			secondary.append("Route fail: %s" % _short(route_fail, 32))
+		chunks.append(_bb_secondary("\n".join(secondary)))
 
 	## Silence unused tree warning while keeping signature stable for future scans.
 	if tree == null:
 		pass
-	return "\n".join(lines)
+	return "\n".join(chunks)
 
 
 func _derive_idle_reason(
@@ -638,18 +717,18 @@ func _note_events(snap: Dictionary) -> void:
 	var last_order: String = String(snap.get("last_order_label", ""))
 
 	if not _prev_state.is_empty() and state != _prev_state:
-		_push_event(now, "%s → %s" % [_prev_state, state])
+		_push_event(now, "%s > %s" % [_short_event_token(_prev_state), _short_event_token(state)])
 	elif not _prev_mission.is_empty() and mission != _prev_mission:
-		_push_event(now, "mission %s → %s" % [_prev_mission, mission])
+		_push_event(now, "%s > %s" % [_short_event_token(_prev_mission), _short_event_token(mission)])
 	if not reason.is_empty() and reason != _prev_reason and state != _prev_state:
-		_push_event(now, "why: %s" % _short(reason, 36))
+		_push_event(now, "why %s" % _short(reason, 28))
 	if _prev_hero_with_main != hero_with:
-		_push_event(now, "hero %s MAIN" % ("joined" if hero_with else "left"))
+		_push_event(now, "Hero > MAIN" if hero_with else "Hero < MAIN")
 	if not last_order.is_empty() and last_order != _prev_last_order:
-		_push_event(now, "order %s" % last_order)
+		_push_event(now, _short_order_event(last_order))
 		_order_replace_times.append(now)
 	if not exec_label.is_empty() and exec_label != _prev_exec:
-		_push_event(now, "exec %s" % exec_label)
+		_push_event(now, _short_event_token(exec_label))
 
 	_prev_state = state
 	_prev_mission = mission
@@ -657,6 +736,29 @@ func _note_events(snap: Dictionary) -> void:
 	_prev_hero_with_main = hero_with
 	_prev_exec = exec_label
 	_prev_last_order = last_order
+
+
+func _short_event_token(text: String) -> String:
+	var t: String = text.strip_edges()
+	if t.is_empty():
+		return "-"
+	t = t.replace("ATTACK_MOVE", "ATKMOV").replace("DEFEND", "DEFEND")
+	if t.length() <= 12:
+		return t.to_upper()
+	return t.substr(0, 12).to_upper()
+
+
+func _short_order_event(label: String) -> String:
+	var t: String = label.strip_edges()
+	if t.to_lower().contains("creep"):
+		return "CREEP > ATTACK" if t.to_lower().contains("attack") else "CREEP"
+	if t.to_lower().contains("defend"):
+		return "DEFEND ON"
+	if t.to_lower().begins_with("target"):
+		return _short(t, 22)
+	if t.to_lower().contains("attack"):
+		return "ATTACK"
+	return _short(t, 22)
 
 
 func _push_event(now: float, message: String) -> void:
