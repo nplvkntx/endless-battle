@@ -30,6 +30,7 @@ var _slot_root: Node3D
 var _unit_root: Node3D
 var _camera: Camera3D
 var _hud_label: Label
+var _return_button: Button
 var _ground: StaticBody3D
 var _path_mesh: MeshInstance3D
 var _dest_marker: MeshInstance3D
@@ -62,6 +63,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event
 		match key.keycode:
+			KEY_ESCAPE:
+				_return_to_main_menu()
 			KEY_1:
 				load_preset(1)
 			KEY_2:
@@ -82,6 +85,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			var hit: Variant = _raycast_ground(mb.position)
 			if hit is Vector3:
 				issue_group_move(hit as Vector3)
+
+
+func _return_to_main_menu() -> void:
+	MatchSession.go_to_main_menu()
 
 
 func load_preset(preset_id: int) -> void:
@@ -270,11 +277,30 @@ func _build_world() -> void:
 
 	var canvas := CanvasLayer.new()
 	add_child(canvas)
+	var hud_root := Control.new()
+	hud_root.name = "LabHudRoot"
+	hud_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(hud_root)
+
 	_hud_label = Label.new()
 	_hud_label.name = "LabHUD"
 	_hud_label.position = Vector2(16, 16)
 	_hud_label.add_theme_font_size_override("font_size", 16)
-	canvas.add_child(_hud_label)
+	_hud_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_root.add_child(_hud_label)
+
+	_return_button = Button.new()
+	_return_button.name = "ReturnToMainMenuButton"
+	_return_button.text = "RETURN TO MAIN MENU (ESC)"
+	_return_button.custom_minimum_size = Vector2(260, 36)
+	_return_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_return_button.offset_left = -276.0
+	_return_button.offset_top = 16.0
+	_return_button.offset_right = -16.0
+	_return_button.offset_bottom = 52.0
+	_return_button.pressed.connect(_return_to_main_menu)
+	hud_root.add_child(_return_button)
 
 
 func _ensure_units() -> void:
@@ -441,6 +467,7 @@ func _update_hud() -> void:
 
 	_hud_label.text = "\n".join([
 		"RTS MOVEMENT LAB",
+		"NO PRODUCTION NAVIGATION",
 		"Preset: %d" % current_preset,
 		"",
 		"Units: %d" % int(status["units"]),
@@ -448,8 +475,10 @@ func _update_hud() -> void:
 		"Moving: %d" % int(status["moving"]),
 		"Stuck: %d" % int(status["stuck"]),
 		"",
-		"Path calculations this command: %d" % int(status["path_calculations_this_command"]),
-		"Total path calculations: %d" % int(status["total_path_calculations"]),
+		"Path calculations: %d (this command) / %d (total)" % [
+			int(status["path_calculations_this_command"]),
+			int(status["total_path_calculations"]),
+		],
 		"",
 		"Path length: %d" % int(status["path_length"]),
 		"Waypoints: %d" % int(status["waypoints"]),
@@ -460,9 +489,12 @@ func _update_hud() -> void:
 		result_line,
 		"",
 		"Controls:",
-		"RMB = group move",
-		"1/2/3 = presets",
-		"R = reset units",
+		"RMB = move group",
+		"1 = single building test",
+		"2 = choke test",
+		"3 = base cluster test",
+		"R = reset",
 		"G = toggle grid",
 		"P = toggle path",
+		"ESC = return to main menu",
 	])

@@ -7,8 +7,12 @@ extends Control
 @onready var _settings_panel: Control = $DisplaySettingsPanel
 
 
+const MOVEMENT_LAB_SCENE := "res://scenes/debug/rts_movement_lab.tscn"
+
+
 func _ready() -> void:
 	$CenterContainer/VBoxContainer/StartMatchButton.pressed.connect(_on_start_match_pressed)
+	$CenterContainer/VBoxContainer/MovementLabButton.pressed.connect(_on_movement_lab_pressed)
 	$CenterContainer/VBoxContainer/SettingsButton.pressed.connect(_on_settings_pressed)
 	$CenterContainer/VBoxContainer/QuitButton.pressed.connect(_on_quit_pressed)
 	_easy_button.pressed.connect(_on_difficulty_pressed.bind(AIDifficultyConfig.Difficulty.EASY))
@@ -46,6 +50,11 @@ func _on_start_match_pressed() -> void:
 	MatchSession.last_match_result = ""
 	MatchSession.set_ai_difficulty(MatchSession.get_ai_difficulty())
 	MatchSession.start_match()
+
+
+func _on_movement_lab_pressed() -> void:
+	## Development-only isolated lab. Does not start a normal match.
+	get_tree().change_scene_to_file(MOVEMENT_LAB_SCENE)
 
 
 func _on_settings_pressed() -> void:
