@@ -135,8 +135,15 @@ func _ready() -> void:
 		EnemyArmyCommand.tick_group_order_batch(get_tree())
 		await get_tree().process_frame
 
+	## Move the main body into the field so base reinforcements are true stragglers.
+	if NodeSafety.is_alive_node(camp):
+		var field_pos: Vector3 = camp.global_position + Vector3(2.0, 0.0, 2.0)
+		hero.global_position = field_pos
+		for i in range(creep_pikes.size()):
+			(creep_pikes[i] as Node3D).global_position = field_pos + Vector3(float(i) * 0.8, 0.0, 0.5)
+
 	var reinforce: Array = []
-	for i in range(3):
+	for i in range(5):
 		var extra: Spearman = _spawn_enemy_spear(rally + Vector3(-2.0 - float(i), 0.0, 2.0), 100 + i)
 		EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), extra)
 		reinforce.append(extra)
@@ -146,11 +153,20 @@ func _ready() -> void:
 	for entry: Variant in reinforce:
 		if squad.has_member(entry as Node):
 			joined += 1
-	_expect(failures, "case1: all 3 reinforcements admitted to hero squad", joined == 3)
+	_expect(failures, "case1: all 5 base reinforcements admitted to hero squad", joined == 5)
 	_expect(
 		failures,
 		"case1: pending cleared after admit",
 		director.get_pending_reinforcements_copy().is_empty()
+	)
+	_expect(failures, "case1: no duplicate membership", squad.get_size() == 11)
+
+	## Membership-blind min-refresh must not swallow the reinforcement refresh.
+	var creep_army_pre: Array = commander._collect_creep_army(squad)
+	_expect(
+		failures,
+		"case1: stranded base escorts need objective orders",
+		commander._creep_army_needs_objective_orders(creep_army_pre, rally)
 	)
 
 	squad.recompute_metrics()
@@ -168,8 +184,35 @@ func _ready() -> void:
 			and EnemyUnitMission.get_unit_mission(entry as Node) == EnemyUnitMission.Mission.CREEP
 		):
 			creep_orders += 1
-	_expect(failures, "case1: reinforcements receive CREEP objective", creep_orders == 3)
+	_expect(failures, "case1: all 5 reinforcements receive CREEP objective", creep_orders == 5)
 	_expect(failures, "case1: hero still in main squad", squad.hero_present)
+
+	## New training while CREEP remains active — no mission restart required.
+	var trained: Spearman = _spawn_enemy_spear(rally + Vector3(4.0, 0.0, -3.0), 150)
+	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), trained)
+	await _admit_spawned_military(director, false)
+	squad = director.get_main_squad()
+	_expect(failures, "case1b: newly trained pike admitted", squad.has_member(trained))
+	commander._creep_order_reissue_timer = ArmyCommanderV2.CREEP_ORDER_REISSUE_SECONDS
+	commander._execute_creep_mission(director, mission, squad)
+	for _drain_train in range(8):
+		EnemyArmyCommand.tick_group_order_batch(get_tree())
+		await get_tree().process_frame
+	_expect(
+		failures,
+		"case1b: newly trained pike inherits CREEP objective",
+		EnemyUnitMission.get_unit_mission(trained) == EnemyUnitMission.Mission.CREEP
+	)
+	var power_units: Array = director._get_attack_squad_units()
+	var power_owned: int = 0
+	for entry: Variant in power_units:
+		if squad.has_member(entry as Node):
+			power_owned += 1
+	_expect(
+		failures,
+		"case1b: strategic available-power units are main-squad eligible",
+		power_owned == power_units.size() and power_units.size() >= 10
+	)
 
 	## --- CASE 2: clear combat advantage prefers ATTACK ---
 	## Grow AI to ~10 pikes + L4 hero vs player L2 + 5 pikes near player base.
@@ -363,6 +406,26 @@ func _ready() -> void:
 		"case4: no large idle pending orphan army",
 		pending_size <= maxi(1, available_combat / 5)
 	)
+
+	## --- CASE 5: emergency defense reservation is not stolen by main-squad reinforce ---
+	var defender: Spearman = _spawn_enemy_spear(rally + Vector3(6.0, 0.0, 6.0), 500)
+	EnemyArmyCommand.register_combat_unit(defender)
+	EnemyUnitMission.try_set_mission(defender, EnemyUnitMission.Mission.DEFEND, 30.0)
+	EnemyArmyCommand._emergency_defense_active = true
+	director.debug_enqueue_pending_for_tests(defender)
+	director._state = MilitaryDirectorV2.State.CREEP
+	director.debug_admit_pending_for_tests()
+	_expect(
+		failures,
+		"case5: emergency defender not stolen into main squad",
+		not director.get_main_squad().has_member(defender)
+	)
+	_expect(
+		failures,
+		"case5: defender stays DEFEND reserved",
+		EnemyUnitMission.get_unit_mission(defender) == EnemyUnitMission.Mission.DEFEND
+	)
+	EnemyArmyCommand._emergency_defense_active = false
 
 	var report: String
 	if failures.is_empty():

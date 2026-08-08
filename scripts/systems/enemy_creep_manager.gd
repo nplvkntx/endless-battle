@@ -633,19 +633,38 @@ func _hold_army_until_rallied(
 	## V2 may leave `_active_camp` unset while still passing the living field army.
 	var cleaned_field: Array = NodeSafety.clean_node_array(field_army)
 	if not cleaned_field.is_empty():
-		var field_center: Vector3 = EnemyArmyCommand.compute_army_center(cleaned_field)
+		var away_units: Array = []
+		for entry: Variant in cleaned_field:
+			if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+				continue
+			if (
+				rally_position != Vector3.ZERO
+				and EnemyArmyCommand.horizontal_distance(
+					(entry as Node3D).global_position,
+					rally_position
+				)
+				> CREEP_REGROUP_MAX_DISTANCE
+			):
+				away_units.append(entry)
+		## Prefer the already-committed field body — a mixed base+field average can sit
+		## near the rally and falsely trigger a whole-army base RALLY recall.
+		var field_center: Vector3 = EnemyArmyCommand.compute_army_center(
+			away_units if not away_units.is_empty() else cleaned_field
+		)
 		var use_local_field: bool = (
 			_active_camp != null
 			and is_instance_valid(_active_camp)
 		)
-		if (
+		if not use_local_field and not away_units.is_empty():
+			## Main body is already away from base — meet reinforcements locally.
+			use_local_field = true
+		elif (
 			not use_local_field
 			and field_center != Vector3.ZERO
 			and rally_position != Vector3.ZERO
 			and EnemyArmyCommand.horizontal_distance(field_center, rally_position)
 			> CREEP_REGROUP_MAX_DISTANCE * 1.5
 		):
-			## Main body is already away from base — meet reinforcements locally.
 			use_local_field = true
 		if use_local_field and field_center != Vector3.ZERO:
 			EnemyArmyCommand.with_authorized_orders(func() -> void:

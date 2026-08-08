@@ -907,7 +907,7 @@ func _execute_creep_mission(
 	if _creep_regroup_hold_timer > 0.0 or creep_manager._needs_army_regroup(creep_army):
 		## Fresh base escorts still need the camp objective — do not yank the hero
 		## squad home just because reinforcements have not arrived yet.
-		if not _creep_army_needs_objective_orders(creep_army):
+		if not _creep_army_needs_objective_orders(creep_army, rally_point):
 			EnemyArmyCommand.clear_executable_mission("creep regroup")
 			if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
 				_regroup_creep_army(creep_manager, creep_army, rally_point)
@@ -953,8 +953,9 @@ func _execute_creep_mission(
 			_regroup_creep_army(creep_manager, creep_army, rally_point)
 		return
 
-	## Fresh escorts admitted mid-CREEP still hold RALLY — force a prompt objective order.
-	if _creep_army_needs_objective_orders(creep_army):
+	## Fresh escorts admitted mid-CREEP still hold RALLY (or are stranded at base
+	## after a claim-without-move skip) — force a prompt objective order.
+	if _creep_army_needs_objective_orders(creep_army, rally_point):
 		_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
 
 	var destination: Vector3 = creep_manager._resolve_camp_attack_destination(tree, camp, army_center)
@@ -970,15 +971,20 @@ func _execute_creep_mission(
 	)
 
 	if engaging:
-		if not creep_manager._is_squad_cohesive_for_engage(creep_army, camp):
+		## Stragglers still need the camp objective — do not absorb them into a local
+		## regroup hold that can strand / RALLY-recall the base escorts.
+		if (
+			not creep_manager._is_squad_cohesive_for_engage(creep_army, camp)
+			and not _creep_army_needs_objective_orders(creep_army, rally_point)
+		):
 			if _creep_order_reissue_timer >= CREEP_ORDER_REISSUE_SECONDS:
 				_regroup_creep_army(creep_manager, creep_army, rally_point)
 			return
 		EnemyArmyCommand.note_mission_progress(army_center, true, creep_army.size())
 		mission.note_progress("started combat")
 		_execute_creep_focus_fire(creep_manager, tree, creep_army, camp)
-		## Main body is fighting; still pull freshly admitted escorts onto the camp.
-		if not _creep_army_needs_objective_orders(creep_army):
+		## Main body is fighting; still pull freshly admitted / stranded escorts onto the camp.
+		if not _creep_army_needs_objective_orders(creep_army, rally_point):
 			return
 
 	if _creep_order_reissue_timer < CREEP_ORDER_REISSUE_SECONDS:
@@ -1033,14 +1039,54 @@ func _is_creep_army_ready(creep_army: Array) -> bool:
 	return has_hero and non_hero_count >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
 
 
-## True when any squad member still lacks the active CREEP mission (fresh reinforce).
-func _creep_army_needs_objective_orders(creep_army: Array) -> bool:
+## True when any squad member still lacks the active CREEP mission, or is stranded
+## at base after a membership-blind group-order skip claimed CREEP without a move.
+func _creep_army_needs_objective_orders(
+	creep_army: Array,
+	rally_point: Vector3 = Vector3.ZERO
+) -> bool:
+	var field_body_away: bool = _squad_has_field_body_away_from_base(creep_army, rally_point)
 	for entry: Variant in creep_army:
 		if not NodeSafety.is_alive_node(entry):
 			continue
 		if EnemyUnitMission.get_unit_mission(entry as Node) != EnemyUnitMission.Mission.CREEP:
 			return true
+		if field_body_away and _is_unit_near_base_rally(entry as Node, rally_point):
+			return true
 	return false
+
+
+## True when at least one living squad member is already away from the assemble rally.
+func _squad_has_field_body_away_from_base(army: Array, rally_point: Vector3) -> bool:
+	if rally_point == Vector3.ZERO:
+		return false
+	var away_threshold: float = EnemyArmyCommand.WAVE_REGROUP_MAX_DISTANCE * 1.5
+	for entry: Variant in army:
+		if not NodeSafety.is_alive_node(entry) or not entry is Node3D:
+			continue
+		if (
+			EnemyArmyCommand.horizontal_distance(
+				(entry as Node3D).global_position,
+				rally_point
+			)
+			> away_threshold
+		):
+			return true
+	return false
+
+
+func _is_unit_near_base_rally(unit: Node, rally_point: Vector3) -> bool:
+	if not NodeSafety.is_alive_node(unit) or not unit is Node3D:
+		return false
+	if rally_point == Vector3.ZERO:
+		return false
+	return (
+		EnemyArmyCommand.horizontal_distance(
+			(unit as Node3D).global_position,
+			rally_point
+		)
+		<= EnemyArmyCommand.WAVE_REGROUP_MAX_DISTANCE
+	)
 
 
 func _regroup_creep_army(
@@ -1678,11 +1724,13 @@ func _execute_attack_mission(
 	## Only truly pending (not yet admitted) units stage at base.
 	_stage_pending_reinforcements(director)
 
-	## Fresh escorts admitted mid-ATTACK still hold RALLY — force a prompt objective order.
-	if _attack_army_needs_objective_orders(attack_army):
+	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
+	var rally_point: Vector3 = director.get_assemble_rally_point()
+	## Fresh escorts admitted mid-ATTACK still hold RALLY — or are stranded at base
+	## after a claim-without-move skip — force a prompt objective order.
+	if _attack_army_needs_objective_orders(attack_army, rally_point):
 		_attack_order_reissue_timer = MilitaryAIConfig.V2_ATTACK_ORDER_REISSUE_SECONDS
 
-	var army_center: Vector3 = EnemyArmyCommand.compute_army_center(attack_army)
 	var strategic_target: Node3D = mission.get_alive_target_object()
 	var strategic_destination: Vector3 = mission.target_position
 	if strategic_target != null:
@@ -2035,12 +2083,19 @@ func _collect_attack_army(squad: ArmySquadV2) -> Array:
 	return NodeSafety.clean_node_array(units)
 
 
-## True when any squad member still lacks the active ATTACK mission (fresh reinforce).
-func _attack_army_needs_objective_orders(attack_army: Array) -> bool:
+## True when any squad member still lacks the active ATTACK mission, or is stranded
+## at base after a membership-blind group-order skip claimed ATTACK without a move.
+func _attack_army_needs_objective_orders(
+	attack_army: Array,
+	rally_point: Vector3 = Vector3.ZERO
+) -> bool:
+	var field_body_away: bool = _squad_has_field_body_away_from_base(attack_army, rally_point)
 	for entry: Variant in attack_army:
 		if not NodeSafety.is_alive_node(entry):
 			continue
 		if EnemyUnitMission.get_unit_mission(entry as Node) != EnemyUnitMission.Mission.ATTACK:
+			return true
+		if field_body_away and _is_unit_near_base_rally(entry as Node, rally_point):
 			return true
 	return false
 

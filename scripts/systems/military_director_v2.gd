@@ -91,6 +91,8 @@ var _last_strategy_diag_signature: String = ""
 ## Low-frequency CREEP pipeline probe (temporary diagnostic).
 var _creep_probe_timer: float = 0.0
 var _last_creep_probe_signature: String = ""
+## Change-only main-army cohesion telemetry signature.
+var _last_main_army_diag_signature: String = ""
 ## Seconds remaining in the short post-defense regroup window.
 var _post_defend_regroup_remaining: float = 0.0
 ## Seconds spent in a passive (non-offensive) state with a healthy army.
@@ -138,6 +140,7 @@ func reset_match_state() -> void:
 	_last_strategy_diag_signature = ""
 	_creep_probe_timer = 0.0
 	_last_creep_probe_signature = ""
+	_last_main_army_diag_signature = ""
 	_post_defend_regroup_remaining = 0.0
 	_passive_army_seconds = 0.0
 	_logged_hard_runtime_values = false
@@ -174,6 +177,7 @@ func _clear_roster_state() -> void:
 	_last_strategy_diag_signature = ""
 	_creep_probe_timer = 0.0
 	_last_creep_probe_signature = ""
+	_last_main_army_diag_signature = ""
 	_post_defend_regroup_remaining = 0.0
 	_passive_army_seconds = 0.0
 	_unbind_mission_target_exit()
@@ -191,6 +195,7 @@ func _process(delta: float) -> void:
 
 	_tick_timer = 0.0
 	_refresh_army_roster()
+	_maybe_log_main_army_cohesion()
 	_tick_mission_watchdog(TICK_SECONDS)
 	_evaluate_strategy()
 	_maybe_log_creep_pipeline_probe(TICK_SECONDS)
@@ -994,6 +999,145 @@ func _refresh_army_roster() -> void:
 	_main_squad.recompute_metrics()
 
 
+## Low-frequency cohesion summary: mission ownership vs idle base force.
+func _maybe_log_main_army_cohesion() -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+
+	var rally_point: Vector3 = get_assemble_rally_point()
+	var combat_total: int = 0
+	var main_squad: int = 0
+	var defense_reserved: int = 0
+	var other_owned: int = 0
+	var unassigned: int = 0
+	var reinforcements: int = _pending_reinforcements.size()
+	var idle_near_base: int = 0
+	var reason_counts: Dictionary = {}
+
+	var squad_ids: Dictionary = {}
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		squad_ids[(entry as Node).get_instance_id()] = true
+		main_squad += 1
+
+	var pending_ids: Dictionary = {}
+	for entry: Variant in _pending_reinforcements:
+		if NodeSafety.is_alive_node(entry):
+			pending_ids[(entry as Node).get_instance_id()] = true
+
+	for entry: Variant in _roster:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		combat_total += 1
+		var unit: Node = entry as Node
+		var reason: String = _classify_main_army_unit_reason(
+			unit,
+			squad_ids,
+			pending_ids,
+			rally_point
+		)
+		reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+		match reason:
+			"defense_reserved":
+				defense_reserved += 1
+			"no_squad", "reinforcement_pool", "pending_reinforcement":
+				unassigned += 1
+			"mission_owned", "stale_squad":
+				other_owned += 1
+		if (
+			reason in ["no_squad", "reinforcement_pool", "pending_reinforcement", "stale_squad"]
+			and rally_point != Vector3.ZERO
+			and unit is Node3D
+			and EnemyArmyCommand.horizontal_distance(
+				(unit as Node3D).global_position,
+				rally_point
+			)
+			<= EnemyArmyCommand.WAVE_REGROUP_MAX_DISTANCE
+		):
+			idle_near_base += 1
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	var hero_label: String = "-"
+	if hero != null:
+		hero_label = "%s#%d" % [hero.name, hero.get_instance_id()]
+	var signature: String = "%s|%s|%d|%d|%d|%d|%d|%d|%d" % [
+		get_state_name(),
+		hero_label,
+		combat_total,
+		main_squad,
+		defense_reserved,
+		other_owned,
+		unassigned,
+		reinforcements,
+		idle_near_base,
+	]
+	if signature == _last_main_army_diag_signature:
+		return
+	_last_main_army_diag_signature = signature
+
+	print(
+		"[AI MAIN ARMY] mission=%s hero=%s hero_alive=%s combat_total=%d main_squad=%d defense_reserved=%d other_owned=%d unassigned=%d reinforcements=%d idle_near_base=%d"
+		% [
+			get_state_name(),
+			hero_label,
+			"yes" if hero != null else "no",
+			combat_total,
+			main_squad,
+			defense_reserved,
+			other_owned,
+			unassigned,
+			reinforcements,
+			idle_near_base,
+		]
+	)
+	if unassigned > 0 or idle_near_base > 0:
+		var reason_parts: PackedStringArray = []
+		for reason_key: Variant in reason_counts.keys():
+			var key_name: String = String(reason_key)
+			if key_name == "in_main_squad":
+				continue
+			reason_parts.append("%s=%d" % [key_name, int(reason_counts[reason_key])])
+		if not reason_parts.is_empty():
+			print("[AI MAIN ARMY] reasons %s" % " ".join(reason_parts))
+
+
+## Actual ownership reason from current roster/squad/mission/pool state.
+func _classify_main_army_unit_reason(
+	unit: Node,
+	squad_ids: Dictionary,
+	pending_ids: Dictionary,
+	_rally_point: Vector3
+) -> String:
+	if not NodeSafety.is_alive_node(unit):
+		return "not_registered"
+	if not ArmySquadV2.is_roster_eligible(unit):
+		return "excluded_by_filter"
+	var unit_id: int = unit.get_instance_id()
+	if EnemyArmyCommand.is_reinforcement_waiting(unit):
+		if squad_ids.has(unit_id):
+			return "stale_squad"
+		return "reinforcement_pool"
+	if EnemyArmyCommand.is_emergency_defense_active():
+		var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
+		if mission == EnemyUnitMission.Mission.DEFEND:
+			return "defense_reserved"
+	if squad_ids.has(unit_id):
+		return "in_main_squad"
+	if pending_ids.has(unit_id):
+		return "pending_reinforcement"
+	var owned_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
+	if owned_mission in [
+		EnemyUnitMission.Mission.DEFEND,
+		EnemyUnitMission.Mission.RETREAT,
+		EnemyUnitMission.Mission.ATTACK,
+		EnemyUnitMission.Mission.CREEP,
+	]:
+		return "mission_owned"
+	return "no_squad"
+
+
 func _admit_pending_reinforcements() -> void:
 	if _pending_reinforcements.is_empty():
 		return
@@ -1004,6 +1148,11 @@ func _admit_pending_reinforcements() -> void:
 			continue
 		var unit: Node = entry as Node
 		if _main_squad.has_member(unit):
+			continue
+		## Preserve emergency / higher-priority ownership — do not steal defenders.
+		var unit_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
+		if unit_mission in [EnemyUnitMission.Mission.DEFEND, EnemyUnitMission.Mission.RETREAT]:
+			remaining.append(unit)
 			continue
 		var role: ArmySquadV2.UnitRole = ArmySquadV2.classify_role(unit)
 		if not _main_squad.try_add_member(unit, role):
@@ -1130,6 +1279,10 @@ func debug_admit_pending_for_tests() -> void:
 		if unit is Worker or unit is Building or unit is NeutralCreep:
 			continue
 		if _main_squad.has_member(unit):
+			continue
+		var unit_mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(unit)
+		if unit_mission in [EnemyUnitMission.Mission.DEFEND, EnemyUnitMission.Mission.RETREAT]:
+			remaining.append(unit)
 			continue
 		var role: ArmySquadV2.UnitRole = ArmySquadV2.classify_role(unit)
 		if not _main_squad.try_add_member(unit, role):

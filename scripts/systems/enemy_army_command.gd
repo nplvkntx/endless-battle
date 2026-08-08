@@ -5697,6 +5697,7 @@ static func _issue_spaced_group_orders(
 		return true
 
 	## Fresh Attack-Move younger than 1s must not be refreshed for soft formation drift.
+	## Membership must match — mid-mission reinforcements must not be claimed then skipped.
 	if (
 		use_attack_move
 		and not _active_group_order_signature.is_empty()
@@ -5705,8 +5706,15 @@ static func _issue_spaced_group_orders(
 	):
 		var age_sec: float = float(Time.get_ticks_msec() - _active_group_order_msec) / 1000.0
 		if age_sec < GROUP_ORDER_MIN_REFRESH_SECONDS:
-			PerfCounters.warn_duplicate_group_order()
-			return true
+			var refresh_signature: String = _build_group_order_signature(
+				ordered_units,
+				_active_group_order_dest,
+				mission,
+				use_attack_move
+			)
+			if refresh_signature == _active_group_order_signature:
+				PerfCounters.warn_duplicate_group_order()
+				return true
 
 	if MilitaryAIConfig.is_shared_squad_nav_enabled() and ordered_units.size() > 1:
 		var squad_result: Dictionary = SharedSquadNavigation.issue_group_command(
