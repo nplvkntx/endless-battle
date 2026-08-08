@@ -928,9 +928,11 @@ func _state_to_mission_type(state: State) -> ArmyMissionV2.MissionType:
 			return ArmyMissionV2.MissionType.NONE
 
 
-## True while assembling / recovering / idle — never mid-fight reshuffles.
+## True while assembling / recovering / idle / creeping.
+## CREEP may fold in fresh escorts so they do not sit forever at the base rally.
+## ATTACK / DEFEND / RETREAT still block mid-fight reshuffles.
 func _can_admit_reinforcements() -> bool:
-	return _state in [State.IDLE, State.ASSEMBLE, State.RECOVER]
+	return _state in [State.IDLE, State.ASSEMBLE, State.RECOVER, State.CREEP]
 
 
 func _refresh_army_roster() -> void:
@@ -979,6 +981,10 @@ func _refresh_army_roster() -> void:
 	if _can_admit_reinforcements():
 		_admit_pending_reinforcements()
 
+	## Spawn hooks register EAC reinforcement_pool holds. Squad members must be
+	## released or CREEP/ATTACK filter_units_for_field_combat strips their orders.
+	_release_squad_from_reinforcement_pool()
+
 	_main_squad.recompute_metrics()
 
 
@@ -997,8 +1003,17 @@ func _admit_pending_reinforcements() -> void:
 		if not _main_squad.try_add_member(unit, role):
 			remaining.append(unit)
 			continue
+		EnemyArmyCommand.release_reinforcement_from_pool(unit)
 		_bind_unit_lifecycle(unit)
 	_pending_reinforcements = remaining
+
+
+## Clear legacy spawn-hold marks for living main-squad members.
+func _release_squad_from_reinforcement_pool() -> void:
+	for entry: Variant in _main_squad.get_members_copy():
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		EnemyArmyCommand.release_reinforcement_from_pool(entry as Node)
 
 
 func _sanitize_pending_reinforcements() -> void:
@@ -1114,6 +1129,7 @@ func debug_admit_pending_for_tests() -> void:
 		if not _main_squad.try_add_member(unit, role):
 			remaining.append(unit)
 			continue
+		EnemyArmyCommand.release_reinforcement_from_pool(unit)
 		_bind_unit_lifecycle(unit)
 	_pending_reinforcements = remaining
 	_main_squad.recompute_metrics()
@@ -3334,7 +3350,7 @@ func _describe_no_camp_block(
 	return "no worthwhile creep camps"
 
 
-## Low-frequency CREEP pipeline probe for ASSEMBLE stalls (temporary diagnostic).
+## Low-frequency CREEP pipeline probe (temporary diagnostic).
 func _maybe_log_creep_pipeline_probe(delta: float) -> void:
 	_creep_probe_timer += delta
 	if _creep_probe_timer < 2.0:
@@ -3353,36 +3369,60 @@ func _maybe_log_creep_pipeline_probe(delta: float) -> void:
 		origin = EnemyArmyCommand.compute_army_center(creep_army)
 	if origin == Vector3.ZERO:
 		origin = rally_point
+
+	var hero: Hero = EnemyArmyCommand.find_living_enemy_hero(tree)
+	var hero_hp_pct: int = 0
+	if hero != null:
+		hero_hp_pct = int(round(EnemyArmyCommand.get_health_ratio(hero) * 100.0))
+
+	var pikemen_in_squad: int = 0
+	var pool_held: int = 0
+	for entry: Variant in creep_army:
+		if entry is Spearman:
+			pikemen_in_squad += 1
+		if EnemyArmyCommand.is_reinforcement_waiting(entry):
+			pool_held += 1
+
 	var commit_block: String = ""
 	if creep_manager != null:
 		commit_block = _describe_creep_commit_block(tree, creep_army, creep_manager)
-	var camp: Node3D = null
-	if creep_manager != null and commit_block.is_empty():
+
+	var camp: Node3D = _get_current_creep_camp()
+	if not NodeSafety.is_alive_node(camp) and creep_manager != null and commit_block.is_empty():
 		camp = _select_best_creep_camp(tree, creep_manager, creep_army, origin, rally_point)
+
 	var camp_name: String = "-"
-	var camp_valid: String = "no"
-	var camp_reach: String = "-"
-	if camp != null:
+	var distance: float = -1.0
+	if NodeSafety.is_alive_node(camp):
 		camp_name = String(camp.name)
-		camp_valid = "yes"
-		camp_reach = "yes" if _is_creep_camp_reachable(origin, camp.global_position) else "no"
+		distance = EnemyArmyCommand.horizontal_distance(origin, camp.global_position)
+
 	var block: String = commit_block
 	if block.is_empty():
 		block = _last_creep_block_reason
-	if block.is_empty() and camp == null and creep_manager != null:
+	if block.is_empty() and not NodeSafety.is_alive_node(camp) and creep_manager != null:
 		block = _describe_no_camp_block(tree, creep_manager, creep_army, origin, rally_point)
+	if pool_held > 0 and block == "":
+		block = "squad still reinforcement-held (%d)" % pool_held
 	if block.is_empty():
 		block = "-"
+
 	var mission_name: String = "-"
+	var current_target: String = "-"
 	if _mission != null:
 		mission_name = _mission.get_mission_type_name()
-	var exec_label: String = EnemyArmyCommand.executable_mission_to_label(
-		EnemyArmyCommand.get_executable_mission()
-	)
-	var signature: String = "%s|%s|%d|%s|%s|%s" % [
+		var target_obj: Node3D = _mission.get_alive_target_object()
+		if NodeSafety.is_alive_node(target_obj):
+			current_target = String(target_obj.name)
+		elif _mission.target_position != Vector3.ZERO:
+			current_target = "(%.1f, %.1f)" % [_mission.target_position.x, _mission.target_position.z]
+
+	var signature: String = "%s|%s|%d|%d|%d|%s|%s|%s" % [
 		get_state_name(),
-		str(is_creep_ready()),
+		"yes" if _main_squad.hero_present else "no",
 		get_military_unit_count(),
+		creep_army.size(),
+		_pending_reinforcements.size(),
 		camp_name,
 		mission_name,
 		block,
@@ -3391,17 +3431,22 @@ func _maybe_log_creep_pipeline_probe(delta: float) -> void:
 		return
 	_last_creep_probe_signature = signature
 	print(
-		"[AI CREEP] state=%s hero=%s army=%d ready=%s camp=%s valid=%s reach=%s mission=%s exec=%s block=%s"
+		"[AI CREEP] hero=%s hero_hp=%d%% army_available=%d creep_squad=%d pikemen_in_squad=%d reinforcements_pending=%d camp=%s distance=%.1f mission=%s commander_state=%s current_target=%s orders_issued=%s block=%s"
 		% [
-			get_state_name(),
 			"yes" if _main_squad.hero_present else "no",
+			hero_hp_pct,
 			get_military_unit_count(),
-			"yes" if is_creep_ready() else "no",
+			creep_army.size(),
+			pikemen_in_squad,
+			_pending_reinforcements.size(),
 			camp_name,
-			camp_valid,
-			camp_reach,
+			distance,
 			mission_name,
-			exec_label,
+			get_state_name(),
+			current_target,
+			EnemyArmyCommand.executable_mission_to_label(
+				EnemyArmyCommand.get_executable_mission()
+			),
 			block,
 		]
 	)

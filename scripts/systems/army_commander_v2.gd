@@ -949,6 +949,10 @@ func _execute_creep_mission(
 			_regroup_creep_army(creep_manager, creep_army, rally_point)
 		return
 
+	## Fresh escorts admitted mid-CREEP still hold RALLY — force a prompt objective order.
+	if _creep_army_needs_objective_orders(creep_army):
+		_creep_order_reissue_timer = CREEP_ORDER_REISSUE_SECONDS
+
 	var destination: Vector3 = creep_manager._resolve_camp_attack_destination(tree, camp, army_center)
 	EnemyArmyCommand.set_executable_mission(
 		EnemyArmyCommand.ExecutableMission.CREEPING,
@@ -969,7 +973,9 @@ func _execute_creep_mission(
 		EnemyArmyCommand.note_mission_progress(army_center, true, creep_army.size())
 		mission.note_progress("started combat")
 		_execute_creep_focus_fire(creep_manager, tree, creep_army, camp)
-		return
+		## Main body is fighting; still pull freshly admitted escorts onto the camp.
+		if not _creep_army_needs_objective_orders(creep_army):
+			return
 
 	if _creep_order_reissue_timer < CREEP_ORDER_REISSUE_SECONDS:
 		EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
@@ -993,7 +999,7 @@ func _execute_creep_mission(
 
 	if director != null:
 		director.clear_execution_route_block()
-	EnemyArmyCommand.note_mission_progress(army_center, false, creep_army.size())
+	EnemyArmyCommand.note_mission_progress(army_center, engaging, creep_army.size())
 	## Distance reduction is tracked by the director watchdog — do not fake progress here.
 	_creep_order_reissue_timer = 0.0
 
@@ -1021,6 +1027,16 @@ func _is_creep_army_ready(creep_army: Array) -> bool:
 		if EnemyArmyCommand.is_non_hero_combat_unit(entry as Node):
 			non_hero_count += 1
 	return has_hero and non_hero_count >= MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS
+
+
+## True when any squad member still lacks the active CREEP mission (fresh reinforce).
+func _creep_army_needs_objective_orders(creep_army: Array) -> bool:
+	for entry: Variant in creep_army:
+		if not NodeSafety.is_alive_node(entry):
+			continue
+		if EnemyUnitMission.get_unit_mission(entry as Node) != EnemyUnitMission.Mission.CREEP:
+			return true
+	return false
 
 
 func _regroup_creep_army(
