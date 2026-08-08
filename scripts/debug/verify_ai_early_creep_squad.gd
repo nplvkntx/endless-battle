@@ -231,7 +231,9 @@ func _ready() -> void:
 				continue
 			var unit: Unit = entry as Unit
 			var dest: Vector3 = Vector3.ZERO
-			if unit._navigation_agent != null:
+			if unit.has_move_target:
+				dest = unit._movement_target
+			elif unit._navigation_agent != null:
 				dest = unit._navigation_agent.target_position
 			if not unit.has_move_target or dest == Vector3.ZERO:
 				continue

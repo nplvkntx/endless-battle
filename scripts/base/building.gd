@@ -77,15 +77,6 @@ func _enter_tree() -> void:
 	_register_with_entity_registry()
 
 
-func _exit_tree() -> void:
-	## Raw queue_free (without destroy_building) must still release builders/slots
-	## so workers and ConstructionReservations never keep freed building handles.
-	ConstructionReservations.release_build_slots_for_building(self)
-	if not _registered_builders.is_empty():
-		_release_registered_builders_on_destroy()
-	_unregister_with_entity_registry()
-
-
 func _ready() -> void:
 	collision_layer = PhysicsLayers.BUILDINGS
 	collision_mask = PhysicsLayers.BUILDING_COLLISION_MASK
@@ -100,6 +91,43 @@ func _ready() -> void:
 	call_deferred("apply_team_visuals")
 	call_deferred("_setup_damage_visuals")
 	call_deferred("_register_with_entity_registry")
+	call_deferred("_register_rts_occupancy")
+
+
+func _exit_tree() -> void:
+	## Raw queue_free (without destroy_building) must still release builders/slots
+	## so workers and ConstructionReservations never keep freed building handles.
+	_unregister_rts_occupancy()
+	ConstructionReservations.release_build_slots_for_building(self)
+	if not _registered_builders.is_empty():
+		_release_registered_builders_on_destroy()
+	_unregister_with_entity_registry()
+
+
+func _register_rts_occupancy() -> void:
+	if not is_inside_tree():
+		return
+	if not PlayerRouteNavigation.is_custom_rts_movement_enabled():
+		return
+	PlayerRouteNavigation.register_static_obstacle(self)
+
+
+func _unregister_rts_occupancy() -> void:
+	PlayerRouteNavigation.unregister_static_obstacle(self)
+
+
+func _refresh_rts_occupancy() -> void:
+	if not is_inside_tree():
+		return
+	if not PlayerRouteNavigation.is_custom_rts_movement_enabled():
+		return
+	PlayerRouteNavigation.refresh_static_obstacle(self)
+
+
+## Half-extents used by custom player RTS occupancy (collision footprint preferred).
+func get_rts_occupancy_half_extents() -> Vector3:
+	var half_xz: Vector2 = _get_footprint_half_extents()
+	return Vector3(half_xz.x, 1.0, half_xz.y)
 
 
 func _register_with_entity_registry() -> void:
@@ -646,6 +674,7 @@ func _finish_construction_state() -> void:
 		construction_completed.emit()
 	construction_progress_changed.emit(_construction_progress)
 	apply_engineering_bonus()
+	_refresh_rts_occupancy()
 
 
 func apply_engineering_bonus() -> void:

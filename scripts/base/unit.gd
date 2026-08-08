@@ -130,11 +130,24 @@ var _blocked_arrival_time: float = 0.0
 var _movement_generation: int = 0
 var _nav_velocity_request_generation: int = -1
 var _arrival_completed_generation: int = -1
-## Authoritative player group-command token from SharedSquadNavigation.
+## Authoritative player group-command token from SharedSquadNavigation / PlayerRouteNavigation.
 var _player_squad_command_generation: int = -1
 var _player_squad_clicked_destination: Vector3 = Vector3.ZERO
 var _player_squad_final_arrival: Vector3 = Vector3.ZERO
 var _player_squad_command_type: StringName = &""
+
+## Custom player RTS route follow (lab architecture). NavigationAgent remains present but unused.
+const CUSTOM_RTS_WAYPOINT_RADIUS := 0.9
+const CUSTOM_RTS_ARRIVE_RADIUS := 0.7
+const CUSTOM_RTS_SEPARATION_RADIUS := 1.35
+const CUSTOM_RTS_SEPARATION_WEIGHT := 0.35
+const CUSTOM_RTS_ROUTE_WEIGHT := 1.0
+const CUSTOM_RTS_FINAL_SLOT_WEIGHT := 0.55
+var _custom_rts_active: bool = false
+var _custom_rts_pending: bool = false
+var _custom_rts_route: PackedVector3Array = PackedVector3Array()
+var _custom_rts_route_index: int = 0
+var _custom_rts_generation: int = -1
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -697,10 +710,17 @@ func set_movement_target(target: Vector3, urgency: RepathUrgency = RepathUrgency
 
 
 ## Clears movement and navigation without canceling combat orders.
-func clear_move_target() -> void:
+## When `preserve_custom_rts` is true, waypoint route is kept for attack-move resume
+## after combat micro (chase / in-range stop) without NavAgent strategic takeover.
+func clear_move_target(preserve_custom_rts: bool = false) -> void:
 	if has_move_target or _nav_velocity_request_generation >= 0:
 		_invalidate_movement_generation()
 	has_move_target = false
+	if preserve_custom_rts and not _custom_rts_route.is_empty():
+		_custom_rts_active = false
+		_custom_rts_pending = false
+	else:
+		clear_custom_rts_route()
 	_clear_residual_movement()
 	_navigation_active = false
 	_set_navigation_avoidance_enabled(false)
@@ -787,6 +807,240 @@ func get_player_squad_final_arrival() -> Vector3:
 
 func get_player_squad_clicked_destination() -> Vector3:
 	return _player_squad_clicked_destination
+
+
+## Called by PlayerRouteNavigation before issue_order so the next destination
+## consumes the shared grid route instead of NavigationAgent strategic pathing.
+func prepare_custom_rts_route(
+	route: PackedVector3Array,
+	final_arrival: Vector3,
+	generation: int,
+	clicked_destination: Vector3,
+	command_type: StringName
+) -> void:
+	SharedSquadNavigation.release_unit(self)
+	_custom_rts_pending = true
+	_custom_rts_active = false
+	_custom_rts_route = route.duplicate()
+	_custom_rts_route_index = 0
+	_custom_rts_generation = generation
+	bind_player_squad_command(generation, clicked_destination, final_arrival, command_type)
+
+
+func clear_custom_rts_route() -> void:
+	_custom_rts_active = false
+	_custom_rts_pending = false
+	_custom_rts_route = PackedVector3Array()
+	_custom_rts_route_index = 0
+	_custom_rts_generation = -1
+
+
+func is_custom_rts_movement_active() -> bool:
+	return _custom_rts_active and MilitaryAIConfig.is_custom_rts_movement_enabled()
+
+
+func has_custom_rts_route() -> bool:
+	return not _custom_rts_route.is_empty()
+
+
+func get_custom_rts_route_waypoint_count() -> int:
+	return _custom_rts_route.size()
+
+
+func get_custom_rts_route_index() -> int:
+	return _custom_rts_route_index
+
+
+func get_movement_backend_label() -> String:
+	if not MilitaryAIConfig.is_custom_rts_movement_enabled():
+		return "OLD"
+	if is_custom_rts_movement_active() or _custom_rts_pending or has_custom_rts_route():
+		return "CUSTOM"
+	return "OLD"
+
+
+## Reactivate a preserved custom route after combat interrupt (attack-move resume).
+func try_resume_custom_rts_route(destination: Vector3) -> bool:
+	if not MilitaryAIConfig.is_custom_rts_movement_enabled():
+		return false
+	if _custom_rts_route.is_empty():
+		return false
+	var next_target: Vector3 = Vector3(destination.x, global_position.y, destination.z)
+	_begin_movement_generation()
+	_last_issued_move_destination = next_target
+	_last_path_request_msec = Time.get_ticks_msec()
+	_last_move_order_msec = _last_path_request_msec
+	_activate_pending_custom_rts_route(next_target)
+	return true
+
+
+func _activate_pending_custom_rts_route(destination: Vector3) -> void:
+	_custom_rts_pending = false
+	_custom_rts_active = true
+	_custom_rts_route_index = 0
+	_clear_navigation_agent()
+	_set_navigation_avoidance_enabled(false)
+	_navigation_active = false
+	_movement_target = destination
+	_original_move_destination = destination
+	has_move_target = true
+	_reset_unstuck_state()
+	_blocked_arrival_time = 0.0
+
+
+func _process_custom_rts_movement(delta: float) -> void:
+	if not _custom_rts_active:
+		return
+
+	var slot: Vector3 = _movement_target
+	var to_slot: Vector3 = _flat_xz(slot - global_position)
+	var dist_to_slot: float = to_slot.length()
+	var arrive_radius: float = maxf(get_movement_acceptance_radius(), CUSTOM_RTS_ARRIVE_RADIUS)
+	if dist_to_slot <= arrive_radius:
+		_complete_movement_arrival()
+		return
+
+	var route_dir: Vector3 = _custom_rts_route_direction()
+	var separation: Vector3 = _custom_rts_separation_vector()
+	var slot_dir: Vector3 = to_slot.normalized() if dist_to_slot > 0.001 else Vector3.ZERO
+	var near_end: bool = (
+		_custom_rts_route.is_empty()
+		or _custom_rts_route_index >= _custom_rts_route.size() - 1
+	)
+	var slot_w: float = (
+		CUSTOM_RTS_FINAL_SLOT_WEIGHT if near_end or dist_to_slot < 4.0 else 0.15
+	)
+
+	var desired: Vector3 = (
+		route_dir * CUSTOM_RTS_ROUTE_WEIGHT
+		+ separation * CUSTOM_RTS_SEPARATION_WEIGHT
+		+ slot_dir * slot_w
+	)
+	if desired.length_squared() < 0.0001:
+		desired = slot_dir if slot_dir.length_squared() > 0.0 else route_dir
+	if desired.length_squared() < 0.0001:
+		_complete_movement_arrival()
+		return
+	desired = desired.normalized()
+
+	# Blocked-cell slide: prefer walkable candidate direction before physics step.
+	var step: float = move_speed * delta
+	var candidate: Vector3 = global_position + desired * step
+	candidate.y = global_position.y
+	if not PlayerRouteNavigation.is_world_walkable(candidate):
+		desired = _custom_rts_safe_slide_direction(desired, step)
+		if desired.length_squared() < 0.0001:
+			apply_steered_velocity(Vector3.ZERO, delta, 0.0)
+			CommandFeedback.notify_unit_moving(self)
+			return
+
+	var arrival_speed: float = move_speed
+	var slow_start: float = maxf(stopping_distance * 2.0, UnitNavigation.ARRIVAL_SLOWDOWN_DISTANCE)
+	if dist_to_slot < slow_start:
+		var t: float = clampf(
+			(dist_to_slot - stopping_distance) / maxf(0.001, slow_start - stopping_distance),
+			0.0,
+			1.0
+		)
+		arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
+
+	# Separation already blended above — do not double-apply UnitSeparation soft push.
+	apply_steered_velocity(desired * arrival_speed, delta, 0.0)
+	_custom_rts_advance_waypoint()
+	if _try_complete_soft_arrival():
+		return
+	CommandFeedback.notify_unit_moving(self)
+
+
+func _custom_rts_route_direction() -> Vector3:
+	if _custom_rts_route.is_empty():
+		return _flat_xz(_movement_target - global_position).normalized()
+	while _custom_rts_route_index < _custom_rts_route.size():
+		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
+		var to_wp: Vector3 = _flat_xz(wp - global_position)
+		if to_wp.length() <= CUSTOM_RTS_WAYPOINT_RADIUS:
+			_custom_rts_route_index += 1
+			continue
+		return to_wp.normalized()
+	return _flat_xz(_movement_target - global_position).normalized()
+
+
+func _custom_rts_advance_waypoint() -> void:
+	if _custom_rts_route.is_empty():
+		return
+	while _custom_rts_route_index < _custom_rts_route.size():
+		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
+		if _horizontal_distance_xz(global_position, wp) <= CUSTOM_RTS_WAYPOINT_RADIUS:
+			_custom_rts_route_index += 1
+			continue
+		break
+
+
+func _custom_rts_separation_vector() -> Vector3:
+	var push := Vector3.ZERO
+	var count: int = 0
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return Vector3.ZERO
+
+	var query := PhysicsShapeQueryParameters3D.new()
+	var shape := SphereShape3D.new()
+	shape.radius = CUSTOM_RTS_SEPARATION_RADIUS
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, global_position)
+	query.collision_mask = PhysicsLayers.UNITS
+	query.exclude = [get_rid()]
+
+	var hits: Array[Dictionary] = space.intersect_shape(query, 12)
+	for hit: Dictionary in hits:
+		var collider: Variant = hit.get("collider")
+		if not NodeSafety.is_alive_node(collider):
+			continue
+		if not collider is Unit:
+			continue
+		var other: Unit = collider as Unit
+		if other == self:
+			continue
+		# Friendly separation only — do not soft-push through enemies (melee contact).
+		if CombatTargetValidation.are_hostile(self, other):
+			continue
+		var offset: Vector3 = _flat_xz(global_position - other.global_position)
+		var dist: float = offset.length()
+		if dist <= 0.0001 or dist >= CUSTOM_RTS_SEPARATION_RADIUS:
+			continue
+		var strength: float = (CUSTOM_RTS_SEPARATION_RADIUS - dist) / CUSTOM_RTS_SEPARATION_RADIUS
+		push += offset.normalized() * strength
+		count += 1
+	if count == 0:
+		return Vector3.ZERO
+	return push / float(count)
+
+
+func _custom_rts_safe_slide_direction(desired: Vector3, step: float) -> Vector3:
+	var candidates: Array[Vector3] = [
+		desired,
+		Vector3(desired.x, 0.0, 0.0),
+		Vector3(0.0, 0.0, desired.z),
+		Vector3(-desired.z, 0.0, desired.x),
+		Vector3(desired.z, 0.0, -desired.x),
+	]
+	for dir: Vector3 in candidates:
+		if dir.length_squared() < 0.0001:
+			continue
+		var normalized: Vector3 = dir.normalized()
+		var next: Vector3 = global_position + normalized * step
+		next.y = global_position.y
+		if PlayerRouteNavigation.is_world_walkable(next):
+			return normalized
+	return Vector3.ZERO
+
+
+func _flat_xz(v: Vector3) -> Vector3:
+	return Vector3(v.x, 0.0, v.z)
+
+
+func _horizontal_distance_xz(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 func _invalidate_movement_generation() -> void:
@@ -966,6 +1220,23 @@ func request_movement_target(
 	_last_requested_destination = next_target
 	var now_msec: int = Time.get_ticks_msec()
 
+	# Pending custom RTS bind always wins for this order (shared route already computed).
+	# PLAYER_ORDER covers player issue_order; FORMATION covers any AI path that still
+	# lands here with a prepared route (custom AI path uses issue_order / PLAYER_ORDER).
+	if _custom_rts_pending and (
+		urgency == RepathUrgency.PLAYER_ORDER
+		or urgency == RepathUrgency.FORMATION
+	):
+		var began_custom: bool = not has_move_target
+		_begin_movement_generation()
+		_last_issued_move_destination = next_target
+		_last_path_request_msec = now_msec
+		_last_move_order_msec = now_msec
+		_activate_pending_custom_rts_route(next_target)
+		if began_custom:
+			CommandFeedback.notify_movement_started(self)
+		return true
+
 	## Fighting / in-range units must not repath for soft formation refreshes.
 	if (
 		urgency != RepathUrgency.PLAYER_ORDER
@@ -1018,6 +1289,19 @@ func request_movement_target(
 	if CombatTargetValidation.is_enemy_faction(self):
 		next_target = BearTrap.adjust_destination_away_from_traps(self, next_target)
 
+	# Stuck recovery while a custom route is preserved: re-enter custom locomotion.
+	if (
+		urgency == RepathUrgency.STUCK_RECOVERY
+		and MilitaryAIConfig.is_custom_rts_movement_enabled()
+		and not _custom_rts_route.is_empty()
+	):
+		_begin_movement_generation()
+		_last_issued_move_destination = next_target
+		_last_path_request_msec = now_msec
+		_last_move_order_msec = now_msec
+		_activate_pending_custom_rts_route(next_target)
+		return true
+
 	var began_moving: bool = not has_move_target
 	_begin_movement_generation()
 	_movement_target = next_target
@@ -1026,7 +1310,16 @@ func request_movement_target(
 	_last_issued_move_destination = next_target
 	_last_path_request_msec = now_msec
 	_last_move_order_msec = now_msec
+
+	# Chase / combat micro may temporarily use NavigationAgent while preserving the
+	# strategic custom route for attack-move resume. Other destinations clear it.
+	if urgency == RepathUrgency.CHASE and not _custom_rts_route.is_empty():
+		_custom_rts_active = false
+		_custom_rts_pending = false
+	else:
+		clear_custom_rts_route()
 	_apply_navigation_destination(next_target)
+
 	if urgency == RepathUrgency.STUCK_RECOVERY:
 		_stuck_repath_attempted = true
 		_stuck_recovery_cooldown = UNSTUCK_RECOVERY_COOLDOWN_SECONDS
@@ -1215,6 +1508,11 @@ func _physics_process(delta: float) -> void:
 	var arrive_distance: float = get_movement_acceptance_radius()
 	if distance <= arrive_distance:
 		_complete_movement_arrival()
+		return
+
+	# Custom player RTS executor: shared waypoints + local separation (no NavAgent strategic).
+	if is_custom_rts_movement_active():
+		_process_custom_rts_movement(delta)
 		return
 
 	_update_navigation_path_validity(delta)
@@ -1661,6 +1959,23 @@ func _advance_stuck_recovery(distance: float) -> void:
 				_begin_detour(detour_forward.normalized(), distance)
 		_:
 			# Stage 4+: prefer shared-route refresh over cancel while in a squad.
+			# Custom RTS strategic routes re-enter grid locomotion (no NavAgent).
+			if (
+				MilitaryAIConfig.is_custom_rts_movement_enabled()
+				and not _custom_rts_route.is_empty()
+			):
+				_stuck_recovery_stage = 1
+				var resume_custom: Vector3 = (
+					_player_squad_final_arrival
+					if _player_squad_final_arrival.length_squared() > 0.0001
+					else (
+						_original_move_destination
+						if _original_move_destination.length_squared() > 0.0001
+						else _movement_target
+					)
+				)
+				request_movement_target(resume_custom, RepathUrgency.STUCK_RECOVERY)
+				return
 			var squad_ctx: SquadNavContext = SharedSquadNavigation.get_squad_for_unit(self)
 			if squad_ctx != null:
 				## Stale player-command callbacks must not retake control after a newer click.

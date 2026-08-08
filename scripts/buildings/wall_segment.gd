@@ -65,6 +65,14 @@ func _wants_navigation_obstacle() -> bool:
 	return not is_gate
 
 
+## Open gates leave the passage walkable on the custom RTS occupancy grid.
+func get_rts_occupancy_half_extents() -> Vector3:
+	if is_gate and gate_open:
+		# Passage must stay routeable; thin posts remain physical colliders only.
+		return Vector3.ZERO
+	return super.get_rts_occupancy_half_extents()
+
+
 static func allocate_wall_chain_id() -> int:
 	var chain_id: int = _next_wall_chain_id
 	_next_wall_chain_id += 1
@@ -165,6 +173,7 @@ func try_open_gate() -> bool:
 	_apply_gate_visual_state()
 	gate_state_changed.emit()
 	call_deferred("_enforce_gate_navigation_state")
+	_refresh_rts_occupancy()
 	return true
 
 
@@ -177,6 +186,7 @@ func try_close_gate() -> bool:
 	_apply_gate_visual_state()
 	gate_state_changed.emit()
 	call_deferred("_enforce_gate_navigation_state")
+	_refresh_rts_occupancy()
 	return true
 
 
@@ -207,6 +217,7 @@ func _convert_to_gate() -> void:
 	apply_team_visuals()
 	gate_state_changed.emit()
 	call_deferred("_enforce_gate_navigation_state")
+	_refresh_rts_occupancy()
 
 
 func _resolve_gate_layout() -> Dictionary:

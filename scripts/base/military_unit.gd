@@ -102,7 +102,7 @@ func _sanitize_attack_target() -> void:
 	if _attack_target == null:
 		if _has_chase_target:
 			_has_chase_target = false
-			clear_move_target()
+			clear_move_target(true)
 			_resume_attack_move_or_patrol()
 		return
 
@@ -262,7 +262,8 @@ func command_attack_move(
 			if urgency == RepathUrgency.PLAYER_ORDER
 			else MOVE_DEST_TOLERANCE
 		)
-		if existing_delta.length() <= skip_threshold:
+		# Pending custom RTS route must still be consumed even for equivalent destinations.
+		if existing_delta.length() <= skip_threshold and not _custom_rts_pending:
 			# Equivalent attack-move: keep chase/move state; only ensure destination bookkeeping.
 			if not _issuing_order and urgency == RepathUrgency.PLAYER_ORDER:
 				_active_order = UnitOrder.attack_move(destination)
@@ -655,7 +656,8 @@ func _process_attack(delta: float) -> void:
 
 
 func _stop_and_attack(delta: float) -> void:
-	clear_move_target()
+	# Preserve strategic custom route so attack-move can resume without NavAgent.
+	clear_move_target(true)
 	_has_chase_target = false
 	_is_backing_off_for_range = false
 	apply_standing_separation(true)
@@ -898,6 +900,8 @@ func _resume_attack_move_or_patrol() -> bool:
 		return false
 
 	_has_chase_target = false
+	if try_resume_custom_rts_route(_attack_move_destination):
+		return true
 	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
 	return true
 

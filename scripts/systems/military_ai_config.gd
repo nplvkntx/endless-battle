@@ -30,6 +30,13 @@ const USE_MILITARY_AI_V2: bool = true
 ## PRODUCTION DEFAULT: true — reduces per-unit repath storms for large armies.
 const USE_SHARED_SQUAD_NAVIGATION: bool = true
 
+## Custom RTS movement (Movement Lab architecture) for player + AI military strategic travel.
+## DEVELOPMENT DEFAULT ON: shared grid route + slots + local separation.
+## Set false to compare against legacy SharedSquadNavigation / NavigationAgent strategic movement.
+const CUSTOM_RTS_MOVEMENT: bool = true
+## Test / A-B override: -1 use const, 0 force off, 1 force on.
+static var _custom_rts_movement_override: int = -1
+
 ## V2 readiness thresholds.
 const V2_CREEP_READY_MILITARY_UNITS: int = 5
 ## Normal attack commit: living hero + this many non-hero military (10–12 band).
@@ -158,6 +165,20 @@ static func is_v2_enabled() -> bool:
 
 static func is_shared_squad_nav_enabled() -> bool:
 	return USE_SHARED_SQUAD_NAVIGATION
+
+
+static func is_custom_rts_movement_enabled() -> bool:
+	if _custom_rts_movement_override >= 0:
+		return _custom_rts_movement_override == 1
+	return CUSTOM_RTS_MOVEMENT
+
+
+static func set_custom_rts_movement_override(enabled: bool) -> void:
+	_custom_rts_movement_override = 1 if enabled else 0
+
+
+static func clear_custom_rts_movement_override() -> void:
+	_custom_rts_movement_override = -1
 
 
 static func ai_version_label() -> String:

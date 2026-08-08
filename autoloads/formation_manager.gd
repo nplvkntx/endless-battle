@@ -312,7 +312,23 @@ func issue_formation_ground_order(
 
 	# Unformed military in the same selection keep simple spacing around destination
 	if not unformed.is_empty():
-		if (
+		if PlayerRouteNavigation.is_custom_rts_movement_enabled():
+			var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+				unformed,
+				destination,
+				order_kind,
+				queued
+			)
+			if custom_result.get("handled", false):
+				issued = true
+			else:
+				var targets: Array[Vector3] = GroupMoveSpacing.compute_targets(
+					destination, unformed.size()
+				)
+				for i: int in unformed.size():
+					_issue_unit_order(unformed[i] as Unit, targets[i], order_kind, queued, i)
+					issued = true
+		elif (
 			SharedSquadNavigation.is_shared_navigation_enabled()
 			and unformed.size() > 1
 		):
