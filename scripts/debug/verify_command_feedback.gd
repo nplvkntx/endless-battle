@@ -7,6 +7,10 @@ const REPORT_PATH := "user://command_feedback_verify_result.txt"
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 
+var _tree_exit_dust_unit: Node3D = null
+var _tree_exit_spawned: bool = false
+var _tree_exit_tracked: int = 0
+
 
 func _ready() -> void:
 	var failures: PackedStringArray = []
@@ -19,6 +23,7 @@ func _ready() -> void:
 	_verify_marker_spam_cleanup(failures)
 	_verify_attack_pulse(failures)
 	await _verify_movement_dust(failures)
+	await _verify_tree_exit_lifetime_safety(failures)
 	_verify_ai_does_not_spawn_markers(failures)
 	_verify_match_reset_clears(failures)
 	_verify_disable_toggles(failures)
@@ -84,6 +89,14 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 	_expect(failures, "movement request applied", applied)
 	_expect(failures, "start dust spawned", CommandFeedback.get_active_dust_count() >= 1)
 
+	# Deferred attach must still place the effect in the unlocked tree.
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"start dust attached after defer",
+		CommandFeedback.get_active_dust_count() >= 1
+	)
+
 	# Simulate motion so footstep cooldown can fire.
 	unit.velocity = Vector3(5, 0, 0)
 	CommandFeedback.notify_unit_moving(unit)
@@ -100,6 +113,92 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 
 	unit.queue_free()
 	await get_tree().process_frame
+
+
+## Reproduces match bug: attack-target tree_exiting → resume move → dust spawn/free
+## while SceneTree is locked. Must not emit Parent-node-is-busy / add_child failures.
+func _verify_tree_exit_lifetime_safety(failures: PackedStringArray) -> void:
+	CommandFeedback.clear_all()
+	CommandFeedback.enabled = true
+	CommandFeedback.dust_enabled = true
+
+	var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	unit.global_position = Vector3(2, 0, 2)
+	await get_tree().process_frame
+
+	## Seed one attached dust so later cap eviction frees a live tracked effect.
+	CommandFeedback.notify_movement_started(unit)
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"tree_exit seed dust present",
+		CommandFeedback.get_active_dust_count() >= 1
+	)
+
+	var victim := Node3D.new()
+	victim.name = "TreeExitVictim"
+	add_child(victim)
+
+	_tree_exit_spawned = false
+	_tree_exit_tracked = 0
+	_tree_exit_dust_unit = unit
+	victim.tree_exiting.connect(_on_verify_tree_exiting_spawn_feedback, CONNECT_ONE_SHOT)
+
+	## remove_child fires tree_exiting while the parent is busy mutating children.
+	remove_child(victim)
+	victim.free()
+
+	_expect(failures, "tree_exit callback spawned dust", _tree_exit_spawned)
+	_expect(
+		failures,
+		"tree_exit cap kept dust within limit",
+		_tree_exit_tracked <= CommandFeedback.MAX_ACTIVE_DUST
+	)
+
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	_expect(
+		failures,
+		"tree_exit deferred dust survived cleanup path",
+		CommandFeedback.get_active_dust_count() >= 1
+	)
+	_expect(
+		failures,
+		"tree_exit dust remains capped",
+		CommandFeedback.get_active_dust_count() <= CommandFeedback.MAX_ACTIVE_DUST
+	)
+
+	## Normal unlocked-tree spawn still works after the locked-tree case.
+	CommandFeedback.clear_all()
+	CommandFeedback.notify_movement_started(unit)
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"post tree_exit normal dust spawn",
+		CommandFeedback.get_active_dust_count() >= 1
+	)
+
+	CommandFeedback.clear_all()
+	_expect(failures, "tree_exit final clear", CommandFeedback.get_active_dust_count() == 0)
+	_tree_exit_dust_unit = null
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+## Mirrors military_unit._on_attack_target_tree_exiting → notify_movement_started.
+func _on_verify_tree_exiting_spawn_feedback() -> void:
+	var unit: Node3D = _tree_exit_dust_unit
+	if unit == null or not is_instance_valid(unit):
+		return
+	for _i: int in range(CommandFeedback.MAX_ACTIVE_DUST + 2):
+		CommandFeedback.notify_movement_started(unit)
+	_tree_exit_tracked = CommandFeedback.get_active_dust_count()
+	_tree_exit_spawned = _tree_exit_tracked >= 1
+	## Explicit tracked cleanup while the tree is still mutating.
+	CommandFeedback.clear_all()
+	CommandFeedback.notify_movement_started(unit)
 
 
 func _verify_ai_does_not_spawn_markers(failures: PackedStringArray) -> void:

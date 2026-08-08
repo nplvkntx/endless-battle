@@ -150,10 +150,18 @@ func _show_marker(world_position: Vector3, kind: MarkerKind) -> void:
 		marker.free()
 		return
 
-	parent.add_child(marker)
-	marker.global_position = Vector3(world_position.x, MARKER_Y, world_position.z)
-	_active_markers.append(marker.get_instance_id())
-	_animate_fade_and_free(marker, MARKER_DURATION, MARKER_FADE_START_RATIO)
+	## Track before attach so caps/counts stay correct; never sync-mutate the tree
+	## from gameplay callbacks (e.g. attack-target tree_exiting → resume move).
+	var effect_id: int = marker.get_instance_id()
+	_active_markers.append(effect_id)
+	call_deferred(
+		&"_attach_tracked_effect",
+		effect_id,
+		parent.get_instance_id(),
+		Vector3(world_position.x, MARKER_Y, world_position.z),
+		TrackKind.MARKER,
+		false
+	)
 
 
 func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
@@ -171,11 +179,64 @@ func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
 		puff.free()
 		return
 
-	parent.add_child(puff)
-	puff.global_position = Vector3(world_position.x, 0.04, world_position.z)
-	_active_dust.append(puff.get_instance_id())
-	var lifetime: float = DUST_START_LIFETIME if is_start else DUST_FOOTSTEP_LIFETIME
-	_animate_dust(puff, lifetime)
+	## Defer add_child — notify_movement_started can run while SceneTree is locked.
+	var effect_id: int = puff.get_instance_id()
+	_active_dust.append(effect_id)
+	call_deferred(
+		&"_attach_tracked_effect",
+		effect_id,
+		parent.get_instance_id(),
+		Vector3(world_position.x, 0.04, world_position.z),
+		TrackKind.DUST,
+		is_start
+	)
+
+
+## Deferred tree attach with lifetime checks (effect/parent may die before this runs).
+func _attach_tracked_effect(
+	effect_id: int,
+	parent_id: int,
+	world_position: Vector3,
+	track_kind: TrackKind,
+	is_start_dust: bool
+) -> void:
+	if not _track_contains(track_kind, effect_id):
+		_discard_orphan_effect(effect_id)
+		return
+
+	var effect_obj: Object = instance_from_id(effect_id)
+	if effect_obj == null or not is_instance_valid(effect_obj) or not effect_obj is Node3D:
+		_remove_tracked_kind_id(track_kind, effect_id)
+		return
+	var effect: Node3D = effect_obj as Node3D
+	if effect.is_queued_for_deletion():
+		_remove_tracked_kind_id(track_kind, effect_id)
+		return
+	## Already attached — do not create a duplicate under another parent.
+	if effect.get_parent() != null:
+		return
+
+	var parent_obj: Object = instance_from_id(parent_id)
+	if parent_obj == null or not is_instance_valid(parent_obj) or not parent_obj is Node:
+		_remove_tracked_kind_id(track_kind, effect_id)
+		effect.free()
+		return
+	var parent: Node = parent_obj as Node
+	if parent.is_queued_for_deletion() or not parent.is_inside_tree():
+		_remove_tracked_kind_id(track_kind, effect_id)
+		effect.free()
+		return
+
+	parent.add_child(effect)
+	effect.global_position = world_position
+	match track_kind:
+		TrackKind.MARKER:
+			_animate_fade_and_free(effect, MARKER_DURATION, MARKER_FADE_START_RATIO)
+		TrackKind.DUST:
+			var lifetime: float = DUST_START_LIFETIME if is_start_dust else DUST_FOOTSTEP_LIFETIME
+			_animate_dust(effect, lifetime)
+		_:
+			pass
 
 
 func _is_dust_eligible_unit(unit: Node3D) -> bool:
@@ -362,6 +423,40 @@ func _remove_tracked_id(track: PackedInt64Array, effect_id: int) -> void:
 			return
 
 
+func _remove_tracked_kind_id(track_kind: TrackKind, effect_id: int) -> void:
+	match track_kind:
+		TrackKind.MARKER:
+			_remove_tracked_id(_active_markers, effect_id)
+		TrackKind.DUST:
+			_remove_tracked_id(_active_dust, effect_id)
+		_:
+			pass
+
+
+func _track_contains(track_kind: TrackKind, effect_id: int) -> bool:
+	var track: PackedInt64Array = (
+		_active_markers if track_kind == TrackKind.MARKER else _active_dust
+	)
+	for tracked_id: int in track:
+		if tracked_id == effect_id:
+			return true
+	return false
+
+
+func _discard_orphan_effect(effect_id: int) -> void:
+	var obj: Object = instance_from_id(effect_id)
+	if obj == null or not is_instance_valid(obj) or not obj is Node:
+		return
+	var node: Node = obj as Node
+	if node.is_queued_for_deletion():
+		return
+	## Pending deferred attach cancelled (cap / clear_all) — drop orphan safely.
+	if node.get_parent() == null:
+		node.free()
+	else:
+		node.queue_free()
+
+
 func _prune_invalid(track: PackedInt64Array) -> void:
 	var write: int = 0
 	for i: int in track.size():
@@ -385,8 +480,7 @@ func _free_tracked_id(effect_id: int) -> void:
 	if not obj is Node:
 		return
 	var node: Node = obj as Node
-	## Detach + free now so root-bound tweens cannot outlive the effect.
-	var parent: Node = node.get_parent()
-	if parent != null:
-		parent.remove_child(node)
-	node.free()
+	if node.is_queued_for_deletion():
+		return
+	## queue_free is safe while SceneTree is locked; avoid sync remove_child/free.
+	node.queue_free()
