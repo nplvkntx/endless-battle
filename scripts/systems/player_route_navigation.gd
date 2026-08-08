@@ -356,6 +356,10 @@ func _register_building_internal(building: Building) -> void:
 		return
 	if not building.is_inside_tree():
 		return
+	## Foundations under construction stay walkable for builder handoff.
+	if building.is_being_constructed():
+		grid.clear_obstacle(building.get_instance_id())
+		return
 	# Open gates: still register posts-only footprint via resolver.
 	var footprint: Dictionary = _resolve_footprint(building)
 	if footprint.is_empty():

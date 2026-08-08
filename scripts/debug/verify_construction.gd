@@ -53,6 +53,7 @@ func _ready() -> void:
 	await _verify_destroyed_unfinished_building(failures)
 	await _verify_ai_construction_stages(failures)
 	await _verify_nav_snap_does_not_false_commit(failures)
+	await _verify_enemy_hero_altar_construction_handoff(failures)
 	await _verify_construction_timer_survives_brief_range_loss(failures)
 	await _verify_build_tick_stagger_advances_parity(failures)
 	_verify_ai_farm_reservation_recovery(failures)
@@ -572,6 +573,104 @@ func _verify_nav_snap_does_not_false_commit(failures: PackedStringArray) -> void
 	_expect(failures, "near farm: in build range", worker._is_in_build_start_range())
 	_expect(failures, "near farm: commits", worker._try_commit_construction_if_in_range())
 	_expect(failures, "near farm: constructing", worker.is_constructing())
+
+	await _free_harness(harness)
+
+
+func _verify_enemy_hero_altar_construction_handoff(failures: PackedStringArray) -> void:
+	## Regression: unfinished Hero Altar must not block its own construction standees on
+	## the custom RTS grid. Inflated occupancy previously snapped builders away and the
+	## enemy altar could remain permanently unfinished after being placed.
+	print("verify: enemy Hero Altar construction handoff completes")
+	PlayerRouteNavigation.clear_all()
+	var harness: Dictionary = await _spawn_harness()
+	var root: Node3D = harness["root"]
+
+	var town_hall: Building = COMMAND_CENTER_SCENE.instantiate() as Building
+	root.add_child(town_hall)
+	town_hall.global_position = Vector3(0.0, EnemyBuildPlacement.COMMAND_CENTER_GROUND_Y, 0.0)
+	town_hall.set_completed()
+
+	var farm: Building = FARM_SCENE.instantiate() as Building
+	root.add_child(farm)
+	farm.global_position = Vector3(4.0, EnemyBuildPlacement.FARM_GROUND_Y, 0.0)
+	farm.set_completed()
+
+	var altar: Building = HERO_ALTAR_SCENE.instantiate() as Building
+	root.add_child(altar)
+	altar.team_id = 1
+	altar.add_to_group(&"enemy_command_center")
+	altar.global_position = Vector3(8.0, EnemyBuildPlacement.HERO_ALTAR_GROUND_Y, 0.0)
+	altar.set_construction_cost(180, 110, true)
+	altar.start_under_construction()
+	altar.setup_construction(1.5)
+
+	await get_tree().process_frame
+	await get_tree().process_frame
+	PlayerRouteNavigation.ensure_grid_ready()
+	PlayerRouteNavigation.register_static_obstacle(town_hall)
+	PlayerRouteNavigation.register_static_obstacle(farm)
+	## Mimic deferred occupancy + grid rescan against an unfinished altar.
+	altar._register_rts_occupancy()
+	PlayerRouteNavigation._register_building_internal(altar)
+
+	var standee: Vector3 = altar.get_nearest_construction_point(Vector3(8.0, 0.5, -4.0))
+	_expect(
+		failures,
+		"altar handoff: unfinished construction point stays walkable",
+		PlayerRouteNavigation.is_world_walkable(standee)
+	)
+	_expect(
+		failures,
+		"altar handoff: unfinished altar is not an RTS obstacle",
+		not PlayerRouteNavigation.grid.has_obstacle(altar.get_instance_id())
+	)
+
+	var worker: Worker = _spawn_worker(root, Vector3(8.0, 0.5, -6.0), true)
+	await _wait_nav_ready(worker)
+	worker.start_construction_order(altar)
+	_expect(failures, "altar handoff: builder assigned", worker.is_assigned_to_build(altar))
+
+	## Place on the real standee and resume the existing build interaction.
+	worker.global_position = Vector3(standee.x, 0.5, standee.z)
+	worker._construction_target_point = standee
+	worker._construction_target_point_valid = true
+	if worker._build_trip_state == Worker.BuildTripState.TO_BUILDING:
+		worker._try_commit_construction_if_in_range()
+	await get_tree().physics_frame
+	_expect(failures, "altar handoff: in build range at standee", worker.is_in_build_start_range() or worker.is_constructing())
+	_expect(failures, "altar handoff: actively constructing", worker.is_constructing())
+	_expect(
+		failures,
+		"altar handoff: remains assigned while unfinished",
+		worker.is_assigned_to_build(altar)
+	)
+
+	var progress_before: float = altar.get_construction_progress_ratio()
+	var deadline: int = Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < deadline:
+		if altar.building_state == Building.STATE_COMPLETED:
+			break
+		await get_tree().process_frame
+
+	_expect(
+		failures,
+		"altar handoff: progress increases",
+		altar.get_construction_progress_ratio() > progress_before or altar.building_state == Building.STATE_COMPLETED
+	)
+	_expect(failures, "altar handoff: altar completed", altar.building_state == Building.STATE_COMPLETED)
+	_expect(
+		failures,
+		"altar handoff: completed altar registers RTS occupancy",
+		PlayerRouteNavigation.grid.has_obstacle(altar.get_instance_id())
+	)
+
+	## No second unfinished altar left behind.
+	var unfinished_altars: int = 0
+	for node: Node in root.get_children():
+		if node is HeroAltar and (node as Building).is_being_constructed():
+			unfinished_altars += 1
+	_expect(failures, "altar handoff: no unfinished altar remains", unfinished_altars == 0)
 
 	await _free_harness(harness)
 

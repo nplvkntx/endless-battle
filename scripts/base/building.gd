@@ -107,6 +107,12 @@ func _exit_tree() -> void:
 func _register_rts_occupancy() -> void:
 	if not is_inside_tree():
 		return
+	## Unfinished foundations must stay off the custom RTS grid so builders can
+	## reach construction standees. Inflated occupancy around Hero Altar (and other
+	## large footprints) otherwise snaps approach points away and stalls the handoff.
+	if is_being_constructed():
+		PlayerRouteNavigation.unregister_static_obstacle(self)
+		return
 	PlayerRouteNavigation.register_static_obstacle(self)
 
 
@@ -117,7 +123,7 @@ func _unregister_rts_occupancy() -> void:
 func _refresh_rts_occupancy() -> void:
 	if not is_inside_tree():
 		return
-	PlayerRouteNavigation.refresh_static_obstacle(self)
+	_register_rts_occupancy()
 
 
 ## Half-extents used by custom player RTS occupancy (collision footprint preferred).
@@ -397,6 +403,8 @@ func start_under_construction() -> void:
 	building_state_changed.emit(building_state)
 	construction_progress_changed.emit(_construction_progress)
 	play_selection_pulse()
+	## Clear any early/deferred occupancy so builders keep a walkable approach ring.
+	_unregister_rts_occupancy()
 
 
 ## Marks foundation as a future Shift-queued build (vs actively constructing).
