@@ -12,6 +12,9 @@ signal died(unit: Unit)
 @export var unit_data: Resource
 @export var move_speed: float = 5.0
 @export var stopping_distance: float = 0.25
+## Optional strategic travel cap (e.g. keep Hero from outrunning infantry).
+## < 0 means uncapped. Cleared when local combat focus-fire begins.
+var _strategic_move_speed_cap: float = -1.0
 ## Temporary combat-type defaults (identity multipliers — no balance change yet).
 @export var damage_type: DamageService.DamageType = DamageService.DamageType.PHYSICAL
 @export var armor_type: DamageService.ArmorType = DamageService.ArmorType.MEDIUM
@@ -923,7 +926,8 @@ func _process_custom_rts_movement(delta: float) -> void:
 	desired = desired.normalized()
 
 	# Blocked-cell slide: prefer walkable candidate direction before physics step.
-	var step: float = move_speed * delta
+	var travel_speed: float = get_effective_move_speed()
+	var step: float = travel_speed * delta
 	var candidate: Vector3 = global_position + desired * step
 	candidate.y = global_position.y
 	if not PlayerRouteNavigation.is_world_walkable(candidate):
@@ -939,7 +943,7 @@ func _process_custom_rts_movement(delta: float) -> void:
 			CommandFeedback.notify_unit_moving(self)
 			return
 
-	var arrival_speed: float = move_speed
+	var arrival_speed: float = travel_speed
 	var slow_start: float = maxf(stopping_distance * 2.0, UnitNavigation.ARRIVAL_SLOWDOWN_DISTANCE)
 	if dist_to_slot < slow_start:
 		var t: float = clampf(
@@ -947,7 +951,7 @@ func _process_custom_rts_movement(delta: float) -> void:
 			0.0,
 			1.0
 		)
-		arrival_speed = move_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
+		arrival_speed = travel_speed * lerpf(UnitNavigation.ARRIVAL_MIN_SPEED_RATIO, 1.0, t)
 
 	# Separation already blended above — do not double-apply UnitSeparation soft push.
 	var position_before: Vector3 = global_position
@@ -1311,6 +1315,24 @@ func _destination_change_threshold(urgency: RepathUrgency) -> float:
 
 func get_movement_destination() -> Vector3:
 	return _movement_target
+
+
+func get_effective_move_speed() -> float:
+	if _strategic_move_speed_cap > 0.0:
+		return minf(move_speed, _strategic_move_speed_cap)
+	return move_speed
+
+
+func set_strategic_move_speed_cap(cap: float) -> void:
+	_strategic_move_speed_cap = cap
+
+
+func clear_strategic_move_speed_cap() -> void:
+	_strategic_move_speed_cap = -1.0
+
+
+func has_strategic_move_speed_cap() -> bool:
+	return _strategic_move_speed_cap > 0.0
 
 
 func is_confirmed_stuck() -> bool:

@@ -46,6 +46,7 @@ func _ready() -> void:
 	await _test_faction_classification_invariants()
 	await _test_player_power_with_unset_team_id()
 	await _test_freed_creep_camp_count()
+	await _test_army_cohesion_conditions()
 
 	var report: String
 	if _failures.is_empty():
@@ -650,6 +651,160 @@ func _test_freed_creep_camp_count() -> void:
 	)
 	_kill_unit(creep_c)
 	await get_tree().process_frame
+
+
+func _test_army_cohesion_conditions() -> void:
+	print("--- army cohesion conditions ---")
+	## TEST A — Hero + 0 soldiers → HOME
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST A Hero+0 → HOME_ARMY_SMALL or HOME", _ai.get_debug_priority() == &"BUILD_FORCE")
+	_expect("TEST A not together with 0 soldiers", not _ai.is_army_together_for_test())
+
+	## TEST B — Hero + 2 soldiers, minimum = 5 → HOME
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 2))
+	_spawn_enemy_spearman(_cc.global_position + Vector3(2, 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST B Hero+2 → BUILD_FORCE/HOME", _ai.get_debug_priority() == &"BUILD_FORCE")
+
+	## TEST C — Hero + 8 together, attack false → not ATTACK_PLAYER necessarily (WAIT/CREEP)
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	## Strong player force so attack gate stays closed.
+	for i: int in 12:
+		_spawn_player_spearman(_cc.global_position + Vector3(40.0 + float(i), 0, 0))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST C army together", _ai.is_army_together_for_test())
+	_expect(
+		"TEST C no attack vs stronger player",
+		_ai.get_debug_condition_bucket_for_test() != &"ATTACK_PLAYER"
+	)
+
+	## TEST D — Hero + 8 together and AI stronger → ATTACK_PLAYER
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	_spawn_player_spearman(_cc.global_position + Vector3(45, 0, 0))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST D together", _ai.is_army_together_for_test())
+	_expect(
+		"TEST D stronger → ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+
+	## TEST E — During ATTACK, move Hero far ahead → next tick REGROUP
+	hero.global_position = _cc.global_position + Vector3(0, 0, 40)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST E hero ahead → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
+	_expect("TEST E not together", not _ai.is_army_together_for_test())
+
+	## TEST F — Regroup destination does not advance farther toward player than soldiers
+	var soldiers_center := Vector3.ZERO
+	var scount := 0
+	for unit_variant: Variant in _ai.get_enemy_army_for_test():
+		if unit_variant is Unit and not (unit_variant is Hero):
+			soldiers_center += (unit_variant as Unit).global_position
+			scount += 1
+	if scount > 0:
+		soldiers_center /= float(scount)
+	var regroup_dest: Vector3 = _ai.get_regroup_destination_for_test()
+	var player_pike_pos: Vector3 = _cc.global_position + Vector3(45, 0, 0)
+	## Find actual player unit
+	var player_units: Array = _ai.get_player_army_for_test()
+	if not player_units.is_empty() and player_units[0] is Node3D:
+		player_pike_pos = (player_units[0] as Node3D).global_position
+	var soldier_to_player: float = soldiers_center.distance_to(player_pike_pos)
+	var dest_to_player: float = Vector3(regroup_dest.x, 0, regroup_dest.z).distance_to(
+		Vector3(player_pike_pos.x, 0, player_pike_pos.z)
+	)
+	_expect(
+		"TEST F regroup does not advance toward player",
+		dest_to_player + 0.5 >= soldier_to_player - 1.0
+	)
+
+	## TEST G — One reinforcement at base does not cancel cohesive field army
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(30, 0, 30))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 10:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(30.0 + float(i) * 0.7, 0, 30))
+	## Fresh spawn still at home base.
+	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 1))
+	_spawn_player_spearman(_cc.global_position + Vector3(45, 0, 0))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_expect("TEST G main force still together", _ai.is_army_together_for_test())
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST G one straggler does not force REGROUP alone",
+		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
+	)
+
+	## TEST H — Majority behind Hero → REGROUP
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 35))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST H majority behind → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
+
+	## TEST I — Base threat during separation → DEFEND overrides REGROUP
+	var threat: Unit = _spawn_player_spearman(_cc.global_position + Vector3(5, 0, 0))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST I DEFEND overrides REGROUP", _ai.get_debug_priority() == &"DEFEND")
+	_kill_unit(threat)
+	await get_tree().process_frame
+
+	## TEST J — Player Hero + Pikemen → player_power > 0
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var player_hero: Hero = HERO_SCENE.instantiate() as Hero
+	_world.add_child(player_hero)
+	player_hero.global_position = _cc.global_position + Vector3(50, 0, 0)
+	player_hero.team_id = 0
+	player_hero.add_to_group(&"heroes")
+	player_hero.add_to_group(&"units")
+	HeroProgressionStore.register_living_hero(player_hero)
+	_spawn_player_spearman(_cc.global_position + Vector3(52, 0, 0))
+	_spawn_player_spearman(_cc.global_position + Vector3(53, 0, 0))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST J player_power > 0", _ai.get_player_power_for_test() > 0.0)
 
 
 func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:
