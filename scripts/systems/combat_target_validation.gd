@@ -264,6 +264,9 @@ static func is_enemy_faction(node: Variant) -> bool:
 	if node == null or not node is Node:
 		return false
 
+	if is_neutral_creep(node):
+		return false
+
 	var scene_node: Node = node as Node
 	if scene_node.is_in_group(ENEMY_BUILDING_GROUP):
 		return true
@@ -278,6 +281,33 @@ static func is_enemy_faction(node: Variant) -> bool:
 		return true
 
 	return false
+
+
+## True when the node belongs to the actual player faction.
+## Neutral is a third category — NOT ENEMY does not mean PLAYER.
+static func is_player_faction(node: Variant) -> bool:
+	if node == null or not node is Node:
+		return false
+
+	if is_neutral_creep(node):
+		return false
+
+	if is_enemy_faction(node):
+		return false
+
+	var scene_node: Node = node as Node
+	if scene_node.is_in_group(PLAYER_COMMAND_CENTER_GROUP):
+		return true
+
+	var team_id: int = TeamVisuals.NEUTRAL_TEAM_ID
+	if node is Unit:
+		team_id = (node as Unit).team_id
+	elif node is Building:
+		team_id = (node as Building).team_id
+	else:
+		return false
+
+	return team_id == TeamVisuals.PLAYER_TEAM_ID
 
 
 ## Shared faction hostility check. Friendly fire is blocked unless an ability

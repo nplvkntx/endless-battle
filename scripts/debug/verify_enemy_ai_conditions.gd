@@ -12,6 +12,7 @@ const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith
 const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
+const NEUTRAL_CREEP_SCENE: PackedScene = preload("res://scenes/units/neutral_creep.tscn")
 
 var _failures: PackedStringArray = []
 var _world: Node3D
@@ -42,6 +43,7 @@ func _ready() -> void:
 	await _test_early_creep_and_attack_gate()
 	await _test_rebuild_after_hero_death()
 	await _test_tech_requests()
+	await _test_faction_classification_invariants()
 
 	var report: String
 	if _failures.is_empty():
@@ -403,6 +405,155 @@ func _test_tech_requests() -> void:
 	_expect("T2 → Blacksmith requested", _build.requests.has(&"blacksmith"))
 
 
+func _test_faction_classification_invariants() -> void:
+	print("--- faction classification ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var enemy_hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	enemy_hero.level = 3
+	HeroProgressionStore.register_living_hero(enemy_hero)
+	## Keep AI above BUILD_FORCE so DEFEND can win when a real player threat appears.
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 4))
+
+	var player_pike: Unit = _spawn_player_spearman(_cc.global_position + Vector3(80, 0, 0))
+	var enemy_pike: Unit = _spawn_enemy_spearman(_cc.global_position + Vector3(2, 0, 6))
+	var creeps: Array = []
+	for i: int in 3:
+		creeps.append(
+			_spawn_neutral_creep(_cc.global_position + Vector3(90.0 + float(i), 0, 10))
+		)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+
+	## TEST 1 — mutual exclusion of combat sets
+	_expect("TEST1 player military count == 1", _ai.get_player_army_for_test().size() == 1)
+	_expect(
+		"TEST1 enemy military includes spearmen+hero (>=6)",
+		_ai.get_enemy_army_for_test().size() >= 6
+	)
+	_expect("TEST1 neutral creep count == 3", _ai.count_neutral_creeps_for_test() == 3)
+	_expect(
+		"TEST1 player army is the player pikeman",
+		_ai.get_player_army_for_test().has(player_pike)
+	)
+	_expect(
+		"TEST1 player army excludes enemy pikeman",
+		not _ai.get_player_army_for_test().has(enemy_pike)
+	)
+	for creep_variant: Variant in creeps:
+		_expect(
+			"TEST1 player army excludes NeutralCreep",
+			not _ai.get_player_army_for_test().has(creep_variant)
+		)
+		_expect(
+			"TEST1 enemy army excludes NeutralCreep",
+			not _ai.get_enemy_army_for_test().has(creep_variant)
+		)
+
+	## TEST 2 — killing a neutral creep does not change Player Power
+	var power_before_creep: float = _ai.get_player_power_for_test()
+	var our_power_before_creep: float = _ai.get_our_power_for_test()
+	_kill_unit(creeps[0] as Node)
+	creeps.remove_at(0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST2 Player Power unchanged after NeutralCreep death",
+		is_equal_approx(_ai.get_player_power_for_test(), power_before_creep)
+	)
+	_expect(
+		"TEST2 AI Power unchanged after NeutralCreep death",
+		is_equal_approx(_ai.get_our_power_for_test(), our_power_before_creep)
+	)
+	_expect("TEST2 neutral creep count == 2", _ai.count_neutral_creeps_for_test() == 2)
+
+	## TEST 3 — killing player pikeman decreases Player Power
+	var power_before_pike: float = _ai.get_player_power_for_test()
+	_kill_unit(player_pike)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST3 Player Power decreases after player pikeman death",
+		_ai.get_player_power_for_test() < power_before_pike
+	)
+	_expect("TEST3 player military count == 0", _ai.get_player_army_for_test().is_empty())
+
+	## Spawn a fresh player pikeman far away, then move into defense radius.
+	player_pike = _spawn_player_spearman(_cc.global_position + Vector3(80, 0, 0))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST3b player military count == 1 after respawn", _ai.get_player_army_for_test().size() == 1)
+	_expect(
+		"TEST3b Player Power increases after player pikeman spawn",
+		_ai.get_player_power_for_test() > 0.0
+	)
+
+	## TEST 4 — NeutralCreep in defense radius is NOT a base threat / DEFEND
+	var near_creep: NeutralCreep = _spawn_neutral_creep(_cc.global_position + Vector3(5, 0, 0))
+	await get_tree().process_frame
+	var threat_creep: Node3D = _ai.find_base_threat_for_test()
+	_expect("TEST4 find_base_threat ignores NeutralCreep", threat_creep == null)
+	_ai.set_camps_cleared_for_test(3)
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST4 Priority is not DEFEND because of NeutralCreep",
+		_ai.get_debug_priority() != &"DEFEND"
+	)
+
+	## TEST 5 — Player pikeman in radius is DEFEND threat
+	player_pike.global_position = _cc.global_position + Vector3(6, 0, 0)
+	await get_tree().process_frame
+	var threat_player: Node3D = _ai.find_base_threat_for_test()
+	_expect("TEST5 find_base_threat == player pikeman", threat_player == player_pike)
+	_ai.force_tick_for_test()
+	_expect("TEST5 Priority=DEFEND for player military", _ai.get_debug_priority() == &"DEFEND")
+
+	## TEST 6 — player leaves radius → threat clears
+	player_pike.global_position = _cc.global_position + Vector3(80, 0, 0)
+	await get_tree().process_frame
+	_expect("TEST6 find_base_threat == null after leave", _ai.find_base_threat_for_test() == null)
+	_ai.force_tick_for_test()
+	_expect("TEST6 DEFEND no longer wins after leave", _ai.get_debug_priority() != &"DEFEND")
+
+	## Also prove death clears DEFEND.
+	player_pike.global_position = _cc.global_position + Vector3(6, 0, 0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST6b DEFEND while player still near", _ai.get_debug_priority() == &"DEFEND")
+	_kill_unit(player_pike)
+	await get_tree().process_frame
+	_expect("TEST6b threat null after death", _ai.find_base_threat_for_test() == null)
+	_ai.force_tick_for_test()
+	_expect("TEST6b DEFEND ends after death", _ai.get_debug_priority() != &"DEFEND")
+
+	## TEST 7 — ATTACK_PLAYER target selects player entity only
+	player_pike = _spawn_player_spearman(_cc.global_position + Vector3(40, 0, 0))
+	var bait_creep: NeutralCreep = _spawn_neutral_creep(_cc.global_position + Vector3(8, 0, 0))
+	await get_tree().process_frame
+	var attack_target: Node3D = _ai.select_player_target_for_test()
+	_expect("TEST7 attack target is not null", attack_target != null)
+	_expect("TEST7 attack target is player pikeman", attack_target == player_pike)
+	_expect(
+		"TEST7 attack target is not NeutralCreep",
+		attack_target != bait_creep and not CombatTargetValidation.is_neutral_creep(attack_target)
+	)
+	_expect(
+		"TEST7 near NeutralCreep still not base threat",
+		_ai.find_base_threat_for_test() == null
+	)
+
+	## Cleanup locals that remain alive so later harness state stays clean.
+	_kill_unit(near_creep)
+	_kill_unit(bait_creep)
+	for creep_variant2: Variant in creeps:
+		if NodeSafety.is_alive_node(creep_variant2):
+			_kill_unit(creep_variant2 as Node)
+	if NodeSafety.is_alive_node(player_pike):
+		_kill_unit(player_pike)
+	await get_tree().process_frame
+
+
 func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:
 	if farm:
 		var f: Building = _spawn_completed_building(FARM_SCENE, _cc.global_position + Vector3(-5, 0, 0))
@@ -435,6 +586,45 @@ func _spawn_enemy_spearman(position: Vector3) -> Unit:
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")
 	return unit
+
+
+func _spawn_player_spearman(position: Vector3) -> Unit:
+	var unit: Unit = SPEARMAN_SCENE.instantiate() as Unit
+	_world.add_child(unit)
+	unit.global_position = position
+	unit.team_id = TeamVisuals.PLAYER_TEAM_ID
+	if not unit.is_in_group(&"units"):
+		unit.add_to_group(&"units")
+	if unit.is_in_group(&"enemies"):
+		unit.remove_from_group(&"enemies")
+	if unit.is_in_group(&"enemy_combat_units"):
+		unit.remove_from_group(&"enemy_combat_units")
+	return unit
+
+
+func _spawn_neutral_creep(position: Vector3) -> NeutralCreep:
+	var creep: NeutralCreep = NEUTRAL_CREEP_SCENE.instantiate() as NeutralCreep
+	_world.add_child(creep)
+	creep.global_position = position
+	creep.team_id = TeamVisuals.NEUTRAL_TEAM_ID
+	if not creep.is_in_group(&"neutral_creeps"):
+		creep.add_to_group(&"neutral_creeps")
+	if not creep.is_in_group(&"units"):
+		creep.add_to_group(&"units")
+	if creep.is_in_group(&"enemies"):
+		creep.remove_from_group(&"enemies")
+	return creep
+
+
+func _kill_unit(unit: Node) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
+	if health != null:
+		health.current_health = 0
+	if unit.has_method(&"die"):
+		unit.call(&"die")
+	unit.queue_free()
 
 
 func _spawn_enemy_hero(position: Vector3) -> Hero:

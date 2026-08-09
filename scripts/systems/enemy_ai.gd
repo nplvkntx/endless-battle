@@ -315,6 +315,11 @@ func _read_live_world() -> void:
 			continue
 		if node is Worker:
 			continue
+		## Strict AI combat force — never neutrals / "not player".
+		if CombatTargetValidation.is_neutral_creep(node):
+			continue
+		if not CombatTargetValidation.is_enemy_faction(node):
+			continue
 		if not _is_living_combatant(node):
 			continue
 		var unit: Unit = node as Unit
@@ -335,12 +340,15 @@ func _read_live_world() -> void:
 			_w.cannons += 1
 
 	_w.player_hero = HeroProgressionStore.get_living_hero(false)
+	if _w.player_hero != null and not CombatTargetValidation.is_player_faction(_w.player_hero):
+		_w.player_hero = null
+	## Strict player combat force — NOT ENEMY != PLAYER (neutrals are third).
 	for node: Node in tree.get_nodes_in_group(&"units"):
 		if not NodeSafety.is_alive_node(node) or not node is Unit:
 			continue
 		if node is Worker:
 			continue
-		if CombatTargetValidation.is_enemy_faction(node):
+		if not CombatTargetValidation.is_player_faction(node):
 			continue
 		if not _is_living_combatant(node):
 			continue
@@ -348,7 +356,7 @@ func _read_live_world() -> void:
 	for node: Node in tree.get_nodes_in_group(&"heroes"):
 		if not NodeSafety.is_alive_node(node) or not node is Hero:
 			continue
-		if CombatTargetValidation.is_enemy_faction(node):
+		if not CombatTargetValidation.is_player_faction(node):
 			continue
 		if not _is_living_combatant(node):
 			continue
@@ -779,7 +787,10 @@ func _find_base_threat() -> Node3D:
 			var unit: Node3D = unit_variant as Node3D
 			if not NodeSafety.is_alive_node(unit):
 				continue
-			if CombatTargetValidation.is_enemy_faction(unit):
+			## Base threat = living PLAYER combat only — never neutrals/creeps/AI.
+			if not CombatTargetValidation.is_player_faction(unit):
+				continue
+			if unit is Worker:
 				continue
 			if not _is_living_combatant(unit):
 				continue
@@ -1327,6 +1338,12 @@ func _update_debug_overlay() -> void:
 
 	var worker_count: int = (_w.workers as Array).size() if _w.has("workers") else 0
 	var desired_workers: int = _desired_worker_count() if _w.has("tier") else 0
+	var player_military_count: int = (_w.player_army as Array).size() if _w.has("player_army") else 0
+	var enemy_military_count: int = (_w.army as Array).size() if _w.has("army") else 0
+	var neutral_creep_count: int = _count_living_neutral_creeps()
+	var threat_faction: String = "-"
+	if _debug_threat_name != "-":
+		threat_faction = "player"
 	_debug_label.text = "\n".join(
 		PackedStringArray([
 			"ENEMY AI",
@@ -1363,8 +1380,12 @@ func _update_debug_overlay() -> void:
 			"Camps cleared: %d" % _camps_cleared,
 			"AI Power: %d" % int(float(_w.get("our_power", 0.0))),
 			"Player Power: %d" % int(float(_w.get("player_power", 0.0))),
+			"Player military count: %d" % player_military_count,
+			"Enemy military count: %d" % enemy_military_count,
+			"Neutral creep count: %d" % neutral_creep_count,
 			"",
 			"Threat: %s" % _debug_threat_name,
+			"Threat faction: %s" % threat_faction,
 			"Target: %s" % target_text,
 		])
 	)
@@ -1385,3 +1406,49 @@ func set_camps_cleared_for_test(value: int) -> void:
 
 func force_tick_for_test() -> void:
 	_ai_tick()
+
+
+func get_player_army_for_test() -> Array:
+	return (_w.player_army as Array).duplicate() if _w.has("player_army") else []
+
+
+func get_enemy_army_for_test() -> Array:
+	return (_w.army as Array).duplicate() if _w.has("army") else []
+
+
+func get_player_power_for_test() -> float:
+	return float(_w.get("player_power", 0.0))
+
+
+func get_our_power_for_test() -> float:
+	return float(_w.get("our_power", 0.0))
+
+
+func find_base_threat_for_test() -> Node3D:
+	_read_live_world()
+	return _find_base_threat()
+
+
+func select_player_target_for_test() -> Node3D:
+	_read_live_world()
+	return _select_player_target()
+
+
+func count_neutral_creeps_for_test() -> int:
+	return _count_living_neutral_creeps()
+
+
+func _count_living_neutral_creeps() -> int:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return 0
+	var count: int = 0
+	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+		if not NodeSafety.is_alive_node(node):
+			continue
+		if not CombatTargetValidation.is_neutral_creep(node):
+			continue
+		if CombatTargetValidation.get_target_current_health(node) <= 0:
+			continue
+		count += 1
+	return count

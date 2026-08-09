@@ -74,6 +74,9 @@ static func _is_enemy_aligned(owner: Node) -> bool:
 static func _is_player_aligned(owner: Node) -> bool:
 	if _is_enemy_aligned(owner):
 		return false
+	## Neutral creeps also live in the shared "units" group — never treat as player.
+	if owner.is_in_group(&"neutral_creeps"):
+		return false
 	if owner.is_in_group(&"player_command_center"):
 		return true
 	if owner.is_in_group(&"workers") or owner.is_in_group(&"units") or owner.is_in_group(&"heroes"):
