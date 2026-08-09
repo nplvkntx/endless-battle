@@ -577,6 +577,10 @@ func _count_pending_pikemen() -> int:
 
 
 func _get_early_army_pikemen_target() -> int:
+	## Simple WC3 opening needs exactly 5 living Pikemen — do not mass further.
+	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		return 5
+
 	var alive: int = _count_living_pikemen()
 	var pending: int = _count_pending_pikemen()
 	var total: int = alive + pending
