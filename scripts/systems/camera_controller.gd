@@ -1,7 +1,7 @@
 extends Camera3D
 
 ## RTS camera pan and zoom for the main test scene.
-## Supports edge scrolling, arrow keys, and mouse wheel zoom only.
+## Supports edge scrolling, arrow keys, mouse wheel zoom, and hold-Space hero follow.
 
 @export var edge_margin_pixels: float = 15.0
 @export var move_speed: float = 20.0
@@ -15,6 +15,14 @@ extends Camera3D
 
 
 func _process(delta: float) -> void:
+	## LoL-style hold-Space: continuously center on living PLAYER hero while held.
+	## Must run before normal pan so edge/WASD cannot overwrite the same frame.
+	if Input.is_action_pressed(&"focus_hero"):
+		var hero: Hero = _get_living_player_hero()
+		if hero != null:
+			focus_on_world_position(hero.global_position)
+			return
+
 	var direction := _get_movement_direction()
 	if direction == Vector3.ZERO:
 		return
@@ -34,6 +42,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_zoom(1.0)
 		MOUSE_BUTTON_WHEEL_DOWN:
 			_apply_zoom(-1.0)
+
+
+func _get_living_player_hero() -> Hero:
+	return HeroProgressionStore.get_living_hero(false)
 
 
 func _get_movement_direction() -> Vector3:

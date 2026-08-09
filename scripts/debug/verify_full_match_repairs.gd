@@ -178,16 +178,26 @@ func _verify_ability_targeting_keeps_selection(failures: PackedStringArray) -> v
 		return
 
 	if selection.has_method(&"_set_selected_units"):
-		selection.call(&"_set_selected_units", [hero, soldier_a, soldier_b])
+		var selected: Array[Unit] = [hero, soldier_a, soldier_b]
+		selection._set_selected_units(selected)
 	var before_count: int = 0
 	if "selected_units" in selection:
 		before_count = (selection.selected_units as Array).size()
 
 	HeroAbilityTargetingController.begin_targeting(hero, HeroAbilityProgression.ABILITY_E)
 	_expect(failures, "targeting armed", HeroAbilityTargetingController.is_targeting())
-	## Invalid world click — targeting stays armed (selection ownership proven by SelectionManager fix).
-	HeroAbilityTargetingController.try_handle_left_click(Vector2(12, 12))
+	## Drive SelectionManager press+release so release cannot leak into selection.
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(12, 12)
+	selection._unhandled_input(press)
 	_expect(failures, "invalid click keeps targeting", HeroAbilityTargetingController.is_targeting())
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = Vector2(12, 12)
+	selection._unhandled_input(release)
 	if before_count > 0 and "selected_units" in selection:
 		_expect(
 			failures,
@@ -200,8 +210,10 @@ func _verify_ability_targeting_keeps_selection(failures: PackedStringArray) -> v
 
 
 func _verify_space_focus_camera(failures: PackedStringArray) -> void:
+	Input.action_release(&"focus_hero")
 	var camera := Camera3D.new()
 	camera.set_script(load("res://scripts/systems/camera_controller.gd"))
+	camera.edge_margin_pixels = 0.0
 	add_child(camera)
 	await get_tree().process_frame
 	camera.global_position = Vector3(50, 20, 50)
@@ -215,21 +227,47 @@ func _verify_space_focus_camera(failures: PackedStringArray) -> void:
 		hero.add_to_group(&"heroes")
 	HeroProgressionStore.register_living_hero(hero)
 
-	if camera.has_method(&"focus_on_world_position"):
-		camera.call(&"focus_on_world_position", hero.global_position)
+	## Hold-follow: action pressed + _process must track hero across moves.
+	Input.action_press(&"focus_hero")
+	camera._process(0.016)
 	_expect(
 		failures,
-		"space focus centers X",
+		"space hold centers X",
 		is_equal_approx(camera.global_position.x, hero.global_position.x)
 	)
 	_expect(
 		failures,
-		"space focus centers Z",
+		"space hold centers Z",
 		is_equal_approx(camera.global_position.z, hero.global_position.z)
+	)
+	hero.global_position = Vector3(-4, 0, 11)
+	camera._process(0.016)
+	_expect(
+		failures,
+		"space hold follows moved hero X",
+		is_equal_approx(camera.global_position.x, hero.global_position.x)
+	)
+	_expect(
+		failures,
+		"space hold follows moved hero Z",
+		is_equal_approx(camera.global_position.z, hero.global_position.z)
+	)
+	Input.action_release(&"focus_hero")
+	_expect(failures, "space action released", not Input.is_action_pressed(&"focus_hero"))
+	hero.global_position = Vector3(9, 0, -2)
+	camera._process(0.016)
+	_expect(
+		failures,
+		"space release stops follow",
+		not (
+			is_equal_approx(camera.global_position.x, hero.global_position.x)
+			and is_equal_approx(camera.global_position.z, hero.global_position.z)
+		)
 	)
 
 	hero.queue_free()
 	camera.queue_free()
+	HeroProgressionStore.clear()
 	await get_tree().process_frame
 
 

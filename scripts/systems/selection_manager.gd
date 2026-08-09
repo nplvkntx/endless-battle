@@ -274,24 +274,44 @@ var _drag_start: Vector2 = Vector2.ZERO
 var _is_dragging: bool = false
 var _last_clicked_unit_handle: EntityHandle = EntityHandle.empty()
 var _last_click_time_msec: int = -1
+## Latches left-mouse ownership across a targeting click even after a valid cast clears targeting.
+var _ability_owns_left_mouse: bool = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Ability targeting owns world left-clicks while armed (valid or invalid).
-	# Invalid target: stay armed, keep selection unchanged. Valid: cast, keep selection.
-	if HeroAbilityTargetingController != null and HeroAbilityTargetingController.is_targeting():
-		if event is InputEventMouseButton:
-			var mouse_button := event as InputEventMouseButton
-			if mouse_button.pressed:
-				match mouse_button.button_index:
-					MOUSE_BUTTON_LEFT:
+	# Ability targeting owns ALL left mouse (press + release + drag) while armed.
+	# Valid casts clear targeting on press — latch still consumes the matching release so
+	# SelectionManager cannot change selection on the same click sequence.
+	if event is InputEventMouseButton:
+		var mouse_button := event as InputEventMouseButton
+		if mouse_button.button_index == MOUSE_BUTTON_LEFT:
+			var targeting_active: bool = (
+				HeroAbilityTargetingController != null
+				and HeroAbilityTargetingController.is_targeting()
+			)
+			if targeting_active or _ability_owns_left_mouse:
+				if mouse_button.pressed:
+					if targeting_active:
 						HeroAbilityTargetingController.try_handle_left_click(mouse_button.position)
-						get_viewport().set_input_as_handled()
-						return
-					MOUSE_BUTTON_RIGHT:
-						if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
-							get_viewport().set_input_as_handled()
-							return
+					_ability_owns_left_mouse = true
+					_abort_left_selection_gesture()
+				else:
+					_ability_owns_left_mouse = false
+					_abort_left_selection_gesture()
+				get_viewport().set_input_as_handled()
+				return
+		elif mouse_button.button_index == MOUSE_BUTTON_RIGHT:
+			if (
+				mouse_button.pressed
+				and HeroAbilityTargetingController != null
+				and HeroAbilityTargetingController.is_targeting()
+			):
+				## Cancel targeting only — do not fall through to army move on this click.
+				if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
+					get_viewport().set_input_as_handled()
+					return
+
+	# Space/focus_hero hold-follow lives in CameraController._process (not one-shot here).
 
 	# Avoid scanning large selections on every mouse-move frame.
 	if event is InputEventKey:
@@ -306,14 +326,6 @@ func _unhandled_input(event: InputEvent) -> void:
 					if _dispatch_hold_position_command():
 						get_viewport().set_input_as_handled()
 						return
-				KEY_SPACE:
-					if _focus_camera_on_player_hero():
-						get_viewport().set_input_as_handled()
-						return
-	if event.is_action_pressed(&"focus_hero"):
-		if _focus_camera_on_player_hero():
-			get_viewport().set_input_as_handled()
-			return
 	if event is InputEventMouseButton:
 		_purge_invalid_selection()
 		var mouse_button := event as InputEventMouseButton
@@ -327,7 +339,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				if mouse_button.pressed:
 					_handle_right_click(mouse_button.position)
 	elif event is InputEventMouseMotion and _left_button_down:
+		if _ability_owns_left_mouse or (
+			HeroAbilityTargetingController != null
+			and HeroAbilityTargetingController.is_targeting()
+		):
+			get_viewport().set_input_as_handled()
+			return
 		_on_mouse_motion((event as InputEventMouseMotion).position)
+
+
+func _abort_left_selection_gesture() -> void:
+	_left_button_down = false
+	if _is_dragging:
+		var selection_box := _get_selection_box()
+		if selection_box != null:
+			selection_box.end_drag()
+		_is_dragging = false
+
 
 
 func _on_left_press(screen_position: Vector2) -> void:
