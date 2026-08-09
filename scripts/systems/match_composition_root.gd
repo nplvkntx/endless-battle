@@ -29,6 +29,7 @@ func _ready() -> void:
 	_ensure_simple_wc3_ai()
 	_declare_military_command_authority()
 	_bind_ai_runtime()
+	_ensure_test_checkpoint()
 
 
 func _exit_tree() -> void:
@@ -68,6 +69,16 @@ func is_v2_military_active() -> bool:
 
 func is_old_military_runtime_active() -> bool:
 	return false
+
+
+func _ensure_test_checkpoint() -> void:
+	if not OS.is_debug_build():
+		return
+	if get_node_or_null("AiTestCheckpoint") != null:
+		return
+	var checkpoint := AiTestCheckpoint.new()
+	checkpoint.name = "AiTestCheckpoint"
+	add_child(checkpoint)
 
 
 func _ensure_simple_wc3_ai() -> void:

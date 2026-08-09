@@ -25,6 +25,7 @@ func _ready() -> void:
 	await _test_exclusive_authority(failures)
 	await _test_opening_sequence(failures)
 	await _test_match_systems_scene_wiring(failures)
+	await _test_checkpoint_roundtrip(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -193,13 +194,27 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 		more_pikes.append(pike2)
 
 	simple._process(0.5)
-	_expect(failures, "Hero+5 → TRAVEL", simple.get_state() == SimpleWc3AI.State.TRAVEL)
-	_expect(failures, "custom move issued", simple.last_move_handled)
+	_expect(failures, "Hero+5 → ASSEMBLE (wait)", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "assembly position chosen", simple.assembly_position != Vector3.ZERO)
 	_expect(
 		failures,
 		"old military strategic orders still 0",
 		EnemyArmyCommand.get_legacy_military_strategic_orders_issued() == 0
 	)
+
+	## Gather at assembly before creeping — do not leave AFK at Barracks.
+	var assemble_at: Vector3 = simple.assembly_position
+	hero.global_position = assemble_at + Vector3(0.0, 0.5, 0.0)
+	for pike_ref: Variant in few_pikes:
+		if NodeSafety.is_alive_node(pike_ref):
+			(pike_ref as Spearman).global_position = assemble_at + Vector3(-1.0, 0.5, 0.5)
+	for pike_ref: Variant in more_pikes:
+		if NodeSafety.is_alive_node(pike_ref):
+			(pike_ref as Spearman).global_position = assemble_at + Vector3(1.0, 0.5, 0.5)
+
+	simple._process(0.5)
+	_expect(failures, "assembled → TRAVEL", simple.get_state() == SimpleWc3AI.State.TRAVEL)
+	_expect(failures, "custom move issued", simple.last_move_handled)
 
 	hero.global_position = Vector3(18.0, 0.5, 29.0)
 	for pike_ref: Variant in few_pikes:
@@ -316,3 +331,56 @@ func _test_match_systems_scene_wiring(failures: PackedStringArray) -> void:
 
 	systems.queue_free()
 	await get_tree().process_frame
+
+
+func _test_checkpoint_roundtrip(failures: PackedStringArray) -> void:
+	print("verify: SAVE/LOAD TEST checkpoint roundtrip")
+	var checkpoint := AiTestCheckpoint.new()
+	checkpoint.name = "AiTestCheckpointVerify"
+	add_child(checkpoint)
+	await get_tree().process_frame
+
+	var simple := SimpleWc3AI.new()
+	simple.name = "SimpleWc3AI"
+	add_child(simple)
+	await get_tree().process_frame
+
+	simple.assembly_position = Vector3(12.0, 0.0, 14.0)
+	simple._state = SimpleWc3AI.State.ASSEMBLE
+	simple._camp_name = "MediumCampA"
+	simple._camp_destination = Vector3(40.0, 0.0, 40.0)
+	simple._cleared_camp_names["OldCamp"] = true
+	simple.strategic_orders_issued = 7
+
+	ResourceManager.gold = 333
+	EnemyResourceManager.gold = 444
+
+	_expect(failures, "SAVE TEST writes file", checkpoint.save_checkpoint())
+	_expect(failures, "checkpoint file exists", FileAccess.file_exists(AiTestCheckpoint.CHECKPOINT_PATH))
+
+	simple.assembly_position = Vector3.ZERO
+	simple._state = SimpleWc3AI.State.BUILD_FARM
+	simple._camp_name = "-"
+	simple._camp_destination = Vector3.ZERO
+	simple._cleared_camp_names.clear()
+	simple.strategic_orders_issued = 0
+	ResourceManager.gold = 1
+	EnemyResourceManager.gold = 1
+
+	await checkpoint.load_checkpoint()
+	_expect(failures, "LOAD TEST restores AI state ASSEMBLE", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "LOAD TEST restores assembly", simple.assembly_position == Vector3(12.0, 0.0, 14.0))
+	_expect(failures, "LOAD TEST restores camp name", simple.get_camp_name() == "MediumCampA")
+	_expect(failures, "LOAD TEST restores cleared camps", simple._cleared_camp_names.has("OldCamp"))
+	_expect(failures, "LOAD TEST restores player gold", ResourceManager.gold == 333)
+	_expect(failures, "LOAD TEST restores enemy gold", EnemyResourceManager.gold == 444)
+
+	## Authority stays SimpleWc3AI — no old directors created by load.
+	_expect(failures, "no MilitaryDirectorV2 after load", get_node_or_null("MilitaryDirectorV2") == null)
+	_expect(failures, "no EnemyWaveManager after load", get_node_or_null("EnemyWaveManager") == null)
+
+	simple.queue_free()
+	checkpoint.queue_free()
+	await get_tree().process_frame
+	ResourceManager.reset_to_starting_values()
+	EnemyResourceManager.reset_to_starting_values()
