@@ -24,6 +24,8 @@ func _ready() -> void:
 
 	await _test_exclusive_authority(failures)
 	await _test_full_loop(failures)
+	await _test_early_creep_gate(failures)
+	await _test_hero_death_assemble_and_retrain(failures)
 	await _test_match_systems_scene_wiring(failures)
 
 	var report: String
@@ -249,11 +251,13 @@ func _test_full_loop(failures: PackedStringArray) -> void:
 		or simple.get_state() == SimpleWc3AI.State.CREEP
 	)
 
-	## 6) Assemble when weak — kill hero.
+	## 6) Assemble when weak — kill hero. Must stay ASSEMBLE (not OPENING).
 	hero.queue_free()
 	await get_tree().process_frame
 	simple._process(1.0)
-	_expect(failures, "6 assemble occurs when weak", simple.get_state() == SimpleWc3AI.State.ASSEMBLE or simple.get_state() == SimpleWc3AI.State.OPENING)
+	_expect(failures, "6 assemble occurs when hero dies", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "6 opening stays complete after hero death", simple.is_opening_complete())
+	_expect(failures, "6 does not return to OPENING", simple.get_state() != SimpleWc3AI.State.OPENING)
 
 	for node_ref: Variant in [farm, altar, barracks, enemy_cc, player_cc, camp_a]:
 		if NodeSafety.is_alive_node(node_ref):
@@ -263,6 +267,274 @@ func _test_full_loop(failures: PackedStringArray) -> void:
 			(pike_ref as Node).queue_free()
 	simple.queue_free()
 	await get_tree().process_frame
+
+
+func _test_early_creep_gate(failures: PackedStringArray) -> void:
+	print("verify: early creep gate (no pre-creep ATTACK)")
+	CreepCampSafety.reset_match_state()
+	PlayerRouteNavigation.clear_all()
+	HeroProgressionStore.clear()
+
+	var simple := SimpleWc3AI.new()
+	simple.name = "SimpleWc3AI"
+	add_child(simple)
+	await get_tree().process_frame
+
+	var enemy_cc: Building = CC_SCENE.instantiate() as Building
+	enemy_cc.name = "EnemyCC_Gate"
+	enemy_cc.team_id = TeamVisuals.ENEMY_TEAM_ID
+	add_child(enemy_cc)
+	enemy_cc.global_position = Vector3(20.0, 1.0, 20.0)
+	enemy_cc.set_completed()
+	enemy_cc.add_to_group(&"enemy_command_center")
+	enemy_cc.add_to_group(&"buildings")
+
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(hero)
+	hero.global_position = Vector3(18.0, 0.5, 18.0)
+	hero.team_id = TeamVisuals.ENEMY_TEAM_ID
+	hero.add_to_group(&"enemy_combat_units")
+	hero.add_to_group(&"heroes")
+	hero.level = 1
+
+	var pikes: Array = []
+	for i: int in 5:
+		var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+		add_child(pike)
+		pike.global_position = Vector3(17.0 + float(i) * 0.8, 0.5, 17.0)
+		pike.team_id = TeamVisuals.ENEMY_TEAM_ID
+		pike.add_to_group(&"enemy_combat_units")
+		pikes.append(pike)
+
+	## Tiny player force so AI power >> player power.
+	var player_hero: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(player_hero)
+	player_hero.global_position = Vector3(-50.0, 0.5, -50.0)
+	player_hero.team_id = TeamVisuals.PLAYER_TEAM_ID
+	player_hero.add_to_group(&"units")
+	player_hero.add_to_group(&"heroes")
+
+	var camp_a := CreepCamp.new()
+	camp_a.name = "MediumCampGateA"
+	add_child(camp_a)
+	camp_a.global_position = Vector3(18.0, 0.0, 30.0)
+	camp_a.add_to_group(&"creep_camps")
+	var creep_a: NeutralCreep = CREEP_SCENE.instantiate() as NeutralCreep
+	camp_a.add_child(creep_a)
+	creep_a.global_position = Vector3(18.0, 0.5, 30.0)
+	creep_a.add_to_group(&"neutral_creeps")
+
+	var camp_b := CreepCamp.new()
+	camp_b.name = "MediumCampGateB"
+	add_child(camp_b)
+	camp_b.global_position = Vector3(22.0, 0.0, 34.0)
+	camp_b.add_to_group(&"creep_camps")
+	var creep_b: NeutralCreep = CREEP_SCENE.instantiate() as NeutralCreep
+	camp_b.add_child(creep_b)
+	creep_b.global_position = Vector3(22.0, 0.5, 34.0)
+	creep_b.add_to_group(&"neutral_creeps")
+	await get_tree().process_frame
+
+	## Force opening complete + assembled force, camps_cleared=0.
+	simple._opening_complete = true
+	simple._observe_army()
+	simple._update_power_estimates()
+	simple._ensure_assembly_position()
+	simple.assembly_position = Vector3(16.0, 0.0, 16.0)
+	hero.global_position = simple.assembly_position + Vector3(0.0, 0.5, 0.0)
+	for pike_ref: Variant in pikes:
+		(pike_ref as Spearman).global_position = simple.assembly_position + Vector3(-1.0, 0.5, 0.5)
+	simple._state = SimpleWc3AI.State.ASSEMBLE
+	simple._set_objective(&"rally", 0, "Rally", simple.assembly_position)
+
+	simple._process(1.0)
+	_expect(failures, "CASE1 camps=0 → CREEP not ATTACK", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "CASE1 camps still 0", simple.get_camps_cleared() == 0)
+	_expect(failures, "CASE1 early creep incomplete", not simple.is_early_creep_complete())
+	_expect(failures, "CASE1 AI power still >> player", simple.last_ai_power > simple.last_player_power * 1.25)
+
+	## Clear camp A → camps_cleared=1, still must CREEP (CASE 2).
+	if NodeSafety.is_alive_node(creep_a):
+		creep_a.queue_free()
+	await get_tree().process_frame
+	simple._process(1.0)
+	_expect(failures, "CASE2 camps=1", simple.get_camps_cleared() == 1)
+	_expect(failures, "CASE2 still CREEP not ATTACK", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "CASE2 early creep still incomplete", not simple.is_early_creep_complete())
+
+	## Clear camp B → camps_cleared=2, ATTACK may be selected (CASE 3).
+	if NodeSafety.is_alive_node(creep_b):
+		creep_b.queue_free()
+	await get_tree().process_frame
+	simple._process(1.0)
+	_expect(failures, "CASE3 camps=2", simple.get_camps_cleared() == 2)
+	_expect(failures, "CASE3 early creep complete", simple.is_early_creep_complete())
+	_expect(failures, "CASE3 ATTACK eligible/selected", simple.get_state() == SimpleWc3AI.State.ATTACK)
+
+	for node_ref: Variant in [enemy_cc, hero, player_hero, camp_a, camp_b] + pikes:
+		if NodeSafety.is_alive_node(node_ref):
+			(node_ref as Node).queue_free()
+	simple.queue_free()
+	await get_tree().process_frame
+
+
+func _test_hero_death_assemble_and_retrain(failures: PackedStringArray) -> void:
+	print("verify: hero death → ASSEMBLE + retrain priority (twice)")
+	CreepCampSafety.reset_match_state()
+	PlayerRouteNavigation.clear_all()
+	HeroProgressionStore.clear()
+	EnemyResourceManager.reset_to_starting_values()
+	EnemyResourceManager.add_gold(2000)
+	EnemyResourceManager.food_max = 99
+	EnemyResourceManager.food_current = 0
+
+	var simple := SimpleWc3AI.new()
+	simple.name = "SimpleWc3AI"
+	add_child(simple)
+	await get_tree().process_frame
+
+	var enemy_cc: Building = CC_SCENE.instantiate() as Building
+	enemy_cc.name = "EnemyCC_Retrain"
+	enemy_cc.team_id = TeamVisuals.ENEMY_TEAM_ID
+	add_child(enemy_cc)
+	enemy_cc.global_position = Vector3(20.0, 1.0, 20.0)
+	enemy_cc.set_completed()
+	enemy_cc.add_to_group(&"enemy_command_center")
+	enemy_cc.add_to_group(&"buildings")
+
+	var altar: HeroAltar = ALTAR_SCENE.instantiate() as HeroAltar
+	altar.name = "EnemyAltar_Retrain"
+	altar.team_id = TeamVisuals.ENEMY_TEAM_ID
+	add_child(altar)
+	altar.global_position = Vector3(24.0, 1.0, 20.0)
+	altar.set_completed()
+	altar.add_to_group(&"enemy_command_center")
+	altar.add_to_group(&"buildings")
+
+	var barracks: Barracks = BARRACKS_SCENE.instantiate() as Barracks
+	barracks.name = "EnemyBarracks_Retrain"
+	barracks.team_id = TeamVisuals.ENEMY_TEAM_ID
+	add_child(barracks)
+	barracks.global_position = Vector3(26.0, 1.0, 20.0)
+	barracks.set_completed()
+	barracks.add_to_group(&"enemy_command_center")
+	barracks.add_to_group(&"buildings")
+
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(hero)
+	hero.global_position = Vector3(30.0, 0.5, 40.0)
+	hero.team_id = TeamVisuals.ENEMY_TEAM_ID
+	hero.add_to_group(&"enemy_combat_units")
+	hero.add_to_group(&"enemies")
+	hero.add_to_group(&"heroes")
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+
+	var pikes: Array = []
+	for i: int in 5:
+		var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+		add_child(pike)
+		pike.global_position = Vector3(31.0 + float(i) * 0.8, 0.5, 40.0)
+		pike.team_id = TeamVisuals.ENEMY_TEAM_ID
+		pike.add_to_group(&"enemy_combat_units")
+		pike.add_to_group(&"enemies")
+		pikes.append(pike)
+
+	simple._opening_complete = true
+	simple._camps_cleared = 2
+	simple._creep_phase_complete = true
+	simple._observe_army()
+	simple._update_power_estimates()
+	simple._ensure_assembly_position()
+	simple._state = SimpleWc3AI.State.ATTACK
+	simple._set_objective(&"attack", 0, "PlayerHero", Vector3(-40.0, 0.0, -40.0))
+	## Mark units as already ordered on the attack objective.
+	for unit_ref: Variant in [hero] + pikes:
+		simple._ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
+
+	var gold_before_death: int = EnemyResourceManager.gold
+
+	## CASE 4 — kill hero during ATTACK → ASSEMBLE + one rally order.
+	hero.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	simple._process(1.0)
+	_expect(failures, "CASE4 state ASSEMBLE after hero death", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "CASE4 not OPENING", simple.get_state() != SimpleWc3AI.State.OPENING)
+	_expect(failures, "CASE4 rally objective", simple._objective_kind == &"rally")
+	_expect(failures, "CASE4 rally move issued", simple.last_move_handled)
+	_expect(failures, "CASE4 opening still complete", simple.is_opening_complete())
+
+	var orders_after_rally: int = simple.strategic_orders_issued
+	var objective_kind_after: StringName = simple._objective_kind
+	simple._process(1.0)
+	_expect(
+		failures,
+		"CASE4 assemble keeps rally without re-OPENING",
+		simple.get_state() == SimpleWc3AI.State.ASSEMBLE
+		and simple._objective_kind == objective_kind_after
+		and simple.strategic_orders_issued <= orders_after_rally + 1
+	)
+
+	## CASE 5 — hero queued again (first retrain).
+	_expect(failures, "CASE5 hero queued after first death", simple.last_hero_queued or altar.is_training_hero())
+	_expect(failures, "CASE5 altar training", altar.is_training_hero())
+
+	## CASE 6 — hero missing + exact hero gold: must queue Hero, not spend on Pikeman.
+	if altar.is_training_hero():
+		altar._hero_training_session += 1
+		altar._is_training = false
+		altar._training_for_enemy = false
+		EnemyResourceManager.add_gold(HeroAltar.TRAIN_GOLD_COST)
+		EnemyResourceManager.release_food_used(HeroAltar.TRAIN_FOOD_COST)
+
+	EnemyResourceManager.gold = HeroAltar.TRAIN_GOLD_COST
+	EnemyResourceManager.food_current = 0
+	EnemyResourceManager.food_max = 99
+	var spearman_queue_before: int = barracks.get_spearman_queue_count()
+	simple.last_hero_alive = false
+	simple._try_train_pikeman()
+	_expect(failures, "CASE6 hero queued instead of pikeman", altar.is_training_hero())
+	_expect(
+		failures,
+		"CASE6 gold spent on hero cost",
+		EnemyResourceManager.gold == 0
+	)
+	_expect(
+		failures,
+		"CASE6 no new pikeman queued",
+		barracks.get_spearman_queue_count() == spearman_queue_before
+	)
+
+	## CASE 5 second time — spawn hero, kill again, prove retrain is not one-shot.
+	altar._hero_training_session += 1
+	altar._is_training = false
+	var spawned: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(spawned)
+	spawned.global_position = Vector3(24.0, 0.5, 17.0)
+	spawned.team_id = TeamVisuals.ENEMY_TEAM_ID
+	spawned.add_to_group(&"enemy_combat_units")
+	spawned.add_to_group(&"enemies")
+	HeroProgressionStore.register_living_hero(spawned)
+	simple._observe_army()
+	_expect(failures, "CASE5b living hero after first retrain spawn", simple.last_hero_alive)
+
+	spawned.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	HeroProgressionStore.clear_living_hero(null, true)
+	EnemyResourceManager.add_gold(500)
+	simple._observe_army()
+	simple._try_ensure_hero()
+	_expect(failures, "CASE5c second death queues hero again", altar.is_training_hero())
+	_expect(failures, "CASE5c not one-shot", altar.is_training_hero() and not simple.last_hero_alive)
+
+	for node_ref: Variant in [enemy_cc, altar, barracks] + pikes:
+		if NodeSafety.is_alive_node(node_ref):
+			(node_ref as Node).queue_free()
+	simple.queue_free()
+	await get_tree().process_frame
+	_expect(failures, "CASE4 had gold before death", gold_before_death >= 0)
 
 
 func _test_match_systems_scene_wiring(failures: PackedStringArray) -> void:

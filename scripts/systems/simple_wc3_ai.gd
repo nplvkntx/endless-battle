@@ -21,8 +21,9 @@ const ASSEMBLY_RADIUS := 12.0
 const DEFEND_RADIUS := 40.0
 const ATTACK_NEARBY_RADIUS := 36.0
 const ATTACK_POWER_RATIO := 1.25
+## Early creep gate: no normal ATTACK until this is satisfied.
+const EARLY_CREEP_CAMPS := 2
 const CREEP_STOP_HERO_LEVEL := 3
-const CREEP_STOP_CAMPS := 3
 const ENEMY_COMBAT_GROUP := &"enemy_combat_units"
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
@@ -50,8 +51,11 @@ var _cleared_camp_ids: Dictionary = {}
 var _cleared_camp_names: Dictionary = {}
 var _camps_cleared: int = 0
 var _creep_phase_complete: bool = false
+## True after the first OPENING → ASSEMBLE transition. Hero death must not re-enter OPENING.
+var _opening_complete: bool = false
 
 var last_hero_alive: bool = false
+var last_hero_queued: bool = false
 var last_pikeman_count: int = 0
 var last_army_count: int = 0
 var last_hero_level: int = 0
@@ -108,6 +112,14 @@ func get_camps_cleared() -> int:
 	return _camps_cleared
 
 
+func is_early_creep_complete() -> bool:
+	return _is_early_creep_complete()
+
+
+func is_opening_complete() -> bool:
+	return _opening_complete
+
+
 ## Dev test only: mark camps cleared and start normal creep selection.
 func init_test_after_camps(cleared_camp_names: Array) -> void:
 	_ordered_unit_ids.clear()
@@ -115,6 +127,7 @@ func init_test_after_camps(cleared_camp_names: Array) -> void:
 	_cleared_camp_names.clear()
 	_camps_cleared = 0
 	_creep_phase_complete = false
+	_opening_complete = true
 	_clear_objective()
 	for camp_name_ref: Variant in cleared_camp_names:
 		_cleared_camp_names[String(camp_name_ref)] = true
@@ -137,6 +150,7 @@ func _process(delta: float) -> void:
 	_tick_timer = 0.0
 
 	_observe_army()
+	_refresh_hero_queued()
 	_maintain_workers()
 	_update_power_estimates()
 
@@ -161,6 +175,7 @@ func _process(delta: float) -> void:
 		State.DEFEND:
 			_tick_defend()
 
+	_refresh_hero_queued()
 	_update_debug_label()
 	if _authority_log_timer >= AUTHORITY_LOG_INTERVAL_SECONDS:
 		_authority_log_timer = 0.0
@@ -170,7 +185,11 @@ func _process(delta: float) -> void:
 # --- OPENING -----------------------------------------------------------------
 
 func _tick_opening() -> void:
-	_try_train_pikeman_if_ready()
+	## After the initial opening finishes once, never re-enter this build path.
+	if _opening_complete:
+		_state = State.ASSEMBLE
+		_begin_assemble_missing_hero()
+		return
 
 	if not _has_completed_farm():
 		var build: EnemyBuildManager = _resolve_build_manager()
@@ -190,15 +209,14 @@ func _tick_opening() -> void:
 			strategic_orders_issued += 1
 		return
 
+	## Hero before Pikemen — do not spend opening gold/food on endless spears first.
 	if not last_hero_alive:
-		var altar: HeroAltar = _find_completed_hero_altar()
-		if altar != null and not altar.is_training_hero():
-			if altar.try_train_enemy_hero():
-				strategic_orders_issued += 1
+		_try_ensure_hero()
 		return
 
 	_ensure_assembly_position()
 	if last_pikeman_count >= MIN_PIKEMEN:
+		_opening_complete = true
 		_state = State.ASSEMBLE
 		_try_train_pikeman()
 		return
@@ -212,12 +230,14 @@ func _tick_opening() -> void:
 # --- ASSEMBLE ----------------------------------------------------------------
 
 func _tick_assemble() -> void:
-	_try_train_pikeman()
-
 	if not last_hero_alive:
-		_state = State.OPENING
-		_clear_objective()
-		return
+		_try_ensure_hero()
+		_begin_assemble_missing_hero()
+		## Still missing — wait at rally; do not fall back into OPENING.
+		if not last_hero_alive:
+			return
+
+	_try_train_pikeman()
 
 	if last_pikeman_count < MIN_PIKEMEN:
 		## Stay assembling while rebuilding force; opening already finished buildings.
@@ -239,11 +259,28 @@ func _tick_assemble() -> void:
 		_reevaluate()
 
 
+## Hero died / missing: one ASSEMBLE rally to base. Do not refresh every tick.
+func _begin_assemble_missing_hero() -> void:
+	_state = State.ASSEMBLE
+	_ensure_assembly_position()
+	if assembly_position == Vector3.ZERO:
+		_clear_objective()
+		return
+	## One-shot only — keep existing rally objective if already issued.
+	if _has_active_objective() and _objective_kind == &"rally":
+		return
+	_set_objective(&"rally", 0, "Rally", assembly_position)
+	_issue_army_move(_collect_main_army(), assembly_position, &"move")
+
+
 # --- CREEP -------------------------------------------------------------------
 
 func _tick_creep() -> void:
 	_try_train_pikeman()
-	var army: Array = _collect_main_army()
+	if not last_hero_alive:
+		_try_ensure_hero()
+		_begin_assemble_missing_hero()
+		return
 	if _is_army_too_weak():
 		_clear_objective()
 		_state = State.ASSEMBLE
@@ -334,11 +371,14 @@ func _enter_post_creep() -> void:
 
 
 func _should_stop_creeping() -> bool:
+	## Stop the early creep phase when the gate is satisfied — never because attack looks favorable.
+	return _is_early_creep_complete()
+
+
+func _is_early_creep_complete() -> bool:
+	if _camps_cleared >= EARLY_CREEP_CAMPS:
+		return true
 	if last_hero_level >= CREEP_STOP_HERO_LEVEL:
-		return true
-	if _camps_cleared >= CREEP_STOP_CAMPS:
-		return true
-	if _should_attack():
 		return true
 	return false
 
@@ -347,6 +387,10 @@ func _should_stop_creeping() -> bool:
 
 func _tick_attack() -> void:
 	_try_train_pikeman()
+	if not last_hero_alive:
+		_try_ensure_hero()
+		_begin_assemble_missing_hero()
+		return
 	if _is_army_too_weak():
 		_clear_objective()
 		_state = State.ASSEMBLE
@@ -388,6 +432,12 @@ func _begin_attack() -> void:
 
 func _tick_defend() -> void:
 	_try_train_pikeman()
+	if not last_hero_alive:
+		_try_ensure_hero()
+		## Threat still handled by defend interrupt when present; otherwise assemble.
+		if not _has_base_threat():
+			_begin_assemble_missing_hero()
+			return
 	if _is_army_too_weak():
 		## Still defend with whoever remains if threat exists; otherwise assemble.
 		if not _has_base_threat():
@@ -437,12 +487,22 @@ func _reevaluate() -> void:
 	_update_power_estimates()
 	var army: Array = _collect_main_army()
 
+	if not last_hero_alive:
+		_try_ensure_hero()
+		_begin_assemble_missing_hero()
+		return
+
 	if _is_army_too_weak() or not _has_minimum_force(army):
 		_state = State.ASSEMBLE
 		_ensure_assembly_position()
 		if assembly_position != Vector3.ZERO:
 			_set_objective(&"rally", 0, "Rally", assembly_position)
 			_issue_army_move(army, assembly_position, &"move")
+		return
+
+	## Before early creep is done: CREEP only (DEFEND already interrupts above).
+	if not _is_early_creep_complete():
+		_begin_creep()
 		return
 
 	if _should_attack():
@@ -470,6 +530,9 @@ func _reevaluate() -> void:
 
 func _should_attack() -> bool:
 	if not last_hero_alive or last_pikeman_count < MIN_PIKEMEN:
+		return false
+	## BUG FIX: never allow normal offensive ATTACK before early creep gate.
+	if not _is_early_creep_complete():
 		return false
 	if last_ai_power <= 0.0:
 		return false
@@ -1127,6 +1190,43 @@ func _is_near_assembly(world: Vector3) -> bool:
 
 # --- Production / economy ----------------------------------------------------
 
+func _refresh_hero_queued() -> void:
+	var altar: HeroAltar = _find_completed_hero_altar()
+	last_hero_queued = altar != null and altar.is_training_hero()
+
+
+## One invariant: no living enemy Hero + complete altar + can pay + not queued → queue Hero.
+func _try_ensure_hero() -> bool:
+	if last_hero_alive:
+		_refresh_hero_queued()
+		return false
+	var altar: HeroAltar = _find_completed_hero_altar()
+	if altar == null:
+		last_hero_queued = false
+		return false
+	if altar.is_training_hero():
+		last_hero_queued = true
+		return true
+	if altar.try_train_enemy_hero():
+		strategic_orders_issued += 1
+		last_hero_queued = true
+		return true
+	last_hero_queued = false
+	return false
+
+
+func _hero_training_blocks_pikemen() -> bool:
+	## While Hero is missing and not yet queued, do not spend gold/food on more Pikemen.
+	if last_hero_alive:
+		return false
+	var altar: HeroAltar = _find_completed_hero_altar()
+	if altar == null:
+		return false
+	if altar.is_training_hero():
+		return false
+	return true
+
+
 func _try_train_pikeman_if_ready() -> void:
 	if not _has_completed_barracks():
 		return
@@ -1134,6 +1234,9 @@ func _try_train_pikeman_if_ready() -> void:
 
 
 func _try_train_pikeman() -> void:
+	if _hero_training_blocks_pikemen():
+		_try_ensure_hero()
+		return
 	var barracks: Barracks = _find_completed_barracks()
 	if barracks == null:
 		return
@@ -1342,6 +1445,7 @@ func _ensure_debug_label() -> void:
 func _update_debug_label() -> void:
 	if _debug_label == null or not is_instance_valid(_debug_label):
 		return
+	var early_n: int = mini(_camps_cleared, EARLY_CREEP_CAMPS)
 	_debug_label.text = (
 		"WC3 SIMPLE AI\n"
 		+ "State: %s\n" % get_state_label()
@@ -1349,6 +1453,8 @@ func _update_debug_label() -> void:
 		+ "Army: %d\n" % last_army_count
 		+ "Pikemen: %d\n" % last_pikeman_count
 		+ "Camps cleared: %d\n" % _camps_cleared
+		+ "Early creep: %d/%d\n" % [early_n, EARLY_CREEP_CAMPS]
+		+ "Hero queued: %s\n" % ("YES" if last_hero_queued else "NO")
 		+ "Target:\n%s\n" % _objective_name
 		+ "AI Power: %.0f\n" % last_ai_power
 		+ "Player Power: %.0f" % last_player_power
