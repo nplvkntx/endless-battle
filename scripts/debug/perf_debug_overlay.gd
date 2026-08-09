@@ -116,13 +116,37 @@ func _update_label() -> void:
 		"Debug (F3)",
 		"FPS: %d  avg %d  low %d  %.1fms"
 		% [int(round(fps)), int(round(avg_fps)), int(round(low_fps)), frame_time_ms],
-		"Units %d | P mil %d | E mil %d | workers %d | creeps %d"
+		"phys %.1fms  script %.1fms"
+		% [
+			Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		],
+		"Units %d | moving %d | P mil %d | E mil %d | workers %d | creeps %d"
 		% [
 			int(unit_stats.get("total_units", 0)),
+			int(unit_stats.get("moving_units", 0)),
 			int(unit_stats.get("player_military", 0)),
 			int(unit_stats.get("enemy_military", 0)),
 			int(unit_stats.get("workers", 0)),
 			int(unit_stats.get("creeps", 0)),
+		],
+		"neighQ/s %.0f  neighN/s %.0f  sep/s %.0f"
+		% [
+			PerfCounters.get_rate(PerfCounters.KEY_UNIT_NEIGHBOR_QUERIES),
+			PerfCounters.get_rate(PerfCounters.KEY_NEIGHBORS_PROCESSED),
+			PerfCounters.get_rate(PerfCounters.KEY_SEPARATION_UPDATES),
+		],
+		"repath/s %.0f  route/s %.0f  orders/s %.0f  tgt/s %.0f"
+		% [
+			PerfCounters.get_rate(PerfCounters.KEY_REPATH_REQUESTS),
+			PerfCounters.get_rate(PerfCounters.KEY_STRATEGIC_ROUTE_REQUESTS),
+			PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),
+			PerfCounters.get_rate(PerfCounters.KEY_TARGET_SEARCHES),
+		],
+		"stuckChk/s %.0f  stuckRec/s %.0f"
+		% [
+			PerfCounters.get_rate(PerfCounters.KEY_STUCK_CHECKS),
+			PerfCounters.get_rate(PerfCounters.KEY_STUCK_RECOVERIES),
 		],
 		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
 		"",
@@ -163,9 +187,20 @@ func _collect_unit_stats(tree: SceneTree) -> Dictionary:
 	var workers: int = player_workers.size() + enemy_workers.size()
 	var player_military: int = maxi(0, player_units.size() - player_workers.size())
 	var enemy_military: int = maxi(0, enemy_units.size() - enemy_workers.size())
+	var moving_units: int = 0
+	for node: Node in player_units:
+		if node is Unit and (node as Unit).has_move_target:
+			moving_units += 1
+	for node: Node in enemy_units:
+		if node is Unit and (node as Unit).has_move_target:
+			moving_units += 1
+	for node: Node in creeps:
+		if node is Unit and (node as Unit).has_move_target:
+			moving_units += 1
 
 	return {
 		"total_units": player_units.size() + enemy_units.size() + creeps.size(),
+		"moving_units": moving_units,
 		"player_military": player_military,
 		"enemy_military": enemy_military,
 		"workers": workers,

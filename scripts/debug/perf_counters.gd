@@ -18,6 +18,13 @@ const KEY_SQUAD_STRATEGIC_ROUTES := &"squad_strategic_routes"
 const KEY_SQUAD_LOCAL_REPATHS := &"squad_local_repaths"
 const KEY_SQUAD_ROUTE_CACHE_HITS := &"squad_route_cache_hits"
 const KEY_SQUAD_STALLS := &"squad_stalls"
+const KEY_UNIT_NEIGHBOR_QUERIES := &"unit_neighbor_queries"
+const KEY_NEIGHBORS_PROCESSED := &"neighbors_processed"
+const KEY_SEPARATION_UPDATES := &"separation_updates"
+const KEY_STUCK_CHECKS := &"stuck_checks"
+const KEY_STUCK_RECOVERIES := &"stuck_recoveries"
+const KEY_STRATEGIC_ROUTE_REQUESTS := &"strategic_route_requests"
+const KEY_MOVING_UNITS_SAMPLES := &"moving_units_samples"
 
 const FPS_SAMPLE_WINDOW_SECONDS := 3.0
 const WARN_FPS_THRESHOLD := 30.0
@@ -154,6 +161,43 @@ func record_squad_route_cache_hit() -> void:
 
 func record_squad_stall() -> void:
 	bump(KEY_SQUAD_STALLS)
+
+
+func record_unit_neighbor_query(neighbors_processed: int = 0) -> void:
+	if not OS.is_debug_build():
+		return
+	bump(KEY_UNIT_NEIGHBOR_QUERIES)
+	if neighbors_processed > 0:
+		bump_by(KEY_NEIGHBORS_PROCESSED, neighbors_processed)
+
+
+func record_separation_update() -> void:
+	if not OS.is_debug_build():
+		return
+	bump(KEY_SEPARATION_UPDATES)
+
+
+func record_stuck_check() -> void:
+	if not OS.is_debug_build():
+		return
+	bump(KEY_STUCK_CHECKS)
+
+
+func record_stuck_recovery() -> void:
+	if not OS.is_debug_build():
+		return
+	bump(KEY_STUCK_RECOVERIES)
+
+
+func record_strategic_route_request() -> void:
+	bump(KEY_STRATEGIC_ROUTE_REQUESTS)
+	bump(KEY_SQUAD_STRATEGIC_ROUTES)
+
+
+func record_moving_units_sample(count: int) -> void:
+	if not OS.is_debug_build() or count <= 0:
+		return
+	bump_by(KEY_MOVING_UNITS_SAMPLES, count)
 
 
 func set_squad_nav_status(
@@ -652,6 +696,27 @@ func _warn_rate_once(key: StringName, threshold: float, label: String) -> void:
 		)
 
 
+func collect_rate_snapshot() -> Dictionary:
+	## Stable debug snapshot for F3 / stress harness (rates are per-second).
+	return {
+		"fps": get_fps(),
+		"avg_fps": get_average_fps(),
+		"low_fps": get_recent_low_fps(),
+		"frame_ms": get_frame_time_ms(),
+		"physics_ms": Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+		"script_ms": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		"orders_per_sec": get_rate(KEY_AI_ORDERS),
+		"repaths_per_sec": get_rate(KEY_REPATH_REQUESTS),
+		"strategic_routes_per_sec": get_rate(KEY_STRATEGIC_ROUTE_REQUESTS),
+		"target_searches_per_sec": get_rate(KEY_TARGET_SEARCHES),
+		"neighbor_queries_per_sec": get_rate(KEY_UNIT_NEIGHBOR_QUERIES),
+		"neighbors_processed_per_sec": get_rate(KEY_NEIGHBORS_PROCESSED),
+		"separation_updates_per_sec": get_rate(KEY_SEPARATION_UPDATES),
+		"stuck_checks_per_sec": get_rate(KEY_STUCK_CHECKS),
+		"stuck_recoveries_per_sec": get_rate(KEY_STUCK_RECOVERIES),
+	}
+
+
 func collect_warnings() -> PackedStringArray:
 	var warnings: PackedStringArray = PackedStringArray()
 	if get_fps() > 0.0 and get_fps() < WARN_FPS_THRESHOLD:
@@ -664,6 +729,10 @@ func collect_warnings() -> PackedStringArray:
 		warnings.append("Repaths/sec abnormally high")
 	if get_rate(KEY_TARGET_SEARCHES) >= WARN_TARGET_SEARCHES_PER_SEC:
 		warnings.append("Target searches/sec abnormally high")
+	if get_rate(KEY_UNIT_NEIGHBOR_QUERIES) >= 2000.0:
+		warnings.append("Neighbor queries/sec abnormally high")
+	if get_rate(KEY_SEPARATION_UPDATES) >= 2000.0:
+		warnings.append("Separation updates/sec abnormally high")
 	return warnings
 
 

@@ -118,11 +118,19 @@ const CUSTOM_RTS_SEPARATION_RADIUS := 1.35
 const CUSTOM_RTS_SEPARATION_WEIGHT := 0.35
 const CUSTOM_RTS_ROUTE_WEIGHT := 1.0
 const CUSTOM_RTS_FINAL_SLOT_WEIGHT := 0.55
+## Soft mobile-vs-mobile peel — capped neighbors, staggered refresh (not every physics frame).
+const CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS := 6
+const CUSTOM_RTS_SEPARATION_STAGGER_BUCKETS := 5
+const STANDING_SEPARATION_STAGGER_BUCKETS := 5
 var _custom_rts_active: bool = false
 var _custom_rts_pending: bool = false
 var _custom_rts_route: PackedVector3Array = PackedVector3Array()
 var _custom_rts_route_index: int = 0
 var _custom_rts_generation: int = -1
+var _custom_rts_separation_cache: Vector3 = Vector3.ZERO
+var _custom_rts_separation_cache_frame: int = -999999
+static var _custom_rts_probe_shape: SphereShape3D = null
+static var _custom_rts_query: PhysicsShapeQueryParameters3D = null
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -997,21 +1005,36 @@ func _custom_rts_advance_waypoint() -> void:
 
 
 func _custom_rts_separation_vector() -> Vector3:
+	## Soft friendly spacing only. Staggered physics-shape probes — not a full repath trigger.
+	var physics_frame: int = Engine.get_physics_frames()
+	if physics_frame == _custom_rts_separation_cache_frame:
+		return _custom_rts_separation_cache
+	if (
+		(physics_frame % CUSTOM_RTS_SEPARATION_STAGGER_BUCKETS)
+		!= get_update_bucket(CUSTOM_RTS_SEPARATION_STAGGER_BUCKETS)
+	):
+		return _custom_rts_separation_cache
+
 	var push := Vector3.ZERO
 	var count: int = 0
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	if space == null:
+		_custom_rts_separation_cache = Vector3.ZERO
+		_custom_rts_separation_cache_frame = physics_frame
 		return Vector3.ZERO
 
-	var query := PhysicsShapeQueryParameters3D.new()
-	var shape := SphereShape3D.new()
-	shape.radius = CUSTOM_RTS_SEPARATION_RADIUS
-	query.shape = shape
+	var query: PhysicsShapeQueryParameters3D = _get_custom_rts_query()
+	query.shape = _get_custom_rts_probe_shape()
 	query.transform = Transform3D(Basis.IDENTITY, global_position)
 	query.collision_mask = PhysicsLayers.UNITS
 	query.exclude = [get_rid()]
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
 
-	var hits: Array[Dictionary] = space.intersect_shape(query, 12)
+	var hits: Array[Dictionary] = space.intersect_shape(
+		query, CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS
+	)
+	PerfCounters.record_unit_neighbor_query(hits.size())
 	for hit: Dictionary in hits:
 		var collider: Variant = hit.get("collider")
 		if not NodeSafety.is_alive_node(collider):
@@ -1032,8 +1055,26 @@ func _custom_rts_separation_vector() -> Vector3:
 		push += offset.normalized() * strength
 		count += 1
 	if count == 0:
+		_custom_rts_separation_cache = Vector3.ZERO
+		_custom_rts_separation_cache_frame = physics_frame
 		return Vector3.ZERO
-	return push / float(count)
+	PerfCounters.record_separation_update()
+	_custom_rts_separation_cache = push / float(count)
+	_custom_rts_separation_cache_frame = physics_frame
+	return _custom_rts_separation_cache
+
+
+func _get_custom_rts_probe_shape() -> SphereShape3D:
+	if _custom_rts_probe_shape == null:
+		_custom_rts_probe_shape = SphereShape3D.new()
+		_custom_rts_probe_shape.radius = CUSTOM_RTS_SEPARATION_RADIUS
+	return _custom_rts_probe_shape
+
+
+func _get_custom_rts_query() -> PhysicsShapeQueryParameters3D:
+	if _custom_rts_query == null:
+		_custom_rts_query = PhysicsShapeQueryParameters3D.new()
+	return _custom_rts_query
 
 
 func _custom_rts_safe_slide_direction(desired: Vector3, step: float) -> Vector3:
@@ -1171,6 +1212,8 @@ func _clear_residual_movement() -> void:
 	_smoothed_move_velocity = Vector3.ZERO
 	_desired_move_facing = Vector3.ZERO
 	_blocked_arrival_time = 0.0
+	_custom_rts_separation_cache = Vector3.ZERO
+	_custom_rts_separation_cache_frame = -999999
 	UnitSeparation.clear_state(self)
 	if has_meta(&"_nav_last_path_point"):
 		remove_meta(&"_nav_last_path_point")
@@ -1356,6 +1399,7 @@ func is_physically_blocked_from_current_move() -> bool:
 
 
 func _update_physical_stuck_watch(delta: float = -1.0) -> void:
+	PerfCounters.record_stuck_check()
 	if not has_move_target:
 		_reset_physical_stuck_watch()
 		return
@@ -1401,10 +1445,24 @@ func _update_physical_stuck_watch(delta: float = -1.0) -> void:
 		global_position,
 		_physical_stuck_watch_origin
 	)
+	var was_confirmed: bool = _physical_stuck_confirmed
 	_physical_stuck_confirmed = (
 		_physical_stuck_watch_seconds >= PHYSICAL_STUCK_SECONDS
 		and progress_from_watch < PHYSICAL_STUCK_MOVE_EPSILON
+		and not _is_temporary_mobile_congestion(dest)
 	)
+	if _physical_stuck_confirmed and not was_confirmed:
+		PerfCounters.record_stuck_recovery()
+
+
+func _is_temporary_mobile_congestion(dest: Vector3) -> bool:
+	## World cell ahead still walkable ⇒ lack of progress is unit traffic, not a blocked route.
+	var to_dest: Vector3 = _flat_xz(dest - global_position)
+	if to_dest.length_squared() < 0.01:
+		return false
+	var ahead: Vector3 = global_position + to_dest.normalized() * 1.25
+	ahead.y = global_position.y
+	return PlayerRouteNavigation.is_world_walkable(ahead)
 
 
 func _reset_physical_stuck_watch() -> void:
@@ -1570,7 +1628,16 @@ func _physics_process(delta: float) -> void:
 		_reset_physical_stuck_watch()
 		_blocked_arrival_time = 0.0
 		# Hard body-intersection peel only — nearby idle units must not soft-slide.
-		apply_standing_separation(false)
+		# Stagger the expensive shape query; reuse cached peel on other frames.
+		if should_run_staggered_update(STANDING_SEPARATION_STAGGER_BUCKETS):
+			apply_standing_separation(false)
+		elif has_meta(UnitSeparation.META_STANDING_VEL):
+			var cached: Vector3 = get_meta(UnitSeparation.META_STANDING_VEL) as Vector3
+			if cached.length_squared() >= MOVE_VELOCITY_DEAD_ZONE_SQ:
+				apply_steered_velocity(cached, delta, 0.0, false, true)
+			else:
+				velocity = Vector3.ZERO
+				_smoothed_move_velocity = Vector3.ZERO
 		return
 
 	_update_physical_stuck_watch(delta)

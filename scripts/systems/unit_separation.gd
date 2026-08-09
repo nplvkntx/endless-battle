@@ -14,10 +14,11 @@ const MOVE_BLEND := 0.22
 const MAX_PUSH_SPEED_RATIO := 0.35
 const IDLE_PUSH_SPEED_RATIO := 0.22
 const COMBAT_PUSH_SPEED_RATIO := 0.12
-const MAX_NEIGHBORS := 10
+const MAX_NEIGHBORS := 6
 const OVERLAP_EPSILON := 0.04
 const MIN_FORWARD_RATIO := 0.35
-const PUSH_CACHE_SECONDS := 0.06
+const PUSH_CACHE_SECONDS := 0.10
+const HARD_OVERLAP_CACHE_SECONDS := 0.10
 const SIDE_HYSTERESIS_SECONDS := 0.28
 const PUSH_DEAD_ZONE_SQ := 0.0225 # ~0.15 — ignore soft separation noise
 ## Combat standing previously used a soft magnitude gate; hard-overlap query replaces it.
@@ -25,34 +26,41 @@ const STANDING_SMOOTH := 12.0
 
 const META_PUSH_CACHE := &"_sep_push_cache"
 const META_PUSH_CACHE_TIME := &"_sep_push_cache_time"
+const META_HARD_PUSH_CACHE := &"_sep_hard_push_cache"
+const META_HARD_PUSH_CACHE_TIME := &"_sep_hard_push_cache_time"
 const META_SIDE := &"_sep_side"
 const META_SIDE_TIMER := &"_sep_side_timer"
 const META_STANDING_VEL := &"_sep_standing_vel"
+const META_UNIT_RADIUS := &"_sep_unit_radius"
 
 static var _probe_shape: SphereShape3D = null
+static var _query_params: PhysicsShapeQueryParameters3D = null
 
 
 static func get_unit_radius(body: CollisionObject3D) -> float:
 	if body == null:
 		return DEFAULT_RADIUS
+	if body.has_meta(META_UNIT_RADIUS):
+		return float(body.get_meta(META_UNIT_RADIUS))
 
 	var collision_shape: CollisionShape3D = body.get_node_or_null(
 		"CollisionShape3D"
 	) as CollisionShape3D
 	if collision_shape == null or collision_shape.shape == null:
+		body.set_meta(META_UNIT_RADIUS, DEFAULT_RADIUS)
 		return DEFAULT_RADIUS
 
+	var radius: float = DEFAULT_RADIUS
 	if collision_shape.shape is BoxShape3D:
 		var box_shape := collision_shape.shape as BoxShape3D
-		return maxf(box_shape.size.x, box_shape.size.z) * 0.5
+		radius = maxf(box_shape.size.x, box_shape.size.z) * 0.5
+	elif collision_shape.shape is CylinderShape3D:
+		radius = (collision_shape.shape as CylinderShape3D).radius
+	elif collision_shape.shape is SphereShape3D:
+		radius = (collision_shape.shape as SphereShape3D).radius
 
-	if collision_shape.shape is CylinderShape3D:
-		return (collision_shape.shape as CylinderShape3D).radius
-
-	if collision_shape.shape is SphereShape3D:
-		return (collision_shape.shape as SphereShape3D).radius
-
-	return DEFAULT_RADIUS
+	body.set_meta(META_UNIT_RADIUS, radius)
+	return radius
 
 
 static func clear_state(body: Object) -> void:
@@ -62,6 +70,10 @@ static func clear_state(body: Object) -> void:
 		body.remove_meta(META_PUSH_CACHE)
 	if body.has_meta(META_PUSH_CACHE_TIME):
 		body.remove_meta(META_PUSH_CACHE_TIME)
+	if body.has_meta(META_HARD_PUSH_CACHE):
+		body.remove_meta(META_HARD_PUSH_CACHE)
+	if body.has_meta(META_HARD_PUSH_CACHE_TIME):
+		body.remove_meta(META_HARD_PUSH_CACHE_TIME)
 	if body.has_meta(META_SIDE):
 		body.remove_meta(META_SIDE)
 	if body.has_meta(META_SIDE_TIMER):
@@ -217,7 +229,19 @@ static func compute_standing_desired_velocity(
 
 ## Push only when collision radii actually intersect (not soft MIN_SEPARATION packing).
 static func compute_hard_overlap_push(body: CharacterBody3D) -> Vector3:
-	return _query_push(body, true)
+	if body == null or not is_instance_valid(body):
+		return Vector3.ZERO
+
+	var now_sec: float = float(Time.get_ticks_msec()) * 0.001
+	if body.has_meta(META_HARD_PUSH_CACHE) and body.has_meta(META_HARD_PUSH_CACHE_TIME):
+		var cache_time: float = float(body.get_meta(META_HARD_PUSH_CACHE_TIME))
+		if now_sec - cache_time < HARD_OVERLAP_CACHE_SECONDS:
+			return body.get_meta(META_HARD_PUSH_CACHE) as Vector3
+
+	var push: Vector3 = _query_push(body, true)
+	body.set_meta(META_HARD_PUSH_CACHE, push)
+	body.set_meta(META_HARD_PUSH_CACHE_TIME, now_sec)
+	return push
 
 
 ## Compatibility wrapper — prefer Unit.apply_standing_separation so velocity is applied once.
@@ -258,7 +282,7 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 			self_has_dest = true
 			self_dest = self_unit.get_movement_destination()
 
-	var query := PhysicsShapeQueryParameters3D.new()
+	var query: PhysicsShapeQueryParameters3D = _get_query_params()
 	query.shape = _get_probe_shape()
 	query.transform = Transform3D(Basis.IDENTITY, body.global_position)
 	query.collision_mask = PhysicsLayers.UNITS
@@ -269,6 +293,7 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 	var hits: Array[Dictionary] = world.direct_space_state.intersect_shape(
 		query, MAX_NEIGHBORS
 	)
+	PerfCounters.record_unit_neighbor_query(hits.size())
 	if hits.is_empty():
 		return Vector3.ZERO
 
@@ -340,6 +365,7 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 	if contributors <= 0 or push.length_squared() < PUSH_DEAD_ZONE_SQ:
 		return Vector3.ZERO
 
+	PerfCounters.record_separation_update()
 	return push.normalized()
 
 
@@ -348,3 +374,9 @@ static func _get_probe_shape() -> SphereShape3D:
 		_probe_shape = SphereShape3D.new()
 		_probe_shape.radius = QUERY_RADIUS
 	return _probe_shape
+
+
+static func _get_query_params() -> PhysicsShapeQueryParameters3D:
+	if _query_params == null:
+		_query_params = PhysicsShapeQueryParameters3D.new()
+	return _query_params

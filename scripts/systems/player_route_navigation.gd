@@ -137,6 +137,8 @@ func request_group_move(
 	total_path_calculations += 1
 	result["path_calculations"] = path_calculations_this_command
 	result["route_waypoints"] = shared_route.size()
+	PerfCounters.record_strategic_route_request()
+	PerfCounters.record_navigation_path_request()
 
 	if shared_route.is_empty():
 		result["route_failure_reason"] = "no_path"
@@ -206,6 +208,8 @@ func bind_unit_strategic_route(
 	var route: PackedVector3Array = grid.find_path(origin, dest)
 	path_calculations_this_command += 1
 	total_path_calculations += 1
+	PerfCounters.record_strategic_route_request()
+	PerfCounters.record_navigation_path_request()
 	_global_command_generation += 1
 
 	if route.is_empty():
