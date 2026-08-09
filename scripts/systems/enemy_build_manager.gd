@@ -11,10 +11,18 @@ const ENEMY_TEAM_ID: int = 1
 const PLACEMENT_FARM: StringName = &"farm"
 const PLACEMENT_BARRACKS: StringName = &"barracks"
 const PLACEMENT_HERO_ALTAR: StringName = &"hero_altar"
+const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
+const PLACEMENT_STABLE: StringName = &"stable"
+const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
+const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const HERO_ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
+const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
+const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
+const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
+const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
 
 const FARM_GOLD_COST: int = BuildingStats.FARM_GOLD_COST
@@ -23,6 +31,14 @@ const BARRACKS_GOLD_COST: int = BuildingStats.BARRACKS_GOLD_COST
 const BARRACKS_WOOD_COST: int = BuildingStats.BARRACKS_WOOD_COST
 const HERO_ALTAR_GOLD_COST: int = BuildingStats.HERO_ALTAR_GOLD_COST
 const HERO_ALTAR_WOOD_COST: int = BuildingStats.HERO_ALTAR_WOOD_COST
+const BLACKSMITH_GOLD_COST: int = BuildingStats.BLACKSMITH_GOLD_COST
+const BLACKSMITH_WOOD_COST: int = BuildingStats.BLACKSMITH_WOOD_COST
+const STABLE_GOLD_COST: int = BuildingStats.STABLE_GOLD_COST
+const STABLE_WOOD_COST: int = BuildingStats.STABLE_WOOD_COST
+const ARTILLERY_DEPOT_GOLD_COST: int = BuildingStats.ARTILLERY_DEPOT_GOLD_COST
+const ARTILLERY_DEPOT_WOOD_COST: int = BuildingStats.ARTILLERY_DEPOT_WOOD_COST
+const COMMAND_CENTER_GOLD_COST: int = BuildingStats.COMMAND_CENTER_GOLD_COST
+const COMMAND_CENTER_WOOD_COST: int = BuildingStats.COMMAND_CENTER_WOOD_COST
 const FARM_MAX_HEALTH: int = BuildingStats.FARM_MAX_HEALTH
 const HERO_ALTAR_MAX_HEALTH: int = BuildingStats.HERO_ALTAR_MAX_HEALTH
 
@@ -41,11 +57,13 @@ func _ready() -> void:
 
 ## Public mechanic API — place one building if affordable and site is valid.
 func try_place_building(building_type: StringName) -> bool:
-	if building_type != PLACEMENT_FARM and building_type != PLACEMENT_BARRACKS and building_type != PLACEMENT_HERO_ALTAR:
+	if not _is_supported_building_type(building_type):
 		return false
-	if _has_completed_or_in_progress(building_type):
+	if building_type == PLACEMENT_COMMAND_CENTER:
 		return false
-	return _try_place_building(building_type)
+	if building_type != PLACEMENT_FARM and _has_completed_or_in_progress(building_type):
+		return false
+	return _try_place_building(building_type, Vector3.ZERO, false)
 
 
 func try_place_farm() -> bool:
@@ -58,6 +76,27 @@ func try_place_hero_altar() -> bool:
 
 func try_place_barracks() -> bool:
 	return try_place_building(PLACEMENT_BARRACKS)
+
+
+func try_place_blacksmith() -> bool:
+	return try_place_building(PLACEMENT_BLACKSMITH)
+
+
+func try_place_stable() -> bool:
+	return try_place_building(PLACEMENT_STABLE)
+
+
+func try_place_artillery_depot() -> bool:
+	return try_place_building(PLACEMENT_ARTILLERY_DEPOT)
+
+
+## Place an expansion Command Center near a gold mine. No AI policy.
+func try_place_expansion_at_mine(gold_mine: GoldMine) -> bool:
+	if not NodeSafety.is_alive_node(gold_mine):
+		return false
+	if _has_expansion_command_center_or_constructing():
+		return false
+	return _try_place_building(PLACEMENT_COMMAND_CENTER, gold_mine.global_position, true)
 
 
 ## Worker finished spawn / finished construction — hand to gather mechanics.
@@ -74,45 +113,43 @@ func request_worker_production_check() -> void:
 	pass
 
 
-func _try_place_building(building_type: StringName) -> bool:
+func _try_place_building(
+	building_type: StringName,
+	override_anchor: Vector3,
+	prefer_expansion: bool
+) -> bool:
 	if not is_inside_tree():
 		return false
 
-	var anchor: CommandCenter = _resolve_primary_command_center()
-	if anchor == null or not is_instance_valid(anchor) or not anchor.is_inside_tree():
+	var costs: Vector2i = _get_building_costs(building_type)
+	if costs.x < 0:
 		return false
 
-	var gold_cost: int = 0
-	var wood_cost: int = 0
-	match building_type:
-		PLACEMENT_FARM:
-			gold_cost = FARM_GOLD_COST
-			wood_cost = FARM_WOOD_COST
-		PLACEMENT_BARRACKS:
-			gold_cost = BARRACKS_GOLD_COST
-			wood_cost = BARRACKS_WOOD_COST
-		PLACEMENT_HERO_ALTAR:
-			gold_cost = HERO_ALTAR_GOLD_COST
-			wood_cost = HERO_ALTAR_WOOD_COST
-		_:
-			return false
-
-	if not EnemyResourceManager.can_afford(gold_cost, wood_cost, true):
+	if not EnemyResourceManager.can_afford(costs.x, costs.y, true):
 		return false
 
 	var parent: Node = get_node_or_null(buildings_parent_path)
 	if parent == null or not parent.is_inside_tree():
 		return false
 
+	var anchor: Vector3 = override_anchor
+	if not prefer_expansion:
+		var cc: CommandCenter = _resolve_primary_command_center()
+		if cc == null or not is_instance_valid(cc) or not cc.is_inside_tree():
+			return false
+		anchor = cc.global_position
+	elif not anchor.is_finite():
+		return false
+
 	var existing_buildings: Array[Node3D] = EnemyBuildPlacement.collect_nearby_buildings(
-		anchor.global_position,
+		anchor,
 		parent
 	)
 	var position: Vector3 = EnemyBuildPlacement.find_position(
-		anchor.global_position,
+		anchor,
 		building_type,
 		existing_buildings,
-		false,
+		prefer_expansion,
 		parent,
 		_get_navigation_map()
 	)
@@ -127,14 +164,14 @@ func _try_place_building(building_type: StringName) -> bool:
 		ConstructionReservations.FOOTPRINT_RESERVATION_TTL_MSEC
 	)
 
-	if not EnemyResourceManager.try_spend(gold_cost, wood_cost, true):
+	if not EnemyResourceManager.try_spend(costs.x, costs.y, true):
 		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
 	var building: Building = _instantiate_building(building_type)
 	if not NodeSafety.is_alive_node(building):
-		EnemyResourceManager.add_gold(gold_cost)
-		EnemyResourceManager.add_wood(wood_cost)
+		EnemyResourceManager.add_gold(costs.x)
+		EnemyResourceManager.add_wood(costs.y)
 		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
@@ -142,13 +179,13 @@ func _try_place_building(building_type: StringName) -> bool:
 	_add_health_component_if_needed(building, building_type)
 	parent.add_child(building)
 	if not NodeSafety.is_alive_node(building):
-		EnemyResourceManager.add_gold(gold_cost)
-		EnemyResourceManager.add_wood(wood_cost)
+		EnemyResourceManager.add_gold(costs.x)
+		EnemyResourceManager.add_wood(costs.y)
 		ConstructionReservations.release_footprint(footprint_reservation_id)
 		return false
 
 	building.global_position = position
-	building.set_construction_cost(gold_cost, wood_cost, true)
+	building.set_construction_cost(costs.x, costs.y, true)
 	building.start_under_construction()
 	building.setup_construction(
 		BuildingStats.get_construction_seconds(building_type, 1)
@@ -159,6 +196,38 @@ func _try_place_building(building_type: StringName) -> bool:
 	return true
 
 
+func _get_building_costs(building_type: StringName) -> Vector2i:
+	match building_type:
+		PLACEMENT_FARM:
+			return Vector2i(FARM_GOLD_COST, FARM_WOOD_COST)
+		PLACEMENT_BARRACKS:
+			return Vector2i(BARRACKS_GOLD_COST, BARRACKS_WOOD_COST)
+		PLACEMENT_HERO_ALTAR:
+			return Vector2i(HERO_ALTAR_GOLD_COST, HERO_ALTAR_WOOD_COST)
+		PLACEMENT_BLACKSMITH:
+			return Vector2i(BLACKSMITH_GOLD_COST, BLACKSMITH_WOOD_COST)
+		PLACEMENT_STABLE:
+			return Vector2i(STABLE_GOLD_COST, STABLE_WOOD_COST)
+		PLACEMENT_ARTILLERY_DEPOT:
+			return Vector2i(ARTILLERY_DEPOT_GOLD_COST, ARTILLERY_DEPOT_WOOD_COST)
+		PLACEMENT_COMMAND_CENTER:
+			return Vector2i(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+		_:
+			return Vector2i(-1, -1)
+
+
+func _is_supported_building_type(building_type: StringName) -> bool:
+	return (
+		building_type == PLACEMENT_FARM
+		or building_type == PLACEMENT_BARRACKS
+		or building_type == PLACEMENT_HERO_ALTAR
+		or building_type == PLACEMENT_BLACKSMITH
+		or building_type == PLACEMENT_STABLE
+		or building_type == PLACEMENT_ARTILLERY_DEPOT
+		or building_type == PLACEMENT_COMMAND_CENTER
+	)
+
+
 func _instantiate_building(building_type: StringName) -> Building:
 	match building_type:
 		PLACEMENT_FARM:
@@ -167,6 +236,14 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return BARRACKS_SCENE.instantiate() as Building
 		PLACEMENT_HERO_ALTAR:
 			return HERO_ALTAR_SCENE.instantiate() as Building
+		PLACEMENT_BLACKSMITH:
+			return BLACKSMITH_SCENE.instantiate() as Building
+		PLACEMENT_STABLE:
+			return STABLE_SCENE.instantiate() as Building
+		PLACEMENT_ARTILLERY_DEPOT:
+			return ARTILLERY_DEPOT_SCENE.instantiate() as Building
+		PLACEMENT_COMMAND_CENTER:
+			return COMMAND_CENTER_SCENE.instantiate() as Building
 		_:
 			return null
 
@@ -235,17 +312,7 @@ func _has_completed_or_in_progress(building_type: StringName) -> bool:
 		if not NodeSafety.is_alive_node(node) or not node is Building:
 			continue
 		var building: Building = node as Building
-		var matches := false
-		match building_type:
-			PLACEMENT_FARM:
-				matches = building is Farm
-			PLACEMENT_BARRACKS:
-				matches = building is Barracks
-			PLACEMENT_HERO_ALTAR:
-				matches = building is HeroAltar
-			_:
-				matches = false
-		if not matches:
+		if not _building_matches_type(building, building_type):
 			continue
 		var state: StringName = building.building_state
 		if (
@@ -255,6 +322,50 @@ func _has_completed_or_in_progress(building_type: StringName) -> bool:
 		):
 			return true
 	return false
+
+
+func _has_expansion_command_center_or_constructing() -> bool:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return false
+	var primary: CommandCenter = _resolve_primary_command_center()
+	var primary_id: int = primary.get_instance_id() if primary != null else 0
+	var count: int = 0
+	for node: Node in tree.get_nodes_in_group(ENEMY_BUILDING_GROUP):
+		if not NodeSafety.is_alive_node(node) or not node is CommandCenter:
+			continue
+		var cc: CommandCenter = node as CommandCenter
+		var state: StringName = cc.building_state
+		if (
+			state != Building.STATE_COMPLETED
+			and state != Building.STATE_UNDER_CONSTRUCTION
+			and state != Building.STATE_CONSTRUCTING
+		):
+			continue
+		if primary_id != 0 and cc.get_instance_id() == primary_id:
+			continue
+		count += 1
+	return count > 0
+
+
+func _building_matches_type(building: Building, building_type: StringName) -> bool:
+	match building_type:
+		PLACEMENT_FARM:
+			return building is Farm
+		PLACEMENT_BARRACKS:
+			return building is Barracks
+		PLACEMENT_HERO_ALTAR:
+			return building is HeroAltar
+		PLACEMENT_BLACKSMITH:
+			return building is Blacksmith
+		PLACEMENT_STABLE:
+			return building is Stable
+		PLACEMENT_ARTILLERY_DEPOT:
+			return building is ArtilleryDepot
+		PLACEMENT_COMMAND_CENTER:
+			return building is CommandCenter
+		_:
+			return false
 
 
 func _resolve_primary_command_center() -> CommandCenter:

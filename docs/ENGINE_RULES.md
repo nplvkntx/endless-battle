@@ -11,7 +11,7 @@ Every important state must have **one** authoritative owner.
 | Concern | Owner | Notes |
 |---------|--------|--------|
 | Player selection | `SelectionManager` | Scene system (`scripts/systems/selection_manager.gd`). No `class_name`; node/script name is the authority. Stores selection identity via `EntityHandle`. |
-| Enemy military strategy / orders | *(none)* | Enemy strategic AI purged. No active decision authority until a replacement is added. |
+| Enemy military strategy / orders | `EnemyAI` | Sole condition-tick strategic brain (`scripts/systems/enemy_ai.gd`). No directors / commanders / squad managers. |
 | Enemy build / gather execution | `EnemyBuildManager` / `EnemyGatherManager` | Mechanics only — execute placements and gather jobs; do not decide strategy. |
 | Match composition / lifecycle | `MatchCompositionRoot` | Match-scoped wiring for selection, build, gather, and match systems. |
 | Player movement commands | `PlayerRouteNavigation` | Autoload. Intended sole player Move / Attack-Move route authority (see `MOVEMENT_CONTRACT.md`). |

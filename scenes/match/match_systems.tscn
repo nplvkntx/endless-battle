@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://cgqqodo0ymy15" path="res://scripts/systems/match_manager.gd" id="4_match_manager"]
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="6_enemy_gather_manager"]
 [ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
+[ext_resource type="Script" path="res://scripts/systems/enemy_ai.gd" id="8_enemy_ai"]
 [ext_resource type="Script" path="res://scripts/systems/match_composition_root.gd" id="14_match_composition_root"]
 
 [node name="MatchSystems" type="Node"]
@@ -42,3 +43,10 @@ script = ExtResource("7_enemy_build_manager")
 enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
 enemy_gather_manager_path = NodePath("../EnemyGatherManager")
 buildings_parent_path = NodePath("../..")
+
+[node name="EnemyAI" type="Node" parent="."]
+script = ExtResource("8_enemy_ai")
+enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
+enemy_build_manager_path = NodePath("../EnemyBuildManager")
+enemy_gather_manager_path = NodePath("../EnemyGatherManager")
+show_debug_overlay = true

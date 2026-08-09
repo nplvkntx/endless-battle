@@ -2,8 +2,9 @@ class_name MatchCompositionRoot
 extends Node
 
 ## Match-owned composition root.
-## Wires match systems. No enemy strategic AI is active after the AI purge.
+## Wires match systems. EnemyAI is the sole strategic enemy brain.
 
+var enemy_ai: EnemyAI = null
 var enemy_build_manager: EnemyBuildManager = null
 var enemy_gather_manager: EnemyGatherManager = null
 var selection_manager: Node = null
@@ -33,6 +34,7 @@ func get_system(node_name: StringName) -> Node:
 
 
 func _resolve_systems() -> void:
+	enemy_ai = get_node_or_null("EnemyAI") as EnemyAI
 	enemy_build_manager = get_node_or_null("EnemyBuildManager") as EnemyBuildManager
 	enemy_gather_manager = get_node_or_null("EnemyGatherManager") as EnemyGatherManager
 	selection_manager = get_node_or_null("SelectionManager")

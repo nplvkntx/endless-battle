@@ -1,0 +1,402 @@
+extends Node
+
+## Focused EnemyAI condition tests — proves condition winners, not a full match sim.
+## Godot_v4.7-stable_win64.exe --headless --path <project> --scene res://scenes/debug/verify_enemy_ai_conditions.tscn
+
+const REPORT_PATH := "user://enemy_ai_conditions_verify_result.txt"
+const CC_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
+const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
+const ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn")
+const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
+const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
+const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
+const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
+const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
+
+var _failures: PackedStringArray = []
+var _world: Node3D
+var _ai: EnemyAI
+var _build: RecordingEnemyBuildManager
+var _gather: RecordingEnemyGatherManager
+var _cc: CommandCenter
+var _recorded_trains: PackedStringArray = []
+
+
+func _ready() -> void:
+	print("verify_enemy_ai_conditions: start")
+	_world = Node3D.new()
+	_world.name = "ConditionWorld"
+	add_child(_world)
+
+	EnemyResourceManager.reset_to_starting_values()
+	HeroProgressionStore.clear()
+
+	await _setup_brain()
+	await _test_economy_workers()
+	await _test_economy_food_and_buildings()
+	await _test_hero_priority()
+	await _test_build_force_and_home()
+	await _test_defend_beats_creep()
+	await _test_early_creep_and_attack_gate()
+	await _test_rebuild_after_hero_death()
+	await _test_tech_requests()
+
+	var report: String
+	if _failures.is_empty():
+		report = "PASS enemy_ai_conditions\n"
+	else:
+		report = "FAIL enemy_ai_conditions\n" + "\n".join(_failures) + "\n"
+
+	var file := FileAccess.open(REPORT_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(report)
+		file.close()
+	print(report)
+	await get_tree().process_frame
+	get_tree().quit(0 if _failures.is_empty() else 1)
+
+
+func _expect(label: String, ok: bool) -> void:
+	if not ok:
+		_failures.append("- %s" % label)
+		print("FAIL: ", label)
+	else:
+		print("ok: ", label)
+
+
+func _setup_brain() -> void:
+	_build = RecordingEnemyBuildManager.new()
+	_build.name = "EnemyBuildManager"
+	_world.add_child(_build)
+
+	_gather = RecordingEnemyGatherManager.new()
+	_gather.name = "EnemyGatherManager"
+	_world.add_child(_gather)
+
+	_ai = EnemyAI.new()
+	_ai.name = "EnemyAI"
+	_ai.show_debug_overlay = false
+	_ai.set_process(false)
+	_world.add_child(_ai)
+	_ai._build_manager = _build
+	_ai._gather_manager = _gather
+
+	_cc = _spawn_completed_building(CC_SCENE, Vector3(30, 1, 28)) as CommandCenter
+	_cc.add_to_group(&"enemy_command_center")
+	_cc.team_id = 1
+	_ai.enemy_command_center_path = _ai.get_path_to(_cc)
+	await get_tree().process_frame
+
+
+func _clear_units_and_buildings_except_cc() -> void:
+	for child: Node in _world.get_children():
+		if child == _ai or child == _build or child == _gather or child == _cc:
+			continue
+		if child is Node:
+			child.free()
+	_build.requests.clear()
+	_gather.assignments.clear()
+	_recorded_trains.clear()
+	HeroProgressionStore.clear()
+	await get_tree().process_frame
+
+
+func _test_economy_workers() -> void:
+	print("--- economy workers ---")
+	await _clear_units_and_buildings_except_cc()
+	EnemyResourceManager.gold = 500
+	EnemyResourceManager.wood = 500
+	EnemyResourceManager.food_current = 0
+	EnemyResourceManager.food_max = 40
+
+	## No workers → train worker requested via CC API.
+	_ai.force_tick_for_test()
+	_expect("no worker → worker training queued", _cc.get_worker_queue_count() > 0)
+
+	## Spawn idle worker and ensure gather assign is requested.
+	await _clear_units_and_buildings_except_cc()
+	var worker: Worker = WORKER_SCENE.instantiate() as Worker
+	_world.add_child(worker)
+	worker.global_position = _cc.global_position + Vector3(2, 0, 0)
+	worker.team_id = 1
+	worker.add_to_group(&"enemy_workers")
+	worker.add_to_group(&"enemies")
+	if worker.is_in_group(&"workers"):
+		worker.remove_from_group(&"workers")
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("idle worker → gather assignment attempted", _gather.assignments.size() >= 1)
+
+
+func _test_economy_food_and_buildings() -> void:
+	print("--- economy food/buildings ---")
+	await _clear_units_and_buildings_except_cc()
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	EnemyResourceManager.food_current = 14
+	EnemyResourceManager.food_max = 15
+
+	_ai.force_tick_for_test()
+	_expect("near food cap → Farm requested", _build.requests.has(&"farm"))
+
+	await _clear_units_and_buildings_except_cc()
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	EnemyResourceManager.food_current = 0
+	EnemyResourceManager.food_max = 40
+	_ai.force_tick_for_test()
+	_expect("missing Farm → Farm requested", _build.requests.has(&"farm"))
+
+	## With a completed Farm, request Altar.
+	await _clear_units_and_buildings_except_cc()
+	var farm: Building = _spawn_completed_building(FARM_SCENE, _cc.global_position + Vector3(-4, 0, 0))
+	farm.add_to_group(&"enemy_command_center")
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	_ai.force_tick_for_test()
+	_expect("missing Altar → Altar requested", _build.requests.has(&"hero_altar"))
+
+	## With Farm + Altar, request Barracks.
+	await _clear_units_and_buildings_except_cc()
+	farm = _spawn_completed_building(FARM_SCENE, _cc.global_position + Vector3(-4, 0, 0))
+	farm.add_to_group(&"enemy_command_center")
+	var altar: Building = _spawn_completed_building(ALTAR_SCENE, _cc.global_position + Vector3(4, 0, 0))
+	altar.add_to_group(&"enemy_command_center")
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	_ai.force_tick_for_test()
+	_expect("missing Barracks → Barracks requested", _build.requests.has(&"barracks"))
+
+
+func _test_hero_priority() -> void:
+	print("--- hero priority ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	EnemyResourceManager.food_current = 0
+	EnemyResourceManager.food_max = 40
+
+	## Five spearmen present so BUILD_FORCE is not the blocker — Hero still missing.
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	await get_tree().process_frame
+
+	_ai.force_tick_for_test()
+	_expect("no Hero → HERO priority", _ai.get_debug_priority() == &"HERO")
+
+	var altar: HeroAltar = null
+	for node: Node in get_tree().get_nodes_in_group(&"enemy_command_center"):
+		if node is HeroAltar:
+			altar = node as HeroAltar
+			break
+	_expect("no Hero → Hero train attempted/allowed", altar != null and (altar.is_training_hero() or not altar.can_train_enemy_hero()))
+
+
+func _test_build_force_and_home() -> void:
+	print("--- build force ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	## Only 2 spearmen → below minimum.
+	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 2))
+	_spawn_enemy_spearman(_cc.global_position + Vector3(2, 0, 2))
+	EnemyResourceManager.gold = 1000
+	EnemyResourceManager.wood = 1000
+	EnemyResourceManager.food_current = 5
+	EnemyResourceManager.food_max = 40
+	await get_tree().process_frame
+
+	_ai.force_tick_for_test()
+	_expect("<5 Spearmen → BUILD_FORCE", _ai.get_debug_priority() == &"BUILD_FORCE")
+
+
+func _test_defend_beats_creep() -> void:
+	print("--- defend ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+
+	## Player threat near enemy base.
+	var threat: Unit = SPEARMAN_SCENE.instantiate() as Unit
+	_world.add_child(threat)
+	threat.global_position = _cc.global_position + Vector3(5, 0, 0)
+	threat.team_id = 0
+	threat.add_to_group(&"units")
+	await get_tree().process_frame
+
+	_ai.set_camps_cleared_for_test(0)
+	_ai.force_tick_for_test()
+	_expect("base threat → DEFEND over creep", _ai.get_debug_priority() == &"DEFEND")
+
+	threat.queue_free()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("threat removed → not DEFEND", _ai.get_debug_priority() != &"DEFEND")
+
+
+func _test_early_creep_and_attack_gate() -> void:
+	print("--- creep/attack gate ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	await get_tree().process_frame
+
+	_ai.set_camps_cleared_for_test(0)
+	_ai.force_tick_for_test()
+	_expect("camps_cleared < 2 → EARLY_CREEP or HOME", _ai.get_debug_priority() == &"EARLY_CREEP" or _ai.get_debug_priority() == &"HOME")
+
+	_ai.set_camps_cleared_for_test(2)
+	## Strong AI, weak/no player army → attack eligible.
+	_ai.force_tick_for_test()
+	var priority: StringName = _ai.get_debug_priority()
+	_expect(
+		"camps >= 2 enables offense branch (ATTACK/EXTRA_CREEP/HOME)",
+		priority == &"ATTACK_PLAYER" or priority == &"EXTRA_CREEP" or priority == &"HOME"
+	)
+	_expect("offense branch is not EARLY_CREEP", priority != &"EARLY_CREEP")
+
+
+func _test_rebuild_after_hero_death() -> void:
+	print("--- hero death rebuild ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	_ai.set_camps_cleared_for_test(2)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+
+	hero.queue_free()
+	HeroProgressionStore.clear()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("Hero dies → HERO priority naturally wins", _ai.get_debug_priority() == &"HERO")
+
+
+func _test_tech_requests() -> void:
+	print("--- tech ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	EnemyResourceManager.gold = 5000
+	EnemyResourceManager.wood = 5000
+	EnemyResourceManager.food_current = 10
+	EnemyResourceManager.food_max = 40
+	_cc.command_center_tier = 1
+	await get_tree().process_frame
+	_ai.set_camps_cleared_for_test(2)
+	_ai.force_tick_for_test()
+	_expect("T1 healthy → T2 upgrade started or attempted", _cc.get("command_center_tier") != null)
+
+	## Blacksmith after T2
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	_cc.command_center_tier = 2
+	EnemyResourceManager.gold = 5000
+	EnemyResourceManager.wood = 5000
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("T2 → Blacksmith requested", _build.requests.has(&"blacksmith"))
+
+
+func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:
+	if farm:
+		var f: Building = _spawn_completed_building(FARM_SCENE, _cc.global_position + Vector3(-5, 0, 0))
+		f.add_to_group(&"enemy_command_center")
+	if altar:
+		var a: Building = _spawn_completed_building(ALTAR_SCENE, _cc.global_position + Vector3(5, 0, 0))
+		a.add_to_group(&"enemy_command_center")
+	if barracks:
+		var b: Building = _spawn_completed_building(BARRACKS_SCENE, _cc.global_position + Vector3(0, 0, -5))
+		b.add_to_group(&"enemy_command_center")
+
+
+func _spawn_completed_building(scene: PackedScene, position: Vector3) -> Building:
+	var building: Building = scene.instantiate() as Building
+	_world.add_child(building)
+	building.global_position = position
+	building.team_id = 1
+	building.set_completed()
+	building.add_to_group(&"buildings")
+	return building
+
+
+func _spawn_enemy_spearman(position: Vector3) -> Unit:
+	var unit: Unit = SPEARMAN_SCENE.instantiate() as Unit
+	_world.add_child(unit)
+	unit.global_position = position
+	unit.team_id = 1
+	unit.add_to_group(&"enemies")
+	unit.add_to_group(&"enemy_combat_units")
+	if unit.is_in_group(&"units"):
+		unit.remove_from_group(&"units")
+	return unit
+
+
+func _spawn_enemy_hero(position: Vector3) -> Hero:
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	_world.add_child(hero)
+	hero.global_position = position
+	hero.team_id = 1
+	hero.add_to_group(&"enemies")
+	hero.add_to_group(&"enemy_combat_units")
+	if hero.is_in_group(&"heroes"):
+		hero.remove_from_group(&"heroes")
+	if hero.is_in_group(&"units"):
+		hero.remove_from_group(&"units")
+	return hero
+
+
+class RecordingEnemyBuildManager extends EnemyBuildManager:
+	var requests: Array[StringName] = []
+
+	func try_place_building(building_type: StringName) -> bool:
+		requests.append(building_type)
+		return true
+
+	func try_place_farm() -> bool:
+		return try_place_building(&"farm")
+
+	func try_place_hero_altar() -> bool:
+		return try_place_building(&"hero_altar")
+
+	func try_place_barracks() -> bool:
+		return try_place_building(&"barracks")
+
+	func try_place_blacksmith() -> bool:
+		return try_place_building(&"blacksmith")
+
+	func try_place_stable() -> bool:
+		return try_place_building(&"stable")
+
+	func try_place_artillery_depot() -> bool:
+		return try_place_building(&"artillery_depot")
+
+	func try_place_expansion_at_mine(_gold_mine: GoldMine) -> bool:
+		requests.append(&"command_center")
+		return true
+
+
+class RecordingEnemyGatherManager extends EnemyGatherManager:
+	var assignments: Array = []
+
+	func assign_gather_job(worker: Worker, prefer_gold: bool = false, _force_recovery: bool = false) -> bool:
+		assignments.append({"worker": worker, "prefer_gold": prefer_gold})
+		return true

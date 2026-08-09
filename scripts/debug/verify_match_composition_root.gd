@@ -1,6 +1,6 @@
 extends Node
 
-## Headless verification for MatchCompositionRoot after enemy AI purge.
+## Headless verification for MatchCompositionRoot with baseline EnemyAI.
 ## Godot_v4.7-stable_win64.exe --headless --path <project> --scene res://scenes/debug/verify_match_composition_root.tscn
 
 const REPORT_PATH := "user://match_composition_root_verify_result.txt"
@@ -53,6 +53,8 @@ func _verify_packed_scene(failures: PackedStringArray) -> void:
 		await get_tree().process_frame
 		return
 
+	_expect(failures, "exactly one EnemyAI child", root.get_node_or_null("EnemyAI") != null)
+	_expect(failures, "enemy_ai resolved", root.enemy_ai != null)
 	_expect(failures, "no SimpleWc3AI child", root.get_node_or_null("SimpleWc3AI") == null)
 	_expect(failures, "no AIPlayerState child", root.get_node_or_null("AIPlayerState") == null)
 	_expect(failures, "build manager mechanics present", root.enemy_build_manager != null)
@@ -78,10 +80,16 @@ func _verify_runtime_bind(failures: PackedStringArray) -> void:
 	var gather := EnemyGatherManager.new()
 	gather.name = "EnemyGatherManager"
 	root.add_child(gather)
+	var ai := EnemyAI.new()
+	ai.name = "EnemyAI"
+	ai.show_debug_overlay = false
+	ai.set_process(false)
+	root.add_child(ai)
 	add_child(root)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
+	_expect(failures, "runtime resolves enemy ai", root.enemy_ai == ai)
 	_expect(failures, "runtime resolves build manager", root.enemy_build_manager == build)
 	_expect(failures, "runtime resolves gather manager", root.enemy_gather_manager == gather)
 	_expect(failures, "runtime has no SimpleWc3AI", root.get_node_or_null("SimpleWc3AI") == null)
