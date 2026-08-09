@@ -25,7 +25,6 @@ func _ready() -> void:
 	await _test_exclusive_authority(failures)
 	await _test_opening_sequence(failures)
 	await _test_match_systems_scene_wiring(failures)
-	await _test_init_test_after_camps(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -357,25 +356,4 @@ func _test_match_systems_scene_wiring(failures: PackedStringArray) -> void:
 	_expect(failures, "no EnemyCombatController", root.get_node_or_null("EnemyCombatController") == null)
 
 	systems.queue_free()
-	await get_tree().process_frame
-
-
-func _test_init_test_after_camps(failures: PackedStringArray) -> void:
-	print("verify: SimpleWc3AI.init_test_after_camps")
-	var simple := SimpleWc3AI.new()
-	simple.name = "SimpleWc3AIInitTest"
-	add_child(simple)
-	await get_tree().process_frame
-
-	simple.assembly_position = Vector3(12.0, 0.0, 14.0)
-	simple.init_test_after_camps(["MediumCampSouthCenter"])
-	_expect(failures, "init marks camp cleared", simple._cleared_camp_names.has("MediumCampSouthCenter"))
-	_expect(
-		failures,
-		"MatchSession exposes scenario reload API",
-		MatchSession.has_method(&"request_dev_scenario_reload")
-		and MatchSession.has_method(&"take_pending_dev_scenario")
-	)
-
-	simple.queue_free()
 	await get_tree().process_frame

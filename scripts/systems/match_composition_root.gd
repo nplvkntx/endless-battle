@@ -29,7 +29,6 @@ func _ready() -> void:
 	_ensure_simple_wc3_ai()
 	_declare_military_command_authority()
 	_bind_ai_runtime()
-	_ensure_ai_test_scenarios()
 
 
 func _exit_tree() -> void:
@@ -69,16 +68,6 @@ func is_v2_military_active() -> bool:
 
 func is_old_military_runtime_active() -> bool:
 	return false
-
-
-func _ensure_ai_test_scenarios() -> void:
-	if not OS.is_debug_build():
-		return
-	if get_node_or_null("AiTestScenarios") != null:
-		return
-	var scenarios := AiTestScenarios.new()
-	scenarios.name = "AiTestScenarios"
-	add_child(scenarios)
 
 
 func _ensure_simple_wc3_ai() -> void:
