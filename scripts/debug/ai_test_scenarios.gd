@@ -1,7 +1,7 @@
 class_name AiTestScenarios
 extends CanvasLayer
 
-## Dev-only: two deterministic SimpleWc3AI creep-stage jump buttons.
+## Dev-only: deterministic SimpleWc3AI creep-stage jump buttons.
 ## Clean match reload, then plain setup code. Not a save system.
 
 const HERO_FALLBACK_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
@@ -16,6 +16,7 @@ const CAMP_3 := "MediumCampNorthCenter"
 
 const SCENARIO_AFTER_CAMP_1 := &"after_camp_1"
 const SCENARIO_AFTER_CAMP_2 := &"after_camp_2"
+const SCENARIO_AFTER_CAMP_3 := &"after_camp_3"
 
 var _status_label: Label = null
 var _applying: bool = false
@@ -43,11 +44,18 @@ func request_after_camp_2() -> void:
 	MatchSession.request_dev_scenario_reload(SCENARIO_AFTER_CAMP_2)
 
 
+func request_after_camp_3() -> void:
+	_set_status("LOAD… AFTER CAMP 3")
+	MatchSession.request_dev_scenario_reload(SCENARIO_AFTER_CAMP_3)
+
+
 func apply_scenario(scenario: StringName) -> bool:
 	if scenario == SCENARIO_AFTER_CAMP_1:
 		return await _setup_after_camps([CAMP_1], 1)
 	if scenario == SCENARIO_AFTER_CAMP_2:
 		return await _setup_after_camps([CAMP_1, CAMP_2], 2)
+	if scenario == SCENARIO_AFTER_CAMP_3:
+		return await _setup_after_camps([CAMP_1, CAMP_2, CAMP_3], 3)
 	return false
 
 
@@ -233,7 +241,7 @@ func _build_buttons() -> void:
 	root.offset_left = -200.0
 	root.offset_top = 12.0
 	root.offset_right = -12.0
-	root.offset_bottom = 100.0
+	root.offset_bottom = 140.0
 	add_child(root)
 
 	var vbox := VBoxContainer.new()
@@ -249,6 +257,11 @@ func _build_buttons() -> void:
 	camp2_btn.text = "AFTER CAMP 2"
 	camp2_btn.pressed.connect(request_after_camp_2)
 	vbox.add_child(camp2_btn)
+
+	var camp3_btn := Button.new()
+	camp3_btn.text = "AFTER CAMP 3"
+	camp3_btn.pressed.connect(request_after_camp_3)
+	vbox.add_child(camp3_btn)
 
 	_status_label = Label.new()
 	_status_label.text = "AI test: -"

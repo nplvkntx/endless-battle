@@ -1,6 +1,6 @@
 extends Node
 
-## Headless: AFTER CAMP 1 / AFTER CAMP 2 deterministic AI test scenarios on the real main match.
+## Headless: AFTER CAMP 1 / 2 / 3 deterministic AI test scenarios on the real main match.
 
 const CAMP_1 := "MediumCampSouthCenter"
 const CAMP_2 := "MediumCampCentralCrossroads"
@@ -57,6 +57,17 @@ func _pipeline() -> void:
 	await _wait_for_scenario_ok("after_camp_2")
 	_assert_after_camp_2()
 	print("verify: AFTER CAMP 2 assertions done failures=", _failures.size())
+
+	scenarios = _scenarios()
+	if scenarios == null:
+		_failures.append("AiTestScenarios missing before Camp3")
+		_finish()
+		return
+	scenarios.request_after_camp_3()
+	await _wait_for_match()
+	await _wait_for_scenario_ok("after_camp_3")
+	_assert_after_camp_3()
+	print("verify: AFTER CAMP 3 assertions done failures=", _failures.size())
 
 	_finish()
 
@@ -134,6 +145,29 @@ func _assert_after_camp_2() -> void:
 	_expect_true("AI marked camp1 cleared", ai._cleared_camp_names.has(CAMP_1))
 	_expect_true("AI marked camp2 cleared", ai._cleared_camp_names.has(CAMP_2))
 	_expect_true("AI sees hero", ai.last_hero_alive)
+
+
+func _assert_after_camp_3() -> void:
+	_assert_army(5, 4)
+	_expect_eq("camp1 living", _count_living_creeps(CAMP_1), 0)
+	_expect_eq("camp2 living", _count_living_creeps(CAMP_2), 0)
+	_expect_eq("camp3 living", _count_living_creeps(CAMP_3), 0)
+	var ai: SimpleWc3AI = _simple_ai()
+	_expect_true("AI present", ai != null)
+	if ai == null:
+		return
+	_expect_eq("AI state TRAVEL", int(ai.get_state()), int(SimpleWc3AI.State.TRAVEL))
+	var next_camp: String = ai.get_camp_name()
+	_expect_true("AI next camp set", next_camp != "" and next_camp != "-")
+	_expect_true("AI next camp not camp1", next_camp != CAMP_1)
+	_expect_true("AI next camp not camp2", next_camp != CAMP_2)
+	_expect_true("AI next camp not camp3", next_camp != CAMP_3)
+	_expect_true("next camp alive", _count_living_creeps(next_camp) > 0)
+	_expect_true("AI marked camp1 cleared", ai._cleared_camp_names.has(CAMP_1))
+	_expect_true("AI marked camp2 cleared", ai._cleared_camp_names.has(CAMP_2))
+	_expect_true("AI marked camp3 cleared", ai._cleared_camp_names.has(CAMP_3))
+	_expect_true("AI sees hero", ai.last_hero_alive)
+	_expect_eq("AI pikemen", ai.last_pikeman_count, 5)
 
 
 func _assert_army(expected_pikes: int, expected_min_level: int) -> void:
