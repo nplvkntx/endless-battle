@@ -288,11 +288,12 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 		health_b != null and health_b.current_health < hp_b_before
 	)
 
+	## Camp 2 clear while Hero < 3 → whole army to Camp 3.
 	if NodeSafety.is_alive_node(creep_b):
 		creep_b.queue_free()
 	await get_tree().process_frame
 	CreepCampSafety.reset_match_state()
-	hero.level = 3
+	hero.level = 2
 
 	var camp_c := CreepCamp.new()
 	camp_c.name = "MediumCampC"
@@ -306,19 +307,77 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 	CreepCampSafety.reset_match_state()
 
-	simple._camp_id = camp_b.get_instance_id()
+	simple._process(0.5)
+	_expect(failures, "camp 2 cleared Hero<3 → TRAVEL Camp 3", simple.get_state() == SimpleWc3AI.State.TRAVEL)
+	_expect(failures, "next camp is Camp C", simple.get_camp_name() == "MediumCampC")
+	_expect(failures, "Camp 3 move squad includes whole army", simple.last_move_squad_size >= 6)
+
+	## Continuous Pikeman production while creeping when Barracks is free.
+	## Fight-loop ticks may already have filled the Barracks queue (max 3).
+	var barracks_node: Barracks = barracks as Barracks
+	var queued_or_training: bool = (
+		barracks_node.get_total_queue_count() > 0 or barracks_node.is_enemy_training_busy()
+	)
+	if not queued_or_training:
+		EnemyResourceManager.reset_to_starting_values()
+		EnemyResourceManager.add_gold(400)
+		EnemyResourceManager.add_food_max(40)
+		var pending_before: int = barracks_node.get_total_queue_count()
+		simple._process(0.5)
+		queued_or_training = barracks_node.get_total_queue_count() > pending_before
+	_expect(failures, "Barracks keeps training Pikemen while creeping", queued_or_training)
+
+	## New Pikeman while creeping → one-shot toward current camp objective.
+	var late_pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	add_child(late_pike)
+	late_pike.global_position = Vector3(26.0, 0.5, 20.0)
+	late_pike.team_id = TeamVisuals.ENEMY_TEAM_ID
+	late_pike.add_to_group(&"enemy_combat_units")
+	var late_id: int = late_pike.get_instance_id()
+	simple._process(0.5)
+	_expect(failures, "new Pikeman ordered toward current camp", simple._ordered_unit_ids.has(late_id))
+	_expect(failures, "new Pikeman move handled", simple.last_move_handled)
+
+	## Arrive at Camp 3 — Pikemen-first combat handoff.
+	hero.global_position = Vector3(50.0, 0.5, 49.0)
+	for pike_ref: Variant in few_pikes + more_pikes + [late_pike]:
+		if NodeSafety.is_alive_node(pike_ref):
+			(pike_ref as Spearman).global_position = Vector3(49.5, 0.5, 49.2)
+
+	var health_c: HealthComponent = creep_c.get_node_or_null("HealthComponent") as HealthComponent
+	var hp_c_before: float = health_c.current_health if health_c != null else 0.0
+	simple._process(0.5)
+	_expect(failures, "Camp 3 engage → FIGHT", simple.get_state() == SimpleWc3AI.State.FIGHT)
+
+	for _i: int in 40:
+		await get_tree().physics_frame
+		simple._process(0.5)
+		if health_c != null and health_c.current_health < hp_c_before:
+			break
+
+	_expect(
+		failures,
+		"Camp 3 creep HP decreased",
+		health_c != null and health_c.current_health < hp_c_before
+	)
+
+	if NodeSafety.is_alive_node(creep_c):
+		creep_c.queue_free()
+	await get_tree().process_frame
+	CreepCampSafety.reset_match_state()
+	hero.level = 3
+
+	simple._camp_id = camp_c.get_instance_id()
 	simple._state = SimpleWc3AI.State.FIGHT
 	simple._process(0.5)
 	_expect(failures, "Hero level >=3 → DONE", simple.get_state() == SimpleWc3AI.State.DONE)
 
-	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c]:
+	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c, late_pike]:
 		if NodeSafety.is_alive_node(node_ref):
 			(node_ref as Node).queue_free()
 	for pike_ref: Variant in few_pikes + more_pikes:
 		if NodeSafety.is_alive_node(pike_ref):
 			(pike_ref as Node).queue_free()
-	if NodeSafety.is_alive_node(creep_c):
-		creep_c.queue_free()
 	simple.queue_free()
 	await get_tree().process_frame
 

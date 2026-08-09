@@ -4,6 +4,7 @@ extends Node
 ## Simple WC3 melee opening — sole runtime military authority when enabled.
 ## Fixed sequence only:
 ## Farm → Altar → Barracks → Hero → 5 Pikemen → assembly → creep camps until Hero level 3 → STOP.
+## After Barracks: keep training Pikemen when free; new Pikemen one-shot toward assembly or current camp.
 ## Economy/build/train use existing gameplay systems; this script decides when and what.
 
 enum State {
@@ -216,17 +217,14 @@ func _tick_train_pikemen() -> void:
 
 	if last_pikeman_count >= MIN_PIKEMEN:
 		_state = State.ASSEMBLE
+		_try_train_pikeman()
 		return
 
 	var living_and_pending: int = last_pikeman_count + _count_pending_pikemen()
 	if living_and_pending >= MIN_PIKEMEN:
 		return
 
-	var barracks: Barracks = _find_completed_barracks()
-	if barracks == null:
-		return
-	if barracks.try_train_enemy_spearman():
-		strategic_orders_issued += 1
+	_try_train_pikeman()
 
 
 func _tick_assemble() -> void:
@@ -237,6 +235,7 @@ func _tick_assemble() -> void:
 		_state = State.TRAIN_PIKEMEN
 		return
 
+	_try_train_pikeman()
 	_ensure_assembly_position()
 	if assembly_position == Vector3.ZERO:
 		return
@@ -247,6 +246,7 @@ func _tick_assemble() -> void:
 
 
 func _tick_travel() -> void:
+	_try_train_pikeman()
 	var army: Array = _collect_main_army()
 	## After assembly, continue with Hero + living Pikemen (may be below 5).
 	if not _has_creeping_force(army):
@@ -272,6 +272,7 @@ func _tick_travel() -> void:
 
 
 func _tick_fight() -> void:
+	_try_train_pikeman()
 	var army: Array = _collect_main_army()
 	if not _has_creeping_force(army):
 		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
@@ -289,6 +290,15 @@ func _tick_fight() -> void:
 		return
 
 	_issue_fight_orders(army, creep)
+
+
+## Keep making Pikemen whenever Barracks is free and resources allow. No ratios.
+func _try_train_pikeman() -> void:
+	var barracks: Barracks = _find_completed_barracks()
+	if barracks == null:
+		return
+	if barracks.try_train_enemy_spearman():
+		strategic_orders_issued += 1
 
 
 func _on_camp_cleared(camp: Node3D) -> void:
