@@ -15,12 +15,12 @@ extends Camera3D
 
 
 func _process(delta: float) -> void:
-	## LoL-style hold-Space: continuously center on living PLAYER hero while held.
+	## LoL-style hold-Space: living PLAYER hero projects to viewport center while held.
 	## Must run before normal pan so edge/WASD cannot overwrite the same frame.
 	if Input.is_action_pressed(&"focus_hero"):
 		var hero: Hero = _get_living_player_hero()
 		if hero != null:
-			focus_on_world_position(hero.global_position)
+			center_world_position_on_screen(hero.global_position)
 			return
 
 	var direction := _get_movement_direction()
@@ -65,13 +65,13 @@ func _get_movement_direction() -> Vector3:
 	var mouse_position := get_viewport().get_mouse_position()
 	var viewport_size := get_viewport().get_visible_rect().size
 
-	if mouse_position.x <= edge_margin_pixels:
+	if mouse_position.x <= edge_margin_pixels and edge_margin_pixels > 0.0:
 		direction -= right
-	if mouse_position.x >= viewport_size.x - edge_margin_pixels:
+	if mouse_position.x >= viewport_size.x - edge_margin_pixels and edge_margin_pixels > 0.0:
 		direction += right
-	if mouse_position.y <= edge_margin_pixels:
+	if mouse_position.y <= edge_margin_pixels and edge_margin_pixels > 0.0:
 		direction += forward
-	if mouse_position.y >= viewport_size.y - edge_margin_pixels:
+	if mouse_position.y >= viewport_size.y - edge_margin_pixels and edge_margin_pixels > 0.0:
 		direction -= forward
 
 	return direction
@@ -106,8 +106,42 @@ func _clamp_position(position: Vector3) -> Vector3:
 	return position
 
 
+## Centers a world point on the viewport by translating camera X/Z only.
+## Preserves Y, rotation, and FOV. Correct for pitched RTS cameras.
+func center_world_position_on_screen(world_position: Vector3) -> void:
+	var viewport := get_viewport()
+	if viewport == null:
+		return
+	var center: Vector2 = viewport.get_visible_rect().size * 0.5
+	var ray_origin: Vector3 = project_ray_origin(center)
+	var ray_dir: Vector3 = project_ray_normal(center)
+	if absf(ray_dir.y) < 0.0001:
+		## Degenerate (looking horizontal) — fall back to X/Z match.
+		focus_on_world_position(world_position)
+		return
+	var t: float = (world_position.y - ray_origin.y) / ray_dir.y
+	var ground_hit: Vector3 = ray_origin + ray_dir * t
+	var delta := Vector3(
+		world_position.x - ground_hit.x,
+		0.0,
+		world_position.z - ground_hit.z
+	)
+	global_position = _clamp_position(global_position + delta)
+
+
+## Legacy/minimap helper: put camera X/Z over a world point (does NOT screen-center
+## under pitch). Prefer center_world_position_on_screen for Space follow.
 func focus_on_world_position(world_position: Vector3) -> void:
 	var new_position := global_position
 	new_position.x = world_position.x
 	new_position.z = world_position.z
 	global_position = _clamp_position(new_position)
+
+
+## Screen-space error of a world point vs viewport center (pixels).
+func screen_center_error(world_position: Vector3) -> float:
+	var viewport := get_viewport()
+	if viewport == null:
+		return INF
+	var center: Vector2 = viewport.get_visible_rect().size * 0.5
+	return unproject_position(world_position).distance_to(center)

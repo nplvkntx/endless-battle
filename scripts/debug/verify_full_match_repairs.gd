@@ -214,9 +214,13 @@ func _verify_space_focus_camera(failures: PackedStringArray) -> void:
 	var camera := Camera3D.new()
 	camera.set_script(load("res://scripts/systems/camera_controller.gd"))
 	camera.edge_margin_pixels = 0.0
+	## Pitched camera matching main.tscn — assert SCREEN center, not X/Z equality.
+	camera.transform = Transform3D(
+		Basis.from_euler(Vector3(deg_to_rad(-55.0), 0.0, 0.0)),
+		Vector3(50, 22, 50)
+	)
 	add_child(camera)
 	await get_tree().process_frame
-	camera.global_position = Vector3(50, 20, 50)
 
 	var hero: Hero = HERO_SCENE.instantiate() as Hero
 	add_child(hero)
@@ -227,42 +231,29 @@ func _verify_space_focus_camera(failures: PackedStringArray) -> void:
 		hero.add_to_group(&"heroes")
 	HeroProgressionStore.register_living_hero(hero)
 
-	## Hold-follow: action pressed + _process must track hero across moves.
 	Input.action_press(&"focus_hero")
 	camera._process(0.016)
 	_expect(
 		failures,
-		"space hold centers X",
-		is_equal_approx(camera.global_position.x, hero.global_position.x)
-	)
-	_expect(
-		failures,
-		"space hold centers Z",
-		is_equal_approx(camera.global_position.z, hero.global_position.z)
+		"space hold screen-centers hero",
+		camera.screen_center_error(hero.global_position) <= 3.0
 	)
 	hero.global_position = Vector3(-4, 0, 11)
 	camera._process(0.016)
 	_expect(
 		failures,
-		"space hold follows moved hero X",
-		is_equal_approx(camera.global_position.x, hero.global_position.x)
-	)
-	_expect(
-		failures,
-		"space hold follows moved hero Z",
-		is_equal_approx(camera.global_position.z, hero.global_position.z)
+		"space hold follows moved hero on screen",
+		camera.screen_center_error(hero.global_position) <= 3.0
 	)
 	Input.action_release(&"focus_hero")
 	_expect(failures, "space action released", not Input.is_action_pressed(&"focus_hero"))
+	camera.edge_margin_pixels = 0.0
 	hero.global_position = Vector3(9, 0, -2)
 	camera._process(0.016)
 	_expect(
 		failures,
-		"space release stops follow",
-		not (
-			is_equal_approx(camera.global_position.x, hero.global_position.x)
-			and is_equal_approx(camera.global_position.z, hero.global_position.z)
-		)
+		"space release does not keep hero screen-centered",
+		camera.screen_center_error(hero.global_position) > 8.0
 	)
 
 	hero.queue_free()

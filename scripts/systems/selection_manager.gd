@@ -174,7 +174,10 @@ func focus_camera_on_current_selection() -> void:
 	for position: Vector3 in positions:
 		centroid += position
 	centroid /= float(positions.size())
-	camera.focus_on_world_position(centroid)
+	if camera.has_method(&"center_world_position_on_screen"):
+		camera.center_world_position_on_screen(centroid)
+	else:
+		camera.focus_on_world_position(centroid)
 
 
 ## Camera only — does not change selection or issue orders (LoL-style Space focus).
@@ -185,7 +188,10 @@ func _focus_camera_on_player_hero() -> bool:
 	var camera: Camera3D = _get_camera()
 	if camera == null or not camera.has_method("focus_on_world_position"):
 		return false
-	camera.focus_on_world_position(hero.global_position)
+	if camera.has_method(&"center_world_position_on_screen"):
+		camera.center_world_position_on_screen(hero.global_position)
+	else:
+		camera.focus_on_world_position(hero.global_position)
 	return true
 
 
@@ -276,40 +282,22 @@ var _last_clicked_unit_handle: EntityHandle = EntityHandle.empty()
 var _last_click_time_msec: int = -1
 ## Latches left-mouse ownership across a targeting click even after a valid cast clears targeting.
 var _ability_owns_left_mouse: bool = false
+## Temporary one-click diagnostic for real gameplay spell selection ownership.
+var _spell_input_trace_enabled: bool = true
+
+
+## Ability mouse ownership must run in `_input` (before GUI Controls) so press+release
+## cannot split across a HUD Control and the world unhandled path.
+func _input(event: InputEvent) -> void:
+	if _try_handle_ability_mouse_event(event, &"SelectionManager._input"):
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Ability targeting owns ALL left mouse (press + release + drag) while armed.
-	# Valid casts clear targeting on press — latch still consumes the matching release so
-	# SelectionManager cannot change selection on the same click sequence.
-	if event is InputEventMouseButton:
-		var mouse_button := event as InputEventMouseButton
-		if mouse_button.button_index == MOUSE_BUTTON_LEFT:
-			var targeting_active: bool = (
-				HeroAbilityTargetingController != null
-				and HeroAbilityTargetingController.is_targeting()
-			)
-			if targeting_active or _ability_owns_left_mouse:
-				if mouse_button.pressed:
-					if targeting_active:
-						HeroAbilityTargetingController.try_handle_left_click(mouse_button.position)
-					_ability_owns_left_mouse = true
-					_abort_left_selection_gesture()
-				else:
-					_ability_owns_left_mouse = false
-					_abort_left_selection_gesture()
-				get_viewport().set_input_as_handled()
-				return
-		elif mouse_button.button_index == MOUSE_BUTTON_RIGHT:
-			if (
-				mouse_button.pressed
-				and HeroAbilityTargetingController != null
-				and HeroAbilityTargetingController.is_targeting()
-			):
-				## Cancel targeting only — do not fall through to army move on this click.
-				if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
-					get_viewport().set_input_as_handled()
-					return
+	## Safety net if `_input` was bypassed — still own the click sequence.
+	if _try_handle_ability_mouse_event(event, &"SelectionManager._unhandled_input"):
+		get_viewport().set_input_as_handled()
+		return
 
 	# Space/focus_hero hold-follow lives in CameraController._process (not one-shot here).
 
@@ -346,6 +334,109 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		_on_mouse_motion((event as InputEventMouseMotion).position)
+
+
+func _try_handle_ability_mouse_event(event: InputEvent, handled_by: StringName) -> bool:
+	var targeting_active: bool = (
+		HeroAbilityTargetingController != null
+		and HeroAbilityTargetingController.is_targeting()
+	)
+	if not targeting_active and not _ability_owns_left_mouse:
+		return false
+
+	if event is InputEventMouseMotion:
+		## Motion is owned but not spam-logged every frame.
+		return true
+
+	if not event is InputEventMouseButton:
+		return false
+	var mouse_button := event as InputEventMouseButton
+	if mouse_button.button_index == MOUSE_BUTTON_LEFT:
+		var targeting_before: bool = targeting_active
+		var selection_before: Array = _selection_instance_ids_for_trace()
+		if mouse_button.pressed:
+			if targeting_active:
+				HeroAbilityTargetingController.try_handle_left_click(mouse_button.position)
+			_ability_owns_left_mouse = true
+			_abort_left_selection_gesture()
+		else:
+			_ability_owns_left_mouse = false
+			_abort_left_selection_gesture()
+		var targeting_after: bool = (
+			HeroAbilityTargetingController != null
+			and HeroAbilityTargetingController.is_targeting()
+		)
+		_trace_spell_input(
+			&"LEFT_PRESS" if mouse_button.pressed else &"LEFT_RELEASE",
+			targeting_before,
+			targeting_after,
+			handled_by,
+			true,
+			selection_before,
+			_selection_instance_ids_for_trace()
+		)
+		return true
+
+	if mouse_button.button_index == MOUSE_BUTTON_RIGHT and mouse_button.pressed:
+		if not targeting_active:
+			return false
+		var selection_before_r: Array = _selection_instance_ids_for_trace()
+		if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
+			_trace_spell_input(
+				&"RIGHT_PRESS",
+				true,
+				false,
+				handled_by,
+				true,
+				selection_before_r,
+				_selection_instance_ids_for_trace()
+			)
+			return true
+	return false
+
+
+func _selection_instance_ids_for_trace() -> Array:
+	var ids: Array = []
+	for unit_ref: Variant in selected_units:
+		if NodeSafety.is_alive_node(unit_ref) and unit_ref is Object:
+			ids.append((unit_ref as Object).get_instance_id())
+	ids.sort()
+	return ids
+
+
+func _trace_spell_input(
+	event_name: StringName,
+	targeting_before: bool,
+	targeting_after: bool,
+	handled_by: StringName,
+	viewport_handled: bool,
+	selection_before: Array = [],
+	selection_after: Array = []
+) -> void:
+	if not _spell_input_trace_enabled:
+		return
+	if not (
+		HeroAbilityTargetingController != null
+		and (
+			HeroAbilityTargetingController.is_targeting()
+			or _ability_owns_left_mouse
+			or targeting_before
+			or targeting_after
+		)
+	):
+		return
+	print(
+		"[SPELL INPUT]\nevent=%s\ntargeting_before=%s\ntargeting_after=%s\nselection_before_ids=%s\nselection_after_ids=%s\nhandled_by=%s\nviewport_handled=%s"
+		% [
+			String(event_name),
+			str(targeting_before),
+			str(targeting_after),
+			str(selection_before),
+			str(selection_after),
+			String(handled_by),
+			str(viewport_handled),
+		]
+	)
 
 
 func _abort_left_selection_gesture() -> void:
@@ -1070,6 +1161,15 @@ func _make_screen_rect(start: Vector2, end: Vector2) -> Rect2:
 
 
 func _set_selected_units(units: Array[Unit]) -> void:
+	var ability_sequence_active: bool = _ability_owns_left_mouse or (
+		HeroAbilityTargetingController != null
+		and HeroAbilityTargetingController.is_targeting()
+	)
+	if ability_sequence_active and _spell_input_trace_enabled:
+		print(
+			"[SPELL INPUT]\n_set_selected_units during ability sequence\nselection_before_ids=%s\nnext_count=%d\nreason=SelectionManager._set_selected_units"
+			% [str(_selection_instance_ids_for_trace()), units.size()]
+		)
 	var next_units: Array[Unit] = _filter_selectable_units(units.duplicate())
 	if _arrays_match(selected_units, next_units):
 		return

@@ -60,6 +60,11 @@ func _make_camera() -> Camera3D:
 	camera.set_script(CAMERA_SCRIPT)
 	camera.current = true
 	camera.edge_margin_pixels = 0.0
+	## Actual pitched RTS camera from main.tscn (not an unrotated fake).
+	camera.transform = Transform3D(
+		Basis.from_euler(Vector3(deg_to_rad(-55.0), 0.0, 0.0)),
+		Vector3(0, 22, 0)
+	)
 	add_child(camera)
 	return camera
 
@@ -73,6 +78,7 @@ func _make_selection() -> Node:
 	selection.name = "SelectionManager"
 	selection.set_script(SELECTION_SCRIPT)
 	add_child(selection)
+	selection._spell_input_trace_enabled = false
 	return selection
 
 
@@ -107,26 +113,42 @@ func _make_mouse(button: MouseButton, pressed: bool, position: Vector2) -> Input
 	return event
 
 
+func _expect_hero_screen_centered(
+	failures: PackedStringArray,
+	label: String,
+	camera: Camera3D,
+	hero: Hero,
+	tolerance_px: float = 3.0
+) -> void:
+	var error: float = camera.screen_center_error(hero.global_position)
+	_expect(failures, label, error <= tolerance_px)
+
+
+func _drive_ability_mouse(selection: Node, event: InputEvent) -> void:
+	## Primary gameplay path is `_input` (before GUI).
+	if selection.has_method(&"_input"):
+		selection._input(event)
+	elif selection.has_method(&"_unhandled_input"):
+		selection._unhandled_input(event)
+
+
 func _verify_space_press_centers(failures: PackedStringArray) -> void:
-	print("test: space press centers")
+	print("test: space press centers (screen projection)")
 	var camera: Camera3D = _make_camera()
-	camera.global_position = Vector3(40, 18, 40)
+	camera.global_position = Vector3(40, 22, 40)
 	var hero: Hero = _spawn_player_hero(Vector3(5, 0, -4))
 	await get_tree().process_frame
 
 	Input.action_press(&"focus_hero")
 	camera._process(0.016)
+	_expect_hero_screen_centered(failures, "space press centers hero on screen", camera, hero)
+	_expect(failures, "space press preserves camera Y", is_equal_approx(camera.global_position.y, 22.0))
+	## Pure X-pitch: camera X may match hero X, but Z must differ (look-ahead offset).
 	_expect(
 		failures,
-		"space press centers X",
-		is_equal_approx(camera.global_position.x, hero.global_position.x)
+		"pitched camera Z offset vs hero (not blind X/Z lock)",
+		not is_equal_approx(camera.global_position.z, hero.global_position.z)
 	)
-	_expect(
-		failures,
-		"space press centers Z",
-		is_equal_approx(camera.global_position.z, hero.global_position.z)
-	)
-	_expect(failures, "space press preserves camera Y", is_equal_approx(camera.global_position.y, 18.0))
 
 	Input.action_release(&"focus_hero")
 	hero.queue_free()
@@ -136,9 +158,9 @@ func _verify_space_press_centers(failures: PackedStringArray) -> void:
 
 
 func _verify_space_hold_follows(failures: PackedStringArray) -> void:
-	print("test: space hold follows A->B->C")
+	print("test: space hold follows A->B->C (screen center)")
 	var camera: Camera3D = _make_camera()
-	camera.global_position = Vector3(20, 16, 20)
+	camera.global_position = Vector3(20, 22, 20)
 	var hero: Hero = _spawn_player_hero(Vector3(1, 0, 1))
 	await get_tree().process_frame
 
@@ -151,11 +173,11 @@ func _verify_space_hold_follows(failures: PackedStringArray) -> void:
 	for point: Vector3 in path:
 		hero.global_position = point
 		camera._process(0.016)
-		_expect(
+		_expect_hero_screen_centered(
 			failures,
-			"space hold follows (%.0f,%.0f)" % [point.x, point.z],
-			is_equal_approx(camera.global_position.x, point.x)
-			and is_equal_approx(camera.global_position.z, point.z)
+			"space hold screen-centers (%.0f,%.0f)" % [point.x, point.z],
+			camera,
+			hero
 		)
 
 	Input.action_release(&"focus_hero")
@@ -168,32 +190,27 @@ func _verify_space_hold_follows(failures: PackedStringArray) -> void:
 func _verify_space_release_frees_camera(failures: PackedStringArray) -> void:
 	print("test: space release frees camera")
 	var camera: Camera3D = _make_camera()
-	camera.global_position = Vector3(0, 15, 0)
+	camera.global_position = Vector3(0, 22, 0)
 	var hero: Hero = _spawn_player_hero(Vector3(4, 0, 4))
 	await get_tree().process_frame
 
 	Input.action_press(&"focus_hero")
 	camera._process(0.016)
-	_expect(
-		failures,
-		"space hold centers before release",
-		is_equal_approx(camera.global_position.x, hero.global_position.x)
-		and is_equal_approx(camera.global_position.z, hero.global_position.z)
-	)
+	_expect_hero_screen_centered(failures, "space hold centers before release", camera, hero)
 	Input.action_release(&"focus_hero")
 
 	hero.global_position = Vector3(12, 0, -8)
+	## Disable edge pan for this assertion — mouse may sit at (0,0) in headless.
+	camera.edge_margin_pixels = -1.0
 	camera._process(0.016)
 	_expect(
 		failures,
-		"space release stops follow",
-		not (
-			is_equal_approx(camera.global_position.x, hero.global_position.x)
-			and is_equal_approx(camera.global_position.z, hero.global_position.z)
-		)
+		"space release does not keep hero screen-centered",
+		camera.screen_center_error(hero.global_position) > 8.0
 	)
+	camera.edge_margin_pixels = 0.0
 
-	## Manual pan still works after release (simulate WASD via direct move helper path).
+	## Manual recenter helper still works after release.
 	camera.focus_on_world_position(Vector3(2, 0, 2))
 	_expect(
 		failures,
@@ -212,7 +229,7 @@ func _verify_space_preserves_selection(failures: PackedStringArray) -> void:
 	print("test: space preserves multi-selection")
 	var selection: Node = _make_selection()
 	var camera: Camera3D = _make_camera()
-	camera.global_position = Vector3(10, 14, 10)
+	camera.global_position = Vector3(10, 22, 10)
 	var hero: Hero = _spawn_player_hero(Vector3.ZERO)
 	var units: Array[Unit] = []
 	for i in range(5):
@@ -282,11 +299,11 @@ func _verify_ability_valid_click_keeps_selection(failures: PackedStringArray) ->
 
 	## Press while targeting arms the latch, then simulate successful cast clearing targeting
 	## before release (the exact leak that previously reselected on mouse-up).
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(100, 100)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(100, 100)))
 	_expect(failures, "valid path: latch owned after press", selection._ability_owns_left_mouse)
 	HeroAbilityTargetingController.cancel_targeting()
 	_expect(failures, "valid path: targeting cleared like successful cast", not HeroAbilityTargetingController.is_targeting())
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(100, 100)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(100, 100)))
 
 	_expect(failures, "valid path: selection size unchanged", selection.selected_units.size() == 3)
 	_expect(failures, "valid path: selection identity unchanged", _selection_ids(selection) == before)
@@ -326,9 +343,9 @@ func _verify_ability_invalid_click_keeps_selection(failures: PackedStringArray) 
 	var before: Array = _selection_ids(selection)
 
 	HeroAbilityTargetingController.begin_targeting(hero, HeroAbilityProgression.ABILITY_E)
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(12, 12)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(12, 12)))
 	_expect(failures, "invalid path: targeting stays armed", HeroAbilityTargetingController.is_targeting())
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(12, 12)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(12, 12)))
 
 	_expect(failures, "invalid path: selection size unchanged", selection.selected_units.size() == 6)
 	_expect(failures, "invalid path: selection identity unchanged", _selection_ids(selection) == before)
@@ -366,9 +383,9 @@ func _verify_ability_click_on_unit_keeps_selection(failures: PackedStringArray) 
 	var before: Array = _selection_ids(selection)
 	HeroAbilityTargetingController.begin_targeting(hero, HeroAbilityProgression.ABILITY_Q)
 
-	## Ground/self ability click path — SelectionManager must consume regardless of hit.
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(200, 200)))
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(200, 200)))
+	## Ground/self ability click path â€” SelectionManager must consume regardless of hit.
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(200, 200)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(200, 200)))
 
 	_expect(failures, "unit click path: selection unchanged", _selection_ids(selection) == before)
 
@@ -398,12 +415,12 @@ func _verify_ability_drag_blocked(failures: PackedStringArray) -> void:
 	var before: Array = _selection_ids(selection)
 
 	HeroAbilityTargetingController.begin_targeting(hero, HeroAbilityProgression.ABILITY_E)
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(10, 10)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, true, Vector2(10, 10)))
 	var motion := InputEventMouseMotion.new()
 	motion.position = Vector2(80, 80)
 	motion.global_position = Vector2(80, 80)
-	selection._unhandled_input(motion)
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(80, 80)))
+	_drive_ability_mouse(selection, motion)
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_LEFT, false, Vector2(80, 80)))
 
 	_expect(failures, "drag path: not dragging", not selection._is_dragging)
 	_expect(failures, "drag path: left not held", not selection._left_button_down)
@@ -435,7 +452,7 @@ func _verify_ability_right_click_cancel(failures: PackedStringArray) -> void:
 
 	HeroAbilityTargetingController.begin_targeting(hero, HeroAbilityProgression.ABILITY_E)
 	_expect(failures, "right cancel: targeting armed", HeroAbilityTargetingController.is_targeting())
-	selection._unhandled_input(_make_mouse(MOUSE_BUTTON_RIGHT, true, Vector2(50, 50)))
+	_drive_ability_mouse(selection, _make_mouse(MOUSE_BUTTON_RIGHT, true, Vector2(50, 50)))
 	_expect(failures, "right cancel: targeting cleared", not HeroAbilityTargetingController.is_targeting())
 	_expect(failures, "right cancel: selection unchanged", _selection_ids(selection) == before)
 

@@ -1446,23 +1446,46 @@ func _update_physical_stuck_watch(delta: float = -1.0) -> void:
 		_physical_stuck_watch_origin
 	)
 	var was_confirmed: bool = _physical_stuck_confirmed
-	_physical_stuck_confirmed = (
+	## Walkable terrain ahead must NOT cancel true no-progress — units/creeps can
+	## block a walkable cell indefinitely. Brief traffic is already gated by
+	## PHYSICAL_STUCK_SECONDS (~1.6s) before confirmation.
+	var no_progress: bool = (
 		_physical_stuck_watch_seconds >= PHYSICAL_STUCK_SECONDS
 		and progress_from_watch < PHYSICAL_STUCK_MOVE_EPSILON
-		and not _is_temporary_mobile_congestion(dest)
 	)
+	_physical_stuck_confirmed = no_progress and not _is_temporary_mobile_congestion()
 	if _physical_stuck_confirmed and not was_confirmed:
 		PerfCounters.record_stuck_recovery()
 
 
-func _is_temporary_mobile_congestion(dest: Vector3) -> bool:
-	## World cell ahead still walkable ⇒ lack of progress is unit traffic, not a blocked route.
-	var to_dest: Vector3 = _flat_xz(dest - global_position)
-	if to_dest.length_squared() < 0.01:
+## True only when nearby mobiles are still moving (traffic clearing).
+## A walkable nav cell alone is NOT temporary congestion.
+func _is_temporary_mobile_congestion() -> bool:
+	## Only probed when the time gate already elapsed — avoid per-frame spam.
+	if _physical_stuck_watch_seconds < PHYSICAL_STUCK_SECONDS:
 		return false
-	var ahead: Vector3 = global_position + to_dest.normalized() * 1.25
-	ahead.y = global_position.y
-	return PlayerRouteNavigation.is_world_walkable(ahead)
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return false
+	var query: PhysicsShapeQueryParameters3D = _get_custom_rts_query()
+	query.shape = _get_custom_rts_probe_shape()
+	query.transform = Transform3D(Basis.IDENTITY, global_position)
+	query.collision_mask = PhysicsLayers.UNITS
+	query.exclude = [get_rid()]
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	var hits: Array[Dictionary] = space.intersect_shape(query, CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS)
+	var moving_neighbors: int = 0
+	for hit: Dictionary in hits:
+		var collider: Variant = hit.get("collider")
+		if not NodeSafety.is_alive_node(collider) or not collider is CharacterBody3D:
+			continue
+		var other: CharacterBody3D = collider as CharacterBody3D
+		var horiz: Vector3 = Vector3(other.velocity.x, 0.0, other.velocity.z)
+		if horiz.length_squared() > PHYSICAL_STUCK_SPEED_EPSILON * PHYSICAL_STUCK_SPEED_EPSILON:
+			moving_neighbors += 1
+	## Require actual moving traffic — frozen piles / creep bodies do not suppress stuck.
+	return moving_neighbors >= 2
 
 
 func _reset_physical_stuck_watch() -> void:

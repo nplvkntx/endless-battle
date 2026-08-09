@@ -47,6 +47,8 @@ func _ready() -> void:
 	await _test_player_power_with_unset_team_id()
 	await _test_freed_creep_camp_count()
 	await _test_army_cohesion_conditions()
+	await _test_condition_stability_and_hero_unstuck()
+	await _test_difficulty_economy_knobs()
 
 	var report: String
 	if _failures.is_empty():
@@ -805,6 +807,89 @@ func _test_army_cohesion_conditions() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect("TEST J player_power > 0", _ai.get_player_power_for_test() > 0.0)
+
+
+func _test_condition_stability_and_hero_unstuck() -> void:
+	print("--- condition stability + hero local unstuck ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(8, 0, 8))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(8.0 + float(i) * 0.7, 0, 8))
+	## Strong player so attack stays closed; creep camp available for EARLY_CREEP.
+	for i: int in 14:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+	var camp := CreepCamp.new()
+	camp.name = "StableCreepCamp"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(0, 0, 28)
+	var creep: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	creep.reparent(camp)
+	_ai.set_camps_cleared_for_test(0)
+	await get_tree().process_frame
+
+	var buckets: PackedStringArray = PackedStringArray()
+	for _i: int in 6:
+		_ai.force_tick_for_test()
+		buckets.append(String(_ai.get_debug_condition_bucket_for_test()))
+	var unique: Dictionary = {}
+	for b: String in buckets:
+		unique[b] = true
+	_expect(
+		"stable creep travel does not alternate every tick",
+		unique.size() <= 2
+	)
+	## Must not thrash CREEP↔REGROUP↔CREEP↔REGROUP across 6 ticks when facts are stable.
+	var flips: int = 0
+	for i: int in range(1, buckets.size()):
+		if buckets[i] != buckets[i - 1]:
+			flips += 1
+	_expect("condition flips in 6 stable ticks <= 2", flips <= 2)
+
+	## Hero local unstuck must not dump the whole army onto the Hero escape point.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(10, 0, 10))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(10.0 + float(i), 0, 10))
+	await get_tree().process_frame
+	_ai._read_live_world()
+	hero.set_movement_target(_cc.global_position + Vector3(40, 0, 40))
+	## Simulate confirmed stuck by calling fix directly (condition path requires physical watch).
+	_ai._fix_current_hero_movement()
+	var hero_escape: Vector3 = hero.get_movement_destination() if hero.has_move_target else Vector3.ZERO
+	var piled: int = 0
+	for unit_variant: Variant in _ai.get_enemy_army_for_test():
+		if not unit_variant is Unit or unit_variant is Hero:
+			continue
+		var soldier: Unit = unit_variant as Unit
+		if not NodeSafety.is_alive_node(soldier):
+			continue
+		var dest: Vector3 = (
+			soldier.get_movement_destination() if soldier.has_move_target else soldier.global_position
+		)
+		if dest.distance_to(hero_escape) < 2.5:
+			piled += 1
+	_expect("hero unstuck does not pile army onto escape (<2 soldiers)", piled < 2)
+	_expect(
+		"hero unstuck command kind",
+		_ai.get_last_command_kind_for_test() == &"hero_unstuck"
+	)
+
+
+func _test_difficulty_economy_knobs() -> void:
+	print("--- difficulty economy knobs ---")
+	_expect("T1 workers=13", AIDifficultyConfig.get_desired_worker_count(1, false) == 13)
+	_expect("T2 workers=20", AIDifficultyConfig.get_desired_worker_count(2, false) == 20)
+	_expect("T3 workers=28", AIDifficultyConfig.get_desired_worker_count(3, false) == 28)
+	_expect("expansion workers=33", AIDifficultyConfig.get_desired_worker_count(1, true) == 33)
+	_expect("Hard income 1.5", is_equal_approx(AIDifficultyConfig.HARD_RESOURCE_MULTIPLIER, 1.5))
+	_expect("Hard train 1.5", is_equal_approx(AIDifficultyConfig.HARD_TRAIN_SPEED_MULTIPLIER, 1.5))
+	_expect("Easy max military 1", AIDifficultyConfig.MAX_MILITARY_EASY == 1)
+	_expect("Normal/Hard max military 3", AIDifficultyConfig.MAX_MILITARY_NORMAL_HARD == 3)
 
 
 func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:

@@ -302,4 +302,7 @@ func _move_camera_to_minimap_position(local_position: Vector2) -> void:
 		return
 
 	var world_position: Vector3 = _minimap_to_world(local_position)
-	_camera.focus_on_world_position(world_position)
+	if _camera.has_method(&"center_world_position_on_screen"):
+		_camera.center_world_position_on_screen(world_position)
+	else:
+		_camera.focus_on_world_position(world_position)
