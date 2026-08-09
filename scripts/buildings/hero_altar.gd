@@ -9,7 +9,10 @@ signal hero_altar_state_changed()
 const TRAIN_GOLD_COST: int = HeroStats.TRAIN_GOLD_COST
 const TRAIN_FOOD_COST: int = HeroStats.TRAIN_FOOD_COST
 const TRAIN_SECONDS: float = HeroStats.TRAIN_SECONDS
-const HERO_SPAWN_OFFSET: Vector3 = Vector3(3.0, -0.5, 0.0)
+## Barracks/CC-style front exit (-Z). Must clear inflated custom-grid clearance (~2.65).
+const HERO_SPAWN_OFFSET: Vector3 = Vector3(0.0, -0.5, -3.5)
+## Matches Hero / Shadow Assassin collision half-extents used for spawn physics probes.
+const HERO_SPAWN_PHYSICS_HALF: float = 0.6
 const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
 const HERO_GROUP: StringName = &"heroes"
@@ -392,16 +395,49 @@ func _spawn_enemy_hero() -> void:
 	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), hero)
 
 
-## Preferred altar offset can sit inside inflated custom-grid clearance (or a
-## neighboring building's ring). Snap once to a walkable exit — same helper as
-## production rally / post-construction builders. Valid spawns are unchanged.
+## Pick a deterministic exit outside the altar: custom-grid walkable AND physically
+## clear for the Hero body. Grid-only nearest_walkable is not enough — trees and
+## other WORLD colliders are off the occupancy grid but still block move_and_slide.
+## Candidate order matches Barracks/CC front-exit first (-Z), then a ring search.
 func _claim_hero_spawn_position() -> Vector3:
-	var preferred: Vector3 = global_position + HERO_SPAWN_OFFSET
+	var spawn_y: float = global_position.y + HERO_SPAWN_OFFSET.y
 	PlayerRouteNavigation.ensure_grid_ready()
-	if PlayerRouteNavigation.is_world_walkable(preferred):
-		return preferred
+	var preferred: Vector3 = global_position + HERO_SPAWN_OFFSET
+	var start_cell: Vector2i = PlayerRouteNavigation.grid.world_to_cell(preferred)
+	for radius: int in range(0, 12):
+		for dy: int in range(-radius, radius + 1):
+			for dx: int in range(-radius, radius + 1):
+				if radius > 0 and maxi(absi(dx), absi(dy)) != radius:
+					continue
+				var cell := Vector2i(start_cell.x + dx, start_cell.y + dy)
+				if PlayerRouteNavigation.grid.is_cell_blocked(cell):
+					continue
+				var world: Vector3 = PlayerRouteNavigation.grid.cell_to_world_center(cell)
+				var candidate := Vector3(world.x, spawn_y, world.z)
+				if is_position_inside_footprint(candidate):
+					continue
+				if not _is_hero_spawn_physics_clear(candidate):
+					continue
+				return candidate
 	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(preferred)
-	return Vector3(exit_pos.x, preferred.y, exit_pos.z)
+	return Vector3(exit_pos.x, spawn_y, exit_pos.z)
+
+
+func _is_hero_spawn_physics_clear(world: Vector3) -> bool:
+	if not is_inside_tree():
+		return true
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return true
+	var box := BoxShape3D.new()
+	var extent: float = HERO_SPAWN_PHYSICS_HALF * 2.0
+	box.size = Vector3(extent, 1.0, extent)
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = box
+	params.transform = Transform3D(Basis.IDENTITY, world)
+	params.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
+	params.exclude = [get_rid()]
+	return space.intersect_shape(params, 1).is_empty()
 
 
 func _has_living_player_hero() -> bool:
