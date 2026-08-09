@@ -2,8 +2,8 @@ class_name SimpleWc3AI
 extends Node
 
 ## Simple WC3 melee opening — sole runtime military authority when enabled.
-## Fixed sequence only:
-## Farm → Altar → Barracks → Hero → 5 Pikemen → assembly → creep camps until Hero level 3 → STOP.
+## Farm → Altar → Barracks → Hero → 5 Pikemen → assembly → generic creep loop:
+## clear camp → Hero + all living Pikemen → next nearest living camp → repeat.
 ## After Barracks: keep training Pikemen when free; new Pikemen one-shot toward assembly or current camp.
 ## Economy/build/train use existing gameplay systems; this script decides when and what.
 
@@ -20,7 +20,6 @@ enum State {
 }
 
 const MIN_PIKEMEN := 5
-const HERO_STOP_LEVEL := 3
 const TICK_SECONDS := 0.5
 const ENGAGE_DISTANCE := 14.0
 const ASSEMBLY_RADIUS := 12.0
@@ -289,7 +288,7 @@ func _tick_fight() -> void:
 		_on_camp_cleared(camp)
 		return
 
-	_issue_fight_orders(army, creep)
+	_issue_fight_orders(army, camp, creep)
 
 
 ## Keep making Pikemen whenever Barracks is free and resources allow. No ratios.
@@ -313,11 +312,8 @@ func _on_camp_cleared(camp: Node3D) -> void:
 	var hero: Hero = _find_living_hero()
 	if hero != null:
 		last_hero_level = hero.level
-		if hero.level >= HERO_STOP_LEVEL:
-			_state = State.DONE
-			_clear_camp_target()
-			return
 
+	## Generic WC3 creep loop: always take the next suitable living camp.
 	_begin_creep_travel()
 
 
@@ -640,26 +636,10 @@ func _select_creep_camp(army: Array) -> Node3D:
 	if active_camps.is_empty():
 		return null
 
-	## Prefer nearby Medium/Small early camps; otherwise nearest living camp.
-	var preferred: Array[Node3D] = []
-	for camp: Node3D in active_camps:
-		if camp == null or not is_instance_valid(camp):
-			continue
-		if _is_camp_cleared(camp):
-			continue
-		var camp_name: String = String(camp.name)
-		if (
-			camp_name.begins_with("Medium")
-			or camp_name.contains("Medium")
-			or camp_name.begins_with("Small")
-			or camp_name.contains("Small")
-		):
-			preferred.append(camp)
-
-	var pool: Array[Node3D] = preferred if not preferred.is_empty() else active_camps
+	## Nearest living uncleared camp — no camp-name special cases.
 	var best: Node3D = null
 	var best_dist: float = INF
-	for camp: Node3D in pool:
+	for camp: Node3D in active_camps:
 		if camp == null or not is_instance_valid(camp):
 			continue
 		if _is_camp_cleared(camp):
@@ -777,7 +757,7 @@ func _issue_army_move(units: Array) -> void:
 				_ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
 
 
-func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
+func _issue_fight_orders(army: Array, camp: Node3D, creep: NeutralCreep) -> void:
 	if not NodeSafety.is_alive_node(creep):
 		return
 
@@ -794,9 +774,8 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 	if not new_creep_objective:
 		return
 
-	## Only units already at the fight. Never fold a Barracks spawn into this handoff —
-	## that warps the shared group route and cancels active combat.
-	var fighters: Array = _units_near_creep(army, creep)
+	## Only units already at the fight (near camp or creep). Never fold in Barracks spawns.
+	var fighters: Array = _units_near_fight(army, camp, creep)
 	if fighters.is_empty():
 		return
 
@@ -835,17 +814,23 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 		(unit_ref as Hero).command_attack(creep)
 
 
-## Units already near the living creep — excludes Barracks reinforcements mid-fight.
-func _units_near_creep(army: Array, creep: NeutralCreep) -> Array:
+## Units already at the objective — excludes Barracks reinforcements mid-fight.
+func _units_near_fight(army: Array, camp: Node3D, creep: NeutralCreep) -> Array:
 	var fighters: Array = []
-	if not NodeSafety.is_alive_node(creep):
-		return fighters
-	var creep_pos: Vector3 = creep.global_position
 	for unit_ref: Variant in army:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
 		var unit: Unit = unit_ref as Unit
-		if _horizontal_distance(unit.global_position, creep_pos) <= ENGAGE_DISTANCE:
+		var near_camp: bool = (
+			camp != null
+			and is_instance_valid(camp)
+			and _horizontal_distance(unit.global_position, camp.global_position) <= ENGAGE_DISTANCE
+		)
+		var near_creep: bool = (
+			NodeSafety.is_alive_node(creep)
+			and _horizontal_distance(unit.global_position, creep.global_position) <= ENGAGE_DISTANCE
+		)
+		if near_camp or near_creep:
 			fighters.append(unit)
 	return fighters
 
