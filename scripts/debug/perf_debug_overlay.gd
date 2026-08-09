@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 ## Toggle with F3. Refreshes about 4 times per second while visible.
+## Enemy AI lines come from EnemyAI's last condition-tick snapshot (same helpers).
 
 const TOGGLE_KEY := KEY_F3
 const REFRESH_INTERVAL_SECONDS := 0.25
@@ -69,7 +70,7 @@ func _build_ui() -> void:
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.04, 0.06, 0.08, 0.88)
+	panel_style.bg_color = Color(0.04, 0.06, 0.08, 0.90)
 	panel_style.border_width_left = 1
 	panel_style.border_width_top = 1
 	panel_style.border_width_right = 1
@@ -83,8 +84,10 @@ func _build_ui() -> void:
 
 	_label = Label.new()
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_label.add_theme_font_size_override("font_size", 13)
-	_label.add_theme_color_override("font_color", Color(0.85, 0.95, 0.85, 1))
+	_label.add_theme_font_size_override("font_size", 15)
+	_label.add_theme_color_override("font_color", Color(0.90, 0.97, 0.88, 1))
+	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.92))
+	_label.add_theme_constant_override("outline_size", 4)
 	_panel.add_child(_label)
 
 	add_child(_panel)
@@ -110,65 +113,43 @@ func _update_label() -> void:
 		low_fps = fps
 
 	var lines: PackedStringArray = PackedStringArray([
-		"Performance Debug (F3)",
-		"FPS: %d" % int(round(fps)),
-		"Average FPS: %d" % int(round(avg_fps)),
-		"Recent Low: %d" % int(round(low_fps)),
-		"Frame Time: %.1f ms" % frame_time_ms,
-		"",
-		"Units: %d" % int(unit_stats.get("total_units", 0)),
-		"Player Military: %d" % int(unit_stats.get("player_military", 0)),
-		"Enemy Military: %d" % int(unit_stats.get("enemy_military", 0)),
-		"Workers: %d" % int(unit_stats.get("workers", 0)),
-		"Creeps: %d" % int(unit_stats.get("creeps", 0)),
-		"Buildings: %d" % int(unit_stats.get("buildings", 0)),
+		"Debug (F3)",
+		"FPS: %d  avg %d  low %d  %.1fms"
+		% [int(round(fps)), int(round(avg_fps)), int(round(low_fps)), frame_time_ms],
+		"Units %d | P mil %d | E mil %d | workers %d | creeps %d"
+		% [
+			int(unit_stats.get("total_units", 0)),
+			int(unit_stats.get("player_military", 0)),
+			int(unit_stats.get("enemy_military", 0)),
+			int(unit_stats.get("workers", 0)),
+			int(unit_stats.get("creeps", 0)),
+		],
+		"Difficulty: %s (UI only)" % MatchSession.get_ai_difficulty_name(),
 		"",
 	])
 
-	var difficulty_lines: PackedStringArray = _collect_difficulty_debug_lines(tree)
-	for line: String in difficulty_lines:
-		lines.append(line)
-	if not difficulty_lines.is_empty():
-		lines.append("")
-
-	lines.append_array(PackedStringArray([
-		"AI Version: %s" % PerfCounters.get_military_ai_version(),
-		"Macro: %s" % PerfCounters.get_military_ai_v2_macro(),
-		"Military: %s" % PerfCounters.get_military_ai_v2_state(),
-		"Mission: %s" % PerfCounters.get_military_ai_v2_mission(),
-		"Executable: %s" % PerfCounters.get_military_ai_v2_executable_label(),
-		"Blocked: %s" % PerfCounters.get_military_ai_v2_blocked(),
-		"Hero: %s" % PerfCounters.get_military_ai_v2_hero_label(),
-		"Army: %s" % PerfCounters.get_military_ai_v2_army_label(),
-		"Workers: %s" % PerfCounters.get_military_ai_v2_workers_label(),
-		"Camps: %s" % PerfCounters.get_military_ai_v2_camps_label(),
-		"Tier: %s" % PerfCounters.get_military_ai_v2_tier_label(),
-		"Expansion: %s" % PerfCounters.get_military_ai_v2_expansion_label(),
-		"Target: %s" % PerfCounters.get_military_ai_v2_target_label(),
-		"Defense: %s" % PerfCounters.get_military_ai_v2_defense_label(),
-		"Threat: %s" % PerfCounters.get_military_ai_v2_threat_label(),
-		"Combat Group: %d" % PerfCounters.get_combat_group_size(),
-		"Pending AI Orders: %d" % PerfCounters.get_pending_group_orders(),
-		"Orders/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_AI_ORDERS),
-		"Repaths/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_REPATH_REQUESTS),
-		"Target Searches/sec: %.0f" % PerfCounters.get_rate(PerfCounters.KEY_TARGET_SEARCHES),
-	]))
+	var ai_lines: PackedStringArray = _collect_enemy_ai_lines(tree)
+	if ai_lines.is_empty():
+		lines.append("ENEMY AI")
+		lines.append("AI CONDITION: (EnemyAI not in match)")
+	else:
+		lines.append_array(ai_lines)
 
 	var warnings: PackedStringArray = PerfCounters.collect_warnings()
 	if not warnings.is_empty():
 		lines.append("")
-		lines.append("WARNINGS:")
+		lines.append("PERF:")
 		for warning: String in warnings:
 			lines.append("- %s" % warning)
 
 	_label.text = "\n".join(lines)
 
 
-func _collect_difficulty_debug_lines(_tree: SceneTree) -> PackedStringArray:
-	return PackedStringArray([
-		"Difficulty: %s (UI only)" % MatchSession.get_ai_difficulty_name(),
-		"AI decision authority: NONE",
-	])
+func _collect_enemy_ai_lines(tree: SceneTree) -> PackedStringArray:
+	var root: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(tree)
+	if root == null or root.enemy_ai == null:
+		return PackedStringArray()
+	return root.enemy_ai.get_debug_overlay_lines()
 
 
 func _collect_unit_stats(tree: SceneTree) -> Dictionary:
@@ -191,9 +172,3 @@ func _collect_unit_stats(tree: SceneTree) -> Dictionary:
 		"creeps": creeps.size(),
 		"buildings": buildings.size(),
 	}
-
-
-func _format_v2_distance(distance: float) -> String:
-	if distance < 0.0:
-		return "-"
-	return "%.1f" % distance

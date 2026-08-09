@@ -60,8 +60,11 @@ var _last_command_target_id: int = 0
 var _last_command_army_count: int = 0
 var _chosen_expansion_mine_id: int = 0
 var _debug_priority: StringName = &"BOOT"
+var _debug_condition_bucket: StringName = &"HOME"
+var _debug_condition_reason: StringName = &"BOOT"
 var _debug_threat_name: String = "-"
-var _debug_last_decision_key: String = ""
+var _debug_last_logged_condition: StringName = &""
+var _debug_overlay_lines: PackedStringArray = PackedStringArray()
 
 var _build_manager: EnemyBuildManager = null
 var _gather_manager: EnemyGatherManager = null
@@ -88,9 +91,13 @@ func reset_match_state() -> void:
 	_last_command_army_count = 0
 	_chosen_expansion_mine_id = 0
 	_debug_priority = &"RESET"
+	_debug_condition_bucket = &"HOME"
+	_debug_condition_reason = &"RESET"
 	_debug_threat_name = "-"
-	_debug_last_decision_key = ""
+	_debug_last_logged_condition = &""
+	_debug_overlay_lines = PackedStringArray()
 	_w.clear()
+	_update_debug_overlay()
 
 
 func _process(delta: float) -> void:
@@ -121,62 +128,60 @@ func _ai_tick() -> void:
 	## Military — first true condition wins. Live facts are the only memory.
 	if _w.hero == null:
 		_army_home()
-		_set_priority(&"HERO")
-		_log_ai_decision(&"HERO", CMD_HOME, null)
-		_update_debug_overlay()
+		_finish_military_decision(&"HOME", &"HOME_NO_HERO", &"HERO", null)
 		return
 
 	if _army_below_minimum():
 		_army_home()
-		_set_priority(&"BUILD_FORCE")
-		_log_ai_decision(&"BUILD_FORCE", CMD_HOME, null)
-		_update_debug_overlay()
+		_finish_military_decision(&"HOME", &"HOME_ARMY_SMALL", &"BUILD_FORCE", null)
 		return
 
 	var threat: Node3D = _find_base_threat()
 	if threat != null:
 		_debug_threat_name = threat.name
 		_whole_army_attack(threat, CMD_DEFEND)
-		_set_priority(&"DEFEND")
-		_log_ai_decision(&"DEFEND", CMD_DEFEND, threat)
-		_update_debug_overlay()
+		_finish_military_decision(&"DEFEND", &"DEFEND", &"DEFEND", threat)
 		return
 	_debug_threat_name = "-"
 
 	## Cohesion before any strategic offense — Hero must not fight alone.
 	if not _hero_is_with_army():
 		_regroup_whole_army()
-		_set_priority(&"REGROUP")
-		_log_ai_decision(&"REGROUP", CMD_REGROUP, null)
-		_update_debug_overlay()
+		_finish_military_decision(&"REGROUP", &"REGROUP", &"REGROUP", null)
 		return
 
 	if _needs_early_creep():
 		_creep_with_whole_army()
-		_set_priority(&"EARLY_CREEP")
-		_log_ai_decision(&"EARLY_CREEP", CMD_CREEP, null)
-		_update_debug_overlay()
+		_finish_military_decision(
+			&"EARLY_CREEP",
+			&"EARLY_CREEP",
+			&"EARLY_CREEP",
+			_resolve_debug_target_node()
+		)
 		return
 
 	if _should_attack_player():
 		_attack_player_with_whole_army()
-		_set_priority(&"ATTACK_PLAYER")
-		_log_ai_decision(&"ATTACK_PLAYER", CMD_ATTACK, _w.player_cc as Node3D)
-		_update_debug_overlay()
+		_finish_military_decision(
+			&"ATTACK_PLAYER",
+			&"ATTACK_PLAYER",
+			&"ATTACK_PLAYER",
+			_resolve_debug_target_node()
+		)
 		return
 
 	if _useful_creep_exists():
 		_creep_with_whole_army()
-		_set_priority(&"EXTRA_CREEP")
-		_log_ai_decision(&"EXTRA_CREEP", CMD_CREEP, null)
-		_update_debug_overlay()
+		_finish_military_decision(
+			&"EXTRA_CREEP",
+			&"EXTRA_CREEP",
+			&"EXTRA_CREEP",
+			_resolve_debug_target_node()
+		)
 		return
 
 	_army_home()
-	_set_priority(&"WAIT")
-	_log_ai_decision(&"WAIT", CMD_HOME, null)
-	_update_debug_overlay()
-
+	_finish_military_decision(&"HOME", &"HOME_WAIT", &"WAIT", null)
 
 # ---------------------------------------------------------------------------
 # Live world snapshot
@@ -220,6 +225,7 @@ func _read_live_world() -> void:
 		"gold_workers": 0,
 		"wood_workers": 0,
 		"building_workers": 0,
+		"invalid_job_workers": 0,
 		"hero": null,
 		"hero_level": 0,
 		"hero_training": false,
@@ -330,6 +336,9 @@ func _read_live_world() -> void:
 			_w.gold_workers += 1
 		elif resource_id == &"wood":
 			_w.wood_workers += 1
+		else:
+			## Same classification pass as AI staffing — neither gather nor build nor idle.
+			_w.invalid_job_workers += 1
 
 	for node: Node in tree.get_nodes_in_group(&"enemy_combat_units"):
 		if not NodeSafety.is_alive_node(node) or not node is Unit:
@@ -829,18 +838,40 @@ func _needs_early_creep() -> bool:
 
 func _find_base_threat() -> Node3D:
 	## Purely current reality — no remembered defense.
+	var best: Node3D = null
+	var best_dist: float = INF
+	for entry: Dictionary in _collect_base_threat_entries():
+		var dist: float = float(entry.get("dist", INF))
+		var unit: Node3D = entry.get("unit") as Node3D
+		if unit != null and dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
+
+
+func _count_base_threats() -> int:
+	## Same living-player-combat filters as `_find_base_threat`.
+	var seen: Dictionary = {}
+	for entry: Dictionary in _collect_base_threat_entries():
+		var unit: Node3D = entry.get("unit") as Node3D
+		if unit == null or not NodeSafety.is_alive_node(unit):
+			continue
+		seen[unit.get_instance_id()] = true
+	return seen.size()
+
+
+func _collect_base_threat_entries() -> Array:
 	var bases: Array = _w.command_centers as Array
 	if bases.is_empty() and _w.primary_cc != null:
 		bases = [_w.primary_cc]
 
-	var best: Node3D = null
-	var best_dist: float = INF
 	var candidates: Array = []
 	candidates.append_array(_w.player_army as Array)
 	if _w.player_hero != null and not candidates.has(_w.player_hero):
 		if _is_living_combatant(_w.player_hero):
 			candidates.append(_w.player_hero)
 
+	var entries: Array = []
 	for base_variant: Variant in bases:
 		if not base_variant is Node3D:
 			continue
@@ -861,10 +892,9 @@ func _find_base_threat() -> Node3D:
 			if not _is_living_combatant(unit):
 				continue
 			var dist: float = _horizontal_distance(base.global_position, unit.global_position)
-			if dist <= DEFENSE_RADIUS and dist < best_dist:
-				best_dist = dist
-				best = unit
-	return best
+			if dist <= DEFENSE_RADIUS:
+				entries.append({"unit": unit, "dist": dist})
+	return entries
 
 
 func _should_attack_player() -> bool:
@@ -1050,19 +1080,7 @@ func _hero_is_with_army() -> bool:
 	if hero == null or not NodeSafety.is_alive_node(hero):
 		return false
 
-	var non_hero_count: int = 0
-	var soldier_sum := Vector3.ZERO
-	for unit_variant: Variant in _w.army as Array:
-		if not unit_variant is Unit:
-			continue
-		var unit: Unit = unit_variant as Unit
-		if unit == hero or unit is Hero:
-			continue
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		non_hero_count += 1
-		soldier_sum += unit.global_position
-
+	var non_hero_count: int = _count_soldiers()
 	## Hero alone is never a strategic attack force.
 	if non_hero_count <= 0:
 		return false
@@ -1076,10 +1094,51 @@ func _hero_is_with_army() -> bool:
 		return false
 
 	## Hero must not be massively ahead of the soldier mass.
-	var soldier_centroid: Vector3 = soldier_sum / float(non_hero_count)
-	if _horizontal_distance(hero.global_position, soldier_centroid) > COHESION_RADIUS:
+	var hero_dist: float = _hero_distance_to_soldier_centroid()
+	if hero_dist < 0.0 or hero_dist > COHESION_RADIUS:
 		return false
 	return true
+
+
+func _count_soldiers() -> int:
+	var count: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit:
+			continue
+		var unit: Unit = unit_variant as Unit
+		if unit is Hero:
+			continue
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		count += 1
+	return count
+
+
+func _soldier_centroid() -> Vector3:
+	var soldier_sum := Vector3.ZERO
+	var non_hero_count: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit:
+			continue
+		var unit: Unit = unit_variant as Unit
+		if unit is Hero:
+			continue
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		non_hero_count += 1
+		soldier_sum += unit.global_position
+	if non_hero_count <= 0:
+		return _w.home as Vector3
+	return soldier_sum / float(non_hero_count)
+
+
+func _hero_distance_to_soldier_centroid() -> float:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return -1.0
+	if _count_soldiers() <= 0:
+		return -1.0
+	return _horizontal_distance(hero.global_position, _soldier_centroid())
 
 
 # ---------------------------------------------------------------------------
@@ -1469,44 +1528,220 @@ func _validate_power_invariants() -> void:
 		)
 
 
-func _log_ai_decision(condition: StringName, order: StringName, target: Node3D) -> void:
+func _finish_military_decision(
+	bucket: StringName,
+	reason: StringName,
+	legacy_priority: StringName,
+	_target: Node3D
+) -> void:
+	_debug_priority = legacy_priority
+	_debug_condition_bucket = bucket
+	_debug_condition_reason = reason
+	_log_condition_change_if_needed()
+	_rebuild_debug_overlay_lines()
+	_update_debug_overlay()
+
+
+func _log_condition_change_if_needed() -> void:
 	if not OS.is_debug_build():
 		return
-	## Rate-limit to decision changes only.
-	var key: String = "%s|%s|%d" % [
-		String(condition),
-		String(order),
-		target.get_instance_id() if NodeSafety.is_alive_node(target) else 0,
-	]
-	if key == _debug_last_decision_key:
+	if _debug_condition_bucket == _debug_last_logged_condition:
 		return
-	_debug_last_decision_key = key
-	var hero: Hero = _w.hero as Hero
-	var hero_pos: String = "-"
-	var centroid: Vector3 = _army_centroid()
-	var hero_dist: float = -1.0
-	if hero != null and NodeSafety.is_alive_node(hero):
-		hero_pos = "%.1f,%.1f" % [hero.global_position.x, hero.global_position.z]
-		hero_dist = _horizontal_distance(hero.global_position, centroid)
-	var soldiers: int = 0
-	for unit_variant: Variant in _w.army as Array:
-		if unit_variant is Unit and not (unit_variant is Hero) and NodeSafety.is_alive_node(unit_variant):
-			soldiers += 1
+	var previous: String = (
+		String(_debug_last_logged_condition)
+		if _debug_last_logged_condition != &""
+		else "NONE"
+	)
+	_debug_last_logged_condition = _debug_condition_bucket
+	var target_label: String = _strategic_target_label()
+	var hero_dist: float = _hero_distance_to_soldier_centroid()
 	print(
-		"[AI DECISION] condition=%s order=%s player_power=%d enemy_power=%d hero=%s soldiers=%d near_hero=%d hero_dist_centroid=%.1f cohesive=%s target=%s"
+		"[AI CONDITION] %s -> %s\nenemy_power=%d\nplayer_power=%d\nsoldiers=%d\nnear_hero=%d\nhero_centroid_distance=%.1f\ntarget=%s"
 		% [
-			String(condition),
-			String(order),
-			int(float(_w.player_power)),
+			previous,
+			String(_debug_condition_bucket),
 			int(float(_w.our_power)),
-			hero_pos,
-			soldiers,
+			int(float(_w.player_power)),
+			_count_soldiers(),
 			_soldiers_near_hero(COHESION_RADIUS),
 			hero_dist,
-			str(_hero_is_with_army()),
-			target.name if NodeSafety.is_alive_node(target) else "-",
+			target_label,
 		]
 	)
+
+
+func _resolve_debug_target_node() -> Node3D:
+	if _current_target_id == 0 or not is_instance_id_valid(_current_target_id):
+		return null
+	var obj: Object = instance_from_id(_current_target_id)
+	if not NodeSafety.is_alive_node(obj):
+		return null
+	if obj is Node3D:
+		return obj as Node3D
+	return null
+
+
+func _strategic_order_label() -> String:
+	match _last_command_kind:
+		CMD_HOME:
+			return "HOME"
+		CMD_REGROUP:
+			return "MOVE"
+		CMD_ATTACK_MARCH:
+			return "ATTACK_MOVE"
+		CMD_ATTACK, CMD_DEFEND, CMD_CREEP:
+			return "ATTACK"
+		_:
+			return "NONE"
+
+
+func _strategic_target_label() -> String:
+	var target: Node3D = _resolve_debug_target_node()
+	if target == null:
+		return "NONE"
+	var type_name: String = target.get_class()
+	if target.get_script() != null:
+		var script_path: String = String(target.get_script().resource_path)
+		if not script_path.is_empty():
+			type_name = script_path.get_file().get_basename()
+	return "%s/%s" % [target.name, type_name]
+
+
+func _target_distance_from_army_centroid() -> float:
+	var target: Node3D = _resolve_debug_target_node()
+	if target == null:
+		return -1.0
+	return _horizontal_distance(_army_centroid(), target.global_position)
+
+
+func _count_unfinished_buildings() -> int:
+	var tree: SceneTree = _w.tree as SceneTree
+	if tree == null:
+		return 0
+	var count: int = 0
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is Building or not NodeSafety.is_alive_node(node):
+			continue
+		var building: Building = node as Building
+		if building.is_being_constructed():
+			count += 1
+	return count
+
+
+func _count_unfinished_buildings_without_builder() -> int:
+	## Same abandonment criteria as `_find_unfinished_building_without_builder`.
+	var tree: SceneTree = _w.tree as SceneTree
+	if tree == null:
+		return 0
+	var count: int = 0
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is Building or not NodeSafety.is_alive_node(node):
+			continue
+		var building: Building = node as Building
+		if not building.is_being_constructed():
+			continue
+		if building.has_assigned_builder():
+			continue
+		if _has_worker_en_route_to_building(building):
+			continue
+		count += 1
+	return count
+
+
+func _collect_invariant_warnings(
+	player_combat_units: int,
+	army_cohesive: bool,
+	unfinished_without_builder: int
+) -> PackedStringArray:
+	var warnings: PackedStringArray = PackedStringArray()
+	if player_combat_units > 0 and float(_w.player_power) <= 0.0:
+		warnings.append("PLAYER POWER INVALID")
+	var attack_intent: bool = (
+		_debug_condition_bucket == &"ATTACK_PLAYER"
+		or _last_command_kind == CMD_ATTACK_MARCH
+		or (
+			_last_command_kind == CMD_ATTACK
+			and _debug_condition_bucket == &"ATTACK_PLAYER"
+		)
+	)
+	if attack_intent and not army_cohesive:
+		warnings.append("SOLO HERO STRATEGIC ATTACK")
+	if unfinished_without_builder > 0:
+		warnings.append("BUILDING ABANDONED")
+	return warnings
+
+
+func _rebuild_debug_overlay_lines() -> void:
+	var soldiers: int = _count_soldiers()
+	var near_hero: int = _soldiers_near_hero(COHESION_RADIUS)
+	var hero_centroid_dist: float = _hero_distance_to_soldier_centroid()
+	var army_cohesive: bool = _hero_is_with_army()
+	var threat_count: int = _count_base_threats()
+	var base_threatened: bool = threat_count > 0
+	var power_says_attack: bool = _should_attack_player()
+	var early_creep_needed: bool = _needs_early_creep()
+	var useful_creep: bool = _useful_creep_exists()
+	var unfinished: int = _count_unfinished_buildings()
+	var unfinished_no_builder: int = _count_unfinished_buildings_without_builder()
+	var player_combat: int = (_w.player_army as Array).size()
+	var target_dist: float = _target_distance_from_army_centroid()
+	var hero_yes: String = "YES" if _w.hero != null else "NO"
+	var hero_dist_text: String = (
+		"-" if hero_centroid_dist < 0.0 else "%.1f" % hero_centroid_dist
+	)
+	var target_dist_text: String = (
+		"-" if target_dist < 0.0 else "%.1f" % target_dist
+	)
+	var warnings: PackedStringArray = _collect_invariant_warnings(
+		player_combat,
+		army_cohesive,
+		unfinished_no_builder
+	)
+
+	var lines: PackedStringArray = PackedStringArray([
+		"ENEMY AI",
+		"AI CONDITION: %s" % String(_debug_condition_bucket),
+		"Why: %s" % String(_debug_condition_reason),
+		"Enemy hero: %s" % hero_yes,
+		"Enemy soldiers: %d" % soldiers,
+		"Player combat units: %d" % player_combat,
+		"Enemy power: %d" % int(float(_w.our_power)),
+		"Player power: %d" % int(float(_w.player_power)),
+		"Attack ratio required: %.2f" % ATTACK_POWER_RATIO,
+		"Power says attack: %s" % ("YES" if power_says_attack else "NO"),
+		"Soldiers near hero: %d / %d" % [near_hero, soldiers],
+		"Hero → army centroid: %s" % hero_dist_text,
+		"Army cohesive: %s" % ("YES" if army_cohesive else "NO"),
+		"Base threatened: %s" % ("YES" if base_threatened else "NO"),
+		"Threat count: %d" % threat_count,
+		"Early creep needed: %s" % ("YES" if early_creep_needed else "NO"),
+		"Hero level: %d" % int(_w.hero_level),
+		"Useful creep camp: %s" % ("YES" if useful_creep else "NO"),
+		"Current strategic order: %s" % _strategic_order_label(),
+		"Current strategic target: %s" % _strategic_target_label(),
+		"Target distance from army centroid: %s" % target_dist_text,
+		"Unfinished AI buildings: %d" % unfinished,
+		"Unfinished without builder: %d" % unfinished_no_builder,
+		"Enemy workers:",
+		"gold=%d wood=%d building=%d idle=%d invalid-job=%d"
+		% [
+			int(_w.gold_workers),
+			int(_w.wood_workers),
+			int(_w.building_workers),
+			(_w.idle_workers as Array).size(),
+			int(_w.invalid_job_workers),
+		],
+	])
+	if not warnings.is_empty():
+		lines.append("")
+		lines.append("WARNINGS:")
+		for warning: String in warnings:
+			lines.append("- %s" % warning)
+	_debug_overlay_lines = lines
+
+
+func get_debug_overlay_lines() -> PackedStringArray:
+	return _debug_overlay_lines
 
 
 func _count_pending_spearmen(barracks: Barracks) -> int:
@@ -1620,11 +1855,11 @@ func _ensure_debug_overlay() -> void:
 	add_child(layer)
 	_debug_label = Label.new()
 	_debug_label.name = "EnemyAIDebugLabel"
-	_debug_label.position = Vector2(12, 12)
-	_debug_label.add_theme_font_size_override("font_size", 14)
-	_debug_label.add_theme_color_override("font_color", Color(1, 0.92, 0.75))
-	_debug_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	_debug_label.add_theme_constant_override("outline_size", 4)
+	_debug_label.position = Vector2(10, 10)
+	_debug_label.add_theme_font_size_override("font_size", 16)
+	_debug_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.78))
+	_debug_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.92))
+	_debug_label.add_theme_constant_override("outline_size", 5)
 	layer.add_child(_debug_label)
 
 
@@ -1634,72 +1869,10 @@ func _update_debug_overlay() -> void:
 	_ensure_debug_overlay()
 	if _debug_label == null:
 		return
-
-	var hero_text: String = "none"
-	if _w.hero != null:
-		hero_text = "Paladin L%d" % int(_w.hero_level)
-
-	var target_text: String = "-"
-	if _current_target_id != 0 and is_instance_id_valid(_current_target_id):
-		var obj: Object = instance_from_id(_current_target_id)
-		if obj is Node:
-			target_text = (obj as Node).name
-
-	var worker_count: int = (_w.workers as Array).size() if _w.has("workers") else 0
-	var desired_workers: int = _desired_worker_count() if _w.has("tier") else 0
-	var player_military_count: int = (_w.player_army as Array).size() if _w.has("player_army") else 0
-	var enemy_military_count: int = (_w.army as Array).size() if _w.has("army") else 0
-	var neutral_creep_count: int = _count_living_neutral_creeps()
-	var threat_faction: String = "-"
-	if _debug_threat_name != "-":
-		threat_faction = "player"
-	_debug_label.text = "\n".join(
-		PackedStringArray([
-			"ENEMY AI",
-			"Priority: %s" % String(_debug_priority),
-			"Gold: %d" % int(_w.get("gold", 0)),
-			"Wood: %d" % int(_w.get("wood", 0)),
-			"Food: %d/%d" % [int(_w.get("food_used", 0)), int(_w.get("food_cap", 0))],
-			"",
-			"Workers: %d / %d" % [worker_count, desired_workers],
-			"Gold workers: %d" % int(_w.get("gold_workers", 0)),
-			"Wood workers: %d" % int(_w.get("wood_workers", 0)),
-			"Tier: %d" % int(_w.get("tier", 1)),
-			"",
-			"Buildings:",
-			"Farm %d" % int(_w.get("farms", 0)),
-			"Altar %d" % (1 if bool(_w.get("altar_completed", false)) else 0),
-			"Barracks %d" % int(_w.get("barracks_count", 0)),
-			"Blacksmith %d" % (1 if bool(_w.get("blacksmith_completed", false)) else 0),
-			"Stable %d" % (1 if bool(_w.get("stable_completed", false)) else 0),
-			"Artillery %d" % (1 if bool(_w.get("artillery_completed", false)) else 0),
-			"",
-			"Hero:",
-			hero_text,
-			"",
-			"Army:",
-			"Pike %d" % int(_w.get("spearmen", 0)),
-			"Sword %d" % int(_w.get("swordsmen", 0)),
-			"Archer %d" % int(_w.get("archers", 0)),
-			"Cavalry %d" % (
-				int(_w.get("light_cavalry", 0)) + int(_w.get("heavy_cavalry", 0))
-			),
-			"Artillery %d" % int(_w.get("cannons", 0)),
-			"",
-			"Camps cleared: %d" % _camps_cleared,
-			"AI Power: %d" % int(float(_w.get("our_power", 0.0))),
-			"Player Power: %d" % int(float(_w.get("player_power", 0.0))),
-			"Player military count: %d" % player_military_count,
-			"Enemy military count: %d" % enemy_military_count,
-			"Soldiers near hero: %d" % _soldiers_near_hero(COHESION_RADIUS),
-			"Hero with army: %s" % str(_hero_is_with_army()),
-			"Neutral creep count: %d" % neutral_creep_count,
-			"",
-			"Threat: %s" % _debug_threat_name,
-			"Threat faction: %s" % threat_faction,
-			"Target: %s" % target_text,
-		])
-	)
+	if _debug_overlay_lines.is_empty():
+		_debug_label.text = "ENEMY AI\nAI CONDITION: -"
+		return
+	_debug_label.text = "\n".join(_debug_overlay_lines)
 
 
 ## Test helpers — expose last winning condition / camps for condition harnesses.
