@@ -342,7 +342,7 @@ func _spawn_hero() -> void:
 		return
 
 	spawn_parent.add_child(hero)
-	hero.global_position = global_position + HERO_SPAWN_OFFSET
+	hero.global_position = _claim_hero_spawn_position()
 	hero.collision_layer = PhysicsLayers.UNITS
 	hero.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 
@@ -381,7 +381,7 @@ func _spawn_enemy_hero() -> void:
 	EnemyArmyCommand.register_combat_unit(hero)
 
 	spawn_parent.add_child(hero)
-	hero.global_position = global_position + HERO_SPAWN_OFFSET
+	hero.global_position = _claim_hero_spawn_position()
 	hero.apply_team_visuals()
 
 	var collision_shape: CollisionShape3D = hero.get_node_or_null("CollisionShape3D") as CollisionShape3D
@@ -390,6 +390,18 @@ func _spawn_enemy_hero() -> void:
 
 	HeroProgressionStore.register_living_hero(hero)
 	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), hero)
+
+
+## Preferred altar offset can sit inside inflated custom-grid clearance (or a
+## neighboring building's ring). Snap once to a walkable exit — same helper as
+## production rally / post-construction builders. Valid spawns are unchanged.
+func _claim_hero_spawn_position() -> Vector3:
+	var preferred: Vector3 = global_position + HERO_SPAWN_OFFSET
+	PlayerRouteNavigation.ensure_grid_ready()
+	if PlayerRouteNavigation.is_world_walkable(preferred):
+		return preferred
+	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(preferred)
+	return Vector3(exit_pos.x, preferred.y, exit_pos.z)
 
 
 func _has_living_player_hero() -> bool:
