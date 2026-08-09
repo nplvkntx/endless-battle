@@ -25,7 +25,7 @@ func _ready() -> void:
 	await _test_exclusive_authority(failures)
 	await _test_opening_sequence(failures)
 	await _test_match_systems_scene_wiring(failures)
-	await _test_checkpoint_roundtrip(failures)
+	await _test_init_test_after_camps(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -360,66 +360,22 @@ func _test_match_systems_scene_wiring(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 
 
-func _test_checkpoint_roundtrip(failures: PackedStringArray) -> void:
-	print("verify: SAVE/LOAD CHECKPOINT data + apply (no live-scene restore path)")
-	var checkpoint := AiTestCheckpoint.new()
-	checkpoint.name = "AiTestCheckpointVerify"
-	add_child(checkpoint)
-	await get_tree().process_frame
-
+func _test_init_test_after_camps(failures: PackedStringArray) -> void:
+	print("verify: SimpleWc3AI.init_test_after_camps")
 	var simple := SimpleWc3AI.new()
-	simple.name = "SimpleWc3AI"
+	simple.name = "SimpleWc3AIInitTest"
 	add_child(simple)
 	await get_tree().process_frame
 
 	simple.assembly_position = Vector3(12.0, 0.0, 14.0)
-	simple._state = SimpleWc3AI.State.ASSEMBLE
-	simple._camp_name = "MediumCampA"
-	simple._camp_destination = Vector3(40.0, 0.0, 40.0)
-	simple._cleared_camp_names["OldCamp"] = true
-	simple.strategic_orders_issued = 7
-
-	ResourceManager.gold = 333
-	EnemyResourceManager.gold = 444
-
-	_expect(failures, "SAVE CHECKPOINT writes file", checkpoint.save_checkpoint())
-	_expect(failures, "checkpoint file exists", FileAccess.file_exists(AiTestCheckpoint.CHECKPOINT_PATH))
-
-	simple.assembly_position = Vector3.ZERO
-	simple._state = SimpleWc3AI.State.BUILD_FARM
-	simple._camp_name = "-"
-	simple._camp_destination = Vector3.ZERO
-	simple._cleared_camp_names.clear()
-	simple.strategic_orders_issued = 0
-	ResourceManager.gold = 1
-	EnemyResourceManager.gold = 1
-
-	## apply_checkpoint_data is what runs after clean match reload — test it directly here.
-	var payload: Dictionary = checkpoint.read_checkpoint_file()
-	_expect(failures, "checkpoint payload readable", not payload.is_empty())
-	await checkpoint.apply_checkpoint_data(payload)
-	_expect(failures, "APPLY restores AI state ASSEMBLE", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
-	_expect(failures, "APPLY restores assembly", simple.assembly_position == Vector3(12.0, 0.0, 14.0))
-	_expect(failures, "APPLY restores camp name", simple.get_camp_name() == "MediumCampA")
-	_expect(failures, "APPLY restores cleared camps", simple._cleared_camp_names.has("OldCamp"))
-	_expect(failures, "APPLY restores player gold", ResourceManager.gold == 333)
-	_expect(failures, "APPLY restores enemy gold", EnemyResourceManager.gold == 444)
-	_expect(failures, "APPLY clears travel_issued for fresh routes", simple._travel_issued == false)
-
-	## Authority stays SimpleWc3AI — no old directors created by load.
-	_expect(failures, "no MilitaryDirectorV2 after load", get_node_or_null("MilitaryDirectorV2") == null)
-	_expect(failures, "no EnemyWaveManager after load", get_node_or_null("EnemyWaveManager") == null)
-
-	## load_checkpoint arms MatchSession pending + restarts match — do not call it here.
+	simple.init_test_after_camps(["MediumCampSouthCenter"])
+	_expect(failures, "init marks camp cleared", simple._cleared_camp_names.has("MediumCampSouthCenter"))
 	_expect(
 		failures,
-		"MatchSession exposes clean-reload API",
-		MatchSession.has_method(&"request_dev_checkpoint_reload")
-		and MatchSession.has_method(&"take_pending_dev_checkpoint_apply")
+		"MatchSession exposes scenario reload API",
+		MatchSession.has_method(&"request_dev_scenario_reload")
+		and MatchSession.has_method(&"take_pending_dev_scenario")
 	)
 
 	simple.queue_free()
-	checkpoint.queue_free()
 	await get_tree().process_frame
-	ResourceManager.reset_to_starting_values()
-	EnemyResourceManager.reset_to_starting_values()

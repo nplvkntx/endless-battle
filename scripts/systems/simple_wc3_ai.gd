@@ -104,45 +104,20 @@ func get_camp_destination() -> Vector3:
 	return _camp_destination
 
 
-## Snapshot for the developer test checkpoint only — not used by AI decisions.
-func export_test_checkpoint_state() -> Dictionary:
-	return {
-		"state": int(_state),
-		"assembly_position": assembly_position,
-		"camp_name": _camp_name,
-		"camp_destination": _camp_destination,
-		"travel_issued": _travel_issued,
-		"cleared_camp_names": _cleared_camp_names.keys(),
-		"strategic_orders_issued": strategic_orders_issued,
-	}
-
-
-## Restore SimpleWc3AI fields from a developer test checkpoint.
-## Clears runtime IDs/targets so the AI rebinds to recreated world nodes.
-func restore_test_checkpoint_state(data: Dictionary) -> void:
-	if data.is_empty():
-		return
-	var state_value: int = int(data.get("state", int(State.BUILD_FARM)))
-	if state_value >= 0 and state_value <= int(State.DONE):
-		_state = state_value as State
-	assembly_position = data.get("assembly_position", Vector3.ZERO) as Vector3
-	_camp_name = String(data.get("camp_name", "-"))
-	_camp_destination = data.get("camp_destination", Vector3.ZERO) as Vector3
-	## Always re-issue travel after clean reload — old path state must not resume.
-	_travel_issued = false
-	strategic_orders_issued = int(data.get("strategic_orders_issued", 0))
-	_cleared_camp_names.clear()
-	_cleared_camp_ids.clear()
+## Dev test only: mark camps cleared and start normal creep travel selection.
+## Does not change decision logic — reuses _begin_creep_travel().
+func init_test_after_camps(cleared_camp_names: Array) -> void:
 	_ordered_unit_ids.clear()
 	_fight_target_id = 0
 	_tracked_creep_hp = -1.0
-	_camp_id = 0
-	var names: Variant = data.get("cleared_camp_names", [])
-	if names is Array:
-		for camp_name_ref: Variant in names:
-			_cleared_camp_names[String(camp_name_ref)] = true
-	_resolve_camp_id_from_name()
+	_cleared_camp_ids.clear()
+	_cleared_camp_names.clear()
+	_clear_camp_target()
+	for camp_name_ref: Variant in cleared_camp_names:
+		_cleared_camp_names[String(camp_name_ref)] = true
+	_ensure_assembly_position()
 	_observe_army()
+	_begin_creep_travel()
 	_update_debug_label()
 
 
