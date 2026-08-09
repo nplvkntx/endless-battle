@@ -271,9 +271,8 @@ func _tick_assemble() -> void:
 
 func _tick_travel() -> void:
 	var army: Array = _collect_main_army()
-	## After assembly, keep creeping with Hero + all living Pikemen (may be < 5).
-	if not _has_creeping_force(army):
-		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
+	if not _has_minimum_force(army):
+		_state = State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -295,8 +294,8 @@ func _tick_travel() -> void:
 
 func _tick_fight() -> void:
 	var army: Array = _collect_main_army()
-	if not _has_creeping_force(army):
-		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
+	if not _has_minimum_force(army):
+		_state = State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -334,10 +333,9 @@ func _on_camp_cleared(camp: Node3D) -> void:
 
 
 func _begin_creep_travel() -> void:
-	## Creeping force = Hero + all currently living Pikemen (one group command).
 	var army: Array = _collect_main_army()
-	if not _has_creeping_force(army):
-		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
+	if not _has_minimum_force(army):
+		_state = State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -368,17 +366,6 @@ func _clear_camp_target() -> void:
 
 
 func _has_minimum_force(army: Array) -> bool:
-	_observe_force_counts(army)
-	return last_hero_alive and last_pikeman_count >= MIN_PIKEMEN
-
-
-## Once creeping has started: living Hero required; bring every living Pikeman.
-func _has_creeping_force(army: Array) -> bool:
-	_observe_force_counts(army)
-	return last_hero_alive
-
-
-func _observe_force_counts(army: Array) -> void:
 	var hero_alive: bool = false
 	var pikemen: int = 0
 	for unit_ref: Variant in army:
@@ -389,6 +376,7 @@ func _observe_force_counts(army: Array) -> void:
 	last_hero_alive = hero_alive
 	last_pikeman_count = pikemen
 	last_army_count = army.size()
+	return hero_alive and pikemen >= MIN_PIKEMEN
 
 
 func _observe_army() -> void:
@@ -772,9 +760,6 @@ func _issue_army_move(units: Array) -> void:
 	if units.is_empty() or _camp_destination == Vector3.ZERO:
 		return
 
-	## Completed camp combat / chase must not block the next group move.
-	_clear_army_combat_for_travel(units)
-
 	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
 		units,
 		_camp_destination,
@@ -789,17 +774,6 @@ func _issue_army_move(units: Array) -> void:
 		for unit_ref: Variant in units:
 			if NodeSafety.is_alive_node(unit_ref):
 				_ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
-
-
-## Clear only combat/chase leftovers so a fresh custom group move can bind.
-func _clear_army_combat_for_travel(units: Array) -> void:
-	for unit_ref: Variant in units:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		var unit: Unit = unit_ref as Unit
-		unit.cancel_attack()
-		unit.cancel_attack_move()
-		unit.clear_move_target()
 
 
 func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
@@ -820,7 +794,7 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 		var unit: Unit = unit_ref as Unit
 		unit.clear_custom_rts_route()
 
-	## Pikemen make first contact.
+	## Pikemen start the fight / tank first.
 	for unit_ref: Variant in army:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
@@ -828,22 +802,18 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 			continue
 		(unit_ref as Spearman).command_attack(creep)
 
-	var first_contact: bool = _fight_target_id == 0
-	if _fight_target_id != creep_id:
-		_fight_target_id = creep_id
-		_tracked_creep_hp = health.current_health if health != null else -1.0
-		strategic_orders_issued += 1
-
-	## Hero joins on the next fight tick so Pikemen initiate.
-	if first_contact:
-		return
-
+	## Hero joins through normal combat.
 	for unit_ref: Variant in army:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
 		if not unit_ref is Hero:
 			continue
 		(unit_ref as Hero).command_attack(creep)
+
+	if _fight_target_id != creep_id:
+		_fight_target_id = creep_id
+		_tracked_creep_hp = health.current_health if health != null else -1.0
+		strategic_orders_issued += 1
 
 
 func _army_centroid(army: Array) -> Vector3:
