@@ -21,7 +21,6 @@ func _ready() -> void:
 	await _verify_selection_clears_on_unregister(failures)
 	await _verify_selection_clears_on_tree_exit(failures)
 	await _verify_hero_store_handle_separation(failures)
-	_verify_mission_target_handle(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -152,26 +151,3 @@ func _verify_hero_store_handle_separation(failures: PackedStringArray) -> void:
 		failures.append("living hero should be empty after clear")
 	if not HeroProgressionStore.get_living_hero_handle(false).is_empty():
 		failures.append("living hero handle should be empty after clear")
-
-
-func _verify_mission_target_handle(failures: PackedStringArray) -> void:
-	var mission := ArmyMissionV2.new()
-	var building: Building = FARM_SCENE.instantiate() as Building
-	add_child(building)
-	building.team_id = CombatTargetValidation.ENEMY_TEAM_ID
-	building.building_state = Building.STATE_COMPLETED
-
-	mission.set_target_object(building)
-	if mission.get_alive_target_object() != building:
-		failures.append("mission target resolve failed")
-	if mission.get_target_handle().is_empty():
-		failures.append("mission target handle empty")
-
-	building.destroy_building()
-	building.queue_free()
-	## Sync free without awaiting — sanitize must clear.
-	mission.sanitize_target_object()
-	if mission.get_alive_target_object() != null:
-		failures.append("mission kept freed target")
-	if not mission.get_target_handle().is_empty() and mission.get_target_handle().resolve() != null:
-		failures.append("mission handle still resolves freed target")

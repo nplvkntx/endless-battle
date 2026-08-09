@@ -10,15 +10,6 @@ const REPORT_PATH := "user://match_reset_verify_result.txt"
 const LIFECYCLE_CYCLES := 2
 const POST_FREE_FRAMES := 3
 
-## Default EnemyAttackPathDefense lane threat after reset_match_state().
-const _DEFAULT_LANE_THREAT := {
-	&"center": 0.35,
-	&"left": 0.2,
-	&"right": 0.2,
-	&"expansion": 0.1,
-	&"harass": 0.15,
-}
-
 var _dirty_control_group_unit: Node = null
 var _failures: PackedStringArray = PackedStringArray()
 
@@ -123,9 +114,7 @@ func _dirty_persistent_match_state() -> void:
 	ImpactEffects.play_ground_impact(Vector3(3.0, 0.0, 1.0))
 	ImpactEffects.play_shell_impact(Vector3(4.0, 0.0, 0.0))
 
-	## Static AI defense memory — must not survive prepare_new_match.
-	EnemyAttackPathDefense.notify_tower_destroyed(Vector3(12.0, 0.0, -8.0), &"left")
-	EnemyAttackPathDefense.remember_failed_site(Vector3(6.0, 0.0, 4.0))
+	## Static placement preference — must not survive prepare_new_match.
 	EnemyBuildPlacement.set_tower_lane_preference(&"right")
 
 	ConstructionReservations.reserve_footprint(
@@ -193,8 +182,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 			all_upgrades_zero = false
 			break
 
-	var lane_threat: Dictionary = EnemyAttackPathDefense.get_lane_threat_snapshot()
-	var attack_path_clean: bool = _attack_path_defense_is_clean(lane_threat)
 	var entity_count: int = 0
 	if EntityRegistry != null:
 		entity_count = EntityRegistry.get_registered_ids().size()
@@ -237,12 +224,10 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		and DeathEffects.get_active_corpse_count() == 0
 		and ImpactEffects.get_active_burst_count() == 0
 		and ImpactEffects.get_active_trail_count() == 0
-		and attack_path_clean
 		and EnemyBuildPlacement.preferred_tower_lane == &""
 		and entity_count == 0
 		and formation_count == 0
 		and not footprint_reserved
-		and AIHeroMastery.get_tactical_state() == AIHeroMastery.TacticalState.FOLLOW_ARMY
 	)
 
 	return {
@@ -274,34 +259,16 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		"death_effects_corpses": DeathEffects.get_active_corpse_count(),
 		"impact_effects_bursts": ImpactEffects.get_active_burst_count(),
 		"impact_effects_trails": ImpactEffects.get_active_trail_count(),
-		"attack_path_clean": attack_path_clean,
-		"attack_path_lane_threat": lane_threat,
 		"preferred_tower_lane": String(EnemyBuildPlacement.preferred_tower_lane),
 		"entity_registry_count": entity_count,
 		"formation_count": formation_count,
 		"footprint_reserved": footprint_reserved,
-		"ai_hero_tactical_state": int(AIHeroMastery.get_tactical_state()),
 		"object_count": object_count,
 		"node_count": node_count,
 		"resource_count": resource_count,
 		"orphan_node_count": orphan_count,
 		"resetter_count": MatchSession.registered_match_reset_count(),
 	}
-
-
-func _attack_path_defense_is_clean(lane_threat: Dictionary) -> bool:
-	if EnemyAttackPathDefense.get_last_reason() != &"":
-		return false
-	if EnemyAttackPathDefense.get_last_selected_lane() != &"":
-		return false
-	for lane: StringName in _DEFAULT_LANE_THREAT.keys():
-		var expected: float = float(_DEFAULT_LANE_THREAT[lane])
-		var actual: float = float(lane_threat.get(lane, -1.0))
-		if not is_equal_approx(actual, expected):
-			return false
-	## failed_sites / destroyed_sites have no public getters; threat + lane preference
-	## cover the match-visible stale defense memory. Reset must clear the rest.
-	return true
 
 
 func _formation_count() -> int:
@@ -348,12 +315,10 @@ func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number:
 		"death_effects_corpses",
 		"impact_effects_bursts",
 		"impact_effects_trails",
-		"attack_path_clean",
 		"preferred_tower_lane",
 		"entity_registry_count",
 		"formation_count",
 		"footprint_reserved",
-		"ai_hero_tactical_state",
 		"resetter_count",
 	]
 	for key: String in keys:
@@ -363,15 +328,6 @@ func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number:
 				% [cycle_number, key, str(baseline.get(key)), str(after.get(key))]
 			)
 
-	if str(baseline.get("attack_path_lane_threat")) != str(after.get("attack_path_lane_threat")):
-		_failures.append(
-			"cycle %d EnemyAttackPathDefense lane threat drifted (%s -> %s)"
-			% [
-				cycle_number,
-				str(baseline.get("attack_path_lane_threat")),
-				str(after.get("attack_path_lane_threat")),
-			]
-		)
 	if str(baseline.get("player_upgrades")) != str(after.get("player_upgrades")):
 		_failures.append("cycle %d player upgrades drifted from baseline" % cycle_number)
 	if str(baseline.get("enemy_upgrades")) != str(after.get("enemy_upgrades")):

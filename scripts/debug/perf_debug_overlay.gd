@@ -164,47 +164,11 @@ func _update_label() -> void:
 	_label.text = "\n".join(lines)
 
 
-func _collect_difficulty_debug_lines(tree: SceneTree) -> PackedStringArray:
-	var lines: PackedStringArray = PackedStringArray([
-		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
-		"Production Limit:",
+func _collect_difficulty_debug_lines(_tree: SceneTree) -> PackedStringArray:
+	return PackedStringArray([
+		"Difficulty: %s (UI only)" % MatchSession.get_ai_difficulty_name(),
+		"AI decision authority: SimpleWc3AI",
 	])
-
-	var build_manager: EnemyBuildManager = _find_enemy_build_manager(tree)
-	if build_manager == null:
-		lines.append(
-			"Barracks: - / %d" % AIDifficultyConfig.max_barracks()
-		)
-		lines.append(
-			"Stable: - / %d" % AIDifficultyConfig.max_stables()
-		)
-		lines.append(
-			"Artillery Depot: - / %d" % AIDifficultyConfig.max_artillery_depots()
-		)
-		return lines
-
-	var info: Dictionary = build_manager.get_difficulty_debug_info()
-	lines.append(
-		"Barracks: %d / %d"
-		% [int(info.get("barracks_current", 0)), int(info.get("barracks_max", 0))]
-	)
-	lines.append(
-		"Stable: %d / %d"
-		% [int(info.get("stables_current", 0)), int(info.get("stables_max", 0))]
-	)
-	lines.append(
-		"Artillery Depot: %d / %d"
-		% [int(info.get("artillery_current", 0)), int(info.get("artillery_max", 0))]
-	)
-	return lines
-
-
-func _find_enemy_build_manager(tree: SceneTree) -> EnemyBuildManager:
-	var nodes: Array = tree.get_nodes_in_group(&"enemy_build_manager")
-	for node: Variant in nodes:
-		if node is EnemyBuildManager and is_instance_valid(node):
-			return node as EnemyBuildManager
-	return null
 
 
 func _collect_unit_stats(tree: SceneTree) -> Dictionary:

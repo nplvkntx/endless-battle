@@ -131,19 +131,34 @@ func _process(delta: float) -> void:
 
 
 func _tick_build_farm() -> void:
-	## EnemyBuildManager places the opening Farm; wait until it is completed.
 	if _has_completed_farm():
 		_state = State.BUILD_ALTAR
+		return
+	var build: EnemyBuildManager = _resolve_build_manager()
+	if build != null and build.try_place_farm():
+		strategic_orders_issued += 1
 
 
 func _tick_build_altar() -> void:
 	if _has_completed_hero_altar():
 		_state = State.BUILD_BARRACKS
+		return
+	if not _has_completed_farm():
+		return
+	var build: EnemyBuildManager = _resolve_build_manager()
+	if build != null and build.try_place_hero_altar():
+		strategic_orders_issued += 1
 
 
 func _tick_build_barracks() -> void:
 	if _has_completed_barracks():
 		_state = State.TRAIN_HERO
+		return
+	if not _has_completed_hero_altar():
+		return
+	var build: EnemyBuildManager = _resolve_build_manager()
+	if build != null and build.try_place_barracks():
+		strategic_orders_issued += 1
 
 
 func _tick_train_hero() -> void:
@@ -603,6 +618,13 @@ func _horizontal_distance(a: Vector3, b: Vector3) -> float:
 	var dx: float = a.x - b.x
 	var dz: float = a.z - b.z
 	return sqrt(dx * dx + dz * dz)
+
+
+func _resolve_build_manager() -> EnemyBuildManager:
+	var parent: Node = get_parent()
+	if parent == null:
+		return null
+	return parent.get_node_or_null("EnemyBuildManager") as EnemyBuildManager
 
 
 func _log_authority_proof(force: bool) -> void:

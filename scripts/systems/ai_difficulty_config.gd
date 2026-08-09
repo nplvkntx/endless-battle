@@ -1,9 +1,7 @@
 class_name AIDifficultyConfig
 extends RefCounted
 
-## Centralized AI difficulty settings.
-## Difficulty changes AI production capacity only — not player rules,
-## creeping, expansions, upgrades, towers, hero usage, or attack logic.
+## UI/settings difficulty labels only. Does not affect enemy AI runtime behavior.
 
 enum Difficulty {
 	EASY,
@@ -12,25 +10,6 @@ enum Difficulty {
 }
 
 const DEFAULT_DIFFICULTY: int = Difficulty.NORMAL
-
-## Hard caps for military production buildings per difficulty.
-const MAX_BARRACKS_BY_DIFFICULTY: Dictionary = {
-	Difficulty.EASY: 1,
-	Difficulty.NORMAL: 2,
-	Difficulty.HARD: 4,
-}
-
-const MAX_STABLES_BY_DIFFICULTY: Dictionary = {
-	Difficulty.EASY: 1,
-	Difficulty.NORMAL: 2,
-	Difficulty.HARD: 4,
-}
-
-const MAX_ARTILLERY_DEPOTS_BY_DIFFICULTY: Dictionary = {
-	Difficulty.EASY: 1,
-	Difficulty.NORMAL: 2,
-	Difficulty.HARD: 4,
-}
 
 
 static func clamp_difficulty(difficulty: int) -> int:
@@ -49,24 +28,6 @@ static func display_name(difficulty: int) -> String:
 			return "Hard"
 		_:
 			return "Normal"
-
-
-static func max_barracks(difficulty: int = -1) -> int:
-	if difficulty < 0:
-		difficulty = MatchSession.ai_difficulty
-	return int(MAX_BARRACKS_BY_DIFFICULTY.get(clamp_difficulty(difficulty), 2))
-
-
-static func max_stables(difficulty: int = -1) -> int:
-	if difficulty < 0:
-		difficulty = MatchSession.ai_difficulty
-	return int(MAX_STABLES_BY_DIFFICULTY.get(clamp_difficulty(difficulty), 2))
-
-
-static func max_artillery_depots(difficulty: int = -1) -> int:
-	if difficulty < 0:
-		difficulty = MatchSession.ai_difficulty
-	return int(MAX_ARTILLERY_DEPOTS_BY_DIFFICULTY.get(clamp_difficulty(difficulty), 2))
 
 
 static func all_display_names() -> PackedStringArray:

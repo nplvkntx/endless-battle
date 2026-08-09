@@ -108,8 +108,8 @@ func _register_static_match_resets() -> void:
 	register_match_reset(&"HeroProgressionStore", HeroProgressionStore.clear)
 	register_match_reset(&"AIHeroMastery", AIHeroMastery.reset_match_state)
 	register_match_reset(&"EnemyArmyCommand", EnemyArmyCommand.reset_match_state)
-	register_match_reset(&"EnemyAttackPathDefense", EnemyAttackPathDefense.reset_match_state)
 	register_match_reset(&"EnemyAIDebug", EnemyAIDebug.reset_match_state)
+	register_match_reset(&"EnemyBuildPlacement", EnemyBuildPlacement.clear_tower_lane_preference)
 	register_match_reset(&"CombatTargetValidation", CombatTargetValidation.reset_match_state)
 	register_match_reset(&"WorkerAiUnstuck", WorkerAiUnstuck.reset_match_state)
 	register_match_reset(&"WorkerGathering", WorkerGathering.reset_match_state)
@@ -181,28 +181,6 @@ func _verify_clean_match_state() -> void:
 		failures.append("EnemyArmyCommand.strategic_state")
 	if EnemyBuildPlacement.preferred_tower_lane != &"":
 		failures.append("EnemyBuildPlacement.preferred_tower_lane")
-	var lane_threat: Dictionary = EnemyAttackPathDefense.get_lane_threat_snapshot()
-	for lane: StringName in [
-		EnemyAttackPathDefense.LANE_CENTER,
-		EnemyAttackPathDefense.LANE_LEFT,
-		EnemyAttackPathDefense.LANE_RIGHT,
-		EnemyAttackPathDefense.LANE_EXPANSION,
-		EnemyAttackPathDefense.LANE_HARASS,
-	]:
-		## Defaults from EnemyAttackPathDefense.reset_match_state().
-		var expected: float = 0.35
-		match lane:
-			EnemyAttackPathDefense.LANE_LEFT, EnemyAttackPathDefense.LANE_RIGHT:
-				expected = 0.2
-			EnemyAttackPathDefense.LANE_EXPANSION:
-				expected = 0.1
-			EnemyAttackPathDefense.LANE_HARASS:
-				expected = 0.15
-			_:
-				expected = 0.35
-		if not is_equal_approx(float(lane_threat.get(lane, -1.0)), expected):
-			failures.append("EnemyAttackPathDefense.lane_threat.%s" % String(lane))
-			break
 	if registered_match_reset_count() <= 0:
 		failures.append("MatchSession.resetters_empty")
 

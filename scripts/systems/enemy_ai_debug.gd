@@ -390,10 +390,9 @@ static func log_tier_2_complete() -> void:
 
 
 static func match_phase_label(elapsed_seconds: float) -> String:
-	# Legacy time-bucket label; prefer EnemyStrategicDirector.get_strategic_phase_name().
-	if elapsed_seconds < EnemyArmyCommand.PHASE_EARLY_SECONDS:
+	if elapsed_seconds < 180.0:
 		return "Early Economy"
-	if elapsed_seconds < EnemyArmyCommand.PHASE_MID_SECONDS:
+	if elapsed_seconds < 480.0:
 		return "Mid Game"
 	return "Late Game"
 

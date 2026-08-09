@@ -37,8 +37,6 @@ func _ready() -> void:
 	await _verify_targeting_cancels_on_hero_free(failures)
 	await _verify_command_feedback_reset_kills_effect_tweens(failures)
 	await _verify_match_restart_clears_stale_refs(failures)
-	await _verify_ai_attack_objective_clears_freed(failures)
-	await _verify_ai_exec_objective_clears_freed(failures)
 	await _verify_ai_command_authority_clears_freed(failures)
 	await _verify_ai_bound_player_state_clears_freed(failures)
 
@@ -463,151 +461,8 @@ func _verify_match_restart_clears_stale_refs(failures: PackedStringArray) -> voi
 	)
 
 
-func _verify_ai_attack_objective_clears_freed(failures: PackedStringArray) -> void:
-	## Long-lived AI attack objective must be readable as Variant after free,
-	## validated before cast, and cleared by the real maintain path.
-	var state := AIPlayerState.new()
-	add_child(state)
-	EnemyArmyCommand.bind_match_composition(state, state)
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.try_claim_army_mode(EnemyArmyCommand.ArmyMode.ATTACKING, true)
-
-	var objective: Building = FARM_SCENE.instantiate() as Building
-	add_child(objective)
-	objective.global_position = Vector3(12.0, 0.0, 8.0)
-	objective.team_id = PLAYER_TEAM_ID
-	objective.building_state = Building.STATE_COMPLETED
-	await _settle()
-
-	EnemyArmyCommand.set_attack_objective(objective, objective.global_position)
-	_expect(
-		failures,
-		"ai objective: stored through attack-objective API",
-		state.active_wave_objective == objective
-	)
-	_expect(
-		failures,
-		"ai objective: position stored",
-		EnemyArmyCommand.get_attack_objective_position() == objective.global_position
-	)
-
-	objective.queue_free()
-	await _settle()
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	## Real maintain path: Variant read + NodeSafety before cast; clears stale.
-	EnemyArmyCommand.maintain_attack_wave_objective(get_tree(), 1.0)
-
-	var stored_after: Variant = state.active_wave_objective
-	_expect(
-		failures,
-		"ai objective: no live objective after maintain",
-		not NodeSafety.is_alive_node(stored_after)
-	)
-	_expect(
-		failures,
-		"ai objective: stale objective cleared from SoT",
-		stored_after == null
-	)
-	_expect(
-		failures,
-		"ai objective: position fallback retained after free",
-		EnemyArmyCommand.get_attack_objective_position() != Vector3.ZERO
-	)
-
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.unbind_match_composition()
-	state.queue_free()
-	await _settle()
-
-
-func _verify_ai_exec_objective_clears_freed(failures: PackedStringArray) -> void:
-	## Executable mission objective must be readable as Variant after free,
-	## validated before cast, and cleared by the real sanitize path.
-	var state := AIPlayerState.new()
-	add_child(state)
-	EnemyArmyCommand.bind_match_composition(state, state)
-	EnemyArmyCommand.reset_match_state()
-
-	var objective: Building = FARM_SCENE.instantiate() as Building
-	add_child(objective)
-	objective.global_position = Vector3(9.0, 0.0, 5.0)
-	objective.team_id = PLAYER_TEAM_ID
-	objective.building_state = Building.STATE_COMPLETED
-	await _settle()
-
-	var stored_position: Vector3 = objective.global_position
-	EnemyArmyCommand.set_executable_mission(
-		EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER,
-		"exec objective freed regression",
-		objective,
-		stored_position,
-		"farm",
-		"attack",
-		[],
-		false
-	)
-	_expect(
-		failures,
-		"exec objective: stored through set_executable_mission",
-		state.exec_objective_node == objective
-	)
-	_expect(
-		failures,
-		"exec objective: position stored",
-		state.exec_objective_position == stored_position
-	)
-	_expect(
-		failures,
-		"exec objective: name stored",
-		state.exec_objective_name == "farm"
-	)
-
-	objective.queue_free()
-	await _settle()
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	## Real sanitation path used by mission report / watchdog.
-	EnemyArmyCommand.get_authoritative_mission_report(get_tree())
-
-	var stored_after: Variant = state.exec_objective_node
-	_expect(
-		failures,
-		"exec objective: no live objective after sanitize",
-		not NodeSafety.is_alive_node(stored_after)
-	)
-	_expect(
-		failures,
-		"exec objective: stale objective cleared from SoT",
-		stored_after == null
-	)
-	_expect(
-		failures,
-		"exec objective: position fallback retained after free",
-		state.exec_objective_position == stored_position
-	)
-	_expect(
-		failures,
-		"exec objective: name retained after free",
-		state.exec_objective_name == "farm"
-	)
-	_expect(
-		failures,
-		"exec objective: mission retained after free",
-		state.exec_mission == int(EnemyArmyCommand.ExecutableMission.ATTACK_PLAYER)
-	)
-
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.unbind_match_composition()
-	state.queue_free()
-	await _settle()
-
-
 func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> void:
-	## Persistent military command-authority refs must be readable as Variant after free,
-	## validated before cast, and cleared by the real getters without runtime errors.
+	## Persistent military command-authority refs must clear after free.
 	var state := AIPlayerState.new()
 	add_child(state)
 
@@ -627,14 +482,8 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 		"command authority: AIPlayerState live after bind",
 		state.get_military_command_authority() == authority
 	)
-	_expect(
-		failures,
-		"command authority: name preserved after bind",
-		state.military_command_authority_name == &"TempMilitaryCommandAuthority"
-	)
 
 	var composition := MatchCompositionRoot.new()
-	## Keep off-tree so _enter_tree/_ready do not redeclare/bind over the fixture.
 	composition.military_command_authority = authority
 	_expect(
 		failures,
@@ -662,21 +511,6 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 		"command authority: MatchCompositionRoot getter null after free",
 		composition.get_military_command_authority() == null
 	)
-	_expect(
-		failures,
-		"command authority: EAC stale storage cleared",
-		EnemyArmyCommand._declared_command_authority == null
-	)
-	_expect(
-		failures,
-		"command authority: AIPlayerState stale storage cleared",
-		state.get("_military_command_authority") == null
-	)
-	_expect(
-		failures,
-		"command authority: MatchCompositionRoot stale storage cleared",
-		composition.military_command_authority == null
-	)
 
 	EnemyArmyCommand.unbind_match_composition()
 	composition.free()
@@ -685,10 +519,7 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 
 
 func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> void:
-	## Persistent bound AIPlayerState must be readable as Variant after free,
-	## validated before cast, and cleared by the real getter without runtime errors.
-	## Intentionally skips unbind before free — MatchCompositionRoot happy-path
-	## unbinds first, but direct free of the bound state must not crash.
+	## Bound AIPlayerState must clear after free without unbind first.
 	var state := AIPlayerState.new()
 	state.name = "TempBoundAIPlayerState"
 	add_child(state)
@@ -700,18 +531,12 @@ func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> 
 		"bound AI state: getter returns live state after bind",
 		EnemyArmyCommand.get_bound_ai_player_state() == state
 	)
-	_expect(
-		failures,
-		"bound AI state: _rt-backed helper uses bound SoT",
-		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
-	)
 
 	state.queue_free()
 	await _settle()
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	## No unbind yet — getter / _rt must tolerate freed static storage.
 	_expect(
 		failures,
 		"bound AI state: getter null after free without unbind",
@@ -719,20 +544,8 @@ func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> 
 	)
 	_expect(
 		failures,
-		"bound AI state: stale storage cleared",
-		EnemyArmyCommand._bound_player_state == null
-	)
-	## Public _rt()-using helper must fall back to unbound runtime, not crash.
-	var mode_after: EnemyArmyCommand.ArmyMode = EnemyArmyCommand.get_army_mode()
-	_expect(
-		failures,
-		"bound AI state: _rt helper remains functional unbound",
-		mode_after == EnemyArmyCommand.ArmyMode.IDLE
-	)
-	_expect(
-		failures,
-		"bound AI state: still unbound after _rt helper",
-		EnemyArmyCommand.get_bound_ai_player_state() == null
+		"bound AI state: army mode helper remains functional",
+		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
 	)
 
 	EnemyArmyCommand.reset_match_state()

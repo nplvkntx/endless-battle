@@ -1,31 +1,20 @@
 class_name MatchCompositionRoot
 extends Node
 
-## Match-owned composition root (PHASE 2 audit item 1).
-## Owns AIPlayerState, resolves match systems once, and declares the sole
-## military command authority for this match. Scene lifetime replaces static
-## ownership for identity / exec / combat mirrors; EnemyArmyCommand remains a
-## helper facade. Wave/creep/defense publish MilitaryIntent onto AIPlayerState.
+## Match-owned composition root.
+## Declares SimpleWc3AI as the sole enemy decision / military command authority.
 
 const AI_PLAYER_STATE_NAME := &"AIPlayerState"
 
 var ai_player_state: AIPlayerState = null
-var military_director_v2: MilitaryDirectorV2 = null
-var army_commander_v2: ArmyCommanderV2 = null
-var enemy_combat_controller: EnemyCombatController = null
-var enemy_strategic_director: EnemyStrategicDirector = null
-var enemy_creep_manager: EnemyCreepManager = null
-var enemy_wave_manager: EnemyWaveManager = null
-var enemy_defense_manager: EnemyDefenseManager = null
+var simple_wc3_ai: SimpleWc3AI = null
 var enemy_build_manager: EnemyBuildManager = null
 var enemy_gather_manager: EnemyGatherManager = null
-var simple_wc3_ai: SimpleWc3AI = null
 var selection_manager: Node = null
 var build_manager: Node = null
 var match_manager: Node = null
 
-## Sole node allowed to own main-army order issuance for this match.
-## Variant so freed authority can be read before validation (typed Node getters cast first).
+## Sole node allowed to own enemy strategic decisions for this match.
 var military_command_authority: Variant = null
 
 
@@ -36,19 +25,10 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
-	## Bind after children have entered so authority nodes are fully constructed.
 	_resolve_systems()
-	## Disable any old military siblings before SimpleWc3AI logs authority proof.
-	if MilitaryAIConfig.is_simple_wc3_ai_enabled():
-		_disable_old_military_runtime()
 	_ensure_simple_wc3_ai()
-	if _uses_simple_wc3_ai():
-		_disable_old_military_runtime()
 	_declare_military_command_authority()
 	_bind_ai_runtime()
-	## Children may re-enable process in their own _ready; force-disable after.
-	if _uses_simple_wc3_ai():
-		call_deferred("_disable_old_military_runtime")
 
 
 func _exit_tree() -> void:
@@ -83,39 +63,14 @@ func get_system(node_name: StringName) -> Node:
 
 
 func is_v2_military_active() -> bool:
-	if _uses_simple_wc3_ai():
-		return false
-	return MilitaryAIConfig.is_v2_runtime_active() and army_commander_v2 != null
-
-
-func is_old_military_runtime_active() -> bool:
-	## True if any old military controller is still processing.
-	if not _uses_simple_wc3_ai():
-		return is_v2_military_active()
-	const OLD_MILITARY_NODES: Array[StringName] = [
-		&"MilitaryDirectorV2",
-		&"ArmyCommanderV2",
-		&"EnemyCombatController",
-		&"EnemyCreepManager",
-		&"EnemyWaveManager",
-		&"EnemyDefenseManager",
-	]
-	for node_name: StringName in OLD_MILITARY_NODES:
-		var node: Node = get_node_or_null(NodePath(String(node_name)))
-		if node == null:
-			continue
-		if node.is_processing() or node.is_physics_processing():
-			return true
 	return false
 
 
-func _uses_simple_wc3_ai() -> bool:
-	return MilitaryAIConfig.is_simple_wc3_ai_enabled() and simple_wc3_ai != null
+func is_old_military_runtime_active() -> bool:
+	return false
 
 
 func _ensure_simple_wc3_ai() -> void:
-	if not MilitaryAIConfig.is_simple_wc3_ai_enabled():
-		return
 	if simple_wc3_ai != null and is_instance_valid(simple_wc3_ai):
 		return
 	simple_wc3_ai = get_node_or_null("SimpleWc3AI") as SimpleWc3AI
@@ -124,26 +79,6 @@ func _ensure_simple_wc3_ai() -> void:
 	simple_wc3_ai = SimpleWc3AI.new()
 	simple_wc3_ai.name = "SimpleWc3AI"
 	add_child(simple_wc3_ai)
-
-
-func _disable_old_military_runtime() -> void:
-	## Prevent old military controllers from commanding units.
-	## Keep nodes in the scene (wiring / economy helpers) but stop their process.
-	## Intent publishers stay off too so nothing queues military work for a dead V2 consumer.
-	const OLD_MILITARY_NODES: Array[StringName] = [
-		&"MilitaryDirectorV2",
-		&"ArmyCommanderV2",
-		&"EnemyCombatController",
-		&"EnemyCreepManager",
-		&"EnemyWaveManager",
-		&"EnemyDefenseManager",
-	]
-	for node_name: StringName in OLD_MILITARY_NODES:
-		var node: Node = get_node_or_null(NodePath(String(node_name)))
-		if node == null:
-			continue
-		node.set_process(false)
-		node.set_physics_process(false)
 
 
 func _ensure_ai_player_state() -> void:
@@ -155,35 +90,20 @@ func _ensure_ai_player_state() -> void:
 	ai_player_state = AIPlayerState.new()
 	ai_player_state.name = String(AI_PLAYER_STATE_NAME)
 	add_child(ai_player_state)
-	## Keep identity state first among siblings for stable tree order in tools.
 	move_child(ai_player_state, 0)
 
 
 func _resolve_systems() -> void:
-	military_director_v2 = get_node_or_null("MilitaryDirectorV2") as MilitaryDirectorV2
-	army_commander_v2 = get_node_or_null("ArmyCommanderV2") as ArmyCommanderV2
-	enemy_combat_controller = get_node_or_null("EnemyCombatController") as EnemyCombatController
-	enemy_strategic_director = get_node_or_null("EnemyStrategicDirector") as EnemyStrategicDirector
-	enemy_creep_manager = get_node_or_null("EnemyCreepManager") as EnemyCreepManager
-	enemy_wave_manager = get_node_or_null("EnemyWaveManager") as EnemyWaveManager
-	enemy_defense_manager = get_node_or_null("EnemyDefenseManager") as EnemyDefenseManager
+	simple_wc3_ai = get_node_or_null("SimpleWc3AI") as SimpleWc3AI
 	enemy_build_manager = get_node_or_null("EnemyBuildManager") as EnemyBuildManager
 	enemy_gather_manager = get_node_or_null("EnemyGatherManager") as EnemyGatherManager
-	simple_wc3_ai = get_node_or_null("SimpleWc3AI") as SimpleWc3AI
 	selection_manager = get_node_or_null("SelectionManager")
 	build_manager = get_node_or_null("BuildManager")
 	match_manager = get_node_or_null("MatchManager")
 
 
 func _declare_military_command_authority() -> void:
-	## Exactly one main-army order issuer per match. Simple WC3 owns production.
-	if _uses_simple_wc3_ai():
-		military_command_authority = simple_wc3_ai
-	elif MilitaryAIConfig.is_v2_runtime_active():
-		military_command_authority = army_commander_v2
-	else:
-		military_command_authority = enemy_combat_controller
-
+	military_command_authority = simple_wc3_ai
 	if ai_player_state != null:
 		ai_player_state.set_military_command_authority(military_command_authority)
 

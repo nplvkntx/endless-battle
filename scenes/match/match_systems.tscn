@@ -4,15 +4,8 @@
 [ext_resource type="Script" uid="uid://c1ftguf355mf" path="res://scripts/systems/gather_command_handler.gd" id="2_gather_command_handler"]
 [ext_resource type="Script" uid="uid://cxuw8agy6hjxe" path="res://scripts/systems/build_manager.gd" id="3_build_manager"]
 [ext_resource type="Script" uid="uid://cgqqodo0ymy15" path="res://scripts/systems/match_manager.gd" id="4_match_manager"]
-[ext_resource type="Script" uid="uid://nm2x6cvs7fm0" path="res://scripts/systems/enemy_wave_manager.gd" id="5_enemy_wave_manager"]
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="6_enemy_gather_manager"]
 [ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
-[ext_resource type="Script" uid="uid://dmawlogwv25xq" path="res://scripts/systems/enemy_creep_manager.gd" id="8_enemy_creep_manager"]
-[ext_resource type="Script" uid="uid://c8kdef3nse7mgr" path="res://scripts/systems/enemy_defense_manager.gd" id="9_enemy_defense_manager"]
-[ext_resource type="Script" uid="uid://d4stratdirector9" path="res://scripts/systems/enemy_strategic_director.gd" id="10_enemy_strategic_director"]
-[ext_resource type="Script" path="res://scripts/systems/enemy_combat_controller.gd" id="11_enemy_combat_controller"]
-[ext_resource type="Script" path="res://scripts/systems/military_director_v2.gd" id="12_military_director_v2"]
-[ext_resource type="Script" path="res://scripts/systems/army_commander_v2.gd" id="13_army_commander_v2"]
 [ext_resource type="Script" path="res://scripts/systems/match_composition_root.gd" id="14_match_composition_root"]
 [ext_resource type="Script" path="res://scripts/systems/ai_player_state.gd" id="15_ai_player_state"]
 [ext_resource type="Script" path="res://scripts/systems/simple_wc3_ai.gd" id="16_simple_wc3_ai"]
@@ -25,19 +18,6 @@ script = ExtResource("15_ai_player_state")
 
 [node name="SimpleWc3AI" type="Node" parent="."]
 script = ExtResource("16_simple_wc3_ai")
-
-[node name="EnemyStrategicDirector" type="Node" parent="."]
-script = ExtResource("10_enemy_strategic_director")
-debug_enabled = true
-
-[node name="MilitaryDirectorV2" type="Node" parent="."]
-script = ExtResource("12_military_director_v2")
-
-[node name="ArmyCommanderV2" type="Node" parent="."]
-script = ExtResource("13_army_commander_v2")
-
-[node name="EnemyCombatController" type="Node" parent="."]
-script = ExtResource("11_enemy_combat_controller")
 
 [node name="SelectionManager" type="Node" parent="." unique_id=53640150]
 script = ExtResource("1_selection_manager")
@@ -60,10 +40,6 @@ player_command_center_path = NodePath("../../PlayerStartingBase/CommandCenter")
 enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
 match_result_label_path = NodePath("../../GameUI/MatchResultLabel")
 
-[node name="EnemyWaveManager" type="Node" parent="." unique_id=212905880]
-script = ExtResource("5_enemy_wave_manager")
-player_command_center_path = NodePath("../../PlayerStartingBase/CommandCenter")
-
 [node name="EnemyGatherManager" type="Node" parent="." unique_id=266528595]
 script = ExtResource("6_enemy_gather_manager")
 enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
@@ -74,9 +50,3 @@ script = ExtResource("7_enemy_build_manager")
 enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
 enemy_gather_manager_path = NodePath("../EnemyGatherManager")
 buildings_parent_path = NodePath("../..")
-
-[node name="EnemyCreepManager" type="Node" parent="." unique_id=2101198463]
-script = ExtResource("8_enemy_creep_manager")
-
-[node name="EnemyDefenseManager" type="Node" parent="." unique_id=3847291056]
-script = ExtResource("9_enemy_defense_manager")

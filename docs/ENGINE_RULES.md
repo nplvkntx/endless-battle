@@ -11,10 +11,10 @@ Every important state must have **one** authoritative owner.
 | Concern | Owner | Notes |
 |---------|--------|--------|
 | Player selection | `SelectionManager` | Scene system (`scripts/systems/selection_manager.gd`). No `class_name`; node/script name is the authority. Stores selection identity via `EntityHandle`. |
-| Enemy military strategy | `MilitaryDirectorV2` | Sole strategic state / mission publisher when V2 is enabled. |
-| Enemy military executable orders | `ArmyCommanderV2` | **Only** enemy main-army order issuer under V2. Director never issues unit orders. |
-| Match-owned AI state | `AIPlayerState` | Owned by match via `MatchCompositionRoot`. |
-| Match composition / lifecycle | `MatchCompositionRoot` | Match-scoped wiring; declares military command authority. |
+| Enemy military strategy / orders | `SimpleWc3AI` | Sole enemy decision authority. |
+| Enemy build / gather execution | `EnemyBuildManager` / `EnemyGatherManager` | Mechanics only — execute placements and gather jobs; do not decide strategy. |
+| Match-owned AI identity | `AIPlayerState` | Owned by match via `MatchCompositionRoot`. |
+| Match composition / lifecycle | `MatchCompositionRoot` | Match-scoped wiring; declares SimpleWc3AI command authority. |
 | Player movement commands | `PlayerRouteNavigation` | Autoload. Intended sole player Move / Attack-Move route authority (see `MOVEMENT_CONTRACT.md`). |
 | UI | UI scripts under `scripts/ui/` | Reads gameplay state and issues requests. **Must not** become gameplay-state authority. |
 
@@ -22,10 +22,8 @@ Supporting infrastructure (not alternative owners):
 
 - `NodeSafety` — alive/freed Node validation helpers
 - `EntityHandle` — identity-only safe entity references
-- `EnemyArmyCommand` — low-level army order bus / helpers; not an independent mission owner under V2
-- `FormationManager` — formation registry/UI/AI helpers; must not override newer player movement commands
-
-See also `docs/MILITARY_AI_V2.md` for the V2 stack detail.
+- `EnemyArmyCommand` — thin registry / geometry helpers; not a mission owner
+- `FormationManager` — formation registry/UI helpers; must not override newer player movement commands
 
 ---
 
