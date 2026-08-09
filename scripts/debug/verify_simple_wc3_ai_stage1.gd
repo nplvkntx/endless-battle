@@ -96,7 +96,7 @@ func _test_exclusive_authority(failures: PackedStringArray) -> void:
 
 
 func _test_opening_sequence(failures: PackedStringArray) -> void:
-	print("verify: opening build → army → generic creep loop")
+	print("verify: opening build → army → creep fight → DONE")
 	EnemyArmyCommand.reset_match_state()
 	EnemyArmyCommand.reset_legacy_military_strategic_order_counter()
 	CreepCampSafety.reset_match_state()
@@ -311,12 +311,12 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	)
 	_expect(failures, "Camp 2 still FIGHT after mid-fight join", simple.get_state() == SimpleWc3AI.State.FIGHT)
 
-	## Camp 2 clear → whole army to Camp 3 (generic loop, no level stop).
+	## Camp 2 clear while Hero < 3 → whole army to Camp 3.
 	if NodeSafety.is_alive_node(creep_b):
 		creep_b.queue_free()
 	await get_tree().process_frame
 	CreepCampSafety.reset_match_state()
-	hero.level = 3
+	hero.level = 2
 
 	var camp_c := CreepCamp.new()
 	camp_c.name = "MediumCampC"
@@ -331,7 +331,7 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	CreepCampSafety.reset_match_state()
 
 	simple._process(0.5)
-	_expect(failures, "camp 2 cleared → TRAVEL Camp 3", simple.get_state() == SimpleWc3AI.State.TRAVEL)
+	_expect(failures, "camp 2 cleared Hero<3 → TRAVEL Camp 3", simple.get_state() == SimpleWc3AI.State.TRAVEL)
 	_expect(failures, "next camp is Camp C", simple.get_camp_name() == "MediumCampC")
 	_expect(failures, "Camp 3 move squad includes whole army", simple.last_move_squad_size >= 6)
 
@@ -363,7 +363,7 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 
 	## Arrive at Camp 3 — Pikemen-first combat handoff.
 	hero.global_position = Vector3(50.0, 0.5, 49.0)
-	for pike_ref: Variant in few_pikes + more_pikes + [late_pike, mid_fight_pike]:
+	for pike_ref: Variant in few_pikes + more_pikes + [late_pike]:
 		if NodeSafety.is_alive_node(pike_ref):
 			(pike_ref as Spearman).global_position = Vector3(49.5, 0.5, 49.2)
 
@@ -384,63 +384,18 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 		health_c != null and health_c.current_health < hp_c_before
 	)
 
-	## Camp 3 clear at Hero level >=3 → still continue to Camp 4 (no level stop).
 	if NodeSafety.is_alive_node(creep_c):
 		creep_c.queue_free()
 	await get_tree().process_frame
 	CreepCampSafety.reset_match_state()
-	hero.level = 4
+	hero.level = 3
 
-	var camp_d := CreepCamp.new()
-	camp_d.name = "MediumCampD"
-	add_child(camp_d)
-	camp_d.global_position = Vector3(60.0, 0.0, 60.0)
-	camp_d.add_to_group(&"creep_camps")
-	var creep_d: NeutralCreep = CREEP_SCENE.instantiate() as NeutralCreep
-	camp_d.add_child(creep_d)
-	creep_d.global_position = Vector3(60.0, 0.5, 60.0)
-	creep_d.add_to_group(&"neutral_creeps")
-	await get_tree().process_frame
-	CreepCampSafety.reset_match_state()
-
+	simple._camp_id = camp_c.get_instance_id()
+	simple._state = SimpleWc3AI.State.FIGHT
 	simple._process(0.5)
-	_expect(failures, "camp 3 cleared → TRAVEL Camp 4", simple.get_state() == SimpleWc3AI.State.TRAVEL)
-	_expect(failures, "next camp is Camp D", simple.get_camp_name() == "MediumCampD")
-	_expect(failures, "Camp 4 move includes whole army", simple.last_move_squad_size >= 6)
+	_expect(failures, "Hero level >=3 → DONE", simple.get_state() == SimpleWc3AI.State.DONE)
 
-	hero.global_position = Vector3(60.0, 0.5, 59.0)
-	for pike_ref: Variant in few_pikes + more_pikes + [late_pike, mid_fight_pike]:
-		if NodeSafety.is_alive_node(pike_ref):
-			(pike_ref as Spearman).global_position = Vector3(59.5, 0.5, 59.2)
-	await get_tree().process_frame
-
-	var health_d: HealthComponent = creep_d.get_node_or_null("HealthComponent") as HealthComponent
-	var hp_d_before: float = health_d.current_health if health_d != null else 0.0
-	simple._process(0.5)
-	_expect(failures, "Camp 4 engage → FIGHT", simple.get_state() == SimpleWc3AI.State.FIGHT)
-	_expect(failures, "Camp 4 fight handoff issued", simple._fight_target_id != 0)
-
-	for _i: int in 80:
-		await get_tree().physics_frame
-		simple._process(0.5)
-		if health_d != null and health_d.current_health < hp_d_before:
-			break
-
-	_expect(
-		failures,
-		"Camp 4 creep HP decreased",
-		health_d != null and health_d.current_health < hp_d_before
-	)
-
-	## No living camps left → DONE.
-	if NodeSafety.is_alive_node(creep_d):
-		creep_d.queue_free()
-	await get_tree().process_frame
-	CreepCampSafety.reset_match_state()
-	simple._process(0.5)
-	_expect(failures, "no camps left → DONE", simple.get_state() == SimpleWc3AI.State.DONE)
-
-	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c, camp_d, late_pike, mid_fight_pike]:
+	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c, late_pike, mid_fight_pike]:
 		if NodeSafety.is_alive_node(node_ref):
 			(node_ref as Node).queue_free()
 	for pike_ref: Variant in few_pikes + more_pikes:
