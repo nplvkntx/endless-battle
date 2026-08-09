@@ -977,8 +977,9 @@ func _select_player_target() -> Node3D:
 func _resolve_creep_camp() -> Node3D:
 	## Only continue a prior camp target if it is still an active camp.
 	if _current_target_id != 0 and is_instance_id_valid(_current_target_id):
-		var existing: Object = instance_from_id(_current_target_id)
-		if existing is Node3D and NodeSafety.is_alive_node(existing):
+		var existing: Variant = instance_from_id(_current_target_id)
+		## Validate before any `is` / cast — freed Object makes `is` itself error.
+		if NodeSafety.is_alive_node(existing) and existing is Node3D:
 			var existing_camp: Node3D = existing as Node3D
 			if _is_active_camp(existing_camp):
 				if _find_living_creep_in_camp(existing_camp) != null:
@@ -1002,11 +1003,12 @@ func _pick_safe_creep_camp() -> Node3D:
 	var army_size: int = maxi(1, (_w.army as Array).size())
 
 	for camp_variant: Variant in _w.active_camps as Array:
+		## Freed camp refs in the active_camps snapshot must be ignored safely.
+		if not NodeSafety.is_alive_node(camp_variant):
+			continue
 		if not camp_variant is Node3D:
 			continue
 		var camp: Node3D = camp_variant as Node3D
-		if not NodeSafety.is_alive_node(camp):
-			continue
 		var dist: float = _horizontal_distance(home, camp.global_position)
 		if dist > CAMP_SEARCH_RANGE:
 			continue
@@ -1023,8 +1025,15 @@ func _pick_safe_creep_camp() -> Node3D:
 
 
 func _is_active_camp(camp: Node3D) -> bool:
+	if not NodeSafety.is_alive_node(camp):
+		return false
+	var camp_id: int = camp.get_instance_id()
 	for camp_variant: Variant in _w.active_camps as Array:
-		if camp_variant is Node3D and (camp_variant as Node3D).get_instance_id() == camp.get_instance_id():
+		if not NodeSafety.is_alive_node(camp_variant):
+			continue
+		if not camp_variant is Node3D:
+			continue
+		if (camp_variant as Node3D).get_instance_id() == camp_id:
 			return true
 	return false
 
@@ -1041,6 +1050,9 @@ func _find_living_creep_in_camp(camp: Node3D) -> Node3D:
 		tree,
 		CombatTargetValidation.NEUTRAL_CREEP_GROUP
 	):
+		## Group cache can retain refs freed later in the same frame — validate first.
+		if not NodeSafety.is_alive_node(node_variant):
+			continue
 		if not node_variant is Node3D:
 			continue
 		var creep: Node3D = node_variant as Node3D
@@ -1066,6 +1078,9 @@ func _count_living_creeps_in_camp(camp: Node3D) -> int:
 		tree,
 		CombatTargetValidation.NEUTRAL_CREEP_GROUP
 	):
+		## Lifetime order: is_instance_valid (via NodeSafety) BEFORE any `is` / cast.
+		if not NodeSafety.is_alive_node(node_variant):
+			continue
 		if not node_variant is Node3D:
 			continue
 		var creep: Node3D = node_variant as Node3D
@@ -1443,12 +1458,30 @@ func _count_living_neutral_creeps() -> int:
 	if tree == null:
 		return 0
 	var count: int = 0
-	for node: Node in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
-		if not NodeSafety.is_alive_node(node):
+	for node_variant: Variant in tree.get_nodes_in_group(CombatTargetValidation.NEUTRAL_CREEP_GROUP):
+		if not NodeSafety.is_alive_node(node_variant):
 			continue
+		if not node_variant is Node:
+			continue
+		var node: Node = node_variant as Node
 		if not CombatTargetValidation.is_neutral_creep(node):
 			continue
 		if CombatTargetValidation.get_target_current_health(node) <= 0:
 			continue
 		count += 1
 	return count
+
+
+func count_living_creeps_in_camp_for_test(camp: Node3D) -> int:
+	_read_live_world()
+	return _count_living_creeps_in_camp(camp)
+
+
+func find_living_creep_in_camp_for_test(camp: Node3D) -> Node3D:
+	_read_live_world()
+	return _find_living_creep_in_camp(camp)
+
+
+func pick_safe_creep_camp_for_test() -> Node3D:
+	_read_live_world()
+	return _pick_safe_creep_camp()

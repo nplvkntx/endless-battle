@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_rebuild_after_hero_death()
 	await _test_tech_requests()
 	await _test_faction_classification_invariants()
+	await _test_freed_creep_camp_count()
 
 	var report: String
 	if _failures.is_empty():
@@ -551,6 +552,78 @@ func _test_faction_classification_invariants() -> void:
 			_kill_unit(creep_variant2 as Node)
 	if NodeSafety.is_alive_node(player_pike):
 		_kill_unit(player_pike)
+	await get_tree().process_frame
+
+
+func _test_freed_creep_camp_count() -> void:
+	print("--- freed creep camp count ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+
+	var camp := CreepCamp.new()
+	camp.name = "RegressionCreepCamp"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(12, 0, 0)
+
+	var creep_a: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	var creep_b: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(-1, 0, 0))
+	## Parent under camp so active-camp discovery matches real camp ownership.
+	creep_a.reparent(camp)
+	creep_b.reparent(camp)
+	await get_tree().process_frame
+
+	## Living creeps count normally.
+	var living_before: int = _ai.count_living_creeps_in_camp_for_test(camp)
+	_expect("living camp count == 2", living_before == 2)
+	_expect(
+		"living creep finder returns a creep",
+		_ai.find_living_creep_in_camp_for_test(camp) != null
+	)
+	_expect("useful camp picker finds camp", _ai.pick_safe_creep_camp_for_test() == camp)
+
+	## Poison the same-frame group cache: free immediately (not queue_free).
+	## This is the exact failure mode: cached Variant → `is Node3D` on freed Object.
+	creep_a.free()
+	var living_after_one_freed: int = _ai.count_living_creeps_in_camp_for_test(camp)
+	_expect("freed creep ignored; remaining count == 1", living_after_one_freed == 1)
+	var remaining: Node3D = _ai.find_living_creep_in_camp_for_test(camp)
+	_expect("finder returns remaining living creep", remaining == creep_b)
+
+	creep_b.free()
+	var living_empty: int = _ai.count_living_creeps_in_camp_for_test(camp)
+	_expect("empty camp count == 0 after all freed", living_empty == 0)
+	_expect(
+		"finder returns null for empty camp",
+		_ai.find_living_creep_in_camp_for_test(camp) == null
+	)
+	_expect(
+		"picker skips empty camp",
+		_ai.pick_safe_creep_camp_for_test() == null
+	)
+
+	## Real tick path must also survive (early-creep useful-camp scan).
+	_ai.set_camps_cleared_for_test(0)
+	_ai.force_tick_for_test()
+	_expect(
+		"ai tick with freed creeps does not crash",
+		_ai.get_debug_priority() != &""
+	)
+
+	## Wait a frame, then prove a fresh living creep still counts.
+	await get_tree().process_frame
+	var creep_c: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(0.5, 0, 0))
+	creep_c.reparent(camp)
+	await get_tree().process_frame
+	_expect(
+		"new living creep counts after free cleanup",
+		_ai.count_living_creeps_in_camp_for_test(camp) == 1
+	)
+	_kill_unit(creep_c)
 	await get_tree().process_frame
 
 
