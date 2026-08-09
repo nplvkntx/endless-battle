@@ -118,6 +118,7 @@ func export_test_checkpoint_state() -> Dictionary:
 
 
 ## Restore SimpleWc3AI fields from a developer test checkpoint.
+## Clears runtime IDs/targets so the AI rebinds to recreated world nodes.
 func restore_test_checkpoint_state(data: Dictionary) -> void:
 	if data.is_empty():
 		return
@@ -127,7 +128,8 @@ func restore_test_checkpoint_state(data: Dictionary) -> void:
 	assembly_position = data.get("assembly_position", Vector3.ZERO) as Vector3
 	_camp_name = String(data.get("camp_name", "-"))
 	_camp_destination = data.get("camp_destination", Vector3.ZERO) as Vector3
-	_travel_issued = bool(data.get("travel_issued", false))
+	## Always re-issue travel after clean reload — old path state must not resume.
+	_travel_issued = false
 	strategic_orders_issued = int(data.get("strategic_orders_issued", 0))
 	_cleared_camp_names.clear()
 	_cleared_camp_ids.clear()

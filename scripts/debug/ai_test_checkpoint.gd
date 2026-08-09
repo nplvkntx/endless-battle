@@ -2,12 +2,14 @@ class_name AiTestCheckpoint
 extends CanvasLayer
 
 ## Developer-only single-slot match checkpoint for SimpleWc3AI testing.
+## SAVE writes plain data. LOAD clean-reloads main match, then applies the snapshot.
 ## Not a save-game system — two buttons, one user:// file.
 
 const CHECKPOINT_PATH := "user://ai_test_checkpoint.dat"
 const CREEP_SCENE: PackedScene = preload("res://scenes/units/neutral_creep.tscn")
 
 var _status_label: Label = null
+var _applying: bool = false
 
 
 func _ready() -> void:
@@ -16,6 +18,9 @@ func _ready() -> void:
 		return
 	layer = 90
 	_build_buttons()
+	if MatchSession.take_pending_dev_checkpoint_apply():
+		_hold_simple_ai(true)
+		call_deferred("_apply_pending_after_clean_reload")
 
 
 func save_checkpoint() -> bool:
@@ -39,32 +44,52 @@ func save_checkpoint() -> bool:
 		return false
 	file.store_var(data)
 	file.close()
-	_set_status("SAVE TEST ok")
+	_set_status("SAVE CHECKPOINT ok")
 	print("AiTestCheckpoint: saved ", CHECKPOINT_PATH)
 	return true
 
 
+## Starts a clean main-match reload. Snapshot is applied by the new checkpoint after boot.
 func load_checkpoint() -> bool:
 	if not FileAccess.file_exists(CHECKPOINT_PATH):
 		_set_status("LOAD FAIL: no file")
 		return false
 
-	var file := FileAccess.open(CHECKPOINT_PATH, FileAccess.READ)
-	if file == null:
-		_set_status("LOAD FAIL: open")
-		return false
-	var data: Variant = file.get_var()
-	file.close()
-	if typeof(data) != TYPE_DICTIONARY:
+	## Validate payload before tearing down the live match.
+	var data: Dictionary = read_checkpoint_file()
+	if data.is_empty():
 		_set_status("LOAD FAIL: bad data")
 		return false
 
-	var tree: SceneTree = get_tree()
-	if tree == null:
-		_set_status("LOAD FAIL: no tree")
-		return false
+	_set_status("LOAD… clean reload")
+	print("AiTestCheckpoint: requesting clean match reload")
+	MatchSession.request_dev_checkpoint_reload()
+	return true
 
-	var payload: Dictionary = data as Dictionary
+
+func read_checkpoint_file() -> Dictionary:
+	if not FileAccess.file_exists(CHECKPOINT_PATH):
+		return {}
+	var file := FileAccess.open(CHECKPOINT_PATH, FileAccess.READ)
+	if file == null:
+		return {}
+	var data: Variant = file.get_var()
+	file.close()
+	if typeof(data) != TYPE_DICTIONARY:
+		return {}
+	return data as Dictionary
+
+
+## Apply plain checkpoint data onto the current (fresh) match. Used after clean reload.
+func apply_checkpoint_data(payload: Dictionary) -> bool:
+	var tree: SceneTree = get_tree()
+	if tree == null or payload.is_empty():
+		return false
+	if _applying:
+		return false
+	_applying = true
+	_hold_simple_ai(true)
+
 	_clear_dynamic_entities(tree)
 	await tree.process_frame
 	await tree.process_frame
@@ -72,6 +97,7 @@ func load_checkpoint() -> bool:
 	_restore_buildings(tree, payload.get("buildings", []) as Array)
 	_restore_units(tree, payload.get("units", []) as Array)
 	_restore_creeps(tree, payload.get("creeps", []) as Array)
+	## Resources last so farm food_max / unit food churn cannot drift from the save.
 	_restore_resources(payload.get("player", {}) as Dictionary, false)
 	_restore_resources(payload.get("enemy", {}) as Dictionary, true)
 
@@ -80,19 +106,41 @@ func load_checkpoint() -> bool:
 
 	_restore_ai_state(tree, payload.get("ai", {}) as Dictionary)
 	_ensure_simple_ai_authority(tree)
+	_hold_simple_ai(false)
 
-	_set_status("LOAD TEST ok")
-	print("AiTestCheckpoint: loaded ", CHECKPOINT_PATH)
+	_applying = false
 	return true
+
+
+func _apply_pending_after_clean_reload() -> void:
+	var payload: Dictionary = read_checkpoint_file()
+	if payload.is_empty():
+		_hold_simple_ai(false)
+		_set_status("LOAD FAIL: bad data")
+		return
+
+	## Let MatchBootstrap / starting bases finish _ready before clearing defaults.
+	var tree: SceneTree = get_tree()
+	if tree != null:
+		await tree.process_frame
+		await tree.process_frame
+
+	var ok: bool = await apply_checkpoint_data(payload)
+	if ok:
+		_set_status("LOAD CHECKPOINT ok")
+		print("AiTestCheckpoint: applied after clean reload")
+	else:
+		_set_status("LOAD FAIL: apply")
+		_hold_simple_ai(false)
 
 
 func _build_buttons() -> void:
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	root.offset_left = -220.0
+	root.offset_left = -240.0
 	root.offset_top = 12.0
 	root.offset_right = -12.0
-	root.offset_bottom = 110.0
+	root.offset_bottom = 120.0
 	add_child(root)
 
 	var vbox := VBoxContainer.new()
@@ -100,12 +148,12 @@ func _build_buttons() -> void:
 	root.add_child(vbox)
 
 	var save_btn := Button.new()
-	save_btn.text = "SAVE TEST"
+	save_btn.text = "SAVE CHECKPOINT"
 	save_btn.pressed.connect(_on_save_pressed)
 	vbox.add_child(save_btn)
 
 	var load_btn := Button.new()
-	load_btn.text = "LOAD TEST"
+	load_btn.text = "LOAD CHECKPOINT"
 	load_btn.pressed.connect(_on_load_pressed)
 	vbox.add_child(load_btn)
 
@@ -121,12 +169,22 @@ func _on_save_pressed() -> void:
 
 
 func _on_load_pressed() -> void:
-	await load_checkpoint()
+	load_checkpoint()
 
 
 func _set_status(text: String) -> void:
 	if _status_label != null and is_instance_valid(_status_label):
 		_status_label.text = text
+
+
+func _hold_simple_ai(hold: bool) -> void:
+	var ai: SimpleWc3AI = _find_simple_ai(get_tree())
+	if ai == null:
+		return
+	if hold:
+		ai.set_process(false)
+	elif MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		ai.set_process(true)
 
 
 func _collect_resources(is_enemy: bool) -> Dictionary:
@@ -180,6 +238,7 @@ func _collect_buildings(tree: SceneTree) -> Array:
 			"pos": building.global_position,
 			"team_id": building.team_id,
 			"state": String(building.building_state),
+			"construction_progress": building.get_construction_progress_ratio(),
 			"hp": health.current_health if health != null else -1,
 			"max_hp": health.max_health if health != null else -1,
 			"enemy_group": building.is_in_group(&"enemy_command_center"),
@@ -277,7 +336,7 @@ func _clear_dynamic_entities(tree: SceneTree) -> void:
 			seen[id] = true
 			to_free.append(node)
 
-	## Free non-starting buildings.
+	## Free non-starting buildings (fresh match only has starting CCs).
 	for node_variant: Variant in tree.get_nodes_in_group(&"buildings"):
 		if not NodeSafety.is_alive_node(node_variant):
 			continue
@@ -292,7 +351,7 @@ func _clear_dynamic_entities(tree: SceneTree) -> void:
 		seen[id2] = true
 		to_free.append(building)
 
-	## Free living creeps (camps stay).
+	## Free living creeps (camp nodes stay).
 	for node_variant: Variant in tree.get_nodes_in_group(&"neutral_creeps"):
 		if not NodeSafety.is_alive_node(node_variant):
 			continue
@@ -347,9 +406,14 @@ func _restore_buildings(tree: SceneTree, buildings: Array) -> void:
 				building.add_to_group(&"player_command_center")
 		if not building.is_in_group(&"buildings"):
 			building.add_to_group(&"buildings")
+
 		var state_name: String = String(entry.get("state", "completed"))
+		var progress: float = float(entry.get("construction_progress", 1.0))
 		if state_name == String(Building.STATE_COMPLETED) or state_name.is_empty():
 			building.set_completed()
+		else:
+			building.start_under_construction()
+			building.force_construction_progress_for_verify(progress)
 		building.apply_team_visuals()
 		_apply_health(building.get_node_or_null("HealthComponent") as HealthComponent, entry)
 		PlayerRouteNavigation.register_static_obstacle(building)
@@ -409,7 +473,7 @@ func _restore_units(tree: SceneTree, units: Array) -> void:
 					unit.remove_from_group(&"workers")
 				if not unit.is_in_group(&"enemy_workers"):
 					unit.add_to_group(&"enemy_workers")
-			elif not (unit is Worker):
+			else:
 				EnemyArmyCommand.register_combat_unit(unit)
 		else:
 			if not unit.is_in_group(&"units"):
@@ -487,12 +551,11 @@ func _ensure_simple_ai_authority(tree: SceneTree) -> void:
 	root._ensure_simple_wc3_ai()
 	root._declare_military_command_authority()
 	root._bind_ai_runtime()
-	var ai: SimpleWc3AI = root.simple_wc3_ai
-	if ai != null and is_instance_valid(ai):
-		ai.set_process(MilitaryAIConfig.is_simple_wc3_ai_enabled())
 
 
 func _find_simple_ai(tree: SceneTree) -> SimpleWc3AI:
+	if tree == null:
+		return null
 	var root: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(tree)
 	if root != null and root.simple_wc3_ai != null:
 		return root.simple_wc3_ai

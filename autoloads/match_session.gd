@@ -12,6 +12,8 @@ const MATCH_SCENE := "res://scenes/main.tscn"
 var last_match_result: String = ""
 ## AI-only match setting chosen in Create Match. Survives rematch; not wiped by prepare.
 var ai_difficulty: int = AIDifficultyConfig.DEFAULT_DIFFICULTY
+## Developer checkpoint: set before restart_match(); consumed after fresh main match boots.
+var pending_dev_checkpoint_apply: bool = false
 
 
 func set_ai_difficulty(difficulty: int) -> void:
@@ -70,6 +72,19 @@ func start_match() -> void:
 func restart_match() -> void:
 	## Reloads the match scene; MatchBootstrap then calls prepare_new_match().
 	start_match()
+
+
+## Debug checkpoint load: clean main-match reload, then apply saved plain data.
+func request_dev_checkpoint_reload() -> void:
+	pending_dev_checkpoint_apply = true
+	restart_match()
+
+
+func take_pending_dev_checkpoint_apply() -> bool:
+	if not pending_dev_checkpoint_apply:
+		return false
+	pending_dev_checkpoint_apply = false
+	return true
 
 
 func go_to_main_menu() -> void:
