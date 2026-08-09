@@ -15,6 +15,7 @@ const PLACEMENT_BLACKSMITH: StringName = &"blacksmith"
 const PLACEMENT_STABLE: StringName = &"stable"
 const PLACEMENT_ARTILLERY_DEPOT: StringName = &"artillery_depot"
 const PLACEMENT_COMMAND_CENTER: StringName = &"command_center"
+const PLACEMENT_TOWER: StringName = &"tower"
 
 const FARM_SCENE: PackedScene = preload("res://scenes/buildings/farm.tscn")
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
@@ -23,6 +24,7 @@ const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith
 const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
 const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
 const COMMAND_CENTER_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
+const TOWER_SCENE: PackedScene = preload("res://scenes/buildings/tower.tscn")
 const HEALTH_COMPONENT_SCRIPT: Script = preload("res://scripts/components/health_component.gd")
 
 const FARM_GOLD_COST: int = BuildingStats.FARM_GOLD_COST
@@ -39,10 +41,11 @@ const ARTILLERY_DEPOT_GOLD_COST: int = BuildingStats.ARTILLERY_DEPOT_GOLD_COST
 const ARTILLERY_DEPOT_WOOD_COST: int = BuildingStats.ARTILLERY_DEPOT_WOOD_COST
 const COMMAND_CENTER_GOLD_COST: int = BuildingStats.COMMAND_CENTER_GOLD_COST
 const COMMAND_CENTER_WOOD_COST: int = BuildingStats.COMMAND_CENTER_WOOD_COST
+const TOWER_GOLD_COST: int = BuildingStats.TOWER_GOLD_COST
+const TOWER_WOOD_COST: int = BuildingStats.TOWER_WOOD_COST
 const FARM_MAX_HEALTH: int = BuildingStats.FARM_MAX_HEALTH
 const HERO_ALTAR_MAX_HEALTH: int = BuildingStats.HERO_ALTAR_MAX_HEALTH
-## Farms may duplicate. Barracks may exist up to this count. Other types are unique.
-const MAX_BARRACKS: int = 2
+const TOWER_MAX_HEALTH: int = BuildingStats.TOWER_MAX_HEALTH
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gather_manager_path: NodePath
@@ -65,8 +68,15 @@ func try_place_building(building_type: StringName) -> bool:
 		return false
 	if building_type == PLACEMENT_FARM:
 		pass
-	elif building_type == PLACEMENT_BARRACKS:
-		if _count_buildings_of_type(PLACEMENT_BARRACKS) >= MAX_BARRACKS:
+	elif (
+		building_type == PLACEMENT_BARRACKS
+		or building_type == PLACEMENT_STABLE
+		or building_type == PLACEMENT_ARTILLERY_DEPOT
+	):
+		if _count_buildings_of_type(building_type) >= AIDifficultyConfig.get_max_military_buildings(building_type):
+			return false
+	elif building_type == PLACEMENT_TOWER:
+		if _count_buildings_of_type(PLACEMENT_TOWER) >= AIDifficultyConfig.get_desired_tower_count():
 			return false
 	elif _has_completed_or_in_progress(building_type):
 		return false
@@ -95,6 +105,23 @@ func try_place_stable() -> bool:
 
 func try_place_artillery_depot() -> bool:
 	return try_place_building(PLACEMENT_ARTILLERY_DEPOT)
+
+
+## Place a defensive tower toward the preferred approach lane (player CC direction).
+func try_place_tower(toward_world: Vector3 = Vector3.INF) -> bool:
+	var cc: CommandCenter = _resolve_primary_command_center()
+	if cc != null and toward_world.is_finite():
+		var to_player: Vector3 = toward_world - cc.global_position
+		to_player.y = 0.0
+		var lane: StringName = &"front"
+		if absf(to_player.x) >= absf(to_player.z):
+			lane = &"left" if to_player.x < 0.0 else &"right"
+		else:
+			lane = &"front" if to_player.z < 0.0 else &"back"
+		EnemyBuildPlacement.set_tower_lane_preference(lane)
+	var placed: bool = try_place_building(PLACEMENT_TOWER)
+	EnemyBuildPlacement.clear_tower_lane_preference()
+	return placed
 
 
 ## Place an expansion Command Center near a gold mine. No AI policy.
@@ -218,6 +245,8 @@ func _get_building_costs(building_type: StringName) -> Vector2i:
 			return Vector2i(ARTILLERY_DEPOT_GOLD_COST, ARTILLERY_DEPOT_WOOD_COST)
 		PLACEMENT_COMMAND_CENTER:
 			return Vector2i(COMMAND_CENTER_GOLD_COST, COMMAND_CENTER_WOOD_COST)
+		PLACEMENT_TOWER:
+			return Vector2i(TOWER_GOLD_COST, TOWER_WOOD_COST)
 		_:
 			return Vector2i(-1, -1)
 
@@ -231,6 +260,7 @@ func _is_supported_building_type(building_type: StringName) -> bool:
 		or building_type == PLACEMENT_STABLE
 		or building_type == PLACEMENT_ARTILLERY_DEPOT
 		or building_type == PLACEMENT_COMMAND_CENTER
+		or building_type == PLACEMENT_TOWER
 	)
 
 
@@ -250,6 +280,8 @@ func _instantiate_building(building_type: StringName) -> Building:
 			return ARTILLERY_DEPOT_SCENE.instantiate() as Building
 		PLACEMENT_COMMAND_CENTER:
 			return COMMAND_CENTER_SCENE.instantiate() as Building
+		PLACEMENT_TOWER:
+			return TOWER_SCENE.instantiate() as Building
 		_:
 			return null
 
@@ -272,6 +304,8 @@ func _add_health_component_if_needed(building: Building, building_type: StringNa
 			max_health = FARM_MAX_HEALTH
 		PLACEMENT_HERO_ALTAR:
 			max_health = HERO_ALTAR_MAX_HEALTH
+		PLACEMENT_TOWER:
+			max_health = TOWER_MAX_HEALTH
 		_:
 			return
 	var health_component: Node = HEALTH_COMPONENT_SCRIPT.new()
@@ -388,6 +422,8 @@ func _building_matches_type(building: Building, building_type: StringName) -> bo
 			return building is ArtilleryDepot
 		PLACEMENT_COMMAND_CENTER:
 			return building is CommandCenter
+		PLACEMENT_TOWER:
+			return building is Tower
 		_:
 			return false
 

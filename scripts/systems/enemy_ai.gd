@@ -32,18 +32,21 @@ const GOLD_WORKER_RATIO: float = 0.6
 const HOME_OFFSET: Vector3 = Vector3(-2.0, 0.0, 3.0)
 const CRITICAL_WOOD_RESERVE: int = 40
 const ARMY_SOFT_CAP: int = 36
-const MAX_BARRACKS_DESIRED: int = 2
-
-const DESIRED_WORKERS_T1: int = 10
-const DESIRED_WORKERS_T2: int = 16
-const DESIRED_WORKERS_T3: int = 22
-const DESIRED_WORKERS_EXPANSION: int = 26
+const CREEP_STAGING_STANDOFF: float = 10.0
+const CREEP_ENGAGE_RADIUS: float = 12.0
+const HERO_MICRO_INTERVAL: float = 0.3
+const MAX_CREEP_ROUTE_FAILURES: int = 3
+const T3_ARMY_MINIMUM: int = 8
+const T3_WORKER_MINIMUM: int = 18
+const T3_GOLD_NEAR_COST: int = BuildingStats.CC_TIER_3_GOLD_COST + 200
 
 const DESIRED_SPEARMEN_T1: int = 9
 const DESIRED_SPEARMEN_T2: int = 6
 const DESIRED_SWORDSMEN: int = 5
 const DESIRED_ARCHERS: int = 5
 const DESIRED_LIGHT_CAVALRY: int = 4
+const DESIRED_HEAVY_CAVALRY: int = 2
+const DESIRED_CAVALRY_ARCHERS: int = 2
 const DESIRED_CANNONS: int = 2
 
 const CMD_NONE: StringName = &""
@@ -53,6 +56,7 @@ const CMD_CREEP: StringName = &"creep"
 const CMD_ATTACK: StringName = &"attack"
 const CMD_REGROUP: StringName = &"regroup"
 const CMD_ATTACK_MARCH: StringName = &"attack_march"
+const CMD_HERO_UNSTUCK: StringName = &"hero_unstuck"
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_build_manager_path: NodePath
@@ -77,6 +81,11 @@ var _debug_overlay_lines: PackedStringArray = PackedStringArray()
 var _debug_following_ok: int = 0
 var _debug_following_living: int = 0
 var _debug_army_trace_signature: String = ""
+var _hero_micro_timer: float = 0.0
+var _debug_last_hero_ability: String = "-"
+var _creep_route_failures: Dictionary = {} ## camp_id -> fail count
+var _creep_trace_cooldown: float = 0.0
+var _invalid_creep_camp_ids: Dictionary = {}
 
 var _build_manager: EnemyBuildManager = null
 var _gather_manager: EnemyGatherManager = null
@@ -112,11 +121,18 @@ func reset_match_state() -> void:
 	_debug_following_ok = 0
 	_debug_following_living = 0
 	_debug_army_trace_signature = ""
+	_hero_micro_timer = 0.0
+	_debug_last_hero_ability = "-"
+	_creep_route_failures.clear()
+	_creep_trace_cooldown = 0.0
+	_invalid_creep_camp_ids.clear()
 	_w.clear()
 	_update_debug_overlay()
 
 
 func _process(delta: float) -> void:
+	_hero_micro_timer += delta
+	_creep_trace_cooldown = maxf(0.0, _creep_trace_cooldown - delta)
 	_tick_timer += delta
 	if _tick_timer < TICK_INTERVAL_SECONDS:
 		return
@@ -136,10 +152,12 @@ func _ai_tick() -> void:
 	_ensure_basic_buildings()
 	_ensure_hero()
 	_ensure_tech_progression()
-	_ensure_extra_barracks()
+	_ensure_extra_military_buildings()
+	_ensure_towers()
 	_ensure_expansion()
 	_ensure_upgrades()
 	_ensure_unit_production()
+	_use_hero_combat_micro_if_relevant()
 
 	## Military — first true condition wins. Live facts are the only memory.
 	## Defense overrides regroup / offense when the base is under real threat.
@@ -159,6 +177,11 @@ func _ai_tick() -> void:
 	if _army_below_minimum():
 		_army_home()
 		_finish_military_decision(&"HOME", &"HOME_ARMY_SMALL", &"BUILD_FORCE", null)
+		return
+
+	if _hero_is_physically_stuck():
+		_fix_current_hero_movement()
+		_finish_military_decision(&"HERO_STUCK", &"HERO_STUCK", &"UNSTUCK", null)
 		return
 
 	## Cohesion before any strategic offense — Hero must not travel alone.
@@ -230,11 +253,17 @@ func _read_live_world() -> void:
 		"blacksmith_completed": false,
 		"blacksmith_constructing": false,
 		"stable": null,
+		"stable_list": [] as Array,
+		"stable_count": 0,
 		"stable_completed": false,
 		"stable_constructing": false,
 		"artillery_depot": null,
+		"artillery_list": [] as Array,
+		"artillery_count": 0,
 		"artillery_completed": false,
 		"artillery_constructing": false,
+		"towers": 0,
+		"tower_constructing": false,
 		"expansion_cc": null,
 		"expansion_constructing": false,
 		"workers": [] as Array,
@@ -317,16 +346,28 @@ func _read_live_world() -> void:
 				_w.blacksmith_constructing = true
 		elif building is Stable:
 			if completed:
+				(_w.stable_list as Array).append(building)
+				_w.stable_count = int(_w.stable_count) + 1
 				_w.stable = building
 				_w.stable_completed = true
 			elif constructing:
 				_w.stable_constructing = true
+				_w.stable_count = int(_w.stable_count) + 1
 		elif building is ArtilleryDepot:
 			if completed:
+				(_w.artillery_list as Array).append(building)
+				_w.artillery_count = int(_w.artillery_count) + 1
 				_w.artillery_depot = building
 				_w.artillery_completed = true
 			elif constructing:
 				_w.artillery_constructing = true
+				_w.artillery_count = int(_w.artillery_count) + 1
+		elif building is Tower:
+			if completed:
+				_w.towers = int(_w.towers) + 1
+			elif constructing:
+				_w.tower_constructing = true
+				_w.towers = int(_w.towers) + 1
 
 	if _w.altar_completed and _w.altar != null:
 		_w.hero_training = (_w.altar as HeroAltar).is_training_hero()
@@ -568,6 +609,8 @@ func _wood_critically_low() -> bool:
 		return wood < BuildingStats.BARRACKS_WOOD_COST
 	if int(_w.tier) >= 2 and not _w.blacksmith_completed and not _w.blacksmith_constructing:
 		return wood < BuildingStats.BLACKSMITH_WOOD_COST
+	if int(_w.tier) >= 2 and int(_w.towers) < AIDifficultyConfig.get_desired_tower_count():
+		return wood < BuildingStats.TOWER_WOOD_COST
 	if int(_w.free_food) <= FOOD_SAFETY_MARGIN and not _w.farm_constructing:
 		return wood < BuildingStats.FARM_WOOD_COST
 	return wood < CRITICAL_WOOD_RESERVE
@@ -642,13 +685,20 @@ func _ensure_tech_progression() -> void:
 			_build_manager.try_place_stable()
 			return
 
-	## Tier 3
+	## Tier 3 — economy-stable gate; expansion optional if gold near T3 cost.
 	if (
 		int(_w.tier) == 2
 		and _w.blacksmith_completed
-		and (_w.expansion_cc != null or _w.gold >= 2200)
-		and int((_w.army as Array).size()) >= 10
-		and int((_w.workers as Array).size()) >= DESIRED_WORKERS_T2
+		and int((_w.army as Array).size()) >= T3_ARMY_MINIMUM
+		and int((_w.workers as Array).size()) >= T3_WORKER_MINIMUM
+		and (
+			_w.expansion_cc != null
+			or _w.gold >= T3_GOLD_NEAR_COST
+			or EnemyResourceManager.can_afford(
+				BuildingStats.CC_TIER_3_GOLD_COST,
+				BuildingStats.CC_TIER_3_WOOD_COST
+			)
+		)
 	):
 		var cc_t3: CommandCenter = _w.primary_cc as CommandCenter
 		if cc_t3 != null and cc_t3.can_try_enemy_upgrade_tier(3):
@@ -658,8 +708,9 @@ func _ensure_tech_progression() -> void:
 	## Artillery Depot after unlock
 	if (
 		TechTree.can_build_artillery_depot(ENEMY_TEAM_ID)
-		and not _w.artillery_completed
+		and int(_w.artillery_count) < AIDifficultyConfig.get_max_military_buildings(&"artillery_depot")
 		and not _w.artillery_constructing
+		and (not _w.artillery_completed or int(_w.tier) >= 3)
 	):
 		if EnemyResourceManager.can_afford(
 			BuildingStats.ARTILLERY_DEPOT_GOLD_COST,
@@ -668,24 +719,75 @@ func _ensure_tech_progression() -> void:
 			_build_manager.try_place_artillery_depot()
 
 
-func _ensure_extra_barracks() -> void:
+func _ensure_extra_military_buildings() -> void:
 	if _build_manager == null:
 		return
 	if int(_w.tier) < 2:
 		return
-	if int(_w.barracks_count) >= MAX_BARRACKS_DESIRED:
+	if int((_w.workers as Array).size()) < AIDifficultyConfig.DESIRED_WORKERS_T2 - 2:
 		return
-	if not _w.barracks_completed:
+
+	var max_mil: int = AIDifficultyConfig.get_max_military_buildings()
+	if (
+		int(_w.barracks_count) < max_mil
+		and _w.barracks_completed
+		and not _w.barracks_constructing
+		and _w.gold >= 400
+		and _w.wood >= 200
+		and EnemyResourceManager.can_afford(BuildingStats.BARRACKS_GOLD_COST, BuildingStats.BARRACKS_WOOD_COST)
+	):
+		_build_manager.try_place_barracks()
 		return
-	if _w.barracks_constructing:
+
+	if (
+		TechTree.can_build_stable(ENEMY_TEAM_ID)
+		and int(_w.stable_count) < max_mil
+		and (_w.stable_completed or int(_w.stable_count) > 0)
+		and not _w.stable_constructing
+		and int(_w.tier) >= 2
+		and _w.gold >= 450
+		and EnemyResourceManager.can_afford(BuildingStats.STABLE_GOLD_COST, BuildingStats.STABLE_WOOD_COST)
+	):
+		_build_manager.try_place_stable()
 		return
-	if int((_w.workers as Array).size()) < DESIRED_WORKERS_T2 - 2:
+
+	if (
+		int(_w.tier) >= 3
+		and TechTree.can_build_artillery_depot(ENEMY_TEAM_ID)
+		and int(_w.artillery_count) < max_mil
+		and _w.artillery_completed
+		and not _w.artillery_constructing
+		and _w.gold >= 500
+		and EnemyResourceManager.can_afford(
+			BuildingStats.ARTILLERY_DEPOT_GOLD_COST,
+			BuildingStats.ARTILLERY_DEPOT_WOOD_COST
+		)
+	):
+		_build_manager.try_place_artillery_depot()
+
+
+func _ensure_towers() -> void:
+	if _build_manager == null:
 		return
-	if _w.gold < 400 or _w.wood < 200:
+	if int(_w.tier) < 2:
 		return
-	if not EnemyResourceManager.can_afford(BuildingStats.BARRACKS_GOLD_COST, BuildingStats.BARRACKS_WOOD_COST):
+	if int(_w.towers) >= AIDifficultyConfig.get_desired_tower_count():
 		return
-	_build_manager.try_place_barracks()
+	if _w.tower_constructing:
+		return
+	## Do not block T2 / Hero / critical buildings.
+	if int(_w.tier) < 2 and _w.gold < BuildingStats.CC_TIER_2_GOLD_COST:
+		return
+	if _should_reserve_hero_gold():
+		return
+	if not EnemyResourceManager.can_afford(BuildingStats.TOWER_GOLD_COST, BuildingStats.TOWER_WOOD_COST):
+		return
+	if _w.gold < BuildingStats.TOWER_GOLD_COST + 150:
+		return
+	var toward: Vector3 = Vector3.INF
+	if _w.player_cc != null and NodeSafety.is_alive_node(_w.player_cc):
+		toward = (_w.player_cc as Node3D).global_position
+	_build_manager.try_place_tower(toward)
 
 
 func _ensure_expansion() -> void:
@@ -695,7 +797,7 @@ func _ensure_expansion() -> void:
 		return
 	if _w.expansion_cc != null or _w.expansion_constructing:
 		return
-	if int((_w.workers as Array).size()) < DESIRED_WORKERS_T2:
+	if int((_w.workers as Array).size()) < AIDifficultyConfig.DESIRED_WORKERS_T2:
 		return
 	if not EnemyResourceManager.can_afford(
 		BuildingStats.COMMAND_CENTER_GOLD_COST,
@@ -719,6 +821,9 @@ func _ensure_upgrades() -> void:
 		return
 	if int(_w.tier) < 2:
 		return
+	## Prefer a minimum army before draining gold into upgrades.
+	if int((_w.army as Array).size()) < MIN_EARLY_SPEARMEN + 2 and _w.gold < 600:
+		return
 
 	if _w.blacksmith_completed and _w.blacksmith != null:
 		var blacksmith: Blacksmith = _w.blacksmith as Blacksmith
@@ -731,16 +836,21 @@ func _ensure_upgrades() -> void:
 				if blacksmith.try_research_upgrade(upgrade_id):
 					return
 
-	if _w.stable_completed and _w.stable != null:
-		var stable: Stable = _w.stable as Stable
-		if not stable.is_researching():
-			for upgrade_id: StringName in UpgradeManager.STABLE_UPGRADE_ORDER:
-				if UpgradeManager.is_enemy_max_level(upgrade_id):
-					continue
-				if not UpgradeManager.can_enemy_afford_upgrade(upgrade_id):
-					continue
-				if stable.try_research_upgrade(upgrade_id):
-					return
+	for stable_variant: Variant in _w.stable_list as Array:
+		if not stable_variant is Stable:
+			continue
+		var stable: Stable = stable_variant as Stable
+		if not NodeSafety.is_alive_node(stable):
+			continue
+		if stable.is_researching():
+			continue
+		for upgrade_id2: StringName in UpgradeManager.STABLE_UPGRADE_ORDER:
+			if UpgradeManager.is_enemy_max_level(upgrade_id2):
+				continue
+			if not UpgradeManager.can_enemy_afford_upgrade(upgrade_id2):
+				continue
+			if stable.try_research_upgrade(upgrade_id2):
+				return
 
 
 func _ensure_unit_production() -> void:
@@ -800,18 +910,44 @@ func _ensure_unit_production() -> void:
 					_w.spearmen += 1
 					continue
 
-	if _w.stable_completed and _w.stable != null:
-		var stable: Stable = _w.stable as Stable
-		if stable.get_enemy_pending_unit_count() < 1:
-			var cavalry_count: int = int(_w.light_cavalry) + int(_w.heavy_cavalry)
-			if cavalry_count < DESIRED_LIGHT_CAVALRY:
-				stable.try_train_enemy_light_cavalry()
+	for stable_variant: Variant in _w.stable_list as Array:
+		if not stable_variant is Stable:
+			continue
+		var stable_prod: Stable = stable_variant as Stable
+		if not NodeSafety.is_alive_node(stable_prod):
+			continue
+		if stable_prod.get_enemy_pending_unit_count() >= 1:
+			continue
+		var light: int = int(_w.light_cavalry)
+		var heavy: int = int(_w.heavy_cavalry)
+		var cav_archers: int = int(_w.cavalry_archers)
+		if light < DESIRED_LIGHT_CAVALRY:
+			if stable_prod.try_train_enemy_light_cavalry():
+				_w.light_cavalry += 1
+				continue
+		if int(_w.tier) >= 2 and heavy < DESIRED_HEAVY_CAVALRY:
+			if stable_prod.try_train_enemy_heavy_cavalry():
+				_w.heavy_cavalry += 1
+				continue
+		if int(_w.tier) >= 2 and cav_archers < DESIRED_CAVALRY_ARCHERS:
+			if stable_prod.try_train_enemy_cavalry_archer():
+				_w.cavalry_archers += 1
+				continue
 
-	if _w.artillery_completed and _w.artillery_depot != null:
-		if int(_w.spearmen) + int(_w.swordsmen) >= 4 and int(_w.cannons) < DESIRED_CANNONS:
-			var depot: ArtilleryDepot = _w.artillery_depot as ArtilleryDepot
-			if depot.get_enemy_pending_unit_count() < 1:
-				depot.try_train_enemy_cannon()
+	for depot_variant: Variant in _w.artillery_list as Array:
+		if not depot_variant is ArtilleryDepot:
+			continue
+		var depot: ArtilleryDepot = depot_variant as ArtilleryDepot
+		if not NodeSafety.is_alive_node(depot):
+			continue
+		if int(_w.spearmen) + int(_w.swordsmen) < 4:
+			continue
+		if int(_w.cannons) >= DESIRED_CANNONS:
+			continue
+		if depot.get_enemy_pending_unit_count() >= 1:
+			continue
+		if depot.try_train_enemy_cannon():
+			_w.cannons += 1
 
 
 func _economy_supports_extra_army() -> bool:
@@ -834,6 +970,60 @@ func _ensure_hero() -> void:
 	var altar: HeroAltar = _w.altar as HeroAltar
 	if altar.can_train_enemy_hero():
 		altar.try_train_enemy_hero()
+
+
+func _use_hero_combat_micro_if_relevant() -> void:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return
+	## Spend ability points deterministically (kit priority).
+	while hero.ability_points > 0:
+		if not hero.try_ai_spend_ability_point():
+			break
+	if _hero_micro_timer < HERO_MICRO_INTERVAL:
+		return
+	_hero_micro_timer = 0.0
+	if not hero.has_method(&"try_ai_cast_abilities"):
+		return
+	var context: Dictionary = _build_hero_ability_context(hero)
+	hero.call(&"try_ai_cast_abilities", context)
+	_debug_last_hero_ability = "cast@%s" % String(hero.get_hero_kit_id())
+
+
+func _build_hero_ability_context(hero: Hero) -> Dictionary:
+	var health_ratio: float = 1.0
+	var hc: HealthComponent = hero.get_node_or_null("HealthComponent") as HealthComponent
+	if hc != null and hc.max_health > 0:
+		health_ratio = float(hc.current_health) / float(hc.max_health)
+	var nearby_enemies: int = 0
+	var attack_target: Node3D = null
+	if hero is MeleeHero:
+		attack_target = (hero as MeleeHero).get_attack_target()
+	var tree: SceneTree = _w.tree as SceneTree
+	if tree != null:
+		for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+			tree,
+			CombatTargetValidation.NEUTRAL_CREEP_GROUP
+		):
+			if not NodeSafety.is_alive_node(node_variant) or not node_variant is Node3D:
+				continue
+			var creep: Node3D = node_variant as Node3D
+			if _horizontal_distance(hero.global_position, creep.global_position) <= 8.0:
+				nearby_enemies += 1
+		for unit_variant: Variant in _w.player_army as Array:
+			if not NodeSafety.is_alive_node(unit_variant) or not unit_variant is Node3D:
+				continue
+			if _horizontal_distance(hero.global_position, (unit_variant as Node3D).global_position) <= 8.0:
+				nearby_enemies += 1
+	return {
+		"health_ratio": health_ratio,
+		"nearby_enemy_count": nearby_enemies,
+		"aoe_needed": 3,
+		"defensive_hp_ratio": 0.4,
+		"retreating": _debug_condition_bucket == &"HOME" or _debug_condition_bucket == &"REGROUP",
+		"current_target": attack_target,
+		"allied_army_nearby": _soldiers_near_hero(COHESION_RADIUS),
+	}
 
 
 # ---------------------------------------------------------------------------
@@ -955,15 +1145,129 @@ func _creep_with_whole_army() -> void:
 		_army_home()
 		return
 
-	## Far from camp: shared travel. Close: local focus-fire as one army.
-	if not _has_creep_cohesion(camp.global_position):
+	_maybe_trace_creep_stuck(camp, living_creep)
+
+	var staging: Vector3 = _compute_creep_staging_point(camp)
+	var near_camp: bool = _has_creep_cohesion(camp.global_position) or _has_creep_cohesion(staging)
+	## Far: shared travel to walkable home-facing approach (not raw camp root).
+	if not near_camp:
 		_assert_cohesive_strategic_order(CMD_CREEP)
-		_issue_army_move(camp.global_position, &"attack_move", CMD_CREEP, camp.get_instance_id())
+		_issue_army_move(staging, &"attack_move", CMD_CREEP, camp.get_instance_id())
 		return
 
 	_assert_cohesive_strategic_order(CMD_CREEP)
 	_clear_army_strategic_speed_caps()
 	_whole_army_attack(living_creep, CMD_CREEP)
+
+
+## Walkable staging on the HOME-facing side of the camp (avoids converging into creep bodies).
+func _compute_creep_staging_point(camp: Node3D) -> Vector3:
+	var home: Vector3 = _w.home as Vector3
+	var camp_pos: Vector3 = camp.global_position
+	var away: Vector3 = home - camp_pos
+	away.y = 0.0
+	if away.length_squared() < 0.01:
+		away = Vector3(1.0, 0.0, 0.0)
+	else:
+		away = away.normalized()
+	var staging: Vector3 = camp_pos + away * CREEP_STAGING_STANDOFF
+	return _nearest_walkable_dest(staging)
+
+
+func _hero_is_physically_stuck() -> bool:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return false
+	if hero is MeleeHero:
+		var target: Node3D = (hero as MeleeHero).get_attack_target()
+		if NodeSafety.is_alive_node(target) and hero.has_method(&"_is_in_attack_range"):
+			if VariantUtils.to_bool(hero.call(&"_is_in_attack_range", target)):
+				return false
+	return hero.is_physically_blocked_from_current_move()
+
+
+func _fix_current_hero_movement() -> void:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return
+	## Invalidate current creep camp after repeated route failures.
+	if _last_command_kind == CMD_CREEP and _current_target_id != 0:
+		var fails: int = int(_creep_route_failures.get(_current_target_id, 0)) + 1
+		_creep_route_failures[_current_target_id] = fails
+		if fails >= MAX_CREEP_ROUTE_FAILURES:
+			_invalid_creep_camp_ids[_current_target_id] = true
+			_current_target_id = 0
+			_last_command_kind = CMD_NONE
+			_last_command_target_id = 0
+
+	var escape: Vector3 = _pick_hero_escape_point(hero)
+	hero.set_movement_target(escape, Unit.RepathUrgency.STUCK_RECOVERY)
+	hero.record_strategic_order_provenance_for_tests("EnemyAI", "HERO_UNSTUCK", escape)
+	## Keep army nearby while Hero recovers — do not attack player without Hero mobility.
+	_issue_army_move(escape, &"move", CMD_HERO_UNSTUCK, 0)
+
+
+func _pick_hero_escape_point(hero: Hero) -> Vector3:
+	var home: Vector3 = _w.home as Vector3
+	var away: Vector3 = hero.global_position - home
+	away.y = 0.0
+	if away.length_squared() < 0.01:
+		away = Vector3(1.0, 0.0, 0.0)
+	else:
+		away = away.normalized()
+	## Step sideways / homeward out of the congestion.
+	var candidates: Array[Vector3] = [
+		hero.global_position + away * 4.0,
+		hero.global_position - away * 4.0,
+		hero.global_position + Vector3(-away.z, 0.0, away.x) * 4.0,
+		hero.global_position + Vector3(away.z, 0.0, -away.x) * 4.0,
+		home,
+	]
+	for candidate: Vector3 in candidates:
+		var walkable: Vector3 = _nearest_walkable_dest(candidate)
+		if _horizontal_distance(hero.global_position, walkable) >= 1.5:
+			return walkable
+	return _nearest_walkable_dest(home)
+
+
+func _maybe_trace_creep_stuck(camp: Node3D, living_creep: Node3D) -> void:
+	if _creep_trace_cooldown > 0.0:
+		return
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return
+	if not hero.has_move_target and not hero.is_physically_blocked_from_current_move():
+		return
+	_creep_trace_cooldown = 1.0
+	var approach: Vector3 = _compute_creep_staging_point(camp)
+	var attack_target: Node3D = null
+	if hero is MeleeHero:
+		attack_target = (hero as MeleeHero).get_attack_target()
+	print(
+		"[CREEP TRACE]\ncondition=%s\nhero_pos=%s\nhero_move_target=%s\nhero_attack_target=%s\nhero_velocity=%s\nhero_distance_to_target=%.2f\nhero_distance_to_camp=%.2f\nhero_has_move_target=%s\nhero_attack_move_destination=%s\nhero_route_index=%d\nhero_route_size=%d\ncamp_pos=%s\ncamp_walkable=%s\nliving_creep=%s\nliving_creep_pos=%s\nattack_approach_pos=%s\napproach_walkable=%s\nsoldiers=%d\nsoldiers_near_hero=%d\narmy_cohesive=%s"
+		% [
+			String(_debug_condition_bucket),
+			str(hero.global_position),
+			str(hero.get_movement_destination()) if hero.has_move_target else "-",
+			attack_target.name if NodeSafety.is_alive_node(attack_target) else "-",
+			str(Vector3(hero.velocity.x, 0.0, hero.velocity.z)),
+			_horizontal_distance(hero.global_position, hero.get_movement_destination()) if hero.has_move_target else -1.0,
+			_horizontal_distance(hero.global_position, camp.global_position),
+			str(hero.has_move_target),
+			str(hero.get_movement_destination()) if hero.has_move_target else "-",
+			hero.get_custom_rts_route_index(),
+			hero.get_custom_rts_route_waypoint_count(),
+			str(camp.global_position),
+			str(PlayerRouteNavigation.is_world_walkable(camp.global_position)),
+			living_creep.name if living_creep != null else "-",
+			str(living_creep.global_position) if living_creep != null else "-",
+			str(approach),
+			str(PlayerRouteNavigation.is_world_walkable(approach)),
+			_count_soldiers(),
+			_soldiers_near_hero(COHESION_RADIUS),
+			str(_army_is_together()),
+		]
+	)
 
 
 func _attack_player_with_whole_army() -> void:
@@ -1623,6 +1927,9 @@ func _pick_safe_creep_camp() -> Node3D:
 		if not camp_variant is Node3D:
 			continue
 		var camp: Node3D = camp_variant as Node3D
+		var camp_id: int = camp.get_instance_id()
+		if _invalid_creep_camp_ids.has(camp_id):
+			continue
 		var dist: float = _horizontal_distance(home, camp.global_position)
 		if dist > CAMP_SEARCH_RANGE:
 			continue
@@ -1737,14 +2044,10 @@ func _has_creep_cohesion(camp_position: Vector3) -> bool:
 # ---------------------------------------------------------------------------
 
 func _desired_worker_count() -> int:
-	var tier: int = int(_w.tier)
-	if _w.expansion_cc != null:
-		return DESIRED_WORKERS_EXPANSION
-	if tier >= 3:
-		return DESIRED_WORKERS_T3
-	if tier >= 2:
-		return DESIRED_WORKERS_T2
-	return DESIRED_WORKERS_T1
+	return AIDifficultyConfig.get_desired_worker_count(
+		int(_w.tier),
+		_w.expansion_cc != null
+	)
 
 
 func _should_reserve_hero_gold() -> bool:
@@ -1902,7 +2205,7 @@ func _strategic_order_label() -> String:
 	match _last_command_kind:
 		CMD_HOME:
 			return "HOME"
-		CMD_REGROUP:
+		CMD_REGROUP, CMD_HERO_UNSTUCK:
 			return "MOVE"
 		CMD_ATTACK_MARCH:
 			return "ATTACK_MOVE"
@@ -2046,8 +2349,52 @@ func _rebuild_debug_overlay_lines() -> void:
 
 	var lines: PackedStringArray = PackedStringArray([
 		"ENEMY AI",
+		"Difficulty: %s" % AIDifficultyConfig.display_name(AIDifficultyConfig.get_current_difficulty()),
 		"AI CONDITION: %s" % String(_debug_condition_bucket),
 		"Why: %s" % String(_debug_condition_reason),
+		"Worker target: %d" % _desired_worker_count(),
+		"Workers: %d (gold=%d wood=%d idle=%d)"
+		% [
+			(_w.workers as Array).size(),
+			int(_w.gold_workers),
+			int(_w.wood_workers),
+			(_w.idle_workers as Array).size(),
+		],
+		"Tier: %d | T2 ok: %s | T3 ok: %s"
+		% [
+			int(_w.tier),
+			str(
+				_w.hero != null
+				and int(_w.spearmen) >= MIN_EARLY_SPEARMEN
+				and _w.altar_completed
+				and _w.barracks_completed
+				and int(_w.tier) < 2
+			),
+			str(
+				int(_w.tier) == 2
+				and _w.blacksmith_completed
+				and int((_w.army as Array).size()) >= T3_ARMY_MINIMUM
+				and int((_w.workers as Array).size()) >= T3_WORKER_MINIMUM
+			),
+		],
+		"Barracks %d/%d | Stables %d/%d | Artillery %d/%d | Towers %d"
+		% [
+			int(_w.barracks_count),
+			AIDifficultyConfig.get_max_military_buildings(&"barracks"),
+			int(_w.stable_count),
+			AIDifficultyConfig.get_max_military_buildings(&"stable"),
+			int(_w.artillery_count),
+			AIDifficultyConfig.get_max_military_buildings(&"artillery_depot"),
+			int(_w.towers),
+		],
+		"Hero kit: %s | lvl %d | AP %d | last AI ability: %s"
+		% [
+			String(hero.get_hero_kit_id()) if hero != null else "-",
+			int(_w.hero_level),
+			hero.ability_points if hero != null else 0,
+			_debug_last_hero_ability,
+		],
+		"Hero physically stuck: %s" % ("YES" if _hero_is_physically_stuck() else "NO"),
 		"Hero pos: %s" % hero_pos_text,
 		"Enemy hero: %s" % hero_yes,
 		"Soldier count: %d" % soldiers,
@@ -2069,20 +2416,10 @@ func _rebuild_debug_overlay_lines() -> void:
 		"Base threatened: %s" % ("YES" if base_threatened else "NO"),
 		"Threat count: %d" % threat_count,
 		"Early creep needed: %s" % ("YES" if early_creep_needed else "NO"),
-		"Hero level: %d" % int(_w.hero_level),
 		"Useful creep camp: %s" % ("YES" if useful_creep else "NO"),
 		"Target distance from army centroid: %s" % target_dist_text,
 		"Unfinished AI buildings: %d" % unfinished,
 		"Unfinished without builder: %d" % unfinished_no_builder,
-		"Enemy workers:",
-		"gold=%d wood=%d building=%d idle=%d invalid-job=%d"
-		% [
-			int(_w.gold_workers),
-			int(_w.wood_workers),
-			int(_w.building_workers),
-			(_w.idle_workers as Array).size(),
-			int(_w.invalid_job_workers),
-		],
 	])
 	if not warnings.is_empty():
 		lines.append("")

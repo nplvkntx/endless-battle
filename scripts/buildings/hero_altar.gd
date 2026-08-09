@@ -29,8 +29,12 @@ var _rally_next_slot: int = 0
 var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
 ## Player-selected kit for the next training (UI writes this).
 var selected_kit_id: StringName = HeroCatalog.KIT_PALADIN
-## Fixed enemy hero kit when an enemy hero is trained (no strategic hero controller).
-const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_PALADIN
+## Enemy first-train kit pool — one random pick, then locked for the match.
+const ENEMY_KIT_CHOICES: Array[StringName] = [
+	HeroCatalog.KIT_PALADIN,
+	HeroCatalog.KIT_SHADOW_ASSASSIN,
+	HeroCatalog.KIT_RANGER,
+]
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -84,7 +88,7 @@ func get_active_unit_training_progress() -> float:
 		return 0.0
 
 	var elapsed: float = _get_time_seconds() - _training_started_at
-	return clampf(elapsed / TRAIN_SECONDS, 0.0, 1.0)
+	return clampf(elapsed / _get_effective_train_seconds(), 0.0, 1.0)
 
 
 func get_active_unit_training_name() -> String:
@@ -116,16 +120,28 @@ func can_offer_kit(kit_id: StringName, is_enemy_owned: bool = false) -> bool:
 
 ## Resolves which kit the next training session for this owner should spawn.
 ## Match lock (set when training begins) wins; then death snapshot; then selection /
-## enemy default. Cancelled initial training keeps the lock so hero swapping is blocked.
+## enemy random first-choice. Cancelled initial training keeps the lock so hero swapping is blocked.
 func _resolve_spawn_kit_id(is_enemy_owned: bool) -> StringName:
 	var faction_kit: StringName = HeroProgressionStore.get_faction_kit_id(is_enemy_owned)
 	if faction_kit != &"":
 		return faction_kit
 
 	if is_enemy_owned:
-		return ENEMY_DEFAULT_KIT_ID
+		return _pick_enemy_match_kit()
 
 	return selected_kit_id
+
+
+## One random kit for the match; locked via HeroProgressionStore on first train.
+static func _pick_enemy_match_kit() -> StringName:
+	var index: int = randi() % ENEMY_KIT_CHOICES.size()
+	return ENEMY_KIT_CHOICES[index]
+
+
+func _get_effective_train_seconds() -> float:
+	if _training_for_enemy:
+		return TrainingConfig.get_enemy_military_train_seconds(TRAIN_SECONDS)
+	return TRAIN_SECONDS
 
 
 ## Lock faction kit and sync every altar so UI/AI share one choice for the match.
@@ -304,7 +320,7 @@ func _begin_hero_training() -> void:
 	_is_training = true
 	_training_started_at = _get_time_seconds()
 	hero_altar_state_changed.emit()
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(_get_effective_train_seconds())
 	wait_timer.timeout.connect(_on_hero_training_finished.bind(session), CONNECT_ONE_SHOT)
 
 

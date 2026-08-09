@@ -177,6 +177,18 @@ func focus_camera_on_current_selection() -> void:
 	camera.focus_on_world_position(centroid)
 
 
+## Camera only — does not change selection or issue orders (LoL-style Space focus).
+func _focus_camera_on_player_hero() -> bool:
+	var hero: Hero = _find_player_hero()
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return false
+	var camera: Camera3D = _get_camera()
+	if camera == null or not camera.has_method("focus_on_world_position"):
+		return false
+	camera.focus_on_world_position(hero.global_position)
+	return true
+
+
 func select_player_hero_and_focus() -> bool:
 	var hero: Hero = _find_player_hero()
 	if hero == null:
@@ -265,16 +277,17 @@ var _last_click_time_msec: int = -1
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Ability targeting consumes world clicks before selection / orders.
+	# Ability targeting owns world left-clicks while armed (valid or invalid).
+	# Invalid target: stay armed, keep selection unchanged. Valid: cast, keep selection.
 	if HeroAbilityTargetingController != null and HeroAbilityTargetingController.is_targeting():
 		if event is InputEventMouseButton:
 			var mouse_button := event as InputEventMouseButton
 			if mouse_button.pressed:
 				match mouse_button.button_index:
 					MOUSE_BUTTON_LEFT:
-						if HeroAbilityTargetingController.try_handle_left_click(mouse_button.position):
-							get_viewport().set_input_as_handled()
-							return
+						HeroAbilityTargetingController.try_handle_left_click(mouse_button.position)
+						get_viewport().set_input_as_handled()
+						return
 					MOUSE_BUTTON_RIGHT:
 						if HeroAbilityTargetingController.try_handle_right_click(mouse_button.position):
 							get_viewport().set_input_as_handled()
@@ -293,6 +306,14 @@ func _unhandled_input(event: InputEvent) -> void:
 					if _dispatch_hold_position_command():
 						get_viewport().set_input_as_handled()
 						return
+				KEY_SPACE:
+					if _focus_camera_on_player_hero():
+						get_viewport().set_input_as_handled()
+						return
+	if event.is_action_pressed(&"focus_hero"):
+		if _focus_camera_on_player_hero():
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton:
 		_purge_invalid_selection()
 		var mouse_button := event as InputEventMouseButton

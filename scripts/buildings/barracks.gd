@@ -546,7 +546,9 @@ func _is_enemy_owned() -> bool:
 
 
 func _get_unit_training_speed_multiplier() -> float:
-	if UpgradeManager.has_faster_unit_training(_is_enemy_owned()):
+	if _is_enemy_owned():
+		return TrainingConfig.get_enemy_unit_train_speed_multiplier(true)
+	if UpgradeManager.has_faster_unit_training(false):
 		return UpgradeManager.FASTER_UNIT_TRAINING_SPEED_MULTIPLIER
 	return 1.0
 

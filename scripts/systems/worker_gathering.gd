@@ -364,11 +364,13 @@ static func _deposit_to_enemy_stockpile(resource_id: StringName, amount: int) ->
 		_warn_enemy_stockpile_unavailable(resource_id, amount)
 		return
 
+	## Hard difficulty income bonus — one authoritative enemy deposit boundary.
+	var credited: int = AIDifficultyConfig.scale_enemy_resource_amount(amount)
 	match resource_id:
 		&"gold":
-			EnemyResourceManager.add_gold(amount)
+			EnemyResourceManager.add_gold(credited)
 		&"wood":
-			EnemyResourceManager.add_wood(amount)
+			EnemyResourceManager.add_wood(credited)
 		_:
 			push_error("Unknown gather resource id: %s" % resource_id)
 

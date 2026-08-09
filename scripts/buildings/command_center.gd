@@ -203,7 +203,7 @@ func get_active_unit_training_progress() -> float:
 		return 0.0
 
 	var elapsed: float = _get_time_seconds() - _training_started_at
-	return clampf(elapsed / TRAIN_SECONDS, 0.0, 1.0)
+	return clampf(elapsed / _get_worker_train_seconds(), 0.0, 1.0)
 
 
 func get_active_unit_training_name() -> String:
@@ -729,8 +729,14 @@ func _start_next_training() -> void:
 	var session: int = _training_session
 	_is_training = true
 	_training_started_at = _get_time_seconds()
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(TRAIN_SECONDS)
+	var wait_timer: SceneTreeTimer = get_tree().create_timer(_get_worker_train_seconds())
 	wait_timer.timeout.connect(_on_training_finished.bind(session), CONNECT_ONE_SHOT)
+
+
+func _get_worker_train_seconds() -> float:
+	if is_in_group(&"enemy_command_center"):
+		return TrainingConfig.get_enemy_military_train_seconds(TRAIN_SECONDS)
+	return TRAIN_SECONDS
 
 
 func _on_training_finished(session: int) -> void:

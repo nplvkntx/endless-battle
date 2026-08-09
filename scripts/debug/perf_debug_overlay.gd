@@ -124,7 +124,7 @@ func _update_label() -> void:
 			int(unit_stats.get("workers", 0)),
 			int(unit_stats.get("creeps", 0)),
 		],
-		"Difficulty: %s (UI only)" % MatchSession.get_ai_difficulty_name(),
+		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
 		"",
 	])
 

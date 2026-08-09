@@ -752,7 +752,7 @@ func unregister_builder(worker: Worker) -> void:
 func register_builder(worker: Worker) -> void:
 	if building_state == STATE_COMPLETED:
 		if worker != null and is_instance_valid(worker):
-			_place_unit_on_walkable_custom_cell(worker)
+			ensure_builder_clear_of_footprint(worker)
 			worker.on_building_construction_finished()
 		return
 
@@ -841,14 +841,52 @@ func _on_construction_timer_finished() -> void:
 		return
 
 	## Occupancy registers on complete; builders may still stand on standees that
-	## are inside the inflated blocked ring. Eject once before clearing build state.
+	## are inside the inflated blocked ring. Clear footprint once before clearing build state.
 	complete_construction()
 	for builder_ref: Variant in _registered_builders:
 		if NodeSafety.is_alive_node(builder_ref):
 			var builder: Worker = builder_ref as Worker
-			_place_unit_on_walkable_custom_cell(builder)
+			ensure_builder_clear_of_footprint(builder)
 			builder.on_building_construction_finished()
 	_registered_builders.clear()
+
+
+## Prefer a short walk out of the completed footprint; snap only if still unwalkable.
+func ensure_builder_clear_of_footprint(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	_place_unit_on_walkable_custom_cell(unit)
+	if not is_position_inside_footprint(unit.global_position, 0.35):
+		return
+	var exit_pos: Vector3 = _pick_builder_exit_position(unit.global_position)
+	if not exit_pos.is_finite():
+		return
+	if unit is Worker:
+		unit.set_movement_target(exit_pos)
+	else:
+		unit.global_position = Vector3(exit_pos.x, unit.global_position.y, exit_pos.z)
+
+
+func _pick_builder_exit_position(from_position: Vector3) -> Vector3:
+	var points: Array[Vector3] = get_construction_points()
+	var best: Vector3 = Vector3.INF
+	var best_dist: float = INF
+	for point: Vector3 in points:
+		if is_position_inside_footprint(point, 0.35):
+			continue
+		PlayerRouteNavigation.ensure_grid_ready()
+		var walkable: Vector3 = point
+		if not PlayerRouteNavigation.is_world_walkable(walkable):
+			walkable = PlayerRouteNavigation.nearest_walkable_world(walkable)
+		if is_position_inside_footprint(walkable, 0.35):
+			continue
+		var dist: float = Vector2(from_position.x - walkable.x, from_position.z - walkable.z).length()
+		if dist < best_dist:
+			best_dist = dist
+			best = walkable
+	if best.is_finite():
+		return best
+	return claim_production_spawn_world(global_position + Vector3(0.0, 0.0, -3.5))
 
 
 func _apply_under_construction_visual() -> void:

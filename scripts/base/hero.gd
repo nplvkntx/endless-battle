@@ -583,6 +583,43 @@ func try_learn_ability(ability_id: StringName, show_feedback: bool = true) -> bo
 	return false
 
 
+## Enemy kit micro: spend one ability point on the first valid priority skill.
+func try_ai_spend_ability_point() -> bool:
+	if ability_points <= 0:
+		return false
+	for ability_id: StringName in _ai_ability_learn_priority():
+		if try_learn_ability(ability_id, false):
+			return true
+	return false
+
+
+func _ai_ability_learn_priority() -> Array[StringName]:
+	var kit_id: StringName = get_hero_kit_id()
+	## R whenever allowed; then kit priorities from the master repair brief.
+	var order: Array[StringName] = [HeroAbilityProgression.ABILITY_R]
+	match kit_id:
+		HeroCatalog.KIT_RANGER:
+			order.append_array([
+				HeroAbilityProgression.ABILITY_E,
+				HeroAbilityProgression.ABILITY_Q,
+				HeroAbilityProgression.ABILITY_W,
+			])
+		HeroCatalog.KIT_SHADOW_ASSASSIN:
+			order.append_array([
+				HeroAbilityProgression.ABILITY_Q,
+				HeroAbilityProgression.ABILITY_E,
+				HeroAbilityProgression.ABILITY_W,
+			])
+		_:
+			## Paladin default: Q/E/W
+			order.append_array([
+				HeroAbilityProgression.ABILITY_Q,
+				HeroAbilityProgression.ABILITY_E,
+				HeroAbilityProgression.ABILITY_W,
+			])
+	return order
+
+
 func _require_ability_learned(ability_id: StringName) -> bool:
 	if is_ability_unlocked(ability_id):
 		return true

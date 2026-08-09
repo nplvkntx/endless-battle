@@ -21,6 +21,7 @@ func _ready() -> void:
 	await _verify_retrain_uses_saved_progression(failures)
 	await _verify_each_kit_can_lock(failures)
 	await _verify_enemy_lock_independent(failures)
+	await _verify_enemy_random_kit_pool(failures)
 	_verify_match_reset_clears_lock(failures)
 
 	var report: String
@@ -320,10 +321,13 @@ func _verify_enemy_lock_independent(failures: PackedStringArray) -> void:
 
 	var trained: bool = enemy_altar.try_train_enemy_hero()
 	_expect(failures, "enemy: train started", trained)
+	var enemy_kit: StringName = HeroProgressionStore.get_locked_kit_id(true)
 	_expect(
 		failures,
-		"enemy: locked to default assassin",
-		HeroProgressionStore.get_locked_kit_id(true) == HeroCatalog.KIT_SHADOW_ASSASSIN
+		"enemy: locked to a valid kit",
+		enemy_kit == HeroCatalog.KIT_PALADIN
+		or enemy_kit == HeroCatalog.KIT_SHADOW_ASSASSIN
+		or enemy_kit == HeroCatalog.KIT_RANGER
 	)
 	_expect(
 		failures,
@@ -332,12 +336,33 @@ func _verify_enemy_lock_independent(failures: PackedStringArray) -> void:
 	)
 	_expect(
 		failures,
-		"enemy: pending kit assassin",
-		enemy_altar.get_pending_training_kit_id(true) == HeroCatalog.KIT_SHADOW_ASSASSIN
+		"enemy: pending kit matches lock",
+		enemy_altar.get_pending_training_kit_id(true) == enemy_kit
 	)
 
 	root.queue_free()
 	await get_tree().process_frame
+
+
+func _verify_enemy_random_kit_pool(failures: PackedStringArray) -> void:
+	## Controlled seeds must be able to resolve each kit at least once.
+	var seen: Dictionary = {}
+	for seed_value: int in range(0, 64):
+		HeroProgressionStore.clear()
+		_fund_enemy()
+		seed(seed_value)
+		var root := Node3D.new()
+		add_child(root)
+		var enemy_altar: HeroAltar = _make_enemy_altar(root, Vector3(20, 0, 0))
+		if enemy_altar.try_train_enemy_hero():
+			seen[HeroProgressionStore.get_locked_kit_id(true)] = true
+		root.queue_free()
+		await get_tree().process_frame
+		if seen.size() >= 3:
+			break
+	_expect(failures, "enemy random: paladin reachable", seen.has(HeroCatalog.KIT_PALADIN))
+	_expect(failures, "enemy random: assassin reachable", seen.has(HeroCatalog.KIT_SHADOW_ASSASSIN))
+	_expect(failures, "enemy random: ranger reachable", seen.has(HeroCatalog.KIT_RANGER))
 
 
 func _verify_match_reset_clears_lock(failures: PackedStringArray) -> void:

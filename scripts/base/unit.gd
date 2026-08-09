@@ -84,6 +84,14 @@ var _last_requested_destination: Vector3 = Vector3.ZERO
 var _last_path_request_msec: int = 0
 var _last_move_order_msec: int = 0
 var _previous_position: Vector3 = Vector3.ZERO
+var _physical_stuck_watch_origin: Vector3 = Vector3.ZERO
+var _physical_stuck_watch_destination: Vector3 = Vector3.ZERO
+var _physical_stuck_watch_seconds: float = 0.0
+var _physical_stuck_confirmed: bool = false
+const PHYSICAL_STUCK_SECONDS: float = 1.6
+const PHYSICAL_STUCK_MOVE_EPSILON: float = 0.35
+const PHYSICAL_STUCK_DEST_MIN: float = 2.5
+const PHYSICAL_STUCK_SPEED_EPSILON: float = 0.12
 var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
@@ -1336,6 +1344,84 @@ func has_strategic_move_speed_cap() -> bool:
 
 
 func is_confirmed_stuck() -> bool:
+	## Legacy stub kept for dormant callers — prefer is_physically_blocked_from_current_move().
+	return is_physically_blocked_from_current_move()
+
+
+## Mechanical fact: movement intent + far destination + near-zero progress + not fighting.
+## Does not invent strategic recovery — callers decide what to do.
+func is_physically_blocked_from_current_move() -> bool:
+	_update_physical_stuck_watch()
+	return _physical_stuck_confirmed
+
+
+func _update_physical_stuck_watch(delta: float = -1.0) -> void:
+	if not has_move_target:
+		_reset_physical_stuck_watch()
+		return
+	if not BuffService.can_move(self):
+		_reset_physical_stuck_watch()
+		return
+	if _is_actively_attacking_in_range():
+		_reset_physical_stuck_watch()
+		return
+
+	var dest: Vector3 = get_movement_destination()
+	var dest_dist: float = _horizontal_distance_xz(global_position, dest)
+	if dest_dist < PHYSICAL_STUCK_DEST_MIN:
+		_reset_physical_stuck_watch()
+		return
+
+	var horiz_speed: float = Vector3(velocity.x, 0.0, velocity.z).length()
+	var moved: float = _horizontal_distance_xz(global_position, _previous_position)
+	_previous_position = global_position
+
+	var making_progress: bool = (
+		horiz_speed > PHYSICAL_STUCK_SPEED_EPSILON
+		or moved > PHYSICAL_STUCK_MOVE_EPSILON * 0.25
+	)
+	if making_progress:
+		_physical_stuck_watch_origin = global_position
+		_physical_stuck_watch_destination = dest
+		_physical_stuck_watch_seconds = 0.0
+		_physical_stuck_confirmed = false
+		return
+
+	if (
+		_physical_stuck_watch_seconds <= 0.0
+		or _horizontal_distance_xz(_physical_stuck_watch_destination, dest) > 1.0
+	):
+		_physical_stuck_watch_origin = global_position
+		_physical_stuck_watch_destination = dest
+		_physical_stuck_watch_seconds = 0.0
+
+	var step: float = delta if delta > 0.0 else get_physics_process_delta_time()
+	_physical_stuck_watch_seconds += maxf(step, 0.0)
+	var progress_from_watch: float = _horizontal_distance_xz(
+		global_position,
+		_physical_stuck_watch_origin
+	)
+	_physical_stuck_confirmed = (
+		_physical_stuck_watch_seconds >= PHYSICAL_STUCK_SECONDS
+		and progress_from_watch < PHYSICAL_STUCK_MOVE_EPSILON
+	)
+
+
+func _reset_physical_stuck_watch() -> void:
+	_physical_stuck_watch_origin = global_position
+	_physical_stuck_watch_destination = Vector3.ZERO
+	_physical_stuck_watch_seconds = 0.0
+	_physical_stuck_confirmed = false
+
+
+func _is_actively_attacking_in_range() -> bool:
+	if not ("_attack_target" in self):
+		return false
+	var attack_target: Variant = get("_attack_target")
+	if not NodeSafety.is_alive_node(attack_target) or not attack_target is Node3D:
+		return false
+	if has_method("_is_in_attack_range") and VariantUtils.to_bool(call("_is_in_attack_range", attack_target)):
+		return true
 	return false
 
 
@@ -1476,14 +1562,18 @@ func _physics_process(delta: float) -> void:
 	# Root / stun from the Buff system freezes locomotion without clearing orders.
 	if not BuffService.can_move(self):
 		_clear_residual_movement()
+		_reset_physical_stuck_watch()
 		return
 
 	if not has_move_target:
 		_reset_unstuck_state()
+		_reset_physical_stuck_watch()
 		_blocked_arrival_time = 0.0
 		# Hard body-intersection peel only — nearby idle units must not soft-slide.
 		apply_standing_separation(false)
 		return
+
+	_update_physical_stuck_watch(delta)
 
 	var offset: Vector3 = _movement_target - global_position
 	offset.y = 0.0

@@ -936,6 +936,9 @@ class RecordingEnemyBuildManager extends EnemyBuildManager:
 	func try_place_artillery_depot() -> bool:
 		return try_place_building(&"artillery_depot")
 
+	func try_place_tower(_toward_world: Vector3 = Vector3.INF) -> bool:
+		return try_place_building(&"tower")
+
 	func try_place_expansion_at_mine(_gold_mine: GoldMine) -> bool:
 		requests.append(&"command_center")
 		return true
