@@ -31,8 +31,6 @@ const MAX_ENEMY_UNIT_QUEUE: int = 3
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
 const RALLY_SLOT_SPACING: float = 2.0
-## Matches Hero Altar / CC valid-exit physics probe half-extent.
-const UNIT_SPAWN_PHYSICS_HALF: float = 0.6
 
 @export var spearman_spawn_offset: Vector3 = Vector3(-1.2, -0.5, -2.5)
 @export var swordsman_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
@@ -143,8 +141,10 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	if spawn_parent == null or unit == null:
 		return
 
+	disable_spawned_unit_collision(unit)
+	var spawn_pos: Vector3 = _claim_unit_spawn_position(swordsman_spawn_offset)
 	spawn_parent.add_child(unit)
-	unit.global_position = _claim_unit_spawn_position(swordsman_spawn_offset)
+	unit.global_position = spawn_pos
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
@@ -727,12 +727,15 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	if spawn_parent == null or unit == null:
 		return
 
+	disable_spawned_unit_collision(unit)
+	var spawn_pos: Vector3 = _claim_unit_spawn_position(spawn_offset)
 	spawn_parent.add_child(unit)
-	unit.global_position = _claim_unit_spawn_position(spawn_offset)
+	unit.global_position = spawn_pos
 
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
+		enable_spawned_unit_collision(unit)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
 		issue_production_rally_move(unit, _claim_rally_move_target())
@@ -740,46 +743,9 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 		_finalize_spawned_unit(unit)
 
 
-## Deterministic walkable exit outside the Barracks footprint (same rule as Hero Altar / CC).
+## Deterministic walkable exit outside the Barracks footprint (shared Building helper).
 func _claim_unit_spawn_position(spawn_offset: Vector3) -> Vector3:
-	var spawn_y: float = global_position.y + spawn_offset.y
-	PlayerRouteNavigation.ensure_grid_ready()
-	var preferred: Vector3 = global_position + spawn_offset
-	var start_cell: Vector2i = PlayerRouteNavigation.grid.world_to_cell(preferred)
-	for radius: int in range(0, 12):
-		for dy: int in range(-radius, radius + 1):
-			for dx: int in range(-radius, radius + 1):
-				if radius > 0 and maxi(absi(dx), absi(dy)) != radius:
-					continue
-				var cell := Vector2i(start_cell.x + dx, start_cell.y + dy)
-				if PlayerRouteNavigation.grid.is_cell_blocked(cell):
-					continue
-				var world: Vector3 = PlayerRouteNavigation.grid.cell_to_world_center(cell)
-				var candidate := Vector3(world.x, spawn_y, world.z)
-				if is_position_inside_footprint(candidate):
-					continue
-				if not _is_unit_spawn_physics_clear(candidate):
-					continue
-				return candidate
-	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(preferred)
-	return Vector3(exit_pos.x, spawn_y, exit_pos.z)
-
-
-func _is_unit_spawn_physics_clear(world: Vector3) -> bool:
-	if not is_inside_tree():
-		return true
-	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	if space == null:
-		return true
-	var box := BoxShape3D.new()
-	var extent: float = UNIT_SPAWN_PHYSICS_HALF * 2.0
-	box.size = Vector3(extent, 1.0, extent)
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = box
-	params.transform = Transform3D(Basis.IDENTITY, world)
-	params.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
-	params.exclude = [get_rid()]
-	return space.intersect_shape(params, 1).is_empty()
+	return claim_production_spawn_position(spawn_offset)
 
 
 func _finalize_spawned_unit(unit: Unit) -> void:
@@ -790,7 +756,4 @@ func _finalize_spawned_unit(unit: Unit) -> void:
 		unit.add_to_group(&"units")
 
 	UpgradeManager.apply_player_upgrades_to_unit(unit)
-
-	var collision_shape: CollisionShape3D = unit.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	if collision_shape != null:
-		collision_shape.disabled = false
+	enable_spawned_unit_collision(unit)

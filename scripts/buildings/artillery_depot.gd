@@ -18,6 +18,7 @@ const RALLY_MARKER_Y: float = 0.05
 const RALLY_SLOT_SPACING: float = 2.0
 const MAX_ENEMY_UNIT_QUEUE: int = 2
 const ENEMY_TEAM_ID: int = 1
+const CANNON_SPAWN_PHYSICS_HALF: float = 0.95
 
 @export var cannon_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.8)
 
@@ -482,12 +483,18 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	if spawn_parent == null or unit == null:
 		return
 
+	disable_spawned_unit_collision(unit)
+	var spawn_pos: Vector3 = claim_production_spawn_position(
+		spawn_offset,
+		CANNON_SPAWN_PHYSICS_HALF
+	)
 	spawn_parent.add_child(unit)
-	unit.global_position = global_position + spawn_offset
+	unit.global_position = spawn_pos
 
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
+		enable_spawned_unit_collision(unit)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
 		issue_production_rally_move(unit, _claim_rally_move_target())
@@ -517,9 +524,7 @@ func _finalize_spawned_unit(unit: Unit) -> void:
 	if not unit.is_in_group(&"units"):
 		unit.add_to_group(&"units")
 
-	var collision_shape: CollisionShape3D = unit.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	if collision_shape != null:
-		collision_shape.disabled = false
+	enable_spawned_unit_collision(unit)
 
 
 func _refund_training_cost(train_id: StringName) -> void:

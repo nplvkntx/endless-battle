@@ -132,6 +132,14 @@ func get_rts_occupancy_half_extents() -> Vector3:
 	return Vector3(half_xz.x, 1.0, half_xz.y)
 
 
+## Shared production-exit probe half-extent (infantry / worker / hero-sized bodies).
+const PRODUCTION_SPAWN_PHYSICS_HALF: float = 0.6
+const PRODUCTION_SPAWN_SEARCH_RADIUS: int = 12
+## World blockers + buildings + other unit bodies must all be clear at spawn.
+const PRODUCTION_SPAWN_PHYSICS_MASK: int = (
+	PhysicsLayers.WORLD | PhysicsLayers.BUILDINGS | PhysicsLayers.UNITS
+)
+
 ## Production rally uses the same PlayerRouteNavigation backend as player RMB.
 ## Returns true when routing handled the order.
 func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
@@ -155,6 +163,78 @@ func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
 	unit.issue_order(UnitOrder.move(destination))
 	unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
 	return false
+
+
+## Deterministic walkable exit outside this producer: grid walkable, outside footprint,
+## and physically clear (WORLD / BUILDINGS / UNITS). Prefer the export offset, then ring-search.
+func claim_production_spawn_position(
+	spawn_offset: Vector3,
+	physics_half: float = PRODUCTION_SPAWN_PHYSICS_HALF
+) -> Vector3:
+	return claim_production_spawn_world(global_position + spawn_offset, physics_half)
+
+
+func claim_production_spawn_world(
+	preferred: Vector3,
+	physics_half: float = PRODUCTION_SPAWN_PHYSICS_HALF
+) -> Vector3:
+	var spawn_y: float = preferred.y
+	PlayerRouteNavigation.ensure_grid_ready()
+	var start_cell: Vector2i = PlayerRouteNavigation.grid.world_to_cell(preferred)
+	for radius: int in range(0, PRODUCTION_SPAWN_SEARCH_RADIUS):
+		for dy: int in range(-radius, radius + 1):
+			for dx: int in range(-radius, radius + 1):
+				if radius > 0 and maxi(absi(dx), absi(dy)) != radius:
+					continue
+				var cell := Vector2i(start_cell.x + dx, start_cell.y + dy)
+				if PlayerRouteNavigation.grid.is_cell_blocked(cell):
+					continue
+				var world: Vector3 = PlayerRouteNavigation.grid.cell_to_world_center(cell)
+				var candidate := Vector3(world.x, spawn_y, world.z)
+				if is_position_inside_footprint(candidate):
+					continue
+				if not is_production_spawn_physics_clear(candidate, physics_half):
+					continue
+				return candidate
+	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(preferred)
+	return Vector3(exit_pos.x, spawn_y, exit_pos.z)
+
+
+func is_production_spawn_physics_clear(
+	world: Vector3,
+	physics_half: float = PRODUCTION_SPAWN_PHYSICS_HALF
+) -> bool:
+	if not is_inside_tree():
+		return true
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return true
+	var box := BoxShape3D.new()
+	var extent: float = physics_half * 2.0
+	box.size = Vector3(extent, 1.0, extent)
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = box
+	params.transform = Transform3D(Basis.IDENTITY, world)
+	params.collision_mask = PRODUCTION_SPAWN_PHYSICS_MASK
+	params.exclude = [get_rid()]
+	return space.intersect_shape(params, 1).is_empty()
+
+
+## Disable body collision before the unit is placed so it cannot trap inside the producer.
+func disable_spawned_unit_collision(unit: CollisionObject3D) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var collision_shape: CollisionShape3D = unit.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision_shape != null:
+		collision_shape.disabled = true
+
+
+func enable_spawned_unit_collision(unit: CollisionObject3D) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var collision_shape: CollisionShape3D = unit.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if collision_shape != null:
+		collision_shape.disabled = false
 
 
 ## Production spawn offsets and post-construction builders can land inside this

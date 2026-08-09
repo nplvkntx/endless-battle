@@ -794,8 +794,11 @@ func _spawn_worker() -> void:
 	if spawn_parent == null:
 		return
 
+	disable_spawned_unit_collision(worker)
+	var spawn_pos: Vector3 = _claim_worker_spawn_position()
 	spawn_parent.add_child(worker)
-	worker.global_position = _claim_worker_spawn_position()
+	worker.global_position = spawn_pos
+	enable_spawned_unit_collision(worker)
 
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_worker(worker)
@@ -804,7 +807,7 @@ func _spawn_worker() -> void:
 
 
 ## Preferred export offset can sit inside this building's inflated custom-grid clearance.
-## Pick a deterministic nearby walkable exit cell, then diversify sequential spawns.
+## Pick a deterministic nearby walkable + physically clear exit cell, then diversify slots.
 func _claim_worker_spawn_position() -> Vector3:
 	var preferred: Vector3 = global_position + worker_spawn_offset
 	var slot_index: int = _worker_spawn_next_slot
@@ -814,11 +817,7 @@ func _claim_worker_spawn_position() -> Vector3:
 		slot_index,
 		WORKER_SPAWN_SLOT_SPACING
 	)
-	PlayerRouteNavigation.ensure_grid_ready()
-	if PlayerRouteNavigation.is_world_walkable(candidate):
-		return candidate
-	var exit_pos: Vector3 = PlayerRouteNavigation.nearest_walkable_world(candidate)
-	return Vector3(exit_pos.x, preferred.y, exit_pos.z)
+	return claim_production_spawn_world(candidate)
 
 
 func _finalize_enemy_worker(worker: Worker) -> void:

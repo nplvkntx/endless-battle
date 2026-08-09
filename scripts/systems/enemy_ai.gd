@@ -11,12 +11,14 @@ const DEFENSE_RADIUS: float = 36.0
 const HOME_NEAR_RADIUS: float = 8.0
 const CAMP_CLEAR_RADIUS: float = 14.0
 const COHESION_RADIUS: float = 14.0
+const ATTACK_ENGAGE_RADIUS: float = 18.0
 const CAMP_SEARCH_RANGE: float = 70.0
 const ATTACK_POWER_RATIO: float = 1.25
 const OVERWHELM_POWER_RATIO: float = 1.6
 const FOOD_SAFETY_MARGIN: int = 4
 const MIN_EARLY_SPEARMEN: int = 5
 const MIN_CREEP_SOLDIERS_NEAR: int = 3
+const MIN_SOLDIERS_NEAR_HERO: int = 3
 const EARLY_CAMPS_REQUIRED: int = 3
 const EARLY_HERO_LEVEL_TARGET: int = 3
 const GOLD_WORKER_RATIO: float = 0.6
@@ -42,6 +44,8 @@ const CMD_HOME: StringName = &"home"
 const CMD_DEFEND: StringName = &"defend"
 const CMD_CREEP: StringName = &"creep"
 const CMD_ATTACK: StringName = &"attack"
+const CMD_REGROUP: StringName = &"regroup"
+const CMD_ATTACK_MARCH: StringName = &"attack_march"
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_build_manager_path: NodePath
@@ -112,7 +116,7 @@ func _ai_tick() -> void:
 	_ensure_upgrades()
 	_ensure_unit_production()
 
-	## Military — first true condition wins.
+	## Military — first true condition wins. Live facts are the only memory.
 	if _w.hero == null:
 		_army_home()
 		_set_priority(&"HERO")
@@ -133,6 +137,13 @@ func _ai_tick() -> void:
 		_update_debug_overlay()
 		return
 	_debug_threat_name = "-"
+
+	## Cohesion before any strategic offense — Hero must not fight alone.
+	if not _hero_is_with_army():
+		_regroup_whole_army()
+		_set_priority(&"REGROUP")
+		_update_debug_overlay()
+		return
 
 	if _needs_early_creep():
 		_creep_with_whole_army()
@@ -852,6 +863,27 @@ func _attack_player_with_whole_army() -> void:
 	if target == null:
 		_army_home()
 		return
+
+	## Still require live cohesion — never start/continue a player attack solo.
+	if not _hero_is_with_army():
+		_regroup_whole_army()
+		return
+
+	## March spread mid-advance → regroup before anyone sprints alone.
+	if not _army_is_cohesive(COHESION_RADIUS):
+		_regroup_whole_army()
+		return
+
+	var target_pos: Vector3 = target.global_position
+	var army_center: Vector3 = _army_centroid()
+	var dist_to_target: float = _horizontal_distance(army_center, target_pos)
+
+	## Far from the objective: shared attack-move so speeds do not split the force.
+	if dist_to_target > ATTACK_ENGAGE_RADIUS:
+		_issue_army_move(target_pos, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
+		return
+
+	## Close enough: whole army may focus the live target.
 	_whole_army_attack(target, CMD_ATTACK)
 
 
@@ -862,6 +894,23 @@ func _army_home() -> void:
 	if _army_mostly_near(home, HOME_NEAR_RADIUS):
 		return
 	_issue_army_move(home, &"move", CMD_HOME, 0)
+
+
+func _regroup_whole_army() -> void:
+	var army: Array = _w.army as Array
+	if army.is_empty():
+		return
+
+	var destination: Vector3 = _army_centroid()
+	## Badly scattered → fall back to home rather than chasing a useless centroid.
+	if not _army_is_cohesive(COHESION_RADIUS * 2.0):
+		var home: Vector3 = _w.home as Vector3
+		if home != Vector3.ZERO:
+			destination = home
+
+	if _army_mostly_near(destination, HOME_NEAR_RADIUS):
+		return
+	_issue_army_move(destination, &"move", CMD_REGROUP, 0)
 
 
 func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
@@ -890,6 +939,90 @@ func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
 	_last_command_target_id = target_id
 	_last_command_army_count = army.size()
 	_current_target_id = target_id
+
+
+# ---------------------------------------------------------------------------
+# Live cohesion facts (query only — no stored strategic state)
+# ---------------------------------------------------------------------------
+
+func _soldiers_near_hero(radius: float) -> int:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return 0
+	var near_count: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit:
+			continue
+		var unit: Unit = unit_variant as Unit
+		if unit == hero:
+			continue
+		if unit is Hero:
+			continue
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		if _horizontal_distance(unit.global_position, hero.global_position) <= radius:
+			near_count += 1
+	return near_count
+
+
+func _army_near_position(position: Vector3, radius: float) -> int:
+	var near_count: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Node3D:
+			continue
+		var unit: Node3D = unit_variant as Node3D
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		if _horizontal_distance(unit.global_position, position) <= radius:
+			near_count += 1
+	return near_count
+
+
+func _army_is_cohesive(radius: float) -> bool:
+	var army: Array = _w.army as Array
+	if army.size() <= 1:
+		return true
+	var center: Vector3 = _army_centroid()
+	var near: int = _army_near_position(center, radius)
+	## Most of the force near the centroid = together enough.
+	return near * 2 >= army.size()
+
+
+func _hero_is_with_army() -> bool:
+	var hero: Hero = _w.hero as Hero
+	if hero == null or not NodeSafety.is_alive_node(hero):
+		return false
+
+	var non_hero_count: int = 0
+	var soldier_sum := Vector3.ZERO
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit:
+			continue
+		var unit: Unit = unit_variant as Unit
+		if unit == hero or unit is Hero:
+			continue
+		if not NodeSafety.is_alive_node(unit):
+			continue
+		non_hero_count += 1
+		soldier_sum += unit.global_position
+
+	## Hero alone is never a strategic attack force.
+	if non_hero_count <= 0:
+		return false
+
+	var near_hero: int = _soldiers_near_hero(COHESION_RADIUS)
+	var soldiers_ok: bool = (
+		near_hero >= MIN_SOLDIERS_NEAR_HERO
+		or near_hero * 2 >= non_hero_count
+	)
+	if not soldiers_ok:
+		return false
+
+	## Hero must not be massively ahead of the soldier mass.
+	var soldier_centroid: Vector3 = soldier_sum / float(non_hero_count)
+	if _horizontal_distance(hero.global_position, soldier_centroid) > COHESION_RADIUS:
+		return false
+	return true
 
 
 # ---------------------------------------------------------------------------
