@@ -64,7 +64,6 @@ func _get_health_bar_color(ratio: float) -> Color:
 
 func _on_health_depleted() -> void:
 	_attack_target = null
-	EnemyUnitMission.clear_unit_mission(self)
 	HeroXpRewards.notify_unit_killed(self)
 	_health_bar.visible = false
 	die()

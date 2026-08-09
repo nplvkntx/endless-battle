@@ -488,7 +488,6 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-		EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
 		issue_production_rally_move(unit, _claim_rally_move_target())
@@ -502,7 +501,8 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	if not unit.is_in_group(&"enemies"):
 		unit.add_to_group(&"enemies")
 
-	EnemyArmyCommand.register_combat_unit(unit)
+	if not unit.is_in_group(&"enemy_combat_units"):
+		unit.add_to_group(&"enemy_combat_units")
 
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")

@@ -106,9 +106,6 @@ func _go_to_main_menu_with_result(result_message: String) -> void:
 func _register_static_match_resets() -> void:
 	## Static utility classes cannot self-register from _ready; list them once here.
 	register_match_reset(&"HeroProgressionStore", HeroProgressionStore.clear)
-	register_match_reset(&"AIHeroMastery", AIHeroMastery.reset_match_state)
-	register_match_reset(&"EnemyArmyCommand", EnemyArmyCommand.reset_match_state)
-	register_match_reset(&"EnemyAIDebug", EnemyAIDebug.reset_match_state)
 	register_match_reset(&"EnemyBuildPlacement", EnemyBuildPlacement.clear_tower_lane_preference)
 	register_match_reset(&"CombatTargetValidation", CombatTargetValidation.reset_match_state)
 	register_match_reset(&"WorkerAiUnstuck", WorkerAiUnstuck.reset_match_state)
@@ -172,13 +169,8 @@ func _verify_clean_match_state() -> void:
 		failures.append("HeroProgressionStore.player_living_hero")
 	if HeroProgressionStore.has_living_hero(true):
 		failures.append("HeroProgressionStore.enemy_living_hero")
-	if EnemyArmyCommand.get_army_mode() != EnemyArmyCommand.ArmyMode.IDLE:
-		failures.append("EnemyArmyCommand.army_mode")
-	if (
-		EnemyArmyCommand.get_strategic_state()
-		!= EnemyArmyCommand.StrategicState.ECONOMY
-	):
-		failures.append("EnemyArmyCommand.strategic_state")
+	if not MilitaryAIConfig.is_simple_wc3_ai_enabled():
+		failures.append("MilitaryAIConfig.simple_wc3_ai")
 	if EnemyBuildPlacement.preferred_tower_lane != &"":
 		failures.append("EnemyBuildPlacement.preferred_tower_lane")
 	if registered_match_reset_count() <= 0:

@@ -67,7 +67,6 @@ func _verify_packed_scene(failures: PackedStringArray) -> void:
 
 
 func _verify_runtime_bind(failures: PackedStringArray) -> void:
-	EnemyArmyCommand.reset_match_state()
 	var root := MatchCompositionRoot.new()
 	root.name = "MatchSystems"
 	var state := AIPlayerState.new()
@@ -80,14 +79,17 @@ func _verify_runtime_bind(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	_expect(failures, "bound AIPlayerState", EnemyArmyCommand.get_bound_ai_player_state() == state)
-	_expect(failures, "declared authority SimpleWc3AI", EnemyArmyCommand.get_declared_command_authority() is SimpleWc3AI)
+	_expect(failures, "root authority SimpleWc3AI", root.get_military_command_authority() is SimpleWc3AI)
 	_expect(
 		failures,
 		"AIPlayerState records SimpleWc3AI name",
 		state.military_command_authority_name == &"SimpleWc3AI"
 	)
+	_expect(
+		failures,
+		"AIPlayerState authority is SimpleWc3AI",
+		state.get_military_command_authority() is SimpleWc3AI
+	)
 
 	root.queue_free()
 	await get_tree().process_frame
-	EnemyArmyCommand.unbind_match_composition()

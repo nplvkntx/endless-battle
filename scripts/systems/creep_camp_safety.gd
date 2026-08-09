@@ -208,9 +208,7 @@ static func _is_enemy_side_camp(
 	if camp == null or not is_instance_valid(camp):
 		return false
 
-	var player_command_center: CommandCenter = (
-		EnemyArmyCommand.find_living_player_command_center(tree)
-	)
+	var player_command_center: CommandCenter = _find_living_player_command_center(tree)
 	if player_command_center == null or not is_instance_valid(player_command_center):
 		return true
 
@@ -221,6 +219,18 @@ static func _is_enemy_side_camp(
 		player_command_center.global_position
 	)
 	return distance_to_enemy <= distance_to_player
+
+
+static func _find_living_player_command_center(tree: SceneTree) -> CommandCenter:
+	if tree == null:
+		return null
+	for node: Node in tree.get_nodes_in_group(&"player_command_center"):
+		if node is CommandCenter and NodeSafety.is_alive_node(node):
+			var health: HealthComponent = node.get_node_or_null("HealthComponent") as HealthComponent
+			if health != null and health.current_health <= 0:
+				continue
+			return node as CommandCenter
+	return null
 
 
 static func _is_blocking_unit_in_camp(

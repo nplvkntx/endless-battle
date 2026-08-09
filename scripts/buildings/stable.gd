@@ -313,7 +313,6 @@ func _spawn_enemy_unit(scene: PackedScene) -> void:
 	_finalize_spawned_unit(unit)
 	_finalize_enemy_unit(unit)
 	UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
 
 
 func _finalize_enemy_unit(unit: Unit) -> void:
@@ -322,7 +321,8 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	if not unit.is_in_group(&"enemies"):
 		unit.add_to_group(&"enemies")
 
-	EnemyArmyCommand.register_combat_unit(unit)
+	if not unit.is_in_group(&"enemy_combat_units"):
+		unit.add_to_group(&"enemy_combat_units")
 
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")
@@ -625,7 +625,7 @@ func _claim_enemy_gather_target() -> Vector3:
 
 
 func _claim_enemy_rally_target() -> Vector3:
-	var rally_position: Vector3 = EnemyArmyCommand.resolve_enemy_rally_position(get_tree())
+	var rally_position: Vector3 = _resolve_enemy_command_center_rally()
 	if rally_position == Vector3.ZERO:
 		var gather_center: Vector3 = global_position + ENEMY_GATHER_OFFSET
 		var slot_index: int = _enemy_gather_next_slot
@@ -635,6 +635,18 @@ func _claim_enemy_rally_target() -> Vector3:
 	var slot_index: int = _enemy_gather_next_slot
 	_enemy_gather_next_slot += 1
 	return GroupMoveSpacing.compute_slot_target(rally_position, slot_index, RALLY_SLOT_SPACING)
+
+
+func _resolve_enemy_command_center_rally() -> Vector3:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return Vector3.ZERO
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if node is CommandCenter and NodeSafety.is_alive_node(node):
+			var pos: Vector3 = (node as CommandCenter).global_position
+			pos.y = 0.0
+			return pos
+	return Vector3.ZERO
 
 
 func _update_rally_marker(marker_position: Vector3) -> void:
@@ -887,7 +899,6 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 	if is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
-		EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), unit)
 	elif _has_rally_point:
 		_finalize_spawned_unit(unit)
 		issue_production_rally_move(unit, _claim_rally_move_target())

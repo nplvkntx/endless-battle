@@ -471,20 +471,14 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 	add_child(authority)
 	await _settle()
 
-	EnemyArmyCommand.bind_match_composition(state, authority)
-	_expect(
-		failures,
-		"command authority: EAC declared live after bind",
-		EnemyArmyCommand.get_declared_command_authority() == authority
-	)
-	_expect(
-		failures,
-		"command authority: AIPlayerState live after bind",
-		state.get_military_command_authority() == authority
-	)
-
+	state.set_military_command_authority(authority)
 	var composition := MatchCompositionRoot.new()
 	composition.military_command_authority = authority
+	_expect(
+		failures,
+		"command authority: AIPlayerState live after assign",
+		state.get_military_command_authority() == authority
+	)
 	_expect(
 		failures,
 		"command authority: MatchCompositionRoot live after assign",
@@ -498,11 +492,6 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 
 	_expect(
 		failures,
-		"command authority: EAC getter null after free",
-		EnemyArmyCommand.get_declared_command_authority() == null
-	)
-	_expect(
-		failures,
 		"command authority: AIPlayerState getter null after free",
 		state.get_military_command_authority() == null
 	)
@@ -512,42 +501,38 @@ func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> v
 		composition.get_military_command_authority() == null
 	)
 
-	EnemyArmyCommand.unbind_match_composition()
 	composition.free()
 	state.queue_free()
 	await _settle()
 
 
 func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> void:
-	## Bound AIPlayerState must clear after free without unbind first.
-	var state := AIPlayerState.new()
-	state.name = "TempBoundAIPlayerState"
-	add_child(state)
+	## MatchCompositionRoot.military_command_authority must clear after free.
+	var root := MatchCompositionRoot.new()
+	root.name = "TempMatchSystems"
+	add_child(root)
+	var authority := SimpleWc3AI.new()
+	authority.name = "TempSimpleWc3AI"
+	root.add_child(authority)
+	root.military_command_authority = authority
 	await _settle()
 
-	EnemyArmyCommand.bind_match_composition(state, state)
 	_expect(
 		failures,
-		"bound AI state: getter returns live state after bind",
-		EnemyArmyCommand.get_bound_ai_player_state() == state
+		"bound AI authority: getter returns live authority",
+		root.get_military_command_authority() == authority
 	)
 
-	state.queue_free()
+	authority.queue_free()
 	await _settle()
 	await get_tree().process_frame
 	await get_tree().process_frame
 
 	_expect(
 		failures,
-		"bound AI state: getter null after free without unbind",
-		EnemyArmyCommand.get_bound_ai_player_state() == null
-	)
-	_expect(
-		failures,
-		"bound AI state: army mode helper remains functional",
-		EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
+		"bound AI authority: getter null after free",
+		root.get_military_command_authority() == null
 	)
 
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.unbind_match_composition()
+	root.queue_free()
 	await _settle()

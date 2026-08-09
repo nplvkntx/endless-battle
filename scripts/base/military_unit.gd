@@ -521,9 +521,6 @@ func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)
@@ -765,7 +762,6 @@ func _on_health_depleted() -> void:
 	_clear_patrol_state()
 	cancel_attack_move()
 	cancel_attack()
-	EnemyUnitMission.clear_unit_mission(self)
 	clear_move_target()
 	die()
 	queue_free()
@@ -800,9 +796,6 @@ func _update_chase_movement(delta: float = 0.0, force: bool = false) -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var closest_target: Node3D = _find_engagement_target_in_range()
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)

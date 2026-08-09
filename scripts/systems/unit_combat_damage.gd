@@ -29,7 +29,6 @@ static func should_enemy_retaliate(victim: Node3D, attacker) -> bool:
 		CombatTargetValidation.is_enemy_faction(victim)
 		and attacker is Node3D
 		and CombatTargetValidation.is_attack_target_for_attacker(victim, attacker)
-		and EnemyUnitMission.allows_combat_micro(victim)
 	)
 
 

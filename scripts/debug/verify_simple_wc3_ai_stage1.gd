@@ -52,8 +52,6 @@ func _expect(failures: PackedStringArray, label: String, ok: bool) -> void:
 
 func _test_exclusive_authority(failures: PackedStringArray) -> void:
 	print("verify: exclusive authority")
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.reset_legacy_military_strategic_order_counter()
 
 	var root := MatchCompositionRoot.new()
 	root.name = "MatchSystems"
@@ -85,20 +83,12 @@ func _test_exclusive_authority(failures: PackedStringArray) -> void:
 	_expect(failures, "no MilitaryDirectorV2 child", root.get_node_or_null("MilitaryDirectorV2") == null)
 	_expect(failures, "no EnemyStrategicDirector child", root.get_node_or_null("EnemyStrategicDirector") == null)
 
-	var attempted: bool = false
-	EnemyArmyCommand.with_authorized_orders(func() -> void:
-		attempted = true
-	)
-	_expect(failures, "legacy authorize callback refused", not attempted)
-
 	root.queue_free()
 	await get_tree().process_frame
 
 
 func _test_opening_sequence(failures: PackedStringArray) -> void:
 	print("verify: opening build → army → attack-move creep loop")
-	EnemyArmyCommand.reset_match_state()
-	EnemyArmyCommand.reset_legacy_military_strategic_order_counter()
 	CreepCampSafety.reset_match_state()
 	PlayerRouteNavigation.clear_all()
 
@@ -195,11 +185,6 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	simple._process(0.5)
 	_expect(failures, "Hero+5 → ASSEMBLE (wait)", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
 	_expect(failures, "assembly position chosen", simple.assembly_position != Vector3.ZERO)
-	_expect(
-		failures,
-		"old military strategic orders still 0",
-		EnemyArmyCommand.get_legacy_military_strategic_orders_issued() == 0
-	)
 
 	## Gather at assembly before creeping — do not leave AFK at Barracks.
 	var assemble_at: Vector3 = simple.assembly_position

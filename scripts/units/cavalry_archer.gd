@@ -62,7 +62,6 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	cancel_attack_move()
 	cancel_attack()
-	EnemyUnitMission.clear_unit_mission(self)
 	if UpgradeManager.upgrade_applied.is_connected(_on_stable_upgrade_applied):
 		UpgradeManager.upgrade_applied.disconnect(_on_stable_upgrade_applied)
 	if UpgradeManager.enemy_upgrade_applied.is_connected(_on_stable_upgrade_applied):
@@ -326,9 +325,6 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
 		_idle_auto_acquire = true
@@ -582,7 +578,6 @@ func _on_combat_damage_received(result: Dictionary) -> void:
 		CombatTargetValidation.is_enemy_faction(self)
 		and attacker is Node3D
 		and CombatTargetValidation.is_attack_target_for_attacker(self, attacker)
-		and EnemyUnitMission.allows_combat_micro(self)
 	):
 		command_attack(attacker as Node3D)
 
@@ -596,7 +591,6 @@ func _on_health_depleted() -> void:
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
-	EnemyUnitMission.clear_unit_mission(self)
 	clear_move_target()
 	die()
 	queue_free()
@@ -628,9 +622,6 @@ func _update_chase_movement(delta: float = 0.0, force: bool = false) -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var closest_target: Node3D = null
 	if CombatTargetValidation.is_enemy_faction(self):
 		closest_target = _find_engagement_target_in_range()

@@ -22,7 +22,6 @@ Supporting infrastructure (not alternative owners):
 
 - `NodeSafety` — alive/freed Node validation helpers
 - `EntityHandle` — identity-only safe entity references
-- `EnemyArmyCommand` — thin registry / geometry helpers; not a mission owner
 - `FormationManager` — formation registry/UI helpers; must not override newer player movement commands
 
 ---

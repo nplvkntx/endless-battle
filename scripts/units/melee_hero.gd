@@ -993,9 +993,6 @@ func _update_hold_position(can_scan_targets: bool, delta: float) -> void:
 
 
 func _try_auto_attack() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)
@@ -1297,7 +1294,6 @@ func _on_health_depleted() -> void:
 		HeroXpRewards.notify_unit_killed(self)
 		if is_in_group(&"enemy_combat_units"):
 			remove_from_group(&"enemy_combat_units")
-	EnemyUnitMission.clear_unit_mission(self)
 	_health_bar.visible = false
 	cancel_attack_move()
 	cancel_attack()
@@ -1312,7 +1308,6 @@ func _exit_tree() -> void:
 	cancel_attack_move()
 	cancel_attack()
 	_on_prepare_for_new_player_order()
-	EnemyUnitMission.clear_unit_mission(self)
 
 
 func _begin_chase() -> void:
@@ -1436,9 +1431,6 @@ func _reclaim_unreachable_approach_slot() -> void:
 
 
 func _try_attack_move_engagement() -> void:
-	if CombatTargetValidation.is_enemy_faction(self) and not EnemyUnitMission.allows_combat_micro(self):
-		return
-
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
 	var closest_target: Node3D = _find_auto_acquire_target_in_search_range(search_range)
 	if closest_target != null:

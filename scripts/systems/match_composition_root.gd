@@ -32,7 +32,6 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	EnemyArmyCommand.unbind_match_composition()
 	ai_player_state = null
 	military_command_authority = null
 
@@ -112,4 +111,4 @@ func _bind_ai_runtime() -> void:
 	if ai_player_state == null:
 		push_warning("MatchCompositionRoot: AIPlayerState missing; AI identity stays static")
 		return
-	EnemyArmyCommand.bind_match_composition(ai_player_state, military_command_authority)
+	## SimpleWc3AI is already declared as military_command_authority on AIPlayerState.

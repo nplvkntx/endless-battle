@@ -147,9 +147,7 @@ func record_strategic_order_provenance_for_tests(
 	destination: Vector3 = Vector3.ZERO,
 	mission_gen: int = 0
 ) -> void:
-	EnemyArmyCommand.push_diag_order_source(source, mission_gen)
-	_record_strategic_order_provenance(StringName(order_type), destination)
-	EnemyArmyCommand.pop_diag_order_source()
+	_record_strategic_order_provenance(StringName(order_type), destination, source, mission_gen)
 
 
 func get_strategic_order_provenance() -> Dictionary:
@@ -221,11 +219,14 @@ func get_strategic_order_conflict_status() -> String:
 	return "YES"
 
 
-func _record_strategic_order_provenance(order_type: StringName, destination: Vector3) -> void:
-	var source: String = EnemyArmyCommand.get_diag_order_source()
+func _record_strategic_order_provenance(
+	order_type: StringName,
+	destination: Vector3,
+	source: String = "",
+	mission_gen: int = 0
+) -> void:
 	if source.is_empty():
 		source = "UNKNOWN"
-	var mission_gen: int = EnemyArmyCommand.get_diag_order_mission_generation()
 	var type_label: String = String(order_type)
 	## Skip no-op refresh of identical source/type/near destination.
 	if (
@@ -261,23 +262,14 @@ func _record_strategic_order_provenance(order_type: StringName, destination: Vec
 
 
 func _is_diag_tactical_micro_source(source: String) -> bool:
-	return source.begins_with("AIHeroMastery.micro") or source == "AIHeroMastery.micro"
+	return source.begins_with("tactical_micro") or source == "tactical_micro"
 
 
 func _diag_strategic_authority_family(source: String) -> String:
-	if source.begins_with("ArmyCommanderV2"):
-		return "ArmyCommanderV2"
-	if source.begins_with("EnemyArmyCommand.watchdog"):
-		return "EnemyArmyCommand.watchdog"
-	if source.begins_with("EnemyArmyCommand.reinforcement"):
-		return "EnemyArmyCommand.reinforcement"
-	if (
-		source.begins_with("MilitaryDirectorV2")
-		or source.begins_with("EnemyArmyCommand.complete_retreat")
-	):
-		return "MilitaryDirectorV2.direct"
-	if source.begins_with("AIHeroMastery"):
-		return "AIHeroMastery"
+	if source.begins_with("simple_wc3_ai"):
+		return "simple_wc3_ai"
+	if source == "RALLY":
+		return "RALLY"
 	return source
 
 
@@ -347,7 +339,6 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	_unregister_with_entity_registry()
-	EnemyUnitMission.clear_unit_mission(self)
 	_clear_order_queue_internal()
 	_active_order = null
 	if _visual_animator != null:
@@ -1722,7 +1713,6 @@ func get_food_supply_cost() -> int:
 func die() -> void:
 	BuffService.remove_all(self)
 	_release_reserved_food()
-	EnemyArmyCommand.release_reinforcement_from_pool(self)
 	DeathEffects.play_unit_death(self)
 	NodeSafety.prepare_node_for_death(self)
 	_unregister_with_entity_registry()

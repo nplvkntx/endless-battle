@@ -31,9 +31,8 @@ var _rally_next_slot: int = 0
 var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
 ## Player-selected kit for the next training (UI writes this).
 var selected_kit_id: StringName = HeroCatalog.KIT_PALADIN
-## Fallback only when AIHeroMastery has not locked a kit yet (should be rare).
-## Normal AI flow locks an equal-weight random kit before the first train order.
-const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_SHADOW_ASSASSIN
+## Fixed enemy hero kit for SimpleWc3AI (no strategic hero controller).
+const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_PALADIN
 
 @onready var _health_component: HealthComponent = get_node_or_null(
 	"HealthComponent"
@@ -171,7 +170,7 @@ func has_living_owner_hero(is_enemy_owned: bool) -> bool:
 
 	## Fallback scan keeps AI/training correct if registry was never registered.
 	if is_enemy_owned:
-		var enemy_hero: Hero = EnemyArmyCommand.find_living_enemy_hero(get_tree())
+		var enemy_hero: Hero = _find_living_enemy_hero()
 		if enemy_hero != null:
 			HeroProgressionStore.register_living_hero(enemy_hero)
 			return true
@@ -381,7 +380,8 @@ func _spawn_enemy_hero() -> void:
 	if not hero.is_in_group(&"enemies"):
 		hero.add_to_group(&"enemies")
 
-	EnemyArmyCommand.register_combat_unit(hero)
+	if not hero.is_in_group(&"enemy_combat_units"):
+		hero.add_to_group(&"enemy_combat_units")
 
 	spawn_parent.add_child(hero)
 	hero.global_position = _claim_hero_spawn_position()
@@ -392,7 +392,6 @@ func _spawn_enemy_hero() -> void:
 		collision_shape.disabled = false
 
 	HeroProgressionStore.register_living_hero(hero)
-	EnemyArmyCommand.assign_reinforcement_regroup(get_tree(), hero)
 
 
 ## Pick a deterministic exit outside the altar: custom-grid walkable AND physically
@@ -470,6 +469,15 @@ func _is_living_player_hero_variant(node_variant: Variant) -> bool:
 	return not CombatTargetValidation.is_enemy_faction(hero)
 
 
+func _find_living_enemy_hero() -> Hero:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return null
+	for node_variant: Variant in tree.get_nodes_in_group(&"enemy_combat_units"):
+		var hero: Hero = HeroProgressionStore.as_living_hero(node_variant)
+		if hero != null and CombatTargetValidation.is_enemy_faction(hero):
+			return hero
+	return null
 
 
 func _on_health_depleted() -> void:

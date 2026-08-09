@@ -86,7 +86,6 @@ func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
 	worker.pin_starting_gold_mine(gold_mine)
 	worker.command_gather_gold_mine(gold_mine, false)
 	if not worker.needs_gather_target_reassignment():
-		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
 		return true
 	return false
 
@@ -103,7 +102,6 @@ func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
 		return false
 	worker.command_gather_tree(tree_target, false)
 	if not worker.needs_gather_target_reassignment():
-		EnemyUnitMission.try_set_mission(worker, EnemyUnitMission.Mission.ECONOMY)
 		return true
 	return false
 
@@ -147,7 +145,7 @@ func _resolve_gold_mine() -> GoldMine:
 		var mine: GoldMine = node as GoldMine
 		if not _is_valid_gold_mine(mine):
 			continue
-		var dist: float = EnemyArmyCommand.horizontal_distance(cc.global_position, mine.global_position)
+		var dist: float = _horizontal_distance(cc.global_position, mine.global_position)
 		if dist > GOLD_MINE_NEAR_CC_DISTANCE:
 			continue
 		if dist < best_dist:
@@ -172,7 +170,7 @@ func _resolve_safe_trees() -> Array[WoodTree]:
 		if not wood_tree.can_gather():
 			continue
 		if cc != null:
-			var dist: float = EnemyArmyCommand.horizontal_distance(origin, wood_tree.global_position)
+			var dist: float = _horizontal_distance(origin, wood_tree.global_position)
 			if dist > 80.0:
 				continue
 		result.append(wood_tree)
@@ -181,3 +179,9 @@ func _resolve_safe_trees() -> Array[WoodTree]:
 
 func _is_valid_gold_mine(mine: GoldMine) -> bool:
 	return NodeSafety.is_alive_node(mine) and mine.can_gather()
+
+
+func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
+	var dx: float = from_position.x - to_position.x
+	var dz: float = from_position.z - to_position.z
+	return sqrt(dx * dx + dz * dz)

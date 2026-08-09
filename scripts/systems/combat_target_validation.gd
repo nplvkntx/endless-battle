@@ -671,7 +671,7 @@ static func get_auto_acquire_target_priority(
 		or target is CavalryArcher
 		or target is Cannon
 		or target is MilitaryUnit
-		or EnemyArmyCommand.is_combat_unit(target)
+		or target is Hero
 	)
 	if is_military and (target == retaliation_target or distance <= attack_range):
 		return AUTO_ACQUIRE_PRIORITY_FIGHTING_MILITARY
@@ -700,10 +700,6 @@ static func get_enemy_attack_target_priority(
 ) -> int:
 	if not is_attack_target_for_attacker(attacker, target):
 		return ENEMY_ATTACK_PRIORITY_INVALID
-
-	var mission: EnemyUnitMission.Mission = EnemyUnitMission.get_unit_mission(attacker)
-	if mission == EnemyUnitMission.Mission.DEFEND:
-		return get_enemy_defense_target_priority(attacker, target, distance)
 
 	var attack_range: float = _get_attacker_attack_range(attacker)
 
@@ -772,7 +768,10 @@ static func get_enemy_defense_target_priority(
 		or target is Swordsman
 		or target is HeavyCavalry
 		or target is LightCavalry
-		or EnemyArmyCommand.is_combat_unit(target)
+		or target is Archer
+		or target is CavalryArcher
+		or target is Cannon
+		or target is MilitaryUnit
 	):
 		return ENEMY_DEFENSE_PRIORITY_MILITARY
 
@@ -977,7 +976,7 @@ static func _is_worker_attacking_enemy_buildings(tree: SceneTree, worker) -> boo
 	if tree == null or not NodeSafety.is_alive_node(worker):
 		return false
 
-	for node: Node in tree.get_nodes_in_group(EnemyArmyCommand.ENEMY_COMMAND_CENTER_GROUP):
+	for node: Node in tree.get_nodes_in_group(ENEMY_BUILDING_GROUP):
 		if not node is Building:
 			continue
 

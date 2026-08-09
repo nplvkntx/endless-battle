@@ -123,7 +123,7 @@ enum LayoutZone {
 	EXPANSION,
 }
 
-## Debug: last AI placement search summary (debug builds / EnemyAIDebug).
+## Debug: last AI placement search summary.
 static var last_placement_debug: Dictionary = {}
 static var debug_placement_logs: bool = false
 
@@ -1715,11 +1715,7 @@ static func _horizontal_distance(a: Vector3, b: Vector3) -> float:
 
 
 static func _is_placement_debug_enabled() -> bool:
-	if debug_placement_logs:
-		return true
-	if not OS.is_debug_build():
-		return false
-	return EnemyAIDebug.is_enabled()
+	return debug_placement_logs
 
 
 static func _count_reject(reject_counts: Dictionary, reason: String) -> void:

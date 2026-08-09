@@ -147,7 +147,7 @@ func get_ability_active_status_text(ability_id: StringName) -> String:
 
 
 func try_ai_cast_abilities(context: Dictionary) -> void:
-	## Kit micro is owned by AIHeroMastery (tactical states + combo planner).
+	## Kit micro is unit-owned combat behavior.
 	if context.get("mastery_owned", false):
 		return
 

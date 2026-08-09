@@ -190,7 +190,6 @@ func _tick_train_hero() -> void:
 		return
 	if altar.is_training_hero():
 		return
-	AIHeroMastery.ensure_enemy_hero_choice()
 	if altar.try_train_enemy_hero():
 		strategic_orders_issued += 1
 
@@ -503,8 +502,6 @@ func _issue_single_unit_move(unit: Unit, destination: Vector3) -> void:
 func _issue_single_unit_attack_move(unit: Unit, destination: Vector3) -> void:
 	if not NodeSafety.is_alive_node(unit) or destination == Vector3.ZERO:
 		return
-	## Existing combat micro only engages when mission allows it.
-	EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.CREEP, 0.0)
 	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
 		[unit],
 		destination,
@@ -516,11 +513,6 @@ func _issue_single_unit_attack_move(unit: Unit, destination: Vector3) -> void:
 	last_move_squad_size = int(result.get("squad_size", 0))
 	if last_move_handled:
 		strategic_orders_issued += 1
-
-
-func _mark_army_creeping(units: Array) -> void:
-	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.CREEP, "simple wc3 creep")
-	EnemyUnitMission.claim_units_for_mission(units, EnemyUnitMission.Mission.CREEP, 0.0)
 
 
 func _has_completed_farm() -> bool:
@@ -696,8 +688,6 @@ func _issue_army_attack_move(units: Array) -> void:
 	if units.is_empty() or _camp_destination == Vector3.ZERO:
 		return
 
-	_mark_army_creeping(units)
-
 	## Pikemen contact first; Hero attack-moves immediately after to the same camp.
 	var pikemen: Array = []
 	var heroes: Array = []
@@ -793,10 +783,9 @@ func _log_authority_proof(force: bool) -> void:
 	if composition != null:
 		old_active = composition.is_old_military_runtime_active()
 	print(
-		"Simple WC3 AI active: YES | Old Military AI active: %s | Old military strategic orders issued: %d | Simple orders: %d | State: %s"
+		"Simple WC3 AI active: YES | Old Military AI active: %s | Simple orders: %d | State: %s"
 		% [
 			"YES" if old_active else "NO",
-			EnemyArmyCommand.get_legacy_military_strategic_orders_issued(),
 			strategic_orders_issued,
 			get_state_label(),
 		]

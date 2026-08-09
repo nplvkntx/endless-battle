@@ -300,7 +300,6 @@ func _on_health_depleted() -> void:
 	_active_order = null
 	_cancel_build_trip()
 	cancel_gathering()
-	EnemyUnitMission.clear_unit_mission(self)
 	has_move_target = false
 	velocity = Vector3.ZERO
 	_health_bar.visible = false
@@ -2244,15 +2243,15 @@ func can_enemy_economy_force_reassign() -> bool:
 		):
 			return false
 
-	if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
-		if (
-			_build_trip_state != BuildTripState.IDLE
-			and _building_target != null
-			and is_instance_valid(_building_target)
-			and _building_target.building_state != Building.STATE_COMPLETED
-			and _enemy_build_unreachable_time < GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT
-		):
-			return false
+	## Active construction trip owns the worker — do not steal for economy.
+	if (
+		_build_trip_state != BuildTripState.IDLE
+		and _building_target != null
+		and is_instance_valid(_building_target)
+		and _building_target.building_state != Building.STATE_COMPLETED
+		and _enemy_build_unreachable_time < GatheringConfig.AI_WORKER_BUILD_INVALID_TIMEOUT
+	):
+		return false
 
 	if (
 		_carried_amount > 0
@@ -2280,8 +2279,6 @@ func prepare_for_enemy_economy_reassign(reason: String) -> bool:
 
 	if _build_trip_state != BuildTripState.IDLE:
 		_cancel_build_trip()
-		if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
-			EnemyUnitMission.clear_unit_mission(self)
 
 	if _gather_state != GatherTripState.IDLE or _gather_source != null:
 		cancel_gathering()
@@ -2304,8 +2301,6 @@ func _release_invalid_build_assignment(reason: String) -> void:
 		return
 
 	_cancel_build_trip()
-	if EnemyUnitMission.get_unit_mission(self) == EnemyUnitMission.Mission.BUILD:
-		EnemyUnitMission.clear_unit_mission(self)
 
 	_enemy_build_unreachable_time = 0.0
 	_enemy_recovery_cooldown = GatheringConfig.AI_WORKER_RECOVERY_COOLDOWN

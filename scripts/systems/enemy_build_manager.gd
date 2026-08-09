@@ -204,11 +204,6 @@ func _assign_nearest_builder(building: Building) -> void:
 	if not NodeSafety.is_alive_node(worker):
 		return
 	worker.command_build(building)
-	EnemyUnitMission.try_set_mission(
-		worker,
-		EnemyUnitMission.Mission.BUILD,
-		EnemyUnitMission.BUILD_COMMITMENT_SECONDS
-	)
 
 
 func _find_nearest_available_enemy_worker(near_position: Vector3) -> Worker:
@@ -225,7 +220,7 @@ func _find_nearest_available_enemy_worker(near_position: Vector3) -> Worker:
 			continue
 		if worker.is_on_construction_trip():
 			continue
-		var dist: float = EnemyArmyCommand.horizontal_distance(worker.global_position, near_position)
+		var dist: float = _horizontal_distance(worker.global_position, near_position)
 		if dist < best_dist:
 			best_dist = dist
 			best = worker
@@ -299,3 +294,9 @@ func _get_navigation_map() -> RID:
 	if world == null:
 		return RID()
 	return world.get_navigation_map()
+
+
+func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float:
+	var dx: float = from_position.x - to_position.x
+	var dz: float = from_position.z - to_position.z
+	return sqrt(dx * dx + dz * dz)

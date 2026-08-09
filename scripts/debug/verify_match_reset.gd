@@ -124,9 +124,6 @@ func _dirty_persistent_match_state() -> void:
 	)
 	CombatTargetValidation.get_cached_group_nodes(get_tree(), &"units")
 
-	if AIHeroMastery != null:
-		AIHeroMastery.set_forced_kit_for_tests(HeroCatalog.KIT_PALADIN)
-
 
 func _release_dirty_fixtures() -> void:
 	if _dirty_control_group_unit != null and is_instance_valid(_dirty_control_group_unit):
@@ -215,9 +212,7 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		and not HeroProgressionStore.has_locked_kit(true)
 		and not HeroProgressionStore.has_living_hero(false)
 		and not HeroProgressionStore.has_living_hero(true)
-		and EnemyArmyCommand.get_army_mode() == EnemyArmyCommand.ArmyMode.IDLE
-		and EnemyArmyCommand.get_strategic_state() == EnemyArmyCommand.StrategicState.ECONOMY
-		and EnemyUnitMission.get_main_army_mission() == EnemyUnitMission.Mission.RALLY
+		and MilitaryAIConfig.is_simple_wc3_ai_enabled()
 		and CommandFeedback.get_active_marker_count() == 0
 		and CommandFeedback.get_active_dust_count() == 0
 		and DeathEffects.get_active_particle_count() == 0
@@ -250,9 +245,7 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		"hero_enemy_saved": HeroProgressionStore.has_saved_enemy_progression(),
 		"hero_player_locked": HeroProgressionStore.has_locked_kit(false),
 		"hero_enemy_locked": HeroProgressionStore.has_locked_kit(true),
-		"army_mode": int(EnemyArmyCommand.get_army_mode()),
-		"strategic_state": int(EnemyArmyCommand.get_strategic_state()),
-		"main_army_mission": int(EnemyUnitMission.get_main_army_mission()),
+		"simple_wc3_ai_enabled": MilitaryAIConfig.is_simple_wc3_ai_enabled(),
 		"command_feedback_markers": CommandFeedback.get_active_marker_count(),
 		"command_feedback_dust": CommandFeedback.get_active_dust_count(),
 		"death_effects_particles": DeathEffects.get_active_particle_count(),
@@ -306,9 +299,7 @@ func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number:
 		"hero_enemy_saved",
 		"hero_player_locked",
 		"hero_enemy_locked",
-		"army_mode",
-		"strategic_state",
-		"main_army_mission",
+		"simple_wc3_ai_enabled",
 		"command_feedback_markers",
 		"command_feedback_dust",
 		"death_effects_particles",
