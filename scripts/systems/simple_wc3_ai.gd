@@ -279,7 +279,7 @@ func _tick_travel() -> void:
 
 	var camp: Node3D = _resolve_camp()
 	if camp == null or not _camp_has_living_creeps(camp):
-		_begin_creep_travel()
+		_on_camp_cleared(camp)
 		return
 
 	if not _travel_issued:
@@ -791,15 +791,15 @@ func _issue_army_move(units: Array) -> void:
 				_ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
 
 
-## Clear only combat/chase leftovers so a fresh custom group move can bind.
+## Stop completed camp combat AND clear leftover MOVE/ATTACK orders.
+## cancel_attack alone leaves `_active_order` (ATTACK) set — that is the Pikeman/Hero
+## gap after Camp 1: Hero often still holds a MOVE order and keeps traveling; Pikemen
+## hold a finished ATTACK order and will not bind the next group MOVE cleanly.
 func _clear_army_combat_for_travel(units: Array) -> void:
 	for unit_ref: Variant in units:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
-		var unit: Unit = unit_ref as Unit
-		unit.cancel_attack()
-		unit.cancel_attack_move()
-		unit.clear_move_target()
+		(unit_ref as Unit).issue_stop()
 
 
 func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
@@ -813,12 +813,12 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 			last_creep_damaged = true
 		_tracked_creep_hp = health.current_health
 
-	## Stop strategic travel — combat owns the units now.
+	## Fully stop strategic travel for everyone — clear_custom_rts_route alone leaves
+	## has_move_target, so the Hero keeps marching while Pikemen enter ATTACK.
 	for unit_ref: Variant in army:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
-		var unit: Unit = unit_ref as Unit
-		unit.clear_custom_rts_route()
+		(unit_ref as Unit).clear_move_target()
 
 	## Pikemen make first contact.
 	for unit_ref: Variant in army:
