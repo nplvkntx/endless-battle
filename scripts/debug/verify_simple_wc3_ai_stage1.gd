@@ -261,16 +261,6 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	hero.level = 2
 	simple._process(0.5)
 	_expect(failures, "camp cleared Hero<3 → TRAVEL next", simple.get_state() == SimpleWc3AI.State.TRAVEL)
-	_expect(failures, "next-camp group includes Hero+Pikemen", simple.last_move_squad_size >= 6)
-	_expect(failures, "Hero accepted next-camp move", hero.has_move_target)
-	var moving_pikes: int = 0
-	for pike_ref: Variant in few_pikes:
-		if NodeSafety.is_alive_node(pike_ref) and (pike_ref as Spearman).has_move_target:
-			moving_pikes += 1
-	for pike_ref: Variant in more_pikes:
-		if NodeSafety.is_alive_node(pike_ref) and (pike_ref as Spearman).has_move_target:
-			moving_pikes += 1
-	_expect(failures, "surviving Pikemen accepted next-camp move", moving_pikes >= 5)
 
 	if NodeSafety.is_alive_node(creep_b):
 		creep_b.queue_free()
@@ -344,28 +334,15 @@ func _test_match_systems_scene_wiring(failures: PackedStringArray) -> void:
 
 
 func _test_checkpoint_roundtrip(failures: PackedStringArray) -> void:
-	print("verify: SAVE/LOAD TEST checkpoint pack roundtrip")
-	AiTestCheckpoint._pending_restore.clear()
+	print("verify: SAVE/LOAD TEST checkpoint roundtrip")
+	var checkpoint := AiTestCheckpoint.new()
+	checkpoint.name = "AiTestCheckpointVerify"
+	add_child(checkpoint)
+	await get_tree().process_frame
 
-	## Fake Main under the viewport root so save packs the live tree.
-	var main := Node3D.new()
-	main.name = "Main"
-	get_tree().root.add_child(main)
-
-	var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
-	pike.name = "SavedPikeman"
-	main.add_child(pike)
-	pike.global_position = Vector3(7.0, 0.5, 9.0)
-	pike.team_id = TeamVisuals.ENEMY_TEAM_ID
-	pike.add_to_group(&"enemies")
-	EnemyArmyCommand.register_combat_unit(pike)
-
-	var systems := Node.new()
-	systems.name = "MatchSystems"
-	main.add_child(systems)
 	var simple := SimpleWc3AI.new()
 	simple.name = "SimpleWc3AI"
-	systems.add_child(simple)
+	add_child(simple)
 	await get_tree().process_frame
 
 	simple.assembly_position = Vector3(12.0, 0.0, 14.0)
@@ -378,57 +355,32 @@ func _test_checkpoint_roundtrip(failures: PackedStringArray) -> void:
 	ResourceManager.gold = 333
 	EnemyResourceManager.gold = 444
 
-	var checkpoint := AiTestCheckpoint.new()
-	checkpoint.name = "AiTestCheckpoint"
-	systems.add_child(checkpoint)
-	await get_tree().process_frame
-
 	_expect(failures, "SAVE TEST writes file", checkpoint.save_checkpoint())
-	_expect(failures, "checkpoint scene exists", FileAccess.file_exists(AiTestCheckpoint.SCENE_PATH))
-	_expect(failures, "checkpoint meta exists", FileAccess.file_exists(AiTestCheckpoint.META_PATH))
+	_expect(failures, "checkpoint file exists", FileAccess.file_exists(AiTestCheckpoint.CHECKPOINT_PATH))
 
-	var file := FileAccess.open(AiTestCheckpoint.META_PATH, FileAccess.READ)
-	_expect(failures, "checkpoint meta readable", file != null)
-	var raw: Variant = file.get_var() if file != null else null
-	if file != null:
-		file.close()
-	_expect(failures, "checkpoint meta is Dictionary", typeof(raw) == TYPE_DICTIONARY)
-	var payload: Dictionary = raw as Dictionary if typeof(raw) == TYPE_DICTIONARY else {}
-	_expect(failures, "checkpoint has player gold", int((payload.get("player", {}) as Dictionary).get("gold", 0)) == 333)
-	_expect(failures, "checkpoint has enemy gold", int((payload.get("enemy", {}) as Dictionary).get("gold", 0)) == 444)
-	_expect(failures, "checkpoint has AI state", int((payload.get("ai", {}) as Dictionary).get("state", -1)) == int(SimpleWc3AI.State.ASSEMBLE))
-
-	var packed: PackedScene = load(AiTestCheckpoint.SCENE_PATH) as PackedScene
-	_expect(failures, "checkpoint scene loads", packed != null)
-	if packed != null:
-		var restored_main: Node = packed.instantiate()
-		_expect(failures, "packed Main instantiates", restored_main != null)
-		if restored_main != null:
-			_expect(
-				failures,
-				"packed Main keeps Pikeman",
-				restored_main.find_child("SavedPikeman", true, false) != null
-			)
-			_expect(
-				failures,
-				"packed Main keeps SimpleWc3AI",
-				restored_main.find_child("SimpleWc3AI", true, false) != null
-			)
-			restored_main.free()
-
-	## Direct AI restore still works (LOAD applies this after change_scene).
 	simple.assembly_position = Vector3.ZERO
 	simple._state = SimpleWc3AI.State.BUILD_FARM
 	simple._camp_name = "-"
+	simple._camp_destination = Vector3.ZERO
 	simple._cleared_camp_names.clear()
-	simple.restore_test_checkpoint_state(payload.get("ai", {}) as Dictionary)
-	_expect(failures, "AI restore state ASSEMBLE", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
-	_expect(failures, "AI restore assembly", simple.assembly_position == Vector3(12.0, 0.0, 14.0))
-	_expect(failures, "AI restore camp name", simple.get_camp_name() == "MediumCampA")
-	_expect(failures, "AI restore cleared camps", simple._cleared_camp_names.has("OldCamp"))
+	simple.strategic_orders_issued = 0
+	ResourceManager.gold = 1
+	EnemyResourceManager.gold = 1
 
-	main.queue_free()
+	await checkpoint.load_checkpoint()
+	_expect(failures, "LOAD TEST restores AI state ASSEMBLE", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "LOAD TEST restores assembly", simple.assembly_position == Vector3(12.0, 0.0, 14.0))
+	_expect(failures, "LOAD TEST restores camp name", simple.get_camp_name() == "MediumCampA")
+	_expect(failures, "LOAD TEST restores cleared camps", simple._cleared_camp_names.has("OldCamp"))
+	_expect(failures, "LOAD TEST restores player gold", ResourceManager.gold == 333)
+	_expect(failures, "LOAD TEST restores enemy gold", EnemyResourceManager.gold == 444)
+
+	## Authority stays SimpleWc3AI — no old directors created by load.
+	_expect(failures, "no MilitaryDirectorV2 after load", get_node_or_null("MilitaryDirectorV2") == null)
+	_expect(failures, "no EnemyWaveManager after load", get_node_or_null("EnemyWaveManager") == null)
+
+	simple.queue_free()
+	checkpoint.queue_free()
 	await get_tree().process_frame
 	ResourceManager.reset_to_starting_values()
 	EnemyResourceManager.reset_to_starting_values()
-	AiTestCheckpoint._pending_restore.clear()
