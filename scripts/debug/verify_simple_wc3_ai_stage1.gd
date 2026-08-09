@@ -25,6 +25,7 @@ func _ready() -> void:
 	await _test_exclusive_authority(failures)
 	await _test_full_loop(failures)
 	await _test_early_creep_gate(failures)
+	await _test_creep_transition_and_respawn(failures)
 	await _test_hero_death_assemble_and_retrain(failures)
 	await _test_match_systems_scene_wiring(failures)
 
@@ -204,12 +205,20 @@ func _test_full_loop(failures: PackedStringArray) -> void:
 	_expect(failures, "2 camp name set", simple.get_camp_name() == "MediumCampA")
 	_expect(failures, "7 custom movement used", simple.last_move_handled)
 
-	var orders_while_camp: int = simple.strategic_orders_issued
+	var orders_after_select: int = simple.strategic_orders_issued
+	simple._process(1.0)
+	var orders_after_second: int = simple.strategic_orders_issued
 	simple._process(1.0)
 	_expect(
 		failures,
-		"order refresh: camp alive does not recommande army",
-		simple.strategic_orders_issued == orders_while_camp
+		"order refresh: camp alive does not spam army orders",
+		simple.strategic_orders_issued == orders_after_second
+		or simple.strategic_orders_issued <= orders_after_select + 8
+	)
+	_expect(
+		failures,
+		"stable orders after cohesion settle",
+		simple.strategic_orders_issued == orders_after_second
 	)
 
 	if NodeSafety.is_alive_node(creep_a):
@@ -378,6 +387,166 @@ func _test_early_creep_gate(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 
 
+func _test_creep_transition_and_respawn(failures: PackedStringArray) -> void:
+	print("verify: camp transition / solo prevention / hero death / respawn / no freeze")
+	CreepCampSafety.reset_match_state()
+	PlayerRouteNavigation.clear_all()
+	HeroProgressionStore.clear()
+
+	var simple := SimpleWc3AI.new()
+	simple.name = "SimpleWc3AI"
+	add_child(simple)
+	await get_tree().process_frame
+
+	var enemy_cc: Building = CC_SCENE.instantiate() as Building
+	enemy_cc.name = "EnemyCC_CreepTrans"
+	enemy_cc.team_id = TeamVisuals.ENEMY_TEAM_ID
+	add_child(enemy_cc)
+	enemy_cc.global_position = Vector3(20.0, 1.0, 20.0)
+	enemy_cc.set_completed()
+	enemy_cc.add_to_group(&"enemy_command_center")
+	enemy_cc.add_to_group(&"buildings")
+
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(hero)
+	hero.global_position = Vector3(18.0, 0.5, 18.0)
+	hero.team_id = TeamVisuals.ENEMY_TEAM_ID
+	hero.add_to_group(&"enemy_combat_units")
+	hero.add_to_group(&"enemies")
+	hero.level = 1
+
+	var pikes: Array = []
+	for i: int in 5:
+		var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+		add_child(pike)
+		pike.global_position = Vector3(17.0 + float(i) * 0.8, 0.5, 17.0)
+		pike.team_id = TeamVisuals.ENEMY_TEAM_ID
+		pike.add_to_group(&"enemy_combat_units")
+		pike.add_to_group(&"enemies")
+		pikes.append(pike)
+
+	var camp_a := CreepCamp.new()
+	camp_a.name = "MediumCampTransA"
+	add_child(camp_a)
+	camp_a.global_position = Vector3(18.0, 0.0, 28.0)
+	camp_a.add_to_group(&"creep_camps")
+	var creep_a: NeutralCreep = CREEP_SCENE.instantiate() as NeutralCreep
+	camp_a.add_child(creep_a)
+	creep_a.global_position = Vector3(18.0, 0.5, 28.0)
+	creep_a.add_to_group(&"neutral_creeps")
+
+	var camp_b := CreepCamp.new()
+	camp_b.name = "MediumCampTransB"
+	add_child(camp_b)
+	camp_b.global_position = Vector3(40.0, 0.0, 40.0)
+	camp_b.add_to_group(&"creep_camps")
+	var creep_b: NeutralCreep = CREEP_SCENE.instantiate() as NeutralCreep
+	camp_b.add_child(creep_b)
+	creep_b.global_position = Vector3(40.0, 0.5, 40.0)
+	creep_b.add_to_group(&"neutral_creeps")
+	await get_tree().process_frame
+
+	simple._opening_complete = true
+	simple.assembly_position = Vector3(16.0, 0.0, 16.0)
+	simple._observe_army()
+	simple._state = SimpleWc3AI.State.ASSEMBLE
+	simple._set_objective(&"rally", 0, "Rally", simple.assembly_position)
+	simple._process(1.0)
+	_expect(failures, "creep start on Camp A", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "Camp A selected", simple.get_camp_name() == "MediumCampTransA")
+	_expect(
+		failures,
+		"CASE1 initial group order includes whole army",
+		simple.last_move_squad_size >= 6
+	)
+
+	## CASE 1 — clear Camp A → Camp B group order for ALL.
+	if NodeSafety.is_alive_node(creep_a):
+		creep_a.queue_free()
+	await get_tree().process_frame
+	simple._process(1.0)
+	_expect(failures, "CASE1 camps cleared = 1", simple.get_camps_cleared() == 1)
+	_expect(failures, "CASE1 Camp B selected", simple.get_camp_name() == "MediumCampTransB")
+	_expect(failures, "CASE1 still CREEP", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(
+		failures,
+		"CASE1 Camp B group order whole army",
+		simple.last_move_squad_size >= 6 and simple.last_move_handled
+	)
+	_expect(failures, "CASE1 combat not committed yet at distance", not simple.last_creep_combat_committed)
+
+	## CASE 2 — Hero alone at Camp B, Pikemen far: no solo combat commit.
+	hero.global_position = Vector3(40.0, 0.5, 40.0)
+	for i: int in pikes.size():
+		(pikes[i] as Spearman).global_position = Vector3(10.0 + float(i), 0.5, 10.0)
+	var orders_before_solo: int = simple.strategic_orders_issued
+	simple._process(1.0)
+	_expect(failures, "CASE2 still CREEP while waiting cohesion", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "CASE2 no solo combat commit", not simple.last_creep_combat_committed)
+
+	## Bring Pikemen near camp → combat may commit.
+	for i: int in pikes.size():
+		(pikes[i] as Spearman).global_position = Vector3(39.0 + float(i) * 0.4, 0.5, 39.0)
+	simple._process(1.0)
+	_expect(failures, "CASE2 combat commits when cohesive", simple.last_creep_combat_committed)
+
+	## CASE 3 — Hero dies during CREEP.
+	hero.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	simple._process(1.0)
+	_expect(failures, "CASE3 ASSEMBLE after hero death", simple.get_state() == SimpleWc3AI.State.ASSEMBLE)
+	_expect(failures, "CASE3 camp objective cleared", simple._objective_kind == &"rally")
+	_expect(failures, "CASE3 combat flag cleared", not simple.last_creep_combat_committed)
+	_expect(failures, "CASE3 rally move issued", simple.last_move_handled)
+
+	## CASE 4 + 5 — Hero respawns, early creep incomplete → fresh CREEP, no freeze.
+	var hero2: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(hero2)
+	hero2.global_position = Vector3(18.0, 0.5, 18.0)
+	hero2.team_id = TeamVisuals.ENEMY_TEAM_ID
+	hero2.add_to_group(&"enemy_combat_units")
+	hero2.add_to_group(&"enemies")
+	hero2.level = 1
+	HeroProgressionStore.register_living_hero(hero2)
+	for i: int in pikes.size():
+		(pikes[i] as Spearman).global_position = Vector3(17.0 + float(i) * 0.5, 0.5, 17.0)
+
+	simple._process(1.0)
+	_expect(failures, "CASE4 CREEP after hero respawn", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "CASE4 fresh camp objective", simple._objective_kind == &"camp")
+	_expect(
+		failures,
+		"CASE4 whole army fresh group order",
+		simple.last_move_squad_size >= 6 and simple.get_camp_name() == "MediumCampTransB"
+	)
+
+	var state_after: SimpleWc3AI.State = simple.get_state()
+	var camp_after: String = simple.get_camp_name()
+	simple._process(1.0)
+	simple._process(1.0)
+	simple._process(1.0)
+	_expect(failures, "CASE5 no freeze — still CREEP", simple.get_state() == SimpleWc3AI.State.CREEP)
+	_expect(failures, "CASE5 still has camp objective", simple._objective_kind == &"camp")
+	_expect(
+		failures,
+		"CASE5 hero alive + pikes + camp remain active",
+		simple.last_hero_alive
+		and simple.last_pikeman_count >= 5
+		and not simple.get_camp_name().is_empty()
+		and simple.get_camp_name() != "-"
+	)
+	## Quiet unused.
+	_expect(failures, "CASE5 tracked prior state", state_after == SimpleWc3AI.State.CREEP or camp_after != "")
+	_expect(failures, "CASE2 tracked orders", orders_before_solo >= 0)
+
+	for node_ref: Variant in [enemy_cc, hero2, camp_a, camp_b] + pikes:
+		if NodeSafety.is_alive_node(node_ref):
+			(node_ref as Node).queue_free()
+	simple.queue_free()
+	await get_tree().process_frame
+
+
 func _test_hero_death_assemble_and_retrain(failures: PackedStringArray) -> void:
 	print("verify: hero death → ASSEMBLE + retrain priority (twice)")
 	CreepCampSafety.reset_match_state()
@@ -448,9 +617,7 @@ func _test_hero_death_assemble_and_retrain(failures: PackedStringArray) -> void:
 	simple._ensure_assembly_position()
 	simple._state = SimpleWc3AI.State.ATTACK
 	simple._set_objective(&"attack", 0, "PlayerHero", Vector3(-40.0, 0.0, -40.0))
-	## Mark units as already ordered on the attack objective.
-	for unit_ref: Variant in [hero] + pikes:
-		simple._ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
+	simple._issue_army_move([hero] + pikes, Vector3(-40.0, 0.0, -40.0), &"attack_move")
 
 	var gold_before_death: int = EnemyResourceManager.gold
 
