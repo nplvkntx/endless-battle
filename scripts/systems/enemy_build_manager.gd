@@ -41,6 +41,8 @@ const COMMAND_CENTER_GOLD_COST: int = BuildingStats.COMMAND_CENTER_GOLD_COST
 const COMMAND_CENTER_WOOD_COST: int = BuildingStats.COMMAND_CENTER_WOOD_COST
 const FARM_MAX_HEALTH: int = BuildingStats.FARM_MAX_HEALTH
 const HERO_ALTAR_MAX_HEALTH: int = BuildingStats.HERO_ALTAR_MAX_HEALTH
+## Farms may duplicate. Barracks may exist up to this count. Other types are unique.
+const MAX_BARRACKS: int = 2
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gather_manager_path: NodePath
@@ -61,7 +63,12 @@ func try_place_building(building_type: StringName) -> bool:
 		return false
 	if building_type == PLACEMENT_COMMAND_CENTER:
 		return false
-	if building_type != PLACEMENT_FARM and _has_completed_or_in_progress(building_type):
+	if building_type == PLACEMENT_FARM:
+		pass
+	elif building_type == PLACEMENT_BARRACKS:
+		if _count_buildings_of_type(PLACEMENT_BARRACKS) >= MAX_BARRACKS:
+			return false
+	elif _has_completed_or_in_progress(building_type):
 		return false
 	return _try_place_building(building_type, Vector3.ZERO, false)
 
@@ -99,13 +106,12 @@ func try_place_expansion_at_mine(gold_mine: GoldMine) -> bool:
 	return _try_place_building(PLACEMENT_COMMAND_CENTER, gold_mine.global_position, true)
 
 
-## Worker finished spawn / finished construction — hand to gather mechanics.
+## Worker finished spawn / finished construction — leave idle for EnemyAI ratio assign.
+## Previously forced prefer_gold=true here, which starved Wood allocation.
 func notify_enemy_worker_spawned(worker: Worker) -> void:
 	if not NodeSafety.is_alive_node(worker):
 		return
-	var gather: EnemyGatherManager = _resolve_gather_manager()
-	if gather != null:
-		gather.assign_gather_job(worker, true)
+	## No forced Gold job. EnemyAI assigns idle workers by live Gold/Wood ratio.
 
 
 ## Legacy hook from Command Center; no automatic production policy.
@@ -305,9 +311,14 @@ func _find_nearest_available_enemy_worker(near_position: Vector3) -> Worker:
 
 
 func _has_completed_or_in_progress(building_type: StringName) -> bool:
+	return _count_buildings_of_type(building_type) > 0
+
+
+func _count_buildings_of_type(building_type: StringName) -> int:
 	var tree: SceneTree = get_tree()
 	if tree == null:
-		return false
+		return 0
+	var count: int = 0
 	for node: Node in tree.get_nodes_in_group(ENEMY_BUILDING_GROUP):
 		if not NodeSafety.is_alive_node(node) or not node is Building:
 			continue
@@ -320,8 +331,8 @@ func _has_completed_or_in_progress(building_type: StringName) -> bool:
 			or state == Building.STATE_UNDER_CONSTRUCTION
 			or state == Building.STATE_CONSTRUCTING
 		):
-			return true
-	return false
+			count += 1
+	return count
 
 
 func _has_expansion_command_center_or_constructing() -> bool:

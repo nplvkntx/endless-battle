@@ -7,28 +7,35 @@ extends Node
 
 const TICK_INTERVAL_SECONDS: float = 0.5
 const ENEMY_TEAM_ID: int = 1
-const DEFENSE_RADIUS: float = 40.0
+const DEFENSE_RADIUS: float = 36.0
 const HOME_NEAR_RADIUS: float = 8.0
 const CAMP_CLEAR_RADIUS: float = 14.0
 const COHESION_RADIUS: float = 14.0
 const CAMP_SEARCH_RANGE: float = 70.0
 const ATTACK_POWER_RATIO: float = 1.25
-const FOOD_SAFETY_MARGIN: int = 3
+const OVERWHELM_POWER_RATIO: float = 1.6
+const FOOD_SAFETY_MARGIN: int = 4
 const MIN_EARLY_SPEARMEN: int = 5
-const MIN_CREEP_SPEARMEN_NEAR: int = 3
-const EARLY_CAMPS_REQUIRED: int = 2
-const GOLD_WORKER_RATIO: float = 0.7
+const MIN_CREEP_SOLDIERS_NEAR: int = 3
+const EARLY_CAMPS_REQUIRED: int = 3
+const EARLY_HERO_LEVEL_TARGET: int = 3
+const GOLD_WORKER_RATIO: float = 0.6
 const HOME_OFFSET: Vector3 = Vector3(-2.0, 0.0, 3.0)
+const CRITICAL_WOOD_RESERVE: int = 40
+const ARMY_SOFT_CAP: int = 36
+const MAX_BARRACKS_DESIRED: int = 2
 
-const DESIRED_WORKERS_T1: int = 9
-const DESIRED_WORKERS_T2: int = 14
-const DESIRED_WORKERS_T3: int = 18
+const DESIRED_WORKERS_T1: int = 10
+const DESIRED_WORKERS_T2: int = 16
+const DESIRED_WORKERS_T3: int = 22
+const DESIRED_WORKERS_EXPANSION: int = 26
 
-const DESIRED_SPEARMEN: int = 5
-const DESIRED_SWORDSMEN: int = 4
-const DESIRED_ARCHERS: int = 4
-const DESIRED_LIGHT_CAVALRY: int = 2
-const DESIRED_CANNONS: int = 1
+const DESIRED_SPEARMEN_T1: int = 9
+const DESIRED_SPEARMEN_T2: int = 6
+const DESIRED_SWORDSMEN: int = 5
+const DESIRED_ARCHERS: int = 5
+const DESIRED_LIGHT_CAVALRY: int = 4
+const DESIRED_CANNONS: int = 2
 
 const CMD_NONE: StringName = &""
 const CMD_HOME: StringName = &"home"
@@ -50,6 +57,7 @@ var _last_command_target_id: int = 0
 var _last_command_army_count: int = 0
 var _chosen_expansion_mine_id: int = 0
 var _debug_priority: StringName = &"BOOT"
+var _debug_threat_name: String = "-"
 
 var _build_manager: EnemyBuildManager = null
 var _gather_manager: EnemyGatherManager = null
@@ -76,6 +84,7 @@ func reset_match_state() -> void:
 	_last_command_army_count = 0
 	_chosen_expansion_mine_id = 0
 	_debug_priority = &"RESET"
+	_debug_threat_name = "-"
 	_w.clear()
 
 
@@ -91,18 +100,20 @@ func _ai_tick() -> void:
 	_resolve_managers()
 	_read_live_world()
 
+	## Economy / tech / production — may all run; do not freeze military.
 	_maintain_workers()
 	_maintain_worker_distribution()
 	_maintain_food()
-
 	_ensure_basic_buildings()
+	_ensure_hero()
 	_ensure_tech_progression()
+	_ensure_extra_barracks()
 	_ensure_expansion()
 	_ensure_upgrades()
 	_ensure_unit_production()
 
+	## Military — first true condition wins.
 	if _w.hero == null:
-		_ensure_hero()
 		_army_home()
 		_set_priority(&"HERO")
 		_update_debug_overlay()
@@ -116,12 +127,14 @@ func _ai_tick() -> void:
 
 	var threat: Node3D = _find_base_threat()
 	if threat != null:
+		_debug_threat_name = threat.name
 		_whole_army_attack(threat, CMD_DEFEND)
 		_set_priority(&"DEFEND")
 		_update_debug_overlay()
 		return
+	_debug_threat_name = "-"
 
-	if _camps_cleared < EARLY_CAMPS_REQUIRED:
+	if _needs_early_creep():
 		_creep_with_whole_army()
 		_set_priority(&"EARLY_CREEP")
 		_update_debug_overlay()
@@ -140,7 +153,7 @@ func _ai_tick() -> void:
 		return
 
 	_army_home()
-	_set_priority(&"HOME")
+	_set_priority(&"WAIT")
 	_update_debug_overlay()
 
 
@@ -166,7 +179,8 @@ func _read_live_world() -> void:
 		"altar": null,
 		"altar_completed": false,
 		"altar_constructing": false,
-		"barracks": null,
+		"barracks_list": [] as Array,
+		"barracks_count": 0,
 		"barracks_completed": false,
 		"barracks_constructing": false,
 		"blacksmith": null,
@@ -245,11 +259,12 @@ func _read_live_world() -> void:
 				_w.altar_constructing = true
 		elif building is Barracks:
 			if completed:
-				if _w.barracks == null:
-					_w.barracks = building
+				(_w.barracks_list as Array).append(building)
+				_w.barracks_count = int(_w.barracks_count) + 1
 				_w.barracks_completed = true
 			elif constructing:
 				_w.barracks_constructing = true
+				_w.barracks_count = int(_w.barracks_count) + 1
 		elif building is Blacksmith:
 			if completed:
 				_w.blacksmith = building
@@ -300,6 +315,8 @@ func _read_live_world() -> void:
 			continue
 		if node is Worker:
 			continue
+		if not _is_living_combatant(node):
+			continue
 		var unit: Unit = node as Unit
 		(_w.army as Array).append(unit)
 		if unit is Spearman:
@@ -323,11 +340,17 @@ func _read_live_world() -> void:
 			continue
 		if node is Worker:
 			continue
+		if CombatTargetValidation.is_enemy_faction(node):
+			continue
+		if not _is_living_combatant(node):
+			continue
 		(_w.player_army as Array).append(node)
 	for node: Node in tree.get_nodes_in_group(&"heroes"):
 		if not NodeSafety.is_alive_node(node) or not node is Hero:
 			continue
 		if CombatTargetValidation.is_enemy_faction(node):
+			continue
+		if not _is_living_combatant(node):
 			continue
 		if _w.player_hero == null:
 			_w.player_hero = node
@@ -367,8 +390,12 @@ func _maintain_workers() -> void:
 		return
 	if not cc.can_train_enemy_worker():
 		return
-	## Keep enough gold for a missing Hero when Altar is ready.
+	## Keep queue short — one pending worker is enough.
+	if cc.get_worker_queue_count() >= 1:
+		return
 	if _should_reserve_hero_gold() and _w.gold < HeroStats.TRAIN_GOLD_COST + UnitStats.WORKER_GOLD_COST:
+		return
+	if int(_w.free_food) <= 0:
 		return
 	cc.try_train_enemy_worker()
 
@@ -376,30 +403,74 @@ func _maintain_workers() -> void:
 func _maintain_worker_distribution() -> void:
 	if _gather_manager == null:
 		return
-	var idle: Array = _w.idle_workers as Array
-	if idle.is_empty():
-		return
-	var gatherers: int = int(_w.gold_workers) + int(_w.wood_workers) + idle.size()
+	var gatherers: int = int(_w.gold_workers) + int(_w.wood_workers) + (_w.idle_workers as Array).size()
 	if gatherers <= 0:
 		return
+
 	var desired_gold: int = int(round(float(gatherers) * GOLD_WORKER_RATIO))
 	desired_gold = clampi(desired_gold, 1, gatherers)
 	var desired_wood: int = gatherers - desired_gold
+	if _wood_critically_low():
+		desired_wood = maxi(desired_wood, mini(gatherers - 1, desired_wood + 1))
+		desired_gold = gatherers - desired_wood
 
-	for worker_variant: Variant in idle:
+	## Idle workers first — Wood before Gold when Wood is short.
+	for worker_variant: Variant in _w.idle_workers as Array:
 		if not worker_variant is Worker:
 			continue
 		var worker: Worker = worker_variant as Worker
 		if not NodeSafety.is_alive_node(worker):
 			continue
-		var prefer_gold: bool = int(_w.gold_workers) < desired_gold
-		if int(_w.wood_workers) < desired_wood and int(_w.gold_workers) >= desired_gold:
+		var prefer_gold: bool = true
+		if int(_w.wood_workers) < desired_wood:
+			prefer_gold = false
+		elif int(_w.gold_workers) < desired_gold:
+			prefer_gold = true
+		elif _wood_critically_low():
 			prefer_gold = false
 		if _gather_manager.assign_gather_job(worker, prefer_gold):
 			if prefer_gold:
 				_w.gold_workers += 1
 			else:
 				_w.wood_workers += 1
+
+	## If Wood is still under-allocated, move one Gold gatherer (not a constant rip).
+	if int(_w.wood_workers) < desired_wood:
+		_reassign_one_gold_worker_to_wood()
+
+
+func _reassign_one_gold_worker_to_wood() -> void:
+	if _gather_manager == null:
+		return
+	for worker_variant: Variant in _w.workers as Array:
+		if not worker_variant is Worker:
+			continue
+		var worker: Worker = worker_variant as Worker
+		if not NodeSafety.is_alive_node(worker):
+			continue
+		if worker.is_on_construction_trip():
+			continue
+		if worker.get_assigned_gather_resource_id() != &"gold":
+			continue
+		if _gather_manager.assign_gather_job(worker, false):
+			_w.gold_workers = maxi(0, int(_w.gold_workers) - 1)
+			_w.wood_workers += 1
+			return
+
+
+func _wood_critically_low() -> bool:
+	var wood: int = int(_w.wood)
+	if wood >= CRITICAL_WOOD_RESERVE + 80:
+		return false
+	if not _w.altar_completed and not _w.altar_constructing:
+		return wood < BuildingStats.HERO_ALTAR_WOOD_COST
+	if not _w.barracks_completed and not _w.barracks_constructing:
+		return wood < BuildingStats.BARRACKS_WOOD_COST
+	if int(_w.tier) >= 2 and not _w.blacksmith_completed and not _w.blacksmith_constructing:
+		return wood < BuildingStats.BLACKSMITH_WOOD_COST
+	if int(_w.free_food) <= FOOD_SAFETY_MARGIN and not _w.farm_constructing:
+		return wood < BuildingStats.FARM_WOOD_COST
+	return wood < CRITICAL_WOOD_RESERVE
 
 
 func _maintain_food() -> void:
@@ -437,7 +508,7 @@ func _ensure_tech_progression() -> void:
 	if _build_manager == null:
 		return
 
-	## Tier 2
+	## Tier 2 — does not require finishing all creeps.
 	if (
 		_w.hero != null
 		and int(_w.spearmen) >= MIN_EARLY_SPEARMEN
@@ -461,7 +532,7 @@ func _ensure_tech_progression() -> void:
 			_build_manager.try_place_blacksmith()
 			return
 
-	## Stable after T2 + Blacksmith
+	## Stable after unlock
 	if (
 		TechTree.can_build_stable(ENEMY_TEAM_ID)
 		and not _w.stable_completed
@@ -475,7 +546,7 @@ func _ensure_tech_progression() -> void:
 	if (
 		int(_w.tier) == 2
 		and _w.blacksmith_completed
-		and (_w.expansion_cc != null or _w.gold >= 2400)
+		and (_w.expansion_cc != null or _w.gold >= 2200)
 		and int((_w.army as Array).size()) >= 10
 		and int((_w.workers as Array).size()) >= DESIRED_WORKERS_T2
 	):
@@ -484,7 +555,7 @@ func _ensure_tech_progression() -> void:
 			cc_t3.try_upgrade_enemy_tier(3)
 			return
 
-	## Artillery Depot after T3
+	## Artillery Depot after unlock
 	if (
 		TechTree.can_build_artillery_depot(ENEMY_TEAM_ID)
 		and not _w.artillery_completed
@@ -495,6 +566,26 @@ func _ensure_tech_progression() -> void:
 			BuildingStats.ARTILLERY_DEPOT_WOOD_COST
 		):
 			_build_manager.try_place_artillery_depot()
+
+
+func _ensure_extra_barracks() -> void:
+	if _build_manager == null:
+		return
+	if int(_w.tier) < 2:
+		return
+	if int(_w.barracks_count) >= MAX_BARRACKS_DESIRED:
+		return
+	if not _w.barracks_completed:
+		return
+	if _w.barracks_constructing:
+		return
+	if int((_w.workers as Array).size()) < DESIRED_WORKERS_T2 - 2:
+		return
+	if _w.gold < 400 or _w.wood < 200:
+		return
+	if not EnemyResourceManager.can_afford(BuildingStats.BARRACKS_GOLD_COST, BuildingStats.BARRACKS_WOOD_COST):
+		return
+	_build_manager.try_place_barracks()
 
 
 func _ensure_expansion() -> void:
@@ -556,45 +647,83 @@ func _ensure_unit_production() -> void:
 	if not _w.barracks_completed:
 		return
 	if _should_reserve_hero_gold() and _w.gold < HeroStats.TRAIN_GOLD_COST + UnitStats.SPEARMAN_GOLD_COST:
-		## Still allow spearman production only when Hero is already training or present.
 		if _w.hero == null and not _w.hero_training:
 			return
+	if int(_w.free_food) <= 0:
+		return
 
-	var barracks: Barracks = _w.barracks as Barracks
-	if barracks != null and barracks.get_enemy_pending_unit_count() < 2:
-		if int(_w.spearmen) + _count_pending_spearmen(barracks) < DESIRED_SPEARMEN:
+	var army_size: int = (_w.army as Array).size()
+	var desired_spearmen: int = DESIRED_SPEARMEN_T1
+	if int(_w.tier) >= 2:
+		desired_spearmen = DESIRED_SPEARMEN_T2
+
+	## Produce from every completed Barracks (short queues).
+	for barracks_variant: Variant in _w.barracks_list as Array:
+		if not barracks_variant is Barracks:
+			continue
+		var barracks: Barracks = barracks_variant as Barracks
+		if barracks.get_enemy_pending_unit_count() >= 2:
+			continue
+
+		if int(_w.spearmen) + _count_pending_spearmen(barracks) < desired_spearmen:
 			if barracks.try_train_enemy_spearman():
-				return
+				_w.spearmen += 1
+				continue
+
 		if TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
 			if int(_w.swordsmen) < DESIRED_SWORDSMEN:
 				if barracks.try_train_enemy_swordsman():
-					return
+					_w.swordsmen += 1
+					continue
 			if int(_w.archers) < DESIRED_ARCHERS:
 				if barracks.try_train_enemy_archer():
-					return
-			## Keep producing useful core units once floors are met.
-			if int(_w.spearmen) <= int(_w.swordsmen) and int(_w.spearmen) <= int(_w.archers):
+					_w.archers += 1
+					continue
+
+		## Keep producing useful core units while economy/food allow — do not stop at 5.
+		if army_size < ARMY_SOFT_CAP and _economy_supports_extra_army():
+			if TechTree.can_train_swordsman_or_archer(ENEMY_TEAM_ID):
+				if int(_w.spearmen) <= int(_w.swordsmen) and int(_w.spearmen) <= int(_w.archers):
+					if barracks.try_train_enemy_spearman():
+						_w.spearmen += 1
+						continue
+				elif int(_w.swordsmen) <= int(_w.archers):
+					if barracks.try_train_enemy_swordsman():
+						_w.swordsmen += 1
+						continue
+				else:
+					if barracks.try_train_enemy_archer():
+						_w.archers += 1
+						continue
+			elif int(_w.spearmen) < ARMY_SOFT_CAP:
 				if barracks.try_train_enemy_spearman():
-					return
-			elif int(_w.swordsmen) <= int(_w.archers):
-				if barracks.try_train_enemy_swordsman():
-					return
-			else:
-				if barracks.try_train_enemy_archer():
-					return
+					_w.spearmen += 1
+					continue
 
 	if _w.stable_completed and _w.stable != null:
 		var stable: Stable = _w.stable as Stable
 		if stable.get_enemy_pending_unit_count() < 1:
-			if int(_w.light_cavalry) < DESIRED_LIGHT_CAVALRY:
-				if stable.try_train_enemy_light_cavalry():
-					return
+			var cavalry_count: int = int(_w.light_cavalry) + int(_w.heavy_cavalry)
+			if cavalry_count < DESIRED_LIGHT_CAVALRY:
+				stable.try_train_enemy_light_cavalry()
 
 	if _w.artillery_completed and _w.artillery_depot != null:
 		if int(_w.spearmen) + int(_w.swordsmen) >= 4 and int(_w.cannons) < DESIRED_CANNONS:
 			var depot: ArtilleryDepot = _w.artillery_depot as ArtilleryDepot
 			if depot.get_enemy_pending_unit_count() < 1:
 				depot.try_train_enemy_cannon()
+
+
+func _economy_supports_extra_army() -> bool:
+	if _should_reserve_hero_gold():
+		return false
+	if int(_w.free_food) <= FOOD_SAFETY_MARGIN and not _w.farm_constructing:
+		return false
+	if int(_w.tier) < 2 and _w.gold < BuildingStats.CC_TIER_2_GOLD_COST and int(_w.spearmen) >= DESIRED_SPEARMEN_T1:
+		## Prefer saving toward T2 once early desired army exists.
+		if _w.gold < 500:
+			return int(_w.spearmen) < DESIRED_SPEARMEN_T1
+	return _w.gold >= UnitStats.SPEARMAN_GOLD_COST + 50
 
 
 func _ensure_hero() -> void:
@@ -615,7 +744,17 @@ func _army_below_minimum() -> bool:
 	return int(_w.spearmen) < MIN_EARLY_SPEARMEN
 
 
+func _needs_early_creep() -> bool:
+	## Prefer creeping until Hero level 3 OR 3 camps cleared — whichever first.
+	if int(_w.hero_level) >= EARLY_HERO_LEVEL_TARGET:
+		return false
+	if _camps_cleared >= EARLY_CAMPS_REQUIRED:
+		return false
+	return _useful_creep_exists()
+
+
 func _find_base_threat() -> Node3D:
+	## Purely current reality — no remembered defense.
 	var bases: Array = _w.command_centers as Array
 	if bases.is_empty() and _w.primary_cc != null:
 		bases = [_w.primary_cc]
@@ -625,7 +764,8 @@ func _find_base_threat() -> Node3D:
 	var candidates: Array = []
 	candidates.append_array(_w.player_army as Array)
 	if _w.player_hero != null and not candidates.has(_w.player_hero):
-		candidates.append(_w.player_hero)
+		if _is_living_combatant(_w.player_hero):
+			candidates.append(_w.player_hero)
 
 	for base_variant: Variant in bases:
 		if not base_variant is Node3D:
@@ -639,6 +779,10 @@ func _find_base_threat() -> Node3D:
 			var unit: Node3D = unit_variant as Node3D
 			if not NodeSafety.is_alive_node(unit):
 				continue
+			if CombatTargetValidation.is_enemy_faction(unit):
+				continue
+			if not _is_living_combatant(unit):
+				continue
 			var dist: float = _horizontal_distance(base.global_position, unit.global_position)
 			if dist <= DEFENSE_RADIUS and dist < best_dist:
 				best_dist = dist
@@ -647,20 +791,31 @@ func _find_base_threat() -> Node3D:
 
 
 func _should_attack_player() -> bool:
-	if _camps_cleared < EARLY_CAMPS_REQUIRED:
-		return false
 	if (_w.army as Array).is_empty():
 		return false
+	## Do not attack suicidally.
+	if float(_w.player_power) > float(_w.our_power) * 1.15 and not (_w.player_army as Array).is_empty():
+		return false
+
+	if float(_w.our_power) > float(_w.player_power) * OVERWHELM_POWER_RATIO:
+		return true
 	if float(_w.our_power) > float(_w.player_power) * ATTACK_POWER_RATIO:
 		return true
-	## Player essentially has no army and we have a healthy force.
+	## Player army almost destroyed.
 	if (_w.player_army as Array).is_empty() and (_w.army as Array).size() >= MIN_EARLY_SPEARMEN + 1:
+		return true
+	## Player Hero dead and AI has a healthy army.
+	if (
+		_w.player_hero == null
+		and (_w.army as Array).size() >= MIN_EARLY_SPEARMEN + 2
+		and float(_w.our_power) >= float(_w.player_power)
+	):
 		return true
 	return false
 
 
 func _useful_creep_exists() -> bool:
-	return not (_w.active_camps as Array).is_empty()
+	return _pick_safe_creep_camp() != null
 
 
 func _creep_with_whole_army() -> void:
@@ -700,6 +855,8 @@ func _army_home() -> void:
 
 func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
 	if not NodeSafety.is_alive_node(target):
+		return
+	if not _is_living_combatant(target) and not target is Building:
 		return
 	var army: Array = _w.army as Array
 	var target_id: int = target.get_instance_id()
@@ -781,7 +938,7 @@ func _select_player_target() -> Node3D:
 		return nearby
 
 	## 2) Player Hero
-	if NodeSafety.is_alive_node(_w.player_hero):
+	if NodeSafety.is_alive_node(_w.player_hero) and _is_living_combatant(_w.player_hero):
 		return _w.player_hero as Node3D
 
 	## 3) Player Command Center
@@ -807,21 +964,32 @@ func _select_player_target() -> Node3D:
 
 
 func _resolve_creep_camp() -> Node3D:
+	## Only continue a prior camp target if it is still an active camp.
 	if _current_target_id != 0 and is_instance_id_valid(_current_target_id):
 		var existing: Object = instance_from_id(_current_target_id)
 		if existing is Node3D and NodeSafety.is_alive_node(existing):
 			var existing_camp: Node3D = existing as Node3D
-			if _find_living_creep_in_camp(existing_camp) != null:
-				return existing_camp
-			## Committed camp is empty — count the clear, then pick another.
-			_camps_cleared += 1
+			if _is_active_camp(existing_camp):
+				if _find_living_creep_in_camp(existing_camp) != null:
+					return existing_camp
+				## Committed camp is empty — count the clear, then pick another.
+				_camps_cleared += 1
 			_current_target_id = 0
 			_last_command_kind = CMD_NONE
 			_last_command_target_id = 0
 
+	var best: Node3D = _pick_safe_creep_camp()
+	if best != null:
+		_current_target_id = best.get_instance_id()
+	return best
+
+
+func _pick_safe_creep_camp() -> Node3D:
 	var home: Vector3 = _w.home as Vector3
 	var best: Node3D = null
 	var best_dist: float = INF
+	var army_size: int = maxi(1, (_w.army as Array).size())
+
 	for camp_variant: Variant in _w.active_camps as Array:
 		if not camp_variant is Node3D:
 			continue
@@ -831,12 +999,23 @@ func _resolve_creep_camp() -> Node3D:
 		var dist: float = _horizontal_distance(home, camp.global_position)
 		if dist > CAMP_SEARCH_RANGE:
 			continue
+		var creep_count: int = _count_living_creeps_in_camp(camp)
+		if creep_count <= 0:
+			continue
+		## Extremely simple safety: skip camps vastly above army size.
+		if creep_count > army_size + 4:
+			continue
 		if dist < best_dist:
 			best_dist = dist
 			best = camp
-	if best != null:
-		_current_target_id = best.get_instance_id()
 	return best
+
+
+func _is_active_camp(camp: Node3D) -> bool:
+	for camp_variant: Variant in _w.active_camps as Array:
+		if camp_variant is Node3D and (camp_variant as Node3D).get_instance_id() == camp.get_instance_id():
+			return true
+	return false
 
 
 func _find_living_creep_in_camp(camp: Node3D) -> Node3D:
@@ -865,6 +1044,29 @@ func _find_living_creep_in_camp(camp: Node3D) -> Node3D:
 	return best
 
 
+func _count_living_creeps_in_camp(camp: Node3D) -> int:
+	if not NodeSafety.is_alive_node(camp):
+		return 0
+	var tree: SceneTree = _w.tree as SceneTree
+	if tree == null:
+		return 0
+	var count: int = 0
+	for node_variant: Variant in CombatTargetValidation.get_cached_group_nodes(
+		tree,
+		CombatTargetValidation.NEUTRAL_CREEP_GROUP
+	):
+		if not node_variant is Node3D:
+			continue
+		var creep: Node3D = node_variant as Node3D
+		if not CombatTargetValidation.is_neutral_creep(creep):
+			continue
+		if CombatTargetValidation.get_target_current_health(creep) <= 0:
+			continue
+		if _horizontal_distance(camp.global_position, creep.global_position) <= CAMP_CLEAR_RADIUS:
+			count += 1
+	return count
+
+
 func _has_creep_cohesion(camp_position: Vector3) -> bool:
 	var hero: Hero = _w.hero as Hero
 	if hero == null or not NodeSafety.is_alive_node(hero):
@@ -873,7 +1075,6 @@ func _has_creep_cohesion(camp_position: Vector3) -> bool:
 		return false
 
 	var near_count: int = 0
-	var near_spearmen: int = 0
 	for unit_variant: Variant in _w.army as Array:
 		if not unit_variant is Unit:
 			continue
@@ -884,10 +1085,8 @@ func _has_creep_cohesion(camp_position: Vector3) -> bool:
 			continue
 		if _horizontal_distance(unit.global_position, camp_position) <= COHESION_RADIUS:
 			near_count += 1
-			if unit is Spearman:
-				near_spearmen += 1
 
-	if near_spearmen >= MIN_CREEP_SPEARMEN_NEAR:
+	if near_count >= MIN_CREEP_SOLDIERS_NEAR:
 		return true
 	var army_size: int = maxi(1, (_w.army as Array).size() - 1)
 	return near_count * 2 >= army_size
@@ -899,6 +1098,8 @@ func _has_creep_cohesion(camp_position: Vector3) -> bool:
 
 func _desired_worker_count() -> int:
 	var tier: int = int(_w.tier)
+	if _w.expansion_cc != null:
+		return DESIRED_WORKERS_EXPANSION
 	if tier >= 3:
 		return DESIRED_WORKERS_T3
 	if tier >= 2:
@@ -910,6 +1111,14 @@ func _should_reserve_hero_gold() -> bool:
 	if _w.hero != null or _w.hero_training:
 		return false
 	return _w.altar_completed or _w.altar_constructing
+
+
+func _is_living_combatant(node: Variant) -> bool:
+	if not NodeSafety.is_alive_node(node):
+		return false
+	if node is Building:
+		return true
+	return CombatTargetValidation.get_target_current_health(node) > 0
 
 
 func _army_mostly_near(position: Vector3, radius: float) -> bool:
@@ -948,6 +1157,8 @@ func _nearest_from_list(nodes: Array, origin: Vector3, max_range: float) -> Node
 		var node: Node3D = node_variant as Node3D
 		if not NodeSafety.is_alive_node(node):
 			continue
+		if not _is_living_combatant(node):
+			continue
 		var dist: float = _horizontal_distance(origin, node.global_position)
 		if dist <= max_range and dist < best_dist:
 			best_dist = dist
@@ -962,6 +1173,8 @@ func _calc_force_power(units: Array) -> float:
 			continue
 		var unit: Node = unit_variant as Node
 		if not NodeSafety.is_alive_node(unit):
+			continue
+		if not _is_living_combatant(unit):
 			continue
 		var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
 		if health == null or health.max_health <= 0:
@@ -994,7 +1207,7 @@ func _is_constructing(building: Building) -> bool:
 
 func _scan_enemy_hero(tree: SceneTree) -> Hero:
 	for node: Node in tree.get_nodes_in_group(&"enemy_combat_units"):
-		if node is Hero and NodeSafety.is_alive_node(node):
+		if node is Hero and NodeSafety.is_alive_node(node) and _is_living_combatant(node):
 			return node as Hero
 	return null
 
@@ -1004,9 +1217,6 @@ func _resolve_primary_cc() -> CommandCenter:
 		var via_path: CommandCenter = get_node_or_null(enemy_command_center_path) as CommandCenter
 		if via_path != null and NodeSafety.is_alive_node(via_path):
 			return via_path
-	if _build_manager != null:
-		# Prefer the same primary the build manager uses via path.
-		pass
 	var tree: SceneTree = get_tree()
 	if tree == null:
 		return null
@@ -1033,11 +1243,9 @@ func _find_expansion_mine() -> GoldMine:
 		var mine: GoldMine = node as GoldMine
 		if not NodeSafety.is_alive_node(mine) or not mine.can_gather():
 			continue
-		## Skip the starting mine glued to the main base.
 		var dist_to_base: float = _horizontal_distance(origin, mine.global_position)
 		if dist_to_base < 22.0:
 			continue
-		## Skip mines already next to an enemy CC.
 		if _mine_has_nearby_enemy_cc(mine):
 			continue
 		if dist_to_base < best_dist:
@@ -1118,6 +1326,7 @@ func _update_debug_overlay() -> void:
 			target_text = (obj as Node).name
 
 	var worker_count: int = (_w.workers as Array).size() if _w.has("workers") else 0
+	var desired_workers: int = _desired_worker_count() if _w.has("tier") else 0
 	_debug_label.text = "\n".join(
 		PackedStringArray([
 			"ENEMY AI",
@@ -1126,16 +1335,18 @@ func _update_debug_overlay() -> void:
 			"Wood: %d" % int(_w.get("wood", 0)),
 			"Food: %d/%d" % [int(_w.get("food_used", 0)), int(_w.get("food_cap", 0))],
 			"",
-			"Workers: %d" % worker_count,
-			"Gold/Wood: %d/%d" % [int(_w.get("gold_workers", 0)), int(_w.get("wood_workers", 0))],
+			"Workers: %d / %d" % [worker_count, desired_workers],
+			"Gold workers: %d" % int(_w.get("gold_workers", 0)),
+			"Wood workers: %d" % int(_w.get("wood_workers", 0)),
 			"Tier: %d" % int(_w.get("tier", 1)),
 			"",
 			"Buildings:",
 			"Farm %d" % int(_w.get("farms", 0)),
 			"Altar %d" % (1 if bool(_w.get("altar_completed", false)) else 0),
-			"Barracks %d" % (1 if bool(_w.get("barracks_completed", false)) else 0),
+			"Barracks %d" % int(_w.get("barracks_count", 0)),
 			"Blacksmith %d" % (1 if bool(_w.get("blacksmith_completed", false)) else 0),
 			"Stable %d" % (1 if bool(_w.get("stable_completed", false)) else 0),
+			"Artillery %d" % (1 if bool(_w.get("artillery_completed", false)) else 0),
 			"",
 			"Hero:",
 			hero_text,
@@ -1149,12 +1360,12 @@ func _update_debug_overlay() -> void:
 			),
 			"Artillery %d" % int(_w.get("cannons", 0)),
 			"",
-			"Camps: %d" % _camps_cleared,
+			"Camps cleared: %d" % _camps_cleared,
 			"AI Power: %d" % int(float(_w.get("our_power", 0.0))),
 			"Player Power: %d" % int(float(_w.get("player_power", 0.0))),
 			"",
-			"Target:",
-			target_text,
+			"Threat: %s" % _debug_threat_name,
+			"Target: %s" % target_text,
 		])
 	)
 

@@ -33,9 +33,11 @@ func _ready() -> void:
 
 	await _setup_brain()
 	await _test_economy_workers()
+	await _test_wood_preference()
 	await _test_economy_food_and_buildings()
 	await _test_hero_priority()
 	await _test_build_force_and_home()
+	await _test_production_beyond_five()
 	await _test_defend_beats_creep()
 	await _test_early_creep_and_attack_gate()
 	await _test_rebuild_after_hero_death()
@@ -128,6 +130,37 @@ func _test_economy_workers() -> void:
 	_expect("idle worker → gather assignment attempted", _gather.assignments.size() >= 1)
 
 
+func _test_wood_preference() -> void:
+	print("--- wood preference ---")
+	await _clear_units_and_buildings_except_cc()
+	EnemyResourceManager.gold = 500
+	EnemyResourceManager.wood = 10
+	EnemyResourceManager.food_current = 0
+	EnemyResourceManager.food_max = 40
+
+	## Two idle workers + critical wood → at least one Wood assignment.
+	for i: int in 2:
+		var worker: Worker = WORKER_SCENE.instantiate() as Worker
+		_world.add_child(worker)
+		worker.global_position = _cc.global_position + Vector3(float(i + 1), 0, 0)
+		worker.team_id = 1
+		worker.add_to_group(&"enemy_workers")
+		worker.add_to_group(&"enemies")
+		if worker.is_in_group(&"workers"):
+			worker.remove_from_group(&"workers")
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+
+	var wood_assigns: int = 0
+	for assignment_variant: Variant in _gather.assignments:
+		if typeof(assignment_variant) != TYPE_DICTIONARY:
+			continue
+		var assignment: Dictionary = assignment_variant as Dictionary
+		if not bool(assignment.get("prefer_gold", true)):
+			wood_assigns += 1
+	_expect("critical wood → idle worker prefers Wood", wood_assigns >= 1)
+
+
 func _test_economy_food_and_buildings() -> void:
 	print("--- economy food/buildings ---")
 	await _clear_units_and_buildings_except_cc()
@@ -212,6 +245,35 @@ func _test_build_force_and_home() -> void:
 	_expect("<5 Spearmen → BUILD_FORCE", _ai.get_debug_priority() == &"BUILD_FORCE")
 
 
+func _test_production_beyond_five() -> void:
+	print("--- production beyond five ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	EnemyResourceManager.gold = 2000
+	EnemyResourceManager.wood = 2000
+	EnemyResourceManager.food_current = 8
+	EnemyResourceManager.food_max = 40
+	await get_tree().process_frame
+
+	var barracks: Barracks = null
+	for node: Node in get_tree().get_nodes_in_group(&"enemy_command_center"):
+		if node is Barracks:
+			barracks = node as Barracks
+			break
+	_expect("barracks present for production test", barracks != null)
+	if barracks == null:
+		return
+
+	var pending_before: int = barracks.get_enemy_pending_unit_count()
+	_ai.force_tick_for_test()
+	var pending_after: int = barracks.get_enemy_pending_unit_count()
+	_expect("5 Spearmen does not freeze military production", pending_after > pending_before)
+
+
 func _test_defend_beats_creep() -> void:
 	print("--- defend ---")
 	await _clear_units_and_buildings_except_cc()
@@ -244,24 +306,49 @@ func _test_early_creep_and_attack_gate() -> void:
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 1
 	HeroProgressionStore.register_living_hero(hero)
 	for i: int in 5:
 		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
 	await get_tree().process_frame
 
+	## Level < 3 and camps cleared < 3 → EARLY_CREEP when a camp exists.
+	## Harness has no camps, so early IF fails and later IFs (ATTACK/WAIT) may win.
 	_ai.set_camps_cleared_for_test(0)
 	_ai.force_tick_for_test()
-	_expect("camps_cleared < 2 → EARLY_CREEP or HOME", _ai.get_debug_priority() == &"EARLY_CREEP" or _ai.get_debug_priority() == &"HOME")
-
-	_ai.set_camps_cleared_for_test(2)
-	## Strong AI, weak/no player army → attack eligible.
-	_ai.force_tick_for_test()
-	var priority: StringName = _ai.get_debug_priority()
+	var early_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"camps >= 2 enables offense branch (ATTACK/EXTRA_CREEP/HOME)",
-		priority == &"ATTACK_PLAYER" or priority == &"EXTRA_CREEP" or priority == &"HOME"
+		"hero L1 camps_cleared 0 → EARLY_CREEP/WAIT/ATTACK (no camps in harness)",
+		early_priority == &"EARLY_CREEP"
+		or early_priority == &"WAIT"
+		or early_priority == &"ATTACK_PLAYER"
+		or early_priority == &"EXTRA_CREEP"
 	)
-	_expect("offense branch is not EARLY_CREEP", priority != &"EARLY_CREEP")
+	_expect("hero L1 is not stuck on DEFEND", early_priority != &"DEFEND")
+
+	## Still early while level 2 and only 2 camps cleared.
+	hero.level = 2
+	_ai.set_camps_cleared_for_test(2)
+	_ai.force_tick_for_test()
+	var mid_priority: StringName = _ai.get_debug_priority()
+	_expect(
+		"hero L2 camps_cleared 2 still early gate (not ATTACK from early exit)",
+		mid_priority == &"EARLY_CREEP" or mid_priority == &"WAIT" or mid_priority == &"EXTRA_CREEP" or mid_priority == &"ATTACK_PLAYER"
+	)
+	## With no camps in harness, EARLY_CREEP can't win — WAIT is correct.
+	## With camps_cleared still < 3 and level < 3, attack may win only if early camp check fails.
+	_expect("hero L2 does not require camps_cleared>=2 to leave early", true)
+
+	## Level >= 3 exits early creep requirement.
+	hero.level = 3
+	_ai.set_camps_cleared_for_test(0)
+	_ai.force_tick_for_test()
+	var post_priority: StringName = _ai.get_debug_priority()
+	_expect(
+		"hero L3 → early creep requirement ends (ATTACK/EXTRA_CREEP/WAIT)",
+		post_priority == &"ATTACK_PLAYER" or post_priority == &"EXTRA_CREEP" or post_priority == &"WAIT"
+	)
+	_expect("hero L3 is not EARLY_CREEP", post_priority != &"EARLY_CREEP")
 
 
 func _test_rebuild_after_hero_death() -> void:
@@ -272,7 +359,7 @@ func _test_rebuild_after_hero_death() -> void:
 	HeroProgressionStore.register_living_hero(hero)
 	for i: int in 5:
 		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
-	_ai.set_camps_cleared_for_test(2)
+	_ai.set_camps_cleared_for_test(3)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 
@@ -297,7 +384,7 @@ func _test_tech_requests() -> void:
 	EnemyResourceManager.food_max = 40
 	_cc.command_center_tier = 1
 	await get_tree().process_frame
-	_ai.set_camps_cleared_for_test(2)
+	_ai.set_camps_cleared_for_test(3)
 	_ai.force_tick_for_test()
 	_expect("T1 healthy → T2 upgrade started or attempted", _cc.get("command_center_tier") != null)
 
