@@ -289,6 +289,19 @@ func _assign_nearest_builder(building: Building) -> void:
 	worker.command_build(building)
 
 
+## Public: staff an unfinished enemy foundation (AI condition tick / recovery).
+func assign_builder_to(building: Building) -> bool:
+	if not NodeSafety.is_alive_node(building):
+		return false
+	if not building.is_being_constructed():
+		return false
+	var worker: Worker = _find_nearest_available_enemy_worker(building.global_position)
+	if not NodeSafety.is_alive_node(worker):
+		return false
+	worker.command_build(building)
+	return true
+
+
 func _find_nearest_available_enemy_worker(near_position: Vector3) -> Worker:
 	var tree: SceneTree = get_tree()
 	if tree == null:

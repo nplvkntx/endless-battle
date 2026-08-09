@@ -44,6 +44,7 @@ func _ready() -> void:
 	await _test_rebuild_after_hero_death()
 	await _test_tech_requests()
 	await _test_faction_classification_invariants()
+	await _test_player_power_with_unset_team_id()
 	await _test_freed_creep_camp_count()
 
 	var report: String
@@ -555,6 +556,30 @@ func _test_faction_classification_invariants() -> void:
 	await get_tree().process_frame
 
 
+func _test_player_power_with_unset_team_id() -> void:
+	print("--- player power with unset team_id ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Mimic live barracks/altar spawn bug: team_id left at -1, still in "units".
+	var unset_pike: Unit = _spawn_player_spearman_unset_team(_cc.global_position + Vector3(70, 0, 0))
+	await get_tree().process_frame
+	_expect(
+		"unset team_id still is_player_faction",
+		CombatTargetValidation.is_player_faction(unset_pike)
+	)
+	_ai.force_tick_for_test()
+	_expect(
+		"unset team_id player pike counted in army",
+		_ai.get_player_army_for_test().has(unset_pike)
+	)
+	_expect(
+		"unset team_id player power > 0",
+		_ai.get_player_power_for_test() > 0.0
+	)
+	_kill_unit(unset_pike)
+	await get_tree().process_frame
+
+
 func _test_freed_creep_camp_count() -> void:
 	print("--- freed creep camp count ---")
 	await _clear_units_and_buildings_except_cc()
@@ -672,6 +697,23 @@ func _spawn_player_spearman(position: Vector3) -> Unit:
 		unit.remove_from_group(&"enemies")
 	if unit.is_in_group(&"enemy_combat_units"):
 		unit.remove_from_group(&"enemy_combat_units")
+	return unit
+
+
+## Reproduces the live-match bug: player military with default team_id=-1 in "units".
+func _spawn_player_spearman_unset_team(position: Vector3) -> Unit:
+	var unit: Unit = SPEARMAN_SCENE.instantiate() as Unit
+	_world.add_child(unit)
+	unit.global_position = position
+	unit.team_id = TeamVisuals.NEUTRAL_TEAM_ID
+	if not unit.is_in_group(&"units"):
+		unit.add_to_group(&"units")
+	if unit.is_in_group(&"enemies"):
+		unit.remove_from_group(&"enemies")
+	if unit.is_in_group(&"enemy_combat_units"):
+		unit.remove_from_group(&"enemy_combat_units")
+	if unit.is_in_group(&"neutral_creeps"):
+		unit.remove_from_group(&"neutral_creeps")
 	return unit
 
 

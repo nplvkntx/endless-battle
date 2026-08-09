@@ -14,7 +14,6 @@ const COHESION_RADIUS: float = 14.0
 const ATTACK_ENGAGE_RADIUS: float = 18.0
 const CAMP_SEARCH_RANGE: float = 70.0
 const ATTACK_POWER_RATIO: float = 1.25
-const OVERWHELM_POWER_RATIO: float = 1.6
 const FOOD_SAFETY_MARGIN: int = 4
 const MIN_EARLY_SPEARMEN: int = 5
 const MIN_CREEP_SOLDIERS_NEAR: int = 3
@@ -62,6 +61,7 @@ var _last_command_army_count: int = 0
 var _chosen_expansion_mine_id: int = 0
 var _debug_priority: StringName = &"BOOT"
 var _debug_threat_name: String = "-"
+var _debug_last_decision_key: String = ""
 
 var _build_manager: EnemyBuildManager = null
 var _gather_manager: EnemyGatherManager = null
@@ -89,6 +89,7 @@ func reset_match_state() -> void:
 	_chosen_expansion_mine_id = 0
 	_debug_priority = &"RESET"
 	_debug_threat_name = "-"
+	_debug_last_decision_key = ""
 	_w.clear()
 
 
@@ -105,6 +106,7 @@ func _ai_tick() -> void:
 	_read_live_world()
 
 	## Economy / tech / production — may all run; do not freeze military.
+	_staff_abandoned_construction()
 	_maintain_workers()
 	_maintain_worker_distribution()
 	_maintain_food()
@@ -120,12 +122,14 @@ func _ai_tick() -> void:
 	if _w.hero == null:
 		_army_home()
 		_set_priority(&"HERO")
+		_log_ai_decision(&"HERO", CMD_HOME, null)
 		_update_debug_overlay()
 		return
 
 	if _army_below_minimum():
 		_army_home()
 		_set_priority(&"BUILD_FORCE")
+		_log_ai_decision(&"BUILD_FORCE", CMD_HOME, null)
 		_update_debug_overlay()
 		return
 
@@ -134,6 +138,7 @@ func _ai_tick() -> void:
 		_debug_threat_name = threat.name
 		_whole_army_attack(threat, CMD_DEFEND)
 		_set_priority(&"DEFEND")
+		_log_ai_decision(&"DEFEND", CMD_DEFEND, threat)
 		_update_debug_overlay()
 		return
 	_debug_threat_name = "-"
@@ -142,29 +147,34 @@ func _ai_tick() -> void:
 	if not _hero_is_with_army():
 		_regroup_whole_army()
 		_set_priority(&"REGROUP")
+		_log_ai_decision(&"REGROUP", CMD_REGROUP, null)
 		_update_debug_overlay()
 		return
 
 	if _needs_early_creep():
 		_creep_with_whole_army()
 		_set_priority(&"EARLY_CREEP")
+		_log_ai_decision(&"EARLY_CREEP", CMD_CREEP, null)
 		_update_debug_overlay()
 		return
 
 	if _should_attack_player():
 		_attack_player_with_whole_army()
 		_set_priority(&"ATTACK_PLAYER")
+		_log_ai_decision(&"ATTACK_PLAYER", CMD_ATTACK, _w.player_cc as Node3D)
 		_update_debug_overlay()
 		return
 
 	if _useful_creep_exists():
 		_creep_with_whole_army()
 		_set_priority(&"EXTRA_CREEP")
+		_log_ai_decision(&"EXTRA_CREEP", CMD_CREEP, null)
 		_update_debug_overlay()
 		return
 
 	_army_home()
 	_set_priority(&"WAIT")
+	_log_ai_decision(&"WAIT", CMD_HOME, null)
 	_update_debug_overlay()
 
 
@@ -386,6 +396,7 @@ func _read_live_world() -> void:
 
 	_w.our_power = _calc_force_power(_w.army as Array)
 	_w.player_power = _calc_force_power(_w.player_army as Array)
+	_validate_power_invariants()
 	_w.active_camps = CreepCampSafety.collect_active_camps(tree)
 
 	if _chosen_expansion_mine_id != 0:
@@ -398,6 +409,50 @@ func _read_live_world() -> void:
 # ---------------------------------------------------------------------------
 # Economy conditions
 # ---------------------------------------------------------------------------
+
+func _staff_abandoned_construction() -> void:
+	## Condition only: unfinished enemy building with no valid builder → assign one.
+	if _build_manager == null:
+		return
+	var abandoned: Building = _find_unfinished_building_without_builder()
+	if abandoned == null:
+		return
+	if _build_manager.assign_builder_to(abandoned):
+		if OS.is_debug_build():
+			push_warning(
+				"[AI CONSTRUCTION] Reassigned builder to unfinished %s" % abandoned.name
+			)
+
+
+func _find_unfinished_building_without_builder() -> Building:
+	var tree: SceneTree = _w.tree as SceneTree
+	if tree == null:
+		return null
+	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
+		if not node is Building or not NodeSafety.is_alive_node(node):
+			continue
+		var building: Building = node as Building
+		if not building.is_being_constructed():
+			continue
+		if building.has_assigned_builder():
+			continue
+		if _has_worker_en_route_to_building(building):
+			continue
+		return building
+	return null
+
+
+func _has_worker_en_route_to_building(building: Building) -> bool:
+	for worker_variant: Variant in _w.workers as Array:
+		if not worker_variant is Worker or not NodeSafety.is_alive_node(worker_variant):
+			continue
+		var worker: Worker = worker_variant as Worker
+		if not worker.is_on_construction_trip():
+			continue
+		if worker.get_build_target() == building:
+			return true
+	return false
+
 
 func _maintain_workers() -> void:
 	var desired: int = _desired_worker_count()
@@ -813,26 +868,28 @@ func _find_base_threat() -> Node3D:
 
 
 func _should_attack_player() -> bool:
-	if (_w.army as Array).is_empty():
+	var army: Array = _w.army as Array
+	if army.is_empty():
 		return false
-	## Do not attack suicidally.
-	if float(_w.player_power) > float(_w.our_power) * 1.15 and not (_w.player_army as Array).is_empty():
+	if float(_w.our_power) <= 0.0:
 		return false
 
-	if float(_w.our_power) > float(_w.player_power) * OVERWHELM_POWER_RATIO:
+	var player_army: Array = _w.player_army as Array
+	var player_power: float = float(_w.player_power)
+	var our_power: float = float(_w.our_power)
+
+	## Do not suicide into a stronger living player force.
+	if not player_army.is_empty() and player_power > our_power * 1.15:
+		return false
+
+	## Clear superiority — single explicit ratio.
+	if our_power >= player_power * ATTACK_POWER_RATIO:
 		return true
-	if float(_w.our_power) > float(_w.player_power) * ATTACK_POWER_RATIO:
+
+	## Player has no living combatants and AI has a real army.
+	if player_army.is_empty() and army.size() >= MIN_EARLY_SPEARMEN + 1:
 		return true
-	## Player army almost destroyed.
-	if (_w.player_army as Array).is_empty() and (_w.army as Array).size() >= MIN_EARLY_SPEARMEN + 1:
-		return true
-	## Player Hero dead and AI has a healthy army.
-	if (
-		_w.player_hero == null
-		and (_w.army as Array).size() >= MIN_EARLY_SPEARMEN + 2
-		and float(_w.our_power) >= float(_w.player_power)
-	):
-		return true
+
 	return false
 
 
@@ -883,7 +940,11 @@ func _attack_player_with_whole_army() -> void:
 		_issue_army_move(target_pos, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
 		return
 
-	## Close enough: whole army may focus the live target.
+	## Close enough only if the army itself is near — never focus-fire from afar.
+	if _army_near_position(target_pos, ATTACK_ENGAGE_RADIUS) * 2 < (_w.army as Array).size():
+		_issue_army_move(target_pos, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
+		return
+
 	_whole_army_attack(target, CMD_ATTACK)
 
 
@@ -920,11 +981,7 @@ func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
 		return
 	var army: Array = _w.army as Array
 	var target_id: int = target.get_instance_id()
-	if (
-		_last_command_kind == command_kind
-		and _last_command_target_id == target_id
-		and _last_command_army_count == army.size()
-	):
+	if _should_skip_reissue(command_kind, target_id, army):
 		return
 
 	for unit_variant: Variant in army:
@@ -1038,11 +1095,7 @@ func _issue_army_move(
 	var army: Array = _w.army as Array
 	if army.is_empty():
 		return
-	if (
-		_last_command_kind == command_kind
-		and _last_command_target_id == target_id
-		and _last_command_army_count == army.size()
-	):
+	if _should_skip_reissue(command_kind, target_id, army):
 		return
 
 	var units: Array = []
@@ -1072,6 +1125,59 @@ func _issue_army_move(
 	_last_command_target_id = target_id
 	_last_command_army_count = army.size()
 	_current_target_id = target_id
+
+
+## Skip reissue only when cache matches AND majority still executes a compatible order.
+func _should_skip_reissue(command_kind: StringName, target_id: int, army: Array) -> bool:
+	if (
+		_last_command_kind != command_kind
+		or _last_command_target_id != target_id
+		or _last_command_army_count != army.size()
+	):
+		return false
+	return _majority_army_has_compatible_order(command_kind, target_id)
+
+
+func _majority_army_has_compatible_order(command_kind: StringName, target_id: int) -> bool:
+	var army: Array = _w.army as Array
+	if army.is_empty():
+		return true
+	var ok: int = 0
+	var living: int = 0
+	for unit_variant: Variant in army:
+		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
+			continue
+		living += 1
+		var unit: Unit = unit_variant as Unit
+		if _unit_has_compatible_strategic_order(unit, command_kind, target_id):
+			ok += 1
+	if living <= 0:
+		return true
+	return ok * 2 >= living
+
+
+func _unit_has_compatible_strategic_order(unit: Unit, command_kind: StringName, target_id: int) -> bool:
+	## Focus-fire / defend: must still hold the same attack target.
+	if command_kind == CMD_ATTACK or command_kind == CMD_DEFEND or command_kind == CMD_CREEP:
+		if not ("_attack_target" in unit):
+			return unit.has_move_target
+		var attack_target: Variant = unit.get("_attack_target")
+		if NodeSafety.is_alive_node(attack_target) and attack_target is Object:
+			if (attack_target as Object).get_instance_id() == target_id:
+				return true
+		## Creep/attack march may still be traveling.
+		if unit.has_move_target:
+			return true
+		if "_has_attack_move_destination" in unit and bool(unit.get("_has_attack_move_destination")):
+			return true
+		return false
+
+	## Move / regroup / attack-march: still pathing or attack-moving.
+	if unit.has_move_target:
+		return true
+	if "_has_attack_move_destination" in unit and bool(unit.get("_has_attack_move_destination")):
+		return true
+	return false
 
 
 func _select_player_target() -> Node3D:
@@ -1348,6 +1454,61 @@ func _calc_force_power(units: Array) -> float:
 	return total
 
 
+func _validate_power_invariants() -> void:
+	if not OS.is_debug_build():
+		return
+	var player_count: int = (_w.player_army as Array).size()
+	var enemy_count: int = (_w.army as Array).size()
+	if player_count > 0 and float(_w.player_power) <= 0.0:
+		push_error(
+			"[POWER INVARIANT] living player combat units=%d but player_power=0" % player_count
+		)
+	if enemy_count > 0 and float(_w.our_power) <= 0.0:
+		push_error(
+			"[POWER INVARIANT] living enemy combat units=%d but our_power=0" % enemy_count
+		)
+
+
+func _log_ai_decision(condition: StringName, order: StringName, target: Node3D) -> void:
+	if not OS.is_debug_build():
+		return
+	## Rate-limit to decision changes only.
+	var key: String = "%s|%s|%d" % [
+		String(condition),
+		String(order),
+		target.get_instance_id() if NodeSafety.is_alive_node(target) else 0,
+	]
+	if key == _debug_last_decision_key:
+		return
+	_debug_last_decision_key = key
+	var hero: Hero = _w.hero as Hero
+	var hero_pos: String = "-"
+	var centroid: Vector3 = _army_centroid()
+	var hero_dist: float = -1.0
+	if hero != null and NodeSafety.is_alive_node(hero):
+		hero_pos = "%.1f,%.1f" % [hero.global_position.x, hero.global_position.z]
+		hero_dist = _horizontal_distance(hero.global_position, centroid)
+	var soldiers: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if unit_variant is Unit and not (unit_variant is Hero) and NodeSafety.is_alive_node(unit_variant):
+			soldiers += 1
+	print(
+		"[AI DECISION] condition=%s order=%s player_power=%d enemy_power=%d hero=%s soldiers=%d near_hero=%d hero_dist_centroid=%.1f cohesive=%s target=%s"
+		% [
+			String(condition),
+			String(order),
+			int(float(_w.player_power)),
+			int(float(_w.our_power)),
+			hero_pos,
+			soldiers,
+			_soldiers_near_hero(COHESION_RADIUS),
+			hero_dist,
+			str(_hero_is_with_army()),
+			target.name if NodeSafety.is_alive_node(target) else "-",
+		]
+	)
+
+
 func _count_pending_spearmen(barracks: Barracks) -> int:
 	var count: int = 0
 	for train_id: StringName in barracks.get_training_queue():
@@ -1530,6 +1691,8 @@ func _update_debug_overlay() -> void:
 			"Player Power: %d" % int(float(_w.get("player_power", 0.0))),
 			"Player military count: %d" % player_military_count,
 			"Enemy military count: %d" % enemy_military_count,
+			"Soldiers near hero: %d" % _soldiers_near_hero(COHESION_RADIUS),
+			"Hero with army: %s" % str(_hero_is_with_army()),
 			"Neutral creep count: %d" % neutral_creep_count,
 			"",
 			"Threat: %s" % _debug_threat_name,

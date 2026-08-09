@@ -285,6 +285,9 @@ static func is_enemy_faction(node: Variant) -> bool:
 
 ## True when the node belongs to the actual player faction.
 ## Neutral is a third category — NOT ENEMY does not mean PLAYER.
+## Player-trained units historically kept default team_id=-1 while living in
+## "units"/"heroes"/"workers"; treat that group alignment as player only after
+## neutrals and enemies are excluded (matches TeamVisuals.resolve_team).
 static func is_player_faction(node: Variant) -> bool:
 	if node == null or not node is Node:
 		return false
@@ -307,7 +310,20 @@ static func is_player_faction(node: Variant) -> bool:
 	else:
 		return false
 
-	return team_id == TeamVisuals.PLAYER_TEAM_ID
+	if team_id == TeamVisuals.PLAYER_TEAM_ID:
+		return true
+
+	## Unset / neutral team_id on player-aligned groups (not neutral creeps).
+	if team_id != TeamVisuals.NEUTRAL_TEAM_ID and team_id >= 0:
+		return false
+
+	if scene_node.is_in_group(&"workers") or scene_node.is_in_group(&"units") or scene_node.is_in_group(&"heroes"):
+		return true
+
+	if node is Building and scene_node.is_in_group(&"buildings"):
+		return true
+
+	return false
 
 
 ## Shared faction hostility check. Friendly fire is blocked unless an ability

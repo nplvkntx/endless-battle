@@ -327,8 +327,20 @@ func _ready() -> void:
 	_setup_visual_animator()
 	BuffComponent.ensure_on(self)
 	_apply_unit_data()
+	_ensure_default_player_team_id()
 	call_deferred("apply_team_visuals")
 	call_deferred("_register_with_entity_registry")
+
+
+## Player scenes historically omit team_id (default -1). Enemy / neutral paths set
+## team before or during spawn. Backfill player team so faction queries stay factual.
+func _ensure_default_player_team_id() -> void:
+	if team_id >= 0:
+		return
+	if is_in_group(&"neutral_creeps") or is_in_group(&"enemies") or is_in_group(&"enemy_workers") or is_in_group(&"enemy_combat_units"):
+		return
+	if is_in_group(&"workers") or is_in_group(&"units") or is_in_group(&"heroes"):
+		team_id = TeamVisuals.PLAYER_TEAM_ID
 
 
 func _enter_tree() -> void:

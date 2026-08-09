@@ -518,12 +518,14 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 
 
 func _finalize_spawned_unit(unit: Unit) -> void:
+	unit.team_id = TeamVisuals.PLAYER_TEAM_ID
 	unit.collision_layer = PhysicsLayers.UNITS
 	unit.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 
 	if not unit.is_in_group(&"units"):
 		unit.add_to_group(&"units")
 
+	unit.apply_team_visuals()
 	enable_spawned_unit_collision(unit)
 
 

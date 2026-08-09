@@ -867,6 +867,7 @@ func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
 
 
 func _finalize_spawned_unit(unit: Unit) -> void:
+	unit.team_id = TeamVisuals.PLAYER_TEAM_ID
 	unit.collision_layer = PhysicsLayers.UNITS
 	unit.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 
@@ -874,4 +875,5 @@ func _finalize_spawned_unit(unit: Unit) -> void:
 		unit.add_to_group(&"units")
 
 	UpgradeManager.apply_player_upgrades_to_unit(unit)
+	unit.apply_team_visuals()
 	enable_spawned_unit_collision(unit)

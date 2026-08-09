@@ -345,12 +345,14 @@ func _spawn_hero() -> void:
 	var spawn_pos: Vector3 = _claim_hero_spawn_position()
 	spawn_parent.add_child(hero)
 	hero.global_position = spawn_pos
+	hero.team_id = TeamVisuals.PLAYER_TEAM_ID
 	hero.collision_layer = PhysicsLayers.UNITS
 	hero.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 
 	if not hero.is_in_group(&"units"):
 		hero.add_to_group(&"units")
 
+	hero.apply_team_visuals()
 	enable_spawned_unit_collision(hero)
 
 	HeroProgressionStore.register_living_hero(hero)

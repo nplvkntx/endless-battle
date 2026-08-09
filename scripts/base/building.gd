@@ -573,6 +573,12 @@ func is_being_constructed() -> bool:
 	)
 
 
+## True when at least one living worker is registered on this foundation.
+func has_assigned_builder() -> bool:
+	_prune_invalid_builders()
+	return not _registered_builders.is_empty()
+
+
 ## Returns standoff positions around the building footprint for worker construction.
 func get_construction_points() -> Array[Vector3]:
 	var half_extents: Vector2 = _get_footprint_half_extents()
