@@ -2,8 +2,8 @@ class_name SimpleWc3AI
 extends Node
 
 ## Simple WC3 melee opening — sole runtime military authority when enabled.
-## Fixed sequence only:
-## Farm → Altar → Barracks → Hero → 5 Pikemen → assembly → creep camps until Hero level 3 → STOP.
+## Farm → Altar → Barracks → Hero → 5 Pikemen → assembly → attack-move creep loop.
+## Creep: one attack-move to current camp; wait until dead; next camp. No fight micro.
 ## After Barracks: keep training Pikemen when free; new Pikemen one-shot toward assembly or current camp.
 ## Economy/build/train use existing gameplay systems; this script decides when and what.
 
@@ -14,15 +14,12 @@ enum State {
 	TRAIN_HERO,
 	TRAIN_PIKEMEN,
 	ASSEMBLE,
-	TRAVEL,
-	FIGHT,
+	CREEP,
 	DONE,
 }
 
 const MIN_PIKEMEN := 5
-const HERO_STOP_LEVEL := 3
 const TICK_SECONDS := 0.5
-const ENGAGE_DISTANCE := 14.0
 const ASSEMBLY_RADIUS := 12.0
 const ENEMY_COMBAT_GROUP := &"enemy_combat_units"
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
@@ -43,8 +40,6 @@ var _ordered_unit_ids: Dictionary = {}
 var _camp_id: int = 0
 var _camp_name: String = "-"
 var _camp_destination: Vector3 = Vector3.ZERO
-var _travel_issued: bool = false
-var _fight_target_id: int = 0
 var _cleared_camp_ids: Dictionary = {}
 var _cleared_camp_names: Dictionary = {}
 
@@ -54,8 +49,6 @@ var last_army_count: int = 0
 var last_hero_level: int = 0
 var last_move_handled: bool = false
 var last_move_squad_size: int = 0
-var last_creep_damaged: bool = false
-var _tracked_creep_hp: float = -1.0
 var strategic_orders_issued: int = 0
 
 
@@ -88,10 +81,8 @@ func get_state_label() -> String:
 			return "TRAIN_PIKEMEN"
 		State.ASSEMBLE:
 			return "ASSEMBLE"
-		State.TRAVEL:
-			return "TRAVEL"
-		State.FIGHT:
-			return "FIGHT"
+		State.CREEP:
+			return "CREEP"
 		State.DONE:
 			return "DONE"
 	return "?"
@@ -105,12 +96,10 @@ func get_camp_destination() -> Vector3:
 	return _camp_destination
 
 
-## Dev test only: mark camps cleared and start normal creep travel selection.
-## Does not change decision logic — reuses _begin_creep_travel().
+## Dev test only: mark camps cleared and start normal creep selection.
+## Does not change decision logic — reuses _begin_creep().
 func init_test_after_camps(cleared_camp_names: Array) -> void:
 	_ordered_unit_ids.clear()
-	_fight_target_id = 0
-	_tracked_creep_hp = -1.0
 	_cleared_camp_ids.clear()
 	_cleared_camp_names.clear()
 	_clear_camp_target()
@@ -118,7 +107,7 @@ func init_test_after_camps(cleared_camp_names: Array) -> void:
 		_cleared_camp_names[String(camp_name_ref)] = true
 	_ensure_assembly_position()
 	_observe_army()
-	_begin_creep_travel()
+	_begin_creep()
 	_update_debug_label()
 
 
@@ -148,10 +137,8 @@ func _process(delta: float) -> void:
 			_tick_train_pikemen()
 		State.ASSEMBLE:
 			_tick_assemble()
-		State.TRAVEL:
-			_tick_travel()
-		State.FIGHT:
-			_tick_fight()
+		State.CREEP:
+			_tick_creep()
 		State.DONE:
 			pass
 
@@ -242,36 +229,11 @@ func _tick_assemble() -> void:
 
 	## Wait until Hero + 5 Pikemen are near the assembly point. No creeping early.
 	if _is_army_assembled():
-		_begin_creep_travel()
+		_begin_creep()
 
 
-func _tick_travel() -> void:
-	_try_train_pikeman()
-	var army: Array = _collect_main_army()
-	## After assembly, continue with Hero + living Pikemen (may be below 5).
-	if not _has_creeping_force(army):
-		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
-		_clear_camp_target()
-		return
-
-	var camp: Node3D = _resolve_camp()
-	if camp == null or not _camp_has_living_creeps(camp):
-		_begin_creep_travel()
-		return
-
-	if not _travel_issued:
-		_issue_army_move(army)
-		_travel_issued = true
-		return
-
-	if _army_in_engage_range(army, camp):
-		_state = State.FIGHT
-		_fight_target_id = 0
-		_tracked_creep_hp = -1.0
-		_tick_fight()
-
-
-func _tick_fight() -> void:
+## Attack-move current camp once; while camp lives, do nothing. Combat is unit-owned.
+func _tick_creep() -> void:
 	_try_train_pikeman()
 	var army: Array = _collect_main_army()
 	if not _has_creeping_force(army):
@@ -284,12 +246,7 @@ func _tick_fight() -> void:
 		_on_camp_cleared(camp)
 		return
 
-	var creep: NeutralCreep = _pick_living_creep(camp)
-	if creep == null:
-		_on_camp_cleared(camp)
-		return
-
-	_issue_fight_orders(army, creep)
+	## Current camp still alive — leave Hero / Pikemen alone. No order refresh.
 
 
 ## Keep making Pikemen whenever Barracks is free and resources allow. No ratios.
@@ -313,16 +270,13 @@ func _on_camp_cleared(camp: Node3D) -> void:
 	var hero: Hero = _find_living_hero()
 	if hero != null:
 		last_hero_level = hero.level
-		if hero.level >= HERO_STOP_LEVEL:
-			_state = State.DONE
-			_clear_camp_target()
-			return
 
-	_begin_creep_travel()
+	## Next suitable living camp — rebuild army and issue one attack-move.
+	_begin_creep()
 
 
-func _begin_creep_travel() -> void:
-	## Creeping force = Hero + all currently living Pikemen (one group command).
+func _begin_creep() -> void:
+	## main_army = living Hero + all living Pikemen
 	var army: Array = _collect_main_army()
 	if not _has_creeping_force(army):
 		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
@@ -331,7 +285,6 @@ func _begin_creep_travel() -> void:
 
 	var camp: Node3D = _select_creep_camp(army)
 	if camp == null:
-		## No living camp left — stop military behavior.
 		_state = State.DONE
 		_clear_camp_target()
 		return
@@ -339,21 +292,14 @@ func _begin_creep_travel() -> void:
 	_camp_id = camp.get_instance_id()
 	_camp_name = String(camp.name)
 	_camp_destination = Vector3(camp.global_position.x, 0.0, camp.global_position.z)
-	_travel_issued = false
-	_fight_target_id = 0
-	_tracked_creep_hp = -1.0
-	_state = State.TRAVEL
-	_issue_army_move(army)
-	_travel_issued = true
+	_state = State.CREEP
+	_issue_army_attack_move(army)
 
 
 func _clear_camp_target() -> void:
 	_camp_id = 0
 	_camp_name = "-"
 	_camp_destination = Vector3.ZERO
-	_travel_issued = false
-	_fight_target_id = 0
-	_tracked_creep_hp = -1.0
 
 
 func _has_minimum_force(army: Array) -> bool:
@@ -509,7 +455,7 @@ func _is_near_assembly(world: Vector3) -> bool:
 	return _horizontal_distance(world, assembly_position) <= ASSEMBLY_RADIUS
 
 
-## One-shot: new Hero/Pikeman → assembly; during creep → current camp objective.
+## One-shot: new Hero/Pikeman → assembly; during creep → current camp attack-move only.
 func _dispatch_new_unit_moves() -> void:
 	if _state == State.DONE or _state == State.BUILD_FARM or _state == State.BUILD_ALTAR or _state == State.BUILD_BARRACKS:
 		return
@@ -517,7 +463,7 @@ func _dispatch_new_unit_moves() -> void:
 		return
 
 	_ensure_assembly_position()
-	var creeping: bool = _state == State.TRAVEL or _state == State.FIGHT
+	var creeping: bool = _state == State.CREEP
 	var destination: Vector3 = _camp_destination if creeping and _camp_destination != Vector3.ZERO else assembly_position
 	if destination == Vector3.ZERO:
 		return
@@ -531,7 +477,10 @@ func _dispatch_new_unit_moves() -> void:
 		var unit_id: int = unit.get_instance_id()
 		if _ordered_unit_ids.has(unit_id):
 			continue
-		_issue_single_unit_move(unit, destination)
+		if creeping:
+			_issue_single_unit_attack_move(unit, destination)
+		else:
+			_issue_single_unit_move(unit, destination)
 		_ordered_unit_ids[unit_id] = true
 
 
@@ -549,6 +498,29 @@ func _issue_single_unit_move(unit: Unit, destination: Vector3) -> void:
 	last_move_squad_size = int(result.get("squad_size", 0))
 	if last_move_handled:
 		strategic_orders_issued += 1
+
+
+func _issue_single_unit_attack_move(unit: Unit, destination: Vector3) -> void:
+	if not NodeSafety.is_alive_node(unit) or destination == Vector3.ZERO:
+		return
+	## Existing combat micro only engages when mission allows it.
+	EnemyUnitMission.try_set_mission(unit, EnemyUnitMission.Mission.CREEP, 0.0)
+	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		[unit],
+		destination,
+		&"attack_move",
+		false,
+		COMMAND_SOURCE
+	)
+	last_move_handled = bool(result.get("handled", false))
+	last_move_squad_size = int(result.get("squad_size", 0))
+	if last_move_handled:
+		strategic_orders_issued += 1
+
+
+func _mark_army_creeping(units: Array) -> void:
+	EnemyUnitMission.set_main_army_mission(EnemyUnitMission.Mission.CREEP, "simple wc3 creep")
+	EnemyUnitMission.claim_units_for_mission(units, EnemyUnitMission.Mission.CREEP, 0.0)
 
 
 func _has_completed_farm() -> bool:
@@ -640,26 +612,10 @@ func _select_creep_camp(army: Array) -> Node3D:
 	if active_camps.is_empty():
 		return null
 
-	## Prefer nearby Medium/Small early camps; otherwise nearest living camp.
-	var preferred: Array[Node3D] = []
-	for camp: Node3D in active_camps:
-		if camp == null or not is_instance_valid(camp):
-			continue
-		if _is_camp_cleared(camp):
-			continue
-		var camp_name: String = String(camp.name)
-		if (
-			camp_name.begins_with("Medium")
-			or camp_name.contains("Medium")
-			or camp_name.begins_with("Small")
-			or camp_name.contains("Small")
-		):
-			preferred.append(camp)
-
-	var pool: Array[Node3D] = preferred if not preferred.is_empty() else active_camps
+	## Nearest living uncleared camp — no camp-name special cases.
 	var best: Node3D = null
 	var best_dist: float = INF
-	for camp: Node3D in pool:
+	for camp: Node3D in active_camps:
 		if camp == null or not is_instance_valid(camp):
 			continue
 		if _is_camp_cleared(camp):
@@ -736,118 +692,56 @@ func _pick_living_creep(camp: Node3D) -> NeutralCreep:
 	return null
 
 
-func _army_in_engage_range(army: Array, camp: Node3D) -> bool:
-	if camp == null or not is_instance_valid(camp):
-		return false
-	var camp_pos: Vector3 = camp.global_position
-	for unit_ref: Variant in army:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		var unit: Unit = unit_ref as Unit
-		if _horizontal_distance(unit.global_position, camp_pos) <= ENGAGE_DISTANCE:
-			return true
-		for child_variant: Variant in camp.get_children():
-			if not NodeSafety.is_alive_node(child_variant):
-				continue
-			if not child_variant is NeutralCreep:
-				continue
-			var creep: NeutralCreep = child_variant as NeutralCreep
-			if _horizontal_distance(unit.global_position, creep.global_position) <= ENGAGE_DISTANCE:
-				return true
-	return false
-
-
-func _issue_army_move(units: Array) -> void:
+func _issue_army_attack_move(units: Array) -> void:
 	if units.is_empty() or _camp_destination == Vector3.ZERO:
 		return
 
-	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-		units,
-		_camp_destination,
-		&"move",
-		false,
-		COMMAND_SOURCE
-	)
-	last_move_handled = bool(result.get("handled", false))
-	last_move_squad_size = int(result.get("squad_size", 0))
-	if last_move_handled:
-		strategic_orders_issued += 1
-		for unit_ref: Variant in units:
+	_mark_army_creeping(units)
+
+	## Pikemen contact first; Hero attack-moves immediately after to the same camp.
+	var pikemen: Array = []
+	var heroes: Array = []
+	for unit_ref: Variant in units:
+		if not NodeSafety.is_alive_node(unit_ref):
+			continue
+		if unit_ref is Spearman:
+			pikemen.append(unit_ref)
+		elif unit_ref is Hero:
+			heroes.append(unit_ref)
+
+	var total_squad: int = 0
+	var any_handled: bool = false
+	if not pikemen.is_empty():
+		var pike_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+			pikemen,
+			_camp_destination,
+			&"attack_move",
+			false,
+			COMMAND_SOURCE
+		)
+		any_handled = any_handled or bool(pike_result.get("handled", false))
+		total_squad += int(pike_result.get("squad_size", 0))
+		for unit_ref: Variant in pikemen:
+			if NodeSafety.is_alive_node(unit_ref):
+				_ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
+	if not heroes.is_empty():
+		var hero_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+			heroes,
+			_camp_destination,
+			&"attack_move",
+			false,
+			COMMAND_SOURCE
+		)
+		any_handled = any_handled or bool(hero_result.get("handled", false))
+		total_squad += int(hero_result.get("squad_size", 0))
+		for unit_ref: Variant in heroes:
 			if NodeSafety.is_alive_node(unit_ref):
 				_ordered_unit_ids[(unit_ref as Unit).get_instance_id()] = true
 
-
-func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
-	if not NodeSafety.is_alive_node(creep):
-		return
-
-	var creep_id: int = creep.get_instance_id()
-	var health: HealthComponent = creep.get_node_or_null("HealthComponent") as HealthComponent
-	if health != null:
-		if _tracked_creep_hp >= 0.0 and health.current_health < _tracked_creep_hp:
-			last_creep_damaged = true
-		_tracked_creep_hp = health.current_health
-
-	## Same creep already fighting: do not touch Hero / existing Pikemen.
-	## New Pikemen only get a one-shot camp move from _dispatch_new_unit_moves.
-	var new_creep_objective: bool = _fight_target_id != creep_id
-	if not new_creep_objective:
-		return
-
-	## Only units already at the fight. Never fold a Barracks spawn into this handoff —
-	## that warps the shared group route and cancels active combat.
-	var fighters: Array = _units_near_creep(army, creep)
-	if fighters.is_empty():
-		return
-
-	_fight_target_id = creep_id
-	_tracked_creep_hp = health.current_health if health != null else -1.0
-	strategic_orders_issued += 1
-	for unit_ref: Variant in fighters:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		(unit_ref as Unit).clear_move_target()
-	var creep_destination := Vector3(creep.global_position.x, 0.0, creep.global_position.z)
-	var move_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-		fighters,
-		creep_destination,
-		&"move",
-		false,
-		COMMAND_SOURCE
-	)
-	last_move_handled = bool(move_result.get("handled", false))
-	last_move_squad_size = int(move_result.get("squad_size", 0))
-
-	## Pikemen start the fight / tank first.
-	for unit_ref: Variant in fighters:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		if not unit_ref is Spearman:
-			continue
-		(unit_ref as Spearman).command_attack(creep)
-
-	## Hero joins through normal combat.
-	for unit_ref: Variant in fighters:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		if not unit_ref is Hero:
-			continue
-		(unit_ref as Hero).command_attack(creep)
-
-
-## Units already near the living creep — excludes Barracks reinforcements mid-fight.
-func _units_near_creep(army: Array, creep: NeutralCreep) -> Array:
-	var fighters: Array = []
-	if not NodeSafety.is_alive_node(creep):
-		return fighters
-	var creep_pos: Vector3 = creep.global_position
-	for unit_ref: Variant in army:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		var unit: Unit = unit_ref as Unit
-		if _horizontal_distance(unit.global_position, creep_pos) <= ENGAGE_DISTANCE:
-			fighters.append(unit)
-	return fighters
+	last_move_handled = any_handled
+	last_move_squad_size = total_squad
+	if any_handled:
+		strategic_orders_issued += 1
 
 
 func _army_centroid(army: Array) -> Vector3:
