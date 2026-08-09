@@ -4,7 +4,7 @@ extends Node
 ## One shared strategic grid route per group command + personal slots +
 ## lightweight local separation.
 ## Used by player SelectionManager / FormationManager, production rally, and
-## SimpleWc3AI Stage 1 strategic travel (same API — AI chooses destination only).
+## any future commander that issues destinations through this shared API.
 
 const SLOT_SPACING := 1.4
 const GROUND_Y := 0.0

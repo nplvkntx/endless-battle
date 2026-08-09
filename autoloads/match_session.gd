@@ -169,8 +169,6 @@ func _verify_clean_match_state() -> void:
 		failures.append("HeroProgressionStore.player_living_hero")
 	if HeroProgressionStore.has_living_hero(true):
 		failures.append("HeroProgressionStore.enemy_living_hero")
-	if not MilitaryAIConfig.is_simple_wc3_ai_enabled():
-		failures.append("MilitaryAIConfig.simple_wc3_ai")
 	if EnemyBuildPlacement.preferred_tower_lane != &"":
 		failures.append("EnemyBuildPlacement.preferred_tower_lane")
 	if registered_match_reset_count() <= 0:

@@ -2,7 +2,7 @@ class_name EnemyBuildManager
 extends Node
 
 ## Enemy building placement / construction mechanics only.
-## Does not decide what to build — SimpleWc3AI (or tests) must request placement.
+## Does not decide what to build — callers must request placement.
 
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
 const ENEMY_WORKER_GROUP := &"enemy_workers"
@@ -69,7 +69,7 @@ func notify_enemy_worker_spawned(worker: Worker) -> void:
 		gather.assign_gather_job(worker, true)
 
 
-## Legacy hook from Command Center; production decisions are owned by SimpleWc3AI.
+## Legacy hook from Command Center; no automatic production policy.
 func request_worker_production_check() -> void:
 	pass
 

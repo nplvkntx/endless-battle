@@ -1,6 +1,6 @@
 extends Node
 
-## Headless verification for MatchCompositionRoot after total AI purge.
+## Headless verification for MatchCompositionRoot after enemy AI purge.
 ## Godot_v4.7-stable_win64.exe --headless --path <project> --scene res://scenes/debug/verify_match_composition_root.tscn
 
 const REPORT_PATH := "user://match_composition_root_verify_result.txt"
@@ -53,14 +53,17 @@ func _verify_packed_scene(failures: PackedStringArray) -> void:
 		await get_tree().process_frame
 		return
 
-	_expect(failures, "AIPlayerState child present", root.get_node_or_null("AIPlayerState") is AIPlayerState)
-	_expect(failures, "SimpleWc3AI child present", root.simple_wc3_ai is SimpleWc3AI)
-	_expect(failures, "authority is SimpleWc3AI", root.military_command_authority is SimpleWc3AI)
-	_expect(failures, "old military inactive", not root.is_old_military_runtime_active())
-	_expect(failures, "V2 inactive", not root.is_v2_military_active())
+	_expect(failures, "no SimpleWc3AI child", root.get_node_or_null("SimpleWc3AI") == null)
+	_expect(failures, "no AIPlayerState child", root.get_node_or_null("AIPlayerState") == null)
 	_expect(failures, "build manager mechanics present", root.enemy_build_manager != null)
 	_expect(failures, "gather manager mechanics present", root.enemy_gather_manager != null)
-	_expect(failures, "no legacy military children", root.get_node_or_null("MilitaryDirectorV2") == null)
+	_expect(failures, "no MilitaryDirectorV2 child", root.get_node_or_null("MilitaryDirectorV2") == null)
+	_expect(failures, "no ArmyCommanderV2 child", root.get_node_or_null("ArmyCommanderV2") == null)
+	_expect(failures, "no EnemyStrategicDirector child", root.get_node_or_null("EnemyStrategicDirector") == null)
+	_expect(failures, "no EnemyWaveManager child", root.get_node_or_null("EnemyWaveManager") == null)
+	_expect(failures, "no EnemyCreepManager child", root.get_node_or_null("EnemyCreepManager") == null)
+	_expect(failures, "no EnemyDefenseManager child", root.get_node_or_null("EnemyDefenseManager") == null)
+	_expect(failures, "no EnemyCombatController child", root.get_node_or_null("EnemyCombatController") == null)
 
 	systems.queue_free()
 	await get_tree().process_frame
@@ -69,27 +72,19 @@ func _verify_packed_scene(failures: PackedStringArray) -> void:
 func _verify_runtime_bind(failures: PackedStringArray) -> void:
 	var root := MatchCompositionRoot.new()
 	root.name = "MatchSystems"
-	var state := AIPlayerState.new()
-	state.name = "AIPlayerState"
-	root.add_child(state)
-	var simple := SimpleWc3AI.new()
-	simple.name = "SimpleWc3AI"
-	root.add_child(simple)
+	var build := EnemyBuildManager.new()
+	build.name = "EnemyBuildManager"
+	root.add_child(build)
+	var gather := EnemyGatherManager.new()
+	gather.name = "EnemyGatherManager"
+	root.add_child(gather)
 	add_child(root)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	_expect(failures, "root authority SimpleWc3AI", root.get_military_command_authority() is SimpleWc3AI)
-	_expect(
-		failures,
-		"AIPlayerState records SimpleWc3AI name",
-		state.military_command_authority_name == &"SimpleWc3AI"
-	)
-	_expect(
-		failures,
-		"AIPlayerState authority is SimpleWc3AI",
-		state.get_military_command_authority() is SimpleWc3AI
-	)
+	_expect(failures, "runtime resolves build manager", root.enemy_build_manager == build)
+	_expect(failures, "runtime resolves gather manager", root.enemy_gather_manager == gather)
+	_expect(failures, "runtime has no SimpleWc3AI", root.get_node_or_null("SimpleWc3AI") == null)
 
 	root.queue_free()
 	await get_tree().process_frame

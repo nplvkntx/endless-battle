@@ -3,36 +3,15 @@ extends Node
 
 ## Enemy worker gather execution only.
 ## Assigns a worker to mine/chop when told. No strategic rebalance or ratios.
+## Does not auto-assign workers — callers must request jobs.
 
-const ENEMY_WORKER_GROUP := &"enemy_workers"
 const ENEMY_COMMAND_CENTER_GROUP := &"enemy_command_center"
-const STARTING_GOLD_WORKERS: int = 4
 const GOLD_MINE_NEAR_CC_DISTANCE: float = 22.0
-const NAV_READY_MAX_FRAMES: int = 60
 
 @export var enemy_command_center_path: NodePath
 @export var enemy_gold_mine_path: NodePath
 
 var _starting_gold_mine: GoldMine = null
-var _started: bool = false
-
-
-func _ready() -> void:
-	call_deferred("_bootstrap_starting_workers")
-
-
-func _bootstrap_starting_workers() -> void:
-	if _started:
-		return
-	_started = true
-	var frames_waited: int = 0
-	while frames_waited < NAV_READY_MAX_FRAMES:
-		await get_tree().process_frame
-		frames_waited += 1
-		if not is_inside_tree():
-			return
-	_starting_gold_mine = _resolve_starting_gold_mine()
-	_assign_starting_workers()
 
 
 ## Legacy name kept for spawn/construction finish hooks. Not a strategic rebalance.
@@ -62,20 +41,6 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false, _force_recover
 	if _try_assign_wood_gather(worker, trees):
 		return true
 	return _try_assign_gold_gather(worker, gold_mine)
-
-
-func _assign_starting_workers() -> void:
-	var workers: Array[Worker] = []
-	for node: Node in get_tree().get_nodes_in_group(ENEMY_WORKER_GROUP):
-		if node is Worker and NodeSafety.is_alive_node(node):
-			workers.append(node as Worker)
-
-	var gold_assigned: int = 0
-	for worker: Worker in workers:
-		var prefer_gold: bool = gold_assigned < STARTING_GOLD_WORKERS
-		if assign_gather_job(worker, prefer_gold):
-			if prefer_gold:
-				gold_assigned += 1
 
 
 func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
@@ -120,17 +85,14 @@ func _resolve_enemy_command_center() -> CommandCenter:
 	return null
 
 
-func _resolve_starting_gold_mine() -> GoldMine:
-	if enemy_gold_mine_path != NodePath(""):
-		var via_path: GoldMine = get_node_or_null(enemy_gold_mine_path) as GoldMine
-		if via_path != null and _is_valid_gold_mine(via_path):
-			return via_path
-	return _resolve_gold_mine()
-
-
 func _resolve_gold_mine() -> GoldMine:
 	if _is_valid_gold_mine(_starting_gold_mine):
 		return _starting_gold_mine
+	if enemy_gold_mine_path != NodePath(""):
+		var via_path: GoldMine = get_node_or_null(enemy_gold_mine_path) as GoldMine
+		if via_path != null and _is_valid_gold_mine(via_path):
+			_starting_gold_mine = via_path
+			return via_path
 	var cc: CommandCenter = _resolve_enemy_command_center()
 	if cc == null:
 		return null

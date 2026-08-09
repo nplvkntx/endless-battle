@@ -11,10 +11,9 @@ Every important state must have **one** authoritative owner.
 | Concern | Owner | Notes |
 |---------|--------|--------|
 | Player selection | `SelectionManager` | Scene system (`scripts/systems/selection_manager.gd`). No `class_name`; node/script name is the authority. Stores selection identity via `EntityHandle`. |
-| Enemy military strategy / orders | `SimpleWc3AI` | Sole enemy decision authority. |
+| Enemy military strategy / orders | *(none)* | Enemy strategic AI purged. No active decision authority until a replacement is added. |
 | Enemy build / gather execution | `EnemyBuildManager` / `EnemyGatherManager` | Mechanics only — execute placements and gather jobs; do not decide strategy. |
-| Match-owned AI identity | `AIPlayerState` | Owned by match via `MatchCompositionRoot`. |
-| Match composition / lifecycle | `MatchCompositionRoot` | Match-scoped wiring; declares SimpleWc3AI command authority. |
+| Match composition / lifecycle | `MatchCompositionRoot` | Match-scoped wiring for selection, build, gather, and match systems. |
 | Player movement commands | `PlayerRouteNavigation` | Autoload. Intended sole player Move / Attack-Move route authority (see `MOVEMENT_CONTRACT.md`). |
 | UI | UI scripts under `scripts/ui/` | Reads gameplay state and issues requests. **Must not** become gameplay-state authority. |
 

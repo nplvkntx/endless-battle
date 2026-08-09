@@ -266,8 +266,6 @@ func _is_diag_tactical_micro_source(source: String) -> bool:
 
 
 func _diag_strategic_authority_family(source: String) -> String:
-	if source.begins_with("simple_wc3_ai"):
-		return "simple_wc3_ai"
 	if source == "RALLY":
 		return "RALLY"
 	return source

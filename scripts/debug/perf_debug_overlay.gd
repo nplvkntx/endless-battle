@@ -167,7 +167,7 @@ func _update_label() -> void:
 func _collect_difficulty_debug_lines(_tree: SceneTree) -> PackedStringArray:
 	return PackedStringArray([
 		"Difficulty: %s (UI only)" % MatchSession.get_ai_difficulty_name(),
-		"AI decision authority: SimpleWc3AI",
+		"AI decision authority: NONE",
 	])
 
 

@@ -7,17 +7,9 @@
 [ext_resource type="Script" uid="uid://cqdpgscogx8in" path="res://scripts/systems/enemy_gather_manager.gd" id="6_enemy_gather_manager"]
 [ext_resource type="Script" uid="uid://bqrub108hgnuf" path="res://scripts/systems/enemy_build_manager.gd" id="7_enemy_build_manager"]
 [ext_resource type="Script" path="res://scripts/systems/match_composition_root.gd" id="14_match_composition_root"]
-[ext_resource type="Script" path="res://scripts/systems/ai_player_state.gd" id="15_ai_player_state"]
-[ext_resource type="Script" path="res://scripts/systems/simple_wc3_ai.gd" id="16_simple_wc3_ai"]
 
 [node name="MatchSystems" type="Node"]
 script = ExtResource("14_match_composition_root")
-
-[node name="AIPlayerState" type="Node" parent="."]
-script = ExtResource("15_ai_player_state")
-
-[node name="SimpleWc3AI" type="Node" parent="."]
-script = ExtResource("16_simple_wc3_ai")
 
 [node name="SelectionManager" type="Node" parent="." unique_id=53640150]
 script = ExtResource("1_selection_manager")

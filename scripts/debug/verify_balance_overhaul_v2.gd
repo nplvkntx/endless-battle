@@ -141,6 +141,3 @@ func _check_construction(failures: PackedStringArray) -> void:
 		"min ratio floor",
 		BuildingStats.CONSTRUCTION_TIME_RATIO_MINIMUM == 0.45
 	)
-	_expect(failures, "ai thresholds creep 5", MilitaryAIConfig.V2_CREEP_READY_MILITARY_UNITS == 5)
-	_expect(failures, "ai attack 10", MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS == 10)
-	_expect(failures, "ai preferred 12", MilitaryAIConfig.V2_ATTACK_READY_MILITARY_UNITS_PREFERRED == 12)

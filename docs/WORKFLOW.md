@@ -20,7 +20,6 @@ Related but non-equivalent context (do not treat as superseding this set):
 - `cursor/AI_CONTEXT.md` — project snapshot / implemented systems
 - `cursor/RULES.md` — older coding conventions (some superseded; see `ENGINE_RULES.md` giant-script rule)
 - `docs/ROADMAP.md` — milestone task order
-- `docs/MILITARY_AI_V2.md` — military V2 detail
 - `docs/Architecture.md` — older architecture sketch
 
 ---

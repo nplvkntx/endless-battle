@@ -66,7 +66,6 @@ func _run_checks(failures: PackedStringArray) -> void:
 	_expect(failures, "medium creep xp 40", EconomyStats.CREEP_XP_MEDIUM == 40)
 	_expect(failures, "strong creep xp 80", EconomyStats.CREEP_XP_STRONG == 80)
 	_expect(failures, "cav upgrade +2", UpgradeStats.CAVALRY_ATTACK_DAMAGE_PER_LEVEL == 2)
-	_expect(failures, "ai authority SimpleWC3", MilitaryAIConfig.ai_version_label() == "SimpleWC3")
 
 	var w_rank2: float = float(
 		HeroAbilityStats.get_stat(

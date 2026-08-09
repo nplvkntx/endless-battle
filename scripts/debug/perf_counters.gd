@@ -96,7 +96,7 @@ var _squad_nav_stalls: int = 0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process(true)
-	_military_ai_version = MilitaryAIConfig.ai_version_label()
+	_military_ai_version = "NONE"
 	MatchSession.register_match_reset(&"PerfCounters", reset_all)
 
 
@@ -682,7 +682,7 @@ func reset_all() -> void:
 	_ai_combat_state = "-"
 	_ai_mission_owner = "-"
 	_ai_mission_detail = "-"
-	_military_ai_version = MilitaryAIConfig.ai_version_label()
+	_military_ai_version = "NONE"
 	_military_ai_v2_state = "-"
 	_military_ai_v2_mission = "-"
 	_military_ai_v2_objective = "-"

@@ -36,7 +36,6 @@ const LIGHT_CAVALRY_TRAIN_SECONDS: float = UnitStats.LIGHT_CAVALRY_TRAIN_SECONDS
 const HEAVY_CAVALRY_TRAIN_SECONDS: float = UnitStats.HEAVY_CAVALRY_TRAIN_SECONDS
 const CAVALRY_ARCHER_TRAIN_SECONDS: float = UnitStats.CAVALRY_ARCHER_TRAIN_SECONDS
 const RALLY_MARKER_Y: float = 0.05
-const ENEMY_PRODUCTION_INTERVAL_SECONDS: float = 8.0
 const MAX_ENEMY_UNIT_QUEUE: int = 3
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
@@ -45,8 +44,6 @@ const RALLY_SLOT_SPACING: float = 2.0
 @export var heavy_cavalry_spawn_offset: Vector3 = Vector3(-1.2, -0.5, -2.5)
 @export var light_cavalry_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
 @export var cavalry_archer_spawn_offset: Vector3 = Vector3(1.2, -0.5, -2.5)
-
-@export var enable_enemy_auto_production: bool = false
 
 var _training_queue: Array[StringName] = []
 var _is_training: bool = false
@@ -62,8 +59,6 @@ var _rally_point: Vector3 = Vector3.ZERO
 var _rally_marker: MeshInstance3D = null
 var _rally_next_slot: int = 0
 var _enemy_gather_next_slot: int = 0
-var _enemy_production_spawn_light_cavalry_next: bool = true
-var _enemy_production_active: bool = false
 var _is_researching: bool = false
 var _research_upgrade_id: StringName = &""
 var _research_started_at: float = 0.0
@@ -81,10 +76,6 @@ func _ready() -> void:
 
 	if _health_component != null and _health_component.has_signal("health_depleted"):
 		_health_component.health_depleted.connect(_on_health_depleted, CONNECT_ONE_SHOT)
-
-	if enable_enemy_auto_production:
-		_start_enemy_auto_production()
-
 
 ## Keep Quaternius Stable materials untouched; team identity comes from the selection ring.
 func apply_team_visuals() -> void:
@@ -226,42 +217,6 @@ func _exit_tree() -> void:
 	_disconnect_player_resource_listener()
 
 
-func _start_enemy_auto_production() -> void:
-	_enemy_production_active = true
-	_schedule_enemy_production_tick()
-
-
-func _schedule_enemy_production_tick() -> void:
-	if not _enemy_production_active:
-		return
-
-	var wait_timer: SceneTreeTimer = get_tree().create_timer(
-		ENEMY_PRODUCTION_INTERVAL_SECONDS
-	)
-	wait_timer.timeout.connect(_on_enemy_production_tick, CONNECT_ONE_SHOT)
-
-
-func _on_enemy_production_tick() -> void:
-	if not _enemy_production_active or not is_instance_valid(self):
-		return
-
-	if building_state != STATE_COMPLETED:
-		_schedule_enemy_production_tick()
-		return
-
-	if _enemy_production_spawn_light_cavalry_next:
-		if not try_train_enemy_light_cavalry():
-			if not try_train_enemy_cavalry_archer():
-				try_train_enemy_heavy_cavalry()
-	else:
-		if not try_train_enemy_cavalry_archer():
-			if not try_train_enemy_light_cavalry():
-				try_train_enemy_heavy_cavalry()
-
-	_enemy_production_spawn_light_cavalry_next = not _enemy_production_spawn_light_cavalry_next
-	_schedule_enemy_production_tick()
-
-
 func is_enemy_training_busy() -> bool:
 	return _is_training
 
@@ -330,14 +285,7 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	unit.apply_team_visuals()
 
 
-func _stop_enemy_auto_production() -> void:
-	_enemy_production_active = false
-
-
-
-
 func _on_health_depleted() -> void:
-	_stop_enemy_auto_production()
 	_invalidate_research()
 	_repeat_enabled = false
 	_repeat_waiting_for_resources = false
@@ -829,7 +777,7 @@ func _pay_training_costs() -> bool:
 
 
 func _uses_player_resources() -> bool:
-	return not enable_enemy_auto_production and team_id != ENEMY_TEAM_ID
+	return team_id != ENEMY_TEAM_ID
 
 
 func _ensure_player_resource_listener() -> void:

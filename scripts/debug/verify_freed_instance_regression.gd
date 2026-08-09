@@ -37,8 +37,6 @@ func _ready() -> void:
 	await _verify_targeting_cancels_on_hero_free(failures)
 	await _verify_command_feedback_reset_kills_effect_tweens(failures)
 	await _verify_match_restart_clears_stale_refs(failures)
-	await _verify_ai_command_authority_clears_freed(failures)
-	await _verify_ai_bound_player_state_clears_freed(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -459,80 +457,3 @@ func _verify_match_restart_clears_stale_refs(failures: PackedStringArray) -> voi
 		"restart: construction slots cleared for freed farm",
 		not ConstructionReservations.has_build_slot_owners_for_id(farm_id)
 	)
-
-
-func _verify_ai_command_authority_clears_freed(failures: PackedStringArray) -> void:
-	## Persistent military command-authority refs must clear after free.
-	var state := AIPlayerState.new()
-	add_child(state)
-
-	var authority := Node.new()
-	authority.name = "TempMilitaryCommandAuthority"
-	add_child(authority)
-	await _settle()
-
-	state.set_military_command_authority(authority)
-	var composition := MatchCompositionRoot.new()
-	composition.military_command_authority = authority
-	_expect(
-		failures,
-		"command authority: AIPlayerState live after assign",
-		state.get_military_command_authority() == authority
-	)
-	_expect(
-		failures,
-		"command authority: MatchCompositionRoot live after assign",
-		composition.get_military_command_authority() == authority
-	)
-
-	authority.queue_free()
-	await _settle()
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	_expect(
-		failures,
-		"command authority: AIPlayerState getter null after free",
-		state.get_military_command_authority() == null
-	)
-	_expect(
-		failures,
-		"command authority: MatchCompositionRoot getter null after free",
-		composition.get_military_command_authority() == null
-	)
-
-	composition.free()
-	state.queue_free()
-	await _settle()
-
-
-func _verify_ai_bound_player_state_clears_freed(failures: PackedStringArray) -> void:
-	## MatchCompositionRoot.military_command_authority must clear after free.
-	var root := MatchCompositionRoot.new()
-	root.name = "TempMatchSystems"
-	add_child(root)
-	var authority := SimpleWc3AI.new()
-	authority.name = "TempSimpleWc3AI"
-	root.add_child(authority)
-	root.military_command_authority = authority
-	await _settle()
-
-	_expect(
-		failures,
-		"bound AI authority: getter returns live authority",
-		root.get_military_command_authority() == authority
-	)
-
-	authority.queue_free()
-	await _settle()
-	await get_tree().process_frame
-	await get_tree().process_frame
-
-	_expect(
-		failures,
-		"bound AI authority: getter null after free",
-		root.get_military_command_authority() == null
-	)
-
-	root.queue_free()
-	await _settle()

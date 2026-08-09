@@ -31,7 +31,7 @@ var _rally_next_slot: int = 0
 var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
 ## Player-selected kit for the next training (UI writes this).
 var selected_kit_id: StringName = HeroCatalog.KIT_PALADIN
-## Fixed enemy hero kit for SimpleWc3AI (no strategic hero controller).
+## Fixed enemy hero kit when an enemy hero is trained (no strategic hero controller).
 const ENEMY_DEFAULT_KIT_ID: StringName = HeroCatalog.KIT_PALADIN
 
 @onready var _health_component: HealthComponent = get_node_or_null(
