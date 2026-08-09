@@ -271,8 +271,9 @@ func _tick_assemble() -> void:
 
 func _tick_travel() -> void:
 	var army: Array = _collect_main_army()
-	if not _has_minimum_force(army):
-		_state = State.TRAIN_PIKEMEN
+	## After assembly, continue with Hero + living Pikemen (may be below 5).
+	if not _has_creeping_force(army):
+		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -289,13 +290,14 @@ func _tick_travel() -> void:
 	if _army_in_engage_range(army, camp):
 		_state = State.FIGHT
 		_fight_target_id = 0
+		_tracked_creep_hp = -1.0
 		_tick_fight()
 
 
 func _tick_fight() -> void:
 	var army: Array = _collect_main_army()
-	if not _has_minimum_force(army):
-		_state = State.TRAIN_PIKEMEN
+	if not _has_creeping_force(army):
+		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -333,9 +335,10 @@ func _on_camp_cleared(camp: Node3D) -> void:
 
 
 func _begin_creep_travel() -> void:
+	## Creeping force = Hero + all currently living Pikemen (one group command).
 	var army: Array = _collect_main_army()
-	if not _has_minimum_force(army):
-		_state = State.TRAIN_PIKEMEN
+	if not _has_creeping_force(army):
+		_state = State.TRAIN_HERO if not last_hero_alive else State.TRAIN_PIKEMEN
 		_clear_camp_target()
 		return
 
@@ -351,6 +354,7 @@ func _begin_creep_travel() -> void:
 	_camp_destination = Vector3(camp.global_position.x, 0.0, camp.global_position.z)
 	_travel_issued = false
 	_fight_target_id = 0
+	_tracked_creep_hp = -1.0
 	_state = State.TRAVEL
 	_issue_army_move(army)
 	_travel_issued = true
@@ -366,6 +370,17 @@ func _clear_camp_target() -> void:
 
 
 func _has_minimum_force(army: Array) -> bool:
+	_observe_force_counts(army)
+	return last_hero_alive and last_pikeman_count >= MIN_PIKEMEN
+
+
+## Once creeping has started: living Hero required; bring every living Pikeman.
+func _has_creeping_force(army: Array) -> bool:
+	_observe_force_counts(army)
+	return last_hero_alive
+
+
+func _observe_force_counts(army: Array) -> void:
 	var hero_alive: bool = false
 	var pikemen: int = 0
 	for unit_ref: Variant in army:
@@ -376,7 +391,6 @@ func _has_minimum_force(army: Array) -> bool:
 	last_hero_alive = hero_alive
 	last_pikeman_count = pikemen
 	last_army_count = army.size()
-	return hero_alive and pikemen >= MIN_PIKEMEN
 
 
 func _observe_army() -> void:
@@ -787,12 +801,27 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 			last_creep_damaged = true
 		_tracked_creep_hp = health.current_health
 
-	## Stop strategic travel — combat owns the units now.
-	for unit_ref: Variant in army:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		var unit: Unit = unit_ref as Unit
-		unit.clear_custom_rts_route()
+	var new_creep_objective: bool = _fight_target_id != creep_id
+	if new_creep_objective:
+		## Each new creep objective initializes the same combat handoff:
+		## stop camp MOVE → move onto the living creep → Pikemen attack → Hero joins.
+		_fight_target_id = creep_id
+		_tracked_creep_hp = health.current_health if health != null else -1.0
+		strategic_orders_issued += 1
+		for unit_ref: Variant in army:
+			if not NodeSafety.is_alive_node(unit_ref):
+				continue
+			(unit_ref as Unit).clear_move_target()
+		var creep_destination := Vector3(creep.global_position.x, 0.0, creep.global_position.z)
+		var move_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+			army,
+			creep_destination,
+			&"move",
+			false,
+			COMMAND_SOURCE
+		)
+		last_move_handled = bool(move_result.get("handled", false))
+		last_move_squad_size = int(move_result.get("squad_size", 0))
 
 	## Pikemen start the fight / tank first.
 	for unit_ref: Variant in army:
@@ -809,11 +838,6 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 		if not unit_ref is Hero:
 			continue
 		(unit_ref as Hero).command_attack(creep)
-
-	if _fight_target_id != creep_id:
-		_fight_target_id = creep_id
-		_tracked_creep_hp = health.current_health if health != null else -1.0
-		strategic_orders_issued += 1
 
 
 func _army_centroid(army: Array) -> Vector3:

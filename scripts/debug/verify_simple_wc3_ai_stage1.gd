@@ -261,6 +261,33 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	hero.level = 2
 	simple._process(0.5)
 	_expect(failures, "camp cleared Hero<3 → TRAVEL next", simple.get_state() == SimpleWc3AI.State.TRAVEL)
+	_expect(failures, "next camp is Camp B", simple.get_camp_name() == "MediumCampB")
+
+	## Arrive at Camp 2 — same combat-start path as Camp 1.
+	hero.global_position = Vector3(40.0, 0.5, 39.0)
+	for pike_ref: Variant in few_pikes:
+		if NodeSafety.is_alive_node(pike_ref):
+			(pike_ref as Spearman).global_position = Vector3(39.5, 0.5, 39.2)
+	for pike_ref: Variant in more_pikes:
+		if NodeSafety.is_alive_node(pike_ref):
+			(pike_ref as Spearman).global_position = Vector3(40.5, 0.5, 39.2)
+
+	var health_b: HealthComponent = creep_b.get_node_or_null("HealthComponent") as HealthComponent
+	var hp_b_before: float = health_b.current_health if health_b != null else 0.0
+	simple._process(0.5)
+	_expect(failures, "Camp 2 engage → FIGHT", simple.get_state() == SimpleWc3AI.State.FIGHT)
+
+	for _i: int in 40:
+		await get_tree().physics_frame
+		simple._process(0.5)
+		if health_b != null and health_b.current_health < hp_b_before:
+			break
+
+	_expect(
+		failures,
+		"Camp 2 creep HP decreased",
+		health_b != null and health_b.current_health < hp_b_before
+	)
 
 	if NodeSafety.is_alive_node(creep_b):
 		creep_b.queue_free()
