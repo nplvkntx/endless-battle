@@ -788,30 +788,38 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 			last_creep_damaged = true
 		_tracked_creep_hp = health.current_health
 
+	## Same creep already fighting: do not touch Hero / existing Pikemen.
+	## New Pikemen only get a one-shot camp move from _dispatch_new_unit_moves.
 	var new_creep_objective: bool = _fight_target_id != creep_id
-	if new_creep_objective:
-		## Each new creep objective initializes the same combat handoff:
-		## stop camp MOVE → move onto the living creep → Pikemen attack → Hero joins.
-		_fight_target_id = creep_id
-		_tracked_creep_hp = health.current_health if health != null else -1.0
-		strategic_orders_issued += 1
-		for unit_ref: Variant in army:
-			if not NodeSafety.is_alive_node(unit_ref):
-				continue
-			(unit_ref as Unit).clear_move_target()
-		var creep_destination := Vector3(creep.global_position.x, 0.0, creep.global_position.z)
-		var move_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-			army,
-			creep_destination,
-			&"move",
-			false,
-			COMMAND_SOURCE
-		)
-		last_move_handled = bool(move_result.get("handled", false))
-		last_move_squad_size = int(move_result.get("squad_size", 0))
+	if not new_creep_objective:
+		return
+
+	## Only units already at the fight. Never fold a Barracks spawn into this handoff —
+	## that warps the shared group route and cancels active combat.
+	var fighters: Array = _units_near_creep(army, creep)
+	if fighters.is_empty():
+		return
+
+	_fight_target_id = creep_id
+	_tracked_creep_hp = health.current_health if health != null else -1.0
+	strategic_orders_issued += 1
+	for unit_ref: Variant in fighters:
+		if not NodeSafety.is_alive_node(unit_ref):
+			continue
+		(unit_ref as Unit).clear_move_target()
+	var creep_destination := Vector3(creep.global_position.x, 0.0, creep.global_position.z)
+	var move_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
+		fighters,
+		creep_destination,
+		&"move",
+		false,
+		COMMAND_SOURCE
+	)
+	last_move_handled = bool(move_result.get("handled", false))
+	last_move_squad_size = int(move_result.get("squad_size", 0))
 
 	## Pikemen start the fight / tank first.
-	for unit_ref: Variant in army:
+	for unit_ref: Variant in fighters:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
 		if not unit_ref is Spearman:
@@ -819,12 +827,27 @@ func _issue_fight_orders(army: Array, creep: NeutralCreep) -> void:
 		(unit_ref as Spearman).command_attack(creep)
 
 	## Hero joins through normal combat.
-	for unit_ref: Variant in army:
+	for unit_ref: Variant in fighters:
 		if not NodeSafety.is_alive_node(unit_ref):
 			continue
 		if not unit_ref is Hero:
 			continue
 		(unit_ref as Hero).command_attack(creep)
+
+
+## Units already near the living creep — excludes Barracks reinforcements mid-fight.
+func _units_near_creep(army: Array, creep: NeutralCreep) -> Array:
+	var fighters: Array = []
+	if not NodeSafety.is_alive_node(creep):
+		return fighters
+	var creep_pos: Vector3 = creep.global_position
+	for unit_ref: Variant in army:
+		if not NodeSafety.is_alive_node(unit_ref):
+			continue
+		var unit: Unit = unit_ref as Unit
+		if _horizontal_distance(unit.global_position, creep_pos) <= ENGAGE_DISTANCE:
+			fighters.append(unit)
+	return fighters
 
 
 func _army_centroid(army: Array) -> Vector3:

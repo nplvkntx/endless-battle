@@ -276,6 +276,28 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	simple._process(0.5)
 	_expect(failures, "Camp 2 engage → FIGHT", simple.get_state() == SimpleWc3AI.State.FIGHT)
 
+	## Mid-fight spawn must not recommande the active army.
+	var mid_fight_pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	add_child(mid_fight_pike)
+	mid_fight_pike.global_position = Vector3(26.0, 0.5, 20.0)
+	mid_fight_pike.team_id = TeamVisuals.ENEMY_TEAM_ID
+	mid_fight_pike.add_to_group(&"enemy_combat_units")
+	var mid_id: int = mid_fight_pike.get_instance_id()
+	var fight_orders_before: int = simple.strategic_orders_issued
+	simple._process(0.5)
+	_expect(failures, "mid-fight still FIGHT after new Pikeman", simple.get_state() == SimpleWc3AI.State.FIGHT)
+	_expect(failures, "mid-fight new Pikeman one-shot to camp", simple._ordered_unit_ids.has(mid_id))
+	_expect(
+		failures,
+		"mid-fight does not recommande whole army",
+		simple.strategic_orders_issued == fight_orders_before + 1
+	)
+	_expect(
+		failures,
+		"mid-fight join move is single-unit",
+		simple.last_move_squad_size == 1
+	)
+
 	for _i: int in 40:
 		await get_tree().physics_frame
 		simple._process(0.5)
@@ -287,6 +309,7 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 		"Camp 2 creep HP decreased",
 		health_b != null and health_b.current_health < hp_b_before
 	)
+	_expect(failures, "Camp 2 still FIGHT after mid-fight join", simple.get_state() == SimpleWc3AI.State.FIGHT)
 
 	## Camp 2 clear while Hero < 3 → whole army to Camp 3.
 	if NodeSafety.is_alive_node(creep_b):
@@ -372,7 +395,7 @@ func _test_opening_sequence(failures: PackedStringArray) -> void:
 	simple._process(0.5)
 	_expect(failures, "Hero level >=3 → DONE", simple.get_state() == SimpleWc3AI.State.DONE)
 
-	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c, late_pike]:
+	for node_ref: Variant in [farm, altar, barracks, enemy_cc, hero, camp_a, camp_b, camp_c, late_pike, mid_fight_pike]:
 		if NodeSafety.is_alive_node(node_ref):
 			(node_ref as Node).queue_free()
 	for pike_ref: Variant in few_pikes + more_pikes:
