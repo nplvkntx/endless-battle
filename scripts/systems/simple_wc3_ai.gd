@@ -768,10 +768,10 @@ func _issue_fight_orders(army: Array, camp: Node3D, creep: NeutralCreep) -> void
 			last_creep_damaged = true
 		_tracked_creep_hp = health.current_health
 
-	## Camp fight already started: leave Hero / Pikemen alone until the camp is dead.
-	## Do not rebuild on the next living creep — that clear+MOVE handoff idles the army.
+	## Same creep already fighting: do not touch Hero / existing Pikemen.
 	## New Pikemen only get a one-shot camp move from _dispatch_new_unit_moves.
-	if _fight_target_id != 0:
+	var new_creep_objective: bool = _fight_target_id != creep_id
+	if not new_creep_objective:
 		return
 
 	## Only units already at the fight (near camp or creep). Never fold in Barracks spawns.
