@@ -1,29 +1,18 @@
 class_name SimpleWc3AI
 extends Node
 
-## Sole enemy military decision authority — simple WC3 melee loop.
-## OPENING → ASSEMBLE → CREEP → ATTACK (DEFEND interrupt) → ASSEMBLE → repeat.
-## One MAIN ARMY (living Hero + living combat units). One objective.
+## Sole enemy military decision authority — priority-rule WC3 melee loop.
+## Conditions are the state. Live game facts are the memory. No strategic state machine.
 ## Strategic travel: PlayerRouteNavigation custom RTS only.
-
-enum State {
-	OPENING,
-	ASSEMBLE,
-	CREEP,
-	ATTACK,
-	DEFEND,
-}
 
 const MIN_PIKEMEN := 5
 const MIN_WORKERS := 5
-const TICK_SECONDS := 0.75
+const TICK_SECONDS := 0.5
 const DEFEND_RADIUS := 40.0
 const ATTACK_NEARBY_RADIUS := 36.0
 const ATTACK_POWER_RATIO := 1.25
-## Early creep gate: no normal ATTACK until this is satisfied.
 const EARLY_CREEP_CAMPS := 2
-const CREEP_STOP_HERO_LEVEL := 3
-## Creep fight starts only when Hero + enough Pikemen are near the camp together.
+## Creep fight starts only when enough of the army is near the camp together.
 const CREEP_COHESION_RADIUS := 18.0
 const ENEMY_COMBAT_GROUP := &"enemy_combat_units"
 const ENEMY_BUILDING_GROUP := &"enemy_command_center"
@@ -32,34 +21,38 @@ const PLAYER_CC_GROUP := &"player_command_center"
 const AUTHORITY_LOG_INTERVAL_SECONDS := 8.0
 const COMMAND_SOURCE := &"simple_wc3_ai"
 
-var _state: State = State.OPENING
+## Diagnostic only — which priority branch returned this tick. Not a state machine.
+const PRIORITY_NONE := &"NONE"
+const PRIORITY_HERO := &"HERO"
+const PRIORITY_BUILD_FORCE := &"BUILD_FORCE"
+const PRIORITY_DEFEND := &"DEFEND"
+const PRIORITY_EARLY_CREEP := &"EARLY_CREEP"
+const PRIORITY_ATTACK_PLAYER := &"ATTACK_PLAYER"
+const PRIORITY_EXTRA_CREEP := &"EXTRA_CREEP"
+const PRIORITY_WAIT := &"WAIT"
+
 var _tick_timer: float = 0.0
 var _authority_log_timer: float = AUTHORITY_LOG_INTERVAL_SECONDS
 var _debug_label: Label = null
 var _logged_authority_once: bool = false
+var last_priority: StringName = PRIORITY_NONE
 
 ## One deterministic army gather point near the enemy base.
 var assembly_position: Vector3 = Vector3.ZERO
 
-var _objective_id: int = 0
-var _objective_name: String = "-"
-var _objective_destination: Vector3 = Vector3.ZERO
-var _objective_kind: StringName = &"none"
-## Minimal order dedup: last group order fingerprint (not per-unit history).
-var _issued_objective_id: int = -1
-var _issued_army_count: int = -1
-var _issued_had_hero: bool = false
-var _issued_order_kind: StringName = &""
-## Creep travel uses move until the army is cohesive, then commits attack_move once.
-var _creep_combat_committed: bool = false
+## Single sticky strategic target (camp / threat / player). Null when invalid.
+var current_target: Node3D = null
+
+## Minimal order dedup — reissue when kind/target changes or army membership grows.
+var _last_command_kind: StringName = &""
+var _last_command_target_id: int = 0
+var _last_command_army_count: int = -1
 
 var _cleared_camp_ids: Dictionary = {}
 var _cleared_camp_names: Dictionary = {}
 var _camps_cleared: int = 0
-var _creep_phase_complete: bool = false
-## True after the first OPENING → ASSEMBLE transition. Hero death must not re-enter OPENING.
-var _opening_complete: bool = false
 
+## Debug / observation mirrors (live facts from last tick).
 var last_hero_alive: bool = false
 var last_hero_queued: bool = false
 var last_pikeman_count: int = 0
@@ -69,7 +62,6 @@ var last_ai_power: float = 0.0
 var last_player_power: float = 0.0
 var last_move_handled: bool = false
 var last_move_squad_size: int = 0
-var last_creep_combat_committed: bool = false
 var strategic_orders_issued: int = 0
 
 
@@ -78,41 +70,35 @@ func _ready() -> void:
 		set_process(false)
 		return
 	_ensure_debug_label()
-	_observe_army()
 	_update_debug_label()
 	_log_authority_proof(true)
 	set_process(true)
 
 
-func get_state() -> State:
-	return _state
+func get_priority() -> StringName:
+	return last_priority
 
 
-func get_state_label() -> String:
-	match _state:
-		State.OPENING:
-			return "OPENING"
-		State.ASSEMBLE:
-			return "ASSEMBLE"
-		State.CREEP:
-			return "CREEP"
-		State.ATTACK:
-			return "ATTACK"
-		State.DEFEND:
-			return "DEFEND"
-	return "?"
+func get_priority_label() -> String:
+	return String(last_priority)
 
 
 func get_camp_name() -> String:
-	return _objective_name if _objective_kind == &"camp" else "-"
+	if current_target != null and NodeSafety.is_alive_node(current_target) and current_target is CreepCamp:
+		return String(current_target.name)
+	return "-"
 
 
 func get_camp_destination() -> Vector3:
-	return _objective_destination if _objective_kind == &"camp" else Vector3.ZERO
+	if current_target != null and NodeSafety.is_alive_node(current_target) and current_target is CreepCamp:
+		return Vector3(current_target.global_position.x, 0.0, current_target.global_position.z)
+	return Vector3.ZERO
 
 
 func get_objective_name() -> String:
-	return _objective_name
+	if current_target == null or not NodeSafety.is_alive_node(current_target):
+		return "-"
+	return _describe_target(current_target)
 
 
 func get_camps_cleared() -> int:
@@ -120,28 +106,7 @@ func get_camps_cleared() -> int:
 
 
 func is_early_creep_complete() -> bool:
-	return _is_early_creep_complete()
-
-
-func is_opening_complete() -> bool:
-	return _opening_complete
-
-
-## Dev test only: mark camps cleared and start normal creep selection.
-func init_test_after_camps(cleared_camp_names: Array) -> void:
-	_cleared_camp_ids.clear()
-	_cleared_camp_names.clear()
-	_camps_cleared = 0
-	_creep_phase_complete = false
-	_opening_complete = true
-	_clear_objective()
-	for camp_name_ref: Variant in cleared_camp_names:
-		_cleared_camp_names[String(camp_name_ref)] = true
-		_camps_cleared += 1
-	_ensure_assembly_position()
-	_observe_army()
-	_begin_creep()
-	_update_debug_label()
+	return _camps_cleared >= EARLY_CREEP_CAMPS
 
 
 func _process(delta: float) -> void:
@@ -155,494 +120,176 @@ func _process(delta: float) -> void:
 		return
 	_tick_timer = 0.0
 
-	_observe_army()
-	_refresh_hero_queued()
-	_maintain_workers()
-	_update_power_estimates()
-
-	## Defense interrupt — same MAIN ARMY, no reserved defenders.
-	if _state != State.OPENING and _has_base_threat():
-		if _state != State.DEFEND:
-			_begin_defend()
-	elif _state == State.DEFEND and not _has_base_threat():
-		_reevaluate_after_defense()
-
-	match _state:
-		State.OPENING:
-			_tick_opening()
-		State.ASSEMBLE:
-			_tick_assemble()
-		State.CREEP:
-			_tick_creep()
-		State.ATTACK:
-			_tick_attack()
-		State.DEFEND:
-			_tick_defend()
-
-	_refresh_hero_queued()
+	_ai_tick()
 	_update_debug_label()
 	if _authority_log_timer >= AUTHORITY_LOG_INTERVAL_SECONDS:
 		_authority_log_timer = 0.0
 		_log_authority_proof(false)
 
 
-# --- OPENING -----------------------------------------------------------------
-
-func _tick_opening() -> void:
-	## After the initial opening finishes once, never re-enter this build path.
-	if _opening_complete:
-		_state = State.ASSEMBLE
-		_begin_assemble_missing_hero()
-		return
-
-	if not _has_completed_farm():
-		var build: EnemyBuildManager = _resolve_build_manager()
-		if build != null and build.try_place_farm():
-			strategic_orders_issued += 1
-		return
-
-	if not _has_completed_hero_altar():
-		var build_a: EnemyBuildManager = _resolve_build_manager()
-		if build_a != null and build_a.try_place_hero_altar():
-			strategic_orders_issued += 1
-		return
-
-	if not _has_completed_barracks():
-		var build_b: EnemyBuildManager = _resolve_build_manager()
-		if build_b != null and build_b.try_place_barracks():
-			strategic_orders_issued += 1
-		return
-
-	## Hero before Pikemen — do not spend opening gold/food on endless spears first.
-	if not last_hero_alive:
-		_try_ensure_hero()
-		return
-
-	_ensure_assembly_position()
-	if last_pikeman_count >= MIN_PIKEMEN:
-		_opening_complete = true
-		_state = State.ASSEMBLE
-		_try_train_pikeman()
-		return
-
-	var living_and_pending: int = last_pikeman_count + _count_pending_pikemen()
-	if living_and_pending >= MIN_PIKEMEN:
-		return
-	_try_train_pikeman()
-
-
-# --- ASSEMBLE ----------------------------------------------------------------
-
-func _tick_assemble() -> void:
-	var army: Array = _collect_main_army()
-
-	if not last_hero_alive:
-		_try_ensure_hero()
-		_begin_assemble_missing_hero()
-		return
-
-	_try_train_pikeman()
-	army = _collect_main_army()
-
-	if last_pikeman_count < MIN_PIKEMEN:
-		_ensure_assembly_position()
-		if assembly_position == Vector3.ZERO:
-			return
-		if _objective_kind != &"rally" or _needs_fresh_group_order(army, &"move"):
-			_set_objective(&"rally", 0, "Rally", assembly_position)
-			_issue_army_move(army, assembly_position, &"move")
-		return
-
-	## Hero alive + minimum force: fresh decision. No assemble-proximity freeze gate.
-	_reevaluate()
-
-
-## Hero died: abandon all camp/attack objectives, one rally for survivors.
-func _begin_assemble_missing_hero() -> void:
-	var already_rallying: bool = (
-		_state == State.ASSEMBLE
-		and _objective_kind == &"rally"
-		and assembly_position != Vector3.ZERO
-	)
-	_state = State.ASSEMBLE
-	_creep_combat_committed = false
-	last_creep_combat_committed = false
-	_ensure_assembly_position()
-	if assembly_position == Vector3.ZERO:
-		_clear_objective()
-		return
-
-	var army: Array = _collect_main_army()
-	if already_rallying:
-		## Do not refresh every tick — only if army membership changed.
-		if _needs_fresh_group_order(army, &"move"):
-			_issue_army_move(army, assembly_position, &"move")
-		return
-
-	## Abandon stale camp/attack objective from before Hero death.
-	_clear_objective()
-	_set_objective(&"rally", 0, "Rally", assembly_position)
-	_issue_army_move(army, assembly_position, &"move")
-
-
-# --- CREEP -------------------------------------------------------------------
-
-func _tick_creep() -> void:
-	_try_train_pikeman()
-	var army: Array = _collect_main_army()
-
-	if not last_hero_alive:
-		_try_ensure_hero()
-		_begin_assemble_missing_hero()
-		return
-	if _is_army_too_weak():
-		_begin_assemble_missing_hero()
-		return
-
-	var camp: Node3D = _resolve_objective_node()
-	if camp == null or not _camp_has_living_creeps(camp):
-		_on_camp_cleared(camp)
-		return
-
-	## Membership changed (e.g. new Pikeman) — whole army gets the same camp again.
-	if _needs_fresh_group_order(army, &"move") and not _creep_combat_committed:
-		_issue_army_move(army, _objective_destination, &"move")
-		return
-
-	## Wait for Hero + majority of Pikemen before committing creep combat.
-	if not _is_creep_army_cohesive(camp, army):
-		if _needs_fresh_group_order(army, &"move"):
-			_issue_army_move(army, _objective_destination, &"move")
-		return
-
-	if not _creep_combat_committed:
-		_creep_combat_committed = true
-		last_creep_combat_committed = true
-		_issue_army_move(army, _objective_destination, &"attack_move")
-		var creep: NeutralCreep = _pick_living_creep(camp)
-		if creep != null:
-			for unit_ref: Variant in army:
-				if NodeSafety.is_alive_node(unit_ref):
-					_issue_single_unit_attack(unit_ref as Unit, creep)
-
-
-func _begin_creep() -> void:
-	var army: Array = _collect_main_army()
-	if _is_army_too_weak() or not _has_minimum_force(army):
-		_state = State.ASSEMBLE
-		_clear_objective()
-		return
-
-	if _should_stop_creeping():
-		_creep_phase_complete = true
-		_enter_post_creep()
-		return
-
-	var camp: Node3D = _select_creep_camp(army)
-	if camp == null:
-		_creep_phase_complete = true
-		_enter_post_creep()
-		return
-
-	_creep_combat_committed = false
-	last_creep_combat_committed = false
-	_set_objective(
-		&"camp",
-		camp.get_instance_id(),
-		String(camp.name),
-		Vector3(camp.global_position.x, 0.0, camp.global_position.z)
-	)
-	_state = State.CREEP
-	## One group order for the entire MAIN ARMY — travel first, fight when cohesive.
-	_issue_army_move(army, _objective_destination, &"move")
-
-
-func _on_camp_cleared(camp: Node3D) -> void:
-	if camp != null and is_instance_valid(camp):
-		_cleared_camp_ids[camp.get_instance_id()] = true
-		_cleared_camp_names[String(camp.name)] = true
-	elif _objective_id != 0:
-		_cleared_camp_ids[_objective_id] = true
-		if not _objective_name.is_empty() and _objective_name != "-":
-			_cleared_camp_names[_objective_name] = true
-	_camps_cleared += 1
+func _ai_tick() -> void:
+	_invalidate_current_target_if_dead()
+	_note_cleared_camp_if_needed()
 
 	var hero: Hero = _find_living_hero()
-	if hero != null:
-		last_hero_level = hero.level
-
-	_creep_combat_committed = false
-	last_creep_combat_committed = false
-	_clear_objective()
-	if _should_stop_creeping():
-		_creep_phase_complete = true
-		_enter_post_creep()
-		return
-	_begin_creep()
-
-
-## After initial creep stop conditions — attack if strong, else assemble / keep creeping.
-func _enter_post_creep() -> void:
-	_update_power_estimates()
+	var pikemen: Array = _find_living_pikemen()
 	var army: Array = _collect_main_army()
-	if _should_attack():
-		_begin_attack()
+	_observe_force(hero, pikemen, army)
+	_refresh_hero_queued()
+	_update_power_estimates()
+
+	_ensure_workers()
+	_ensure_opening_buildings()
+
+	## HERO missing — train, don't waste Hero gold on Pikemen, survivors home, stop.
+	if hero == null:
+		_try_ensure_hero()
+		if not _hero_training_blocks_pikemen():
+			_try_train_pikeman()
+		_move_army_home_if_needed(army)
+		last_priority = PRIORITY_HERO
 		return
-	var camp: Node3D = _select_creep_camp(army)
-	if camp != null and not _should_attack():
-		_creep_combat_committed = false
-		last_creep_combat_committed = false
-		_set_objective(
-			&"camp",
-			camp.get_instance_id(),
-			String(camp.name),
-			Vector3(camp.global_position.x, 0.0, camp.global_position.z)
-		)
-		_state = State.CREEP
-		_issue_army_move(army, _objective_destination, &"move")
+
+	## BUILD_FORCE — maintain minimum Pikemen near home.
+	_ensure_pikemen(MIN_PIKEMEN)
+	if pikemen.size() < MIN_PIKEMEN:
+		_move_army_home_if_needed(army)
+		last_priority = PRIORITY_BUILD_FORCE
 		return
-	_state = State.ASSEMBLE
-	_ensure_assembly_position()
-	if assembly_position != Vector3.ZERO:
-		_set_objective(&"rally", 0, "Rally", assembly_position)
-		_issue_army_move(army, assembly_position, &"move")
+
+	## Keep producing extra Pikemen when affordable (no composition strategy).
+	_try_train_pikeman()
+
+	## DEFEND — base threat interrupts everything else.
+	var threat: Node3D = _find_base_threat()
+	if threat != null:
+		_attack_target_with_army(army, threat)
+		last_priority = PRIORITY_DEFEND
+		return
+
+	## EARLY_CREEP — before two camps cleared, creep has priority over player attack.
+	if _camps_cleared < EARLY_CREEP_CAMPS:
+		var early_camp: Node3D = _resolve_or_pick_creep_camp(army)
+		if early_camp != null:
+			_attack_camp_with_army(army, early_camp)
+			last_priority = PRIORITY_EARLY_CREEP
+		else:
+			_move_army_home_if_needed(army)
+			last_priority = PRIORITY_WAIT
+		return
+
+	## ATTACK_PLAYER — only after early creep gate + power threshold.
+	if last_ai_power > last_player_power * ATTACK_POWER_RATIO:
+		var player_target: Node3D = _resolve_or_pick_player_target(army)
+		if player_target != null:
+			_attack_target_with_army(army, player_target)
+			last_priority = PRIORITY_ATTACK_PLAYER
+			return
+
+	## EXTRA_CREEP / WAIT — not strong enough: keep creeping or home.
+	var extra_camp: Node3D = _resolve_or_pick_creep_camp(army)
+	if extra_camp != null:
+		_attack_camp_with_army(army, extra_camp)
+		last_priority = PRIORITY_EXTRA_CREEP
+	else:
+		_move_army_home_if_needed(army)
+		last_priority = PRIORITY_WAIT
 
 
-func _is_creep_army_cohesive(camp: Node3D, army: Array) -> bool:
-	if camp == null or not is_instance_valid(camp):
+# --- Opening / production ----------------------------------------------------
+
+func _ensure_opening_buildings() -> void:
+	var build: EnemyBuildManager = _resolve_build_manager()
+	if build == null:
+		return
+	if not _has_completed_farm():
+		if build.try_place_farm():
+			strategic_orders_issued += 1
+		return
+	if not _has_completed_hero_altar():
+		if build.try_place_hero_altar():
+			strategic_orders_issued += 1
+		return
+	if not _has_completed_barracks():
+		if build.try_place_barracks():
+			strategic_orders_issued += 1
+
+
+func _ensure_workers() -> void:
+	var living: int = _count_living_workers()
+	var pending: int = _count_pending_workers()
+	if living + pending >= MIN_WORKERS:
+		return
+	var cc: CommandCenter = _find_enemy_command_center()
+	if cc == null:
+		return
+	if cc.try_train_enemy_worker():
+		strategic_orders_issued += 1
+
+
+func _ensure_pikemen(desired: int) -> void:
+	if _hero_training_blocks_pikemen():
+		_try_ensure_hero()
+		return
+	var living: int = last_pikeman_count
+	var pending: int = _count_pending_pikemen()
+	if living + pending >= desired:
+		return
+	_try_train_pikeman()
+
+
+func _refresh_hero_queued() -> void:
+	var altar: HeroAltar = _find_completed_hero_altar()
+	last_hero_queued = altar != null and altar.is_training_hero()
+
+
+func _try_ensure_hero() -> bool:
+	if last_hero_alive:
+		_refresh_hero_queued()
 		return false
-	var origin := Vector3(camp.global_position.x, 0.0, camp.global_position.z)
-	var hero_near: bool = false
-	var total_pikes: int = 0
-	var near_pikes: int = 0
-	for unit_ref: Variant in army:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		var unit: Unit = unit_ref as Unit
-		var near: bool = _horizontal_distance(unit.global_position, origin) <= CREEP_COHESION_RADIUS
-		if unit is Hero:
-			hero_near = near
-		elif unit is Spearman:
-			total_pikes += 1
-			if near:
-				near_pikes += 1
-	if not hero_near or total_pikes <= 0:
+	var altar: HeroAltar = _find_completed_hero_altar()
+	if altar == null:
+		last_hero_queued = false
 		return false
-	var needed: int = maxi(3, (total_pikes + 1) / 2)
-	return near_pikes >= needed
-
-
-func _should_stop_creeping() -> bool:
-	## Stop the early creep phase when the gate is satisfied — never because attack looks favorable.
-	return _is_early_creep_complete()
-
-
-func _is_early_creep_complete() -> bool:
-	if _camps_cleared >= EARLY_CREEP_CAMPS:
+	if altar.is_training_hero():
+		last_hero_queued = true
 		return true
-	if last_hero_level >= CREEP_STOP_HERO_LEVEL:
+	if altar.try_train_enemy_hero():
+		strategic_orders_issued += 1
+		last_hero_queued = true
 		return true
+	last_hero_queued = false
 	return false
 
 
-# --- ATTACK ------------------------------------------------------------------
-
-func _tick_attack() -> void:
-	_try_train_pikeman()
-	var army: Array = _collect_main_army()
-	if not last_hero_alive:
-		_try_ensure_hero()
-		_begin_assemble_missing_hero()
-		return
-	if _is_army_too_weak():
-		_begin_assemble_missing_hero()
-		return
-
-	var target: Node3D = _resolve_objective_node()
-	if target == null or not _is_living_attack_target(target):
-		_clear_objective()
-		_begin_attack()
-		return
-
-	if _needs_fresh_group_order(army, &"attack_move"):
-		_issue_army_attack(army, target)
-
-
-func _begin_attack() -> void:
-	var army: Array = _collect_main_army()
-	if _is_army_too_weak() or not _has_minimum_force(army):
-		_state = State.ASSEMBLE
-		_clear_objective()
-		return
-
-	var target: Node3D = _select_attack_target(army)
-	if target == null:
-		_state = State.ASSEMBLE
-		_clear_objective()
-		return
-
-	_set_objective(
-		&"attack",
-		target.get_instance_id(),
-		_describe_target(target),
-		Vector3(target.global_position.x, 0.0, target.global_position.z)
-	)
-	_state = State.ATTACK
-	_issue_army_attack(army, target)
-
-
-# --- DEFEND ------------------------------------------------------------------
-
-func _tick_defend() -> void:
-	_try_train_pikeman()
-	if not last_hero_alive:
-		_try_ensure_hero()
-		## Threat still handled by defend interrupt when present; otherwise assemble.
-		if not _has_base_threat():
-			_begin_assemble_missing_hero()
-			return
-	if _is_army_too_weak():
-		## Still defend with whoever remains if threat exists; otherwise assemble.
-		if not _has_base_threat():
-			_clear_objective()
-			_state = State.ASSEMBLE
-			return
-
-	var target: Node3D = _resolve_objective_node()
-	if target == null or not _is_living_attack_target(target) or not _is_threat_unit(target):
-		if not _has_base_threat():
-			_reevaluate_after_defense()
-			return
-		_begin_defend()
-		return
-
-
-func _begin_defend() -> void:
-	var army: Array = _collect_main_army()
-	if army.is_empty():
-		_state = State.ASSEMBLE
-		_clear_objective()
-		return
-
-	var target: Node3D = _select_defend_target()
-	if target == null:
-		_reevaluate_after_defense()
-		return
-
-	_set_objective(
-		&"defend",
-		target.get_instance_id(),
-		_describe_target(target),
-		Vector3(target.global_position.x, 0.0, target.global_position.z)
-	)
-	_state = State.DEFEND
-	_issue_army_attack(army, target)
-
-
-func _reevaluate_after_defense() -> void:
-	_clear_objective()
-	_reevaluate()
-
-
-# --- Reevaluation ------------------------------------------------------------
-
-func _reevaluate() -> void:
-	_update_power_estimates()
-	var army: Array = _collect_main_army()
-
-	if not last_hero_alive:
-		_try_ensure_hero()
-		_begin_assemble_missing_hero()
-		return
-
-	if _is_army_too_weak() or not _has_minimum_force(army):
-		_rally_main_army(army)
-		return
-
-	## Before early creep is done: CREEP only (DEFEND already interrupts above).
-	if not _is_early_creep_complete():
-		_begin_creep()
-		return
-
-	if _should_attack():
-		_begin_attack()
-		return
-
-	if not _creep_phase_complete and not _should_stop_creeping():
-		_begin_creep()
-		return
-
-	if _should_stop_creeping():
-		_creep_phase_complete = true
-
-	## Not strong enough to attack — creep if camps remain, else assemble.
-	if _select_creep_camp(army) != null:
-		_enter_post_creep()
-		return
-
-	_rally_main_army(army)
-
-
-func _rally_main_army(army: Array) -> void:
-	_state = State.ASSEMBLE
-	_ensure_assembly_position()
-	if assembly_position == Vector3.ZERO:
-		return
-	if _objective_kind == &"rally" and not _needs_fresh_group_order(army, &"move"):
-		return
-	_set_objective(&"rally", 0, "Rally", assembly_position)
-	_issue_army_move(army, assembly_position, &"move")
-
-
-func _should_attack() -> bool:
-	if not last_hero_alive or last_pikeman_count < MIN_PIKEMEN:
+func _hero_training_blocks_pikemen() -> bool:
+	## While Hero is missing and not yet queued, do not spend gold/food on more Pikemen.
+	if last_hero_alive:
 		return false
-	## BUG FIX: never allow normal offensive ATTACK before early creep gate.
-	if not _is_early_creep_complete():
+	var altar: HeroAltar = _find_completed_hero_altar()
+	if altar == null:
 		return false
-	if last_ai_power <= 0.0:
+	if altar.is_training_hero():
 		return false
-	## Player almost gone and AI has a real army.
-	if last_player_power < 80.0 and last_ai_power >= 250.0:
-		return true
-	return last_ai_power >= last_player_power * ATTACK_POWER_RATIO
+	return true
 
 
-# --- Army / power ------------------------------------------------------------
-
-func _has_minimum_force(army: Array) -> bool:
-	_observe_force_counts(army)
-	return last_hero_alive and last_pikeman_count >= MIN_PIKEMEN
-
-
-func _is_army_too_weak() -> bool:
-	return not last_hero_alive or last_pikeman_count < 3
-
-
-func _observe_force_counts(army: Array) -> void:
-	var hero_alive: bool = false
-	var pikemen: int = 0
-	for unit_ref: Variant in army:
-		if unit_ref is Hero:
-			hero_alive = true
-		elif unit_ref is Spearman:
-			pikemen += 1
-	last_hero_alive = hero_alive
-	last_pikeman_count = pikemen
-	last_army_count = army.size()
+func _try_train_pikeman() -> void:
+	if _hero_training_blocks_pikemen():
+		_try_ensure_hero()
+		return
+	var barracks: Barracks = _find_completed_barracks()
+	if barracks == null:
+		return
+	if barracks.try_train_enemy_spearman():
+		strategic_orders_issued += 1
 
 
-func _observe_army() -> void:
-	var army: Array = _collect_main_army()
-	var hero: Hero = null
-	var pikemen: int = 0
-	for unit_ref: Variant in army:
-		if unit_ref is Hero:
-			hero = unit_ref as Hero
-		elif unit_ref is Spearman:
-			pikemen += 1
+# --- Live army / facts -------------------------------------------------------
+
+func _observe_force(hero: Hero, pikemen: Array, army: Array) -> void:
 	last_hero_alive = hero != null
-	last_pikeman_count = pikemen
+	last_pikeman_count = pikemen.size()
 	last_army_count = army.size()
 	last_hero_level = hero.level if hero != null else 0
 
@@ -650,11 +297,7 @@ func _observe_army() -> void:
 func _collect_main_army() -> Array:
 	var tree: SceneTree = get_tree()
 	if tree == null:
-		last_hero_alive = false
-		last_pikeman_count = 0
-		last_army_count = 0
 		return []
-
 	var army: Array = []
 	for node_variant: Variant in tree.get_nodes_in_group(ENEMY_COMBAT_GROUP):
 		if not _is_living_enemy_combat_unit(node_variant):
@@ -663,21 +306,28 @@ func _collect_main_army() -> Array:
 	return army
 
 
+func _find_living_hero() -> Hero:
+	for unit_ref: Variant in _collect_main_army():
+		if unit_ref is Hero:
+			return unit_ref as Hero
+	return null
+
+
+func _find_living_pikemen() -> Array:
+	var pikemen: Array = []
+	for unit_ref: Variant in _collect_main_army():
+		if unit_ref is Spearman:
+			pikemen.append(unit_ref)
+	return pikemen
+
+
 func _is_living_enemy_combat_unit(node_variant: Variant) -> bool:
 	if not _is_living_enemy_unit(node_variant):
 		return false
 	var unit: Unit = node_variant as Unit
 	if unit is Worker:
 		return false
-	## MAIN ARMY = Hero + military combat units (Pikemen today; others later).
 	return unit is Hero or unit is MilitaryUnit
-
-
-func _find_living_hero() -> Hero:
-	for unit_ref: Variant in _collect_main_army():
-		if unit_ref is Hero:
-			return unit_ref as Hero
-	return null
 
 
 func _is_living_enemy_unit(node_variant: Variant) -> bool:
@@ -760,35 +410,88 @@ func _collect_player_army() -> Array:
 
 # --- Targets -----------------------------------------------------------------
 
+func _invalidate_current_target_if_dead() -> void:
+	if current_target == null:
+		return
+	if not NodeSafety.is_alive_node(current_target):
+		current_target = null
+		return
+	if current_target is CreepCamp:
+		if not _camp_has_living_creeps(current_target):
+			## Cleared-camp accounting happens in _note_cleared_camp_if_needed.
+			return
+	elif not _is_living_attack_target(current_target):
+		current_target = null
+
+
+func _note_cleared_camp_if_needed() -> void:
+	if current_target == null or not NodeSafety.is_alive_node(current_target):
+		return
+	if not current_target is CreepCamp:
+		return
+	if _camp_has_living_creeps(current_target):
+		return
+	_mark_camp_cleared(current_target)
+	current_target = null
+
+
+func _mark_camp_cleared(camp: Node3D) -> void:
+	if camp == null or not is_instance_valid(camp):
+		return
+	var id: int = camp.get_instance_id()
+	var camp_name: String = String(camp.name)
+	if _cleared_camp_ids.has(id) or _cleared_camp_names.has(camp_name):
+		return
+	_cleared_camp_ids[id] = true
+	_cleared_camp_names[camp_name] = true
+	_camps_cleared += 1
+
+
+func _resolve_or_pick_creep_camp(army: Array) -> Node3D:
+	if current_target != null and NodeSafety.is_alive_node(current_target) and current_target is CreepCamp:
+		if _camp_has_living_creeps(current_target) and not _is_camp_cleared(current_target):
+			return current_target
+		current_target = null
+	var camp: Node3D = _select_creep_camp(army)
+	current_target = camp
+	return camp
+
+
+func _resolve_or_pick_player_target(army: Array) -> Node3D:
+	if current_target != null and NodeSafety.is_alive_node(current_target):
+		if _is_living_attack_target(current_target) and not current_target is CreepCamp:
+			return current_target
+		current_target = null
+	var target: Node3D = _select_attack_target(army)
+	current_target = target
+	return target
+
+
+func _find_base_threat() -> Node3D:
+	var base: Vector3 = _enemy_base_position(get_tree())
+	if base == Vector3.ZERO:
+		return null
+	return _nearest_player_military(base, DEFEND_RADIUS)
+
+
 func _select_attack_target(army: Array) -> Node3D:
 	var origin: Vector3 = _army_centroid(army)
 	if origin == Vector3.ZERO:
 		origin = _enemy_base_position(get_tree())
 
-	## 1) Nearby player military.
 	var nearby: Node3D = _nearest_player_military(origin, ATTACK_NEARBY_RADIUS)
 	if nearby != null:
 		return nearby
 
-	## 2) Player Hero.
 	var player_hero: Node3D = _find_player_hero()
 	if player_hero != null:
 		return player_hero
 
-	## 3) Player Command Center.
 	var cc: Node3D = _find_player_command_center()
 	if cc != null:
 		return cc
 
-	## 4) Other player production buildings.
 	return _find_player_production_building()
-
-
-func _select_defend_target() -> Node3D:
-	var base: Vector3 = _enemy_base_position(get_tree())
-	if base == Vector3.ZERO:
-		return null
-	return _nearest_player_military(base, DEFEND_RADIUS)
 
 
 func _nearest_player_military(origin: Vector3, radius: float) -> Node3D:
@@ -891,28 +594,13 @@ func _is_living_attack_target(target: Node3D) -> bool:
 	return false
 
 
-func _is_threat_unit(node: Node3D) -> bool:
-	if not node is Unit:
-		return false
-	if CombatTargetValidation.is_enemy_faction(node):
-		return false
-	if node is Worker:
-		return false
-	return node is Hero or node is MilitaryUnit
-
-
-func _has_base_threat() -> bool:
-	var base: Vector3 = _enemy_base_position(get_tree())
-	if base == Vector3.ZERO:
-		return false
-	return _nearest_player_military(base, DEFEND_RADIUS) != null
-
-
 func _describe_target(target: Node3D) -> String:
 	if target is Hero:
 		return "PlayerHero"
 	if target is CommandCenter:
 		return "PlayerCC"
+	if target is CreepCamp:
+		return String(target.name)
 	if target is MilitaryUnit:
 		return String(target.name)
 	if target is Building:
@@ -920,7 +608,7 @@ func _describe_target(target: Node3D) -> String:
 	return String(target.name)
 
 
-# --- Creep camp selection ----------------------------------------------------
+# --- Creep camps -------------------------------------------------------------
 
 func _select_creep_camp(army: Array) -> Node3D:
 	var tree: SceneTree = get_tree()
@@ -937,7 +625,6 @@ func _select_creep_camp(army: Array) -> Node3D:
 	if active_camps.is_empty():
 		return null
 
-	## Prefer early-safe Medium/Easy camps; else nearest living uncleared camp.
 	var best_early: Node3D = null
 	var best_early_dist: float = INF
 	var best_any: Node3D = null
@@ -946,6 +633,8 @@ func _select_creep_camp(army: Array) -> Node3D:
 		if camp == null or not is_instance_valid(camp):
 			continue
 		if _is_camp_cleared(camp):
+			continue
+		if not _camp_has_living_creeps(camp):
 			continue
 		var dist: float = _horizontal_distance(origin, camp.global_position)
 		if dist < best_any_dist:
@@ -994,102 +683,97 @@ func _pick_living_creep(camp: Node3D) -> NeutralCreep:
 	return null
 
 
+func _is_creep_army_cohesive(camp: Node3D, army: Array) -> bool:
+	if camp == null or not is_instance_valid(camp):
+		return false
+	var origin := Vector3(camp.global_position.x, 0.0, camp.global_position.z)
+	var hero_near: bool = false
+	var total_units: int = 0
+	var near_units: int = 0
+	for unit_ref: Variant in army:
+		if not NodeSafety.is_alive_node(unit_ref):
+			continue
+		var unit: Unit = unit_ref as Unit
+		total_units += 1
+		var near: bool = _horizontal_distance(unit.global_position, origin) <= CREEP_COHESION_RADIUS
+		if near:
+			near_units += 1
+		if unit is Hero and near:
+			hero_near = true
+	if not hero_near or total_units <= 0:
+		return false
+	## Simple majority of the live army near the camp.
+	var needed: int = maxi(2, (total_units + 1) / 2)
+	return near_units >= needed
+
+
 # --- Orders / movement -------------------------------------------------------
 
-func _has_active_objective() -> bool:
-	return _objective_kind != &"none" and _objective_destination != Vector3.ZERO
+func _attack_camp_with_army(army: Array, camp: Node3D) -> void:
+	if camp == null or not NodeSafety.is_alive_node(camp):
+		return
+	current_target = camp
+	var destination := Vector3(camp.global_position.x, 0.0, camp.global_position.z)
+	if not _is_creep_army_cohesive(camp, army):
+		_issue_army_move(army, destination, &"move", camp)
+		return
+	_issue_army_move(army, destination, &"attack_move", camp)
+	var creep: NeutralCreep = _pick_living_creep(camp)
+	if creep != null:
+		for unit_ref: Variant in army:
+			if NodeSafety.is_alive_node(unit_ref):
+				_issue_single_unit_attack(unit_ref as Unit, creep)
 
 
-func _set_objective(kind: StringName, id: int, obj_name: String, destination: Vector3) -> void:
-	_objective_kind = kind
-	_objective_id = id
-	_objective_name = obj_name
-	_objective_destination = destination
-	_invalidate_issued_orders()
+func _attack_target_with_army(army: Array, target: Node3D) -> void:
+	if target == null or not NodeSafety.is_alive_node(target):
+		return
+	current_target = target
+	var destination := Vector3(target.global_position.x, 0.0, target.global_position.z)
+	_issue_army_move(army, destination, &"attack_move", target)
+	for unit_ref: Variant in army:
+		if NodeSafety.is_alive_node(unit_ref):
+			_issue_single_unit_attack(unit_ref as Unit, target)
 
 
-func _clear_objective() -> void:
-	_objective_kind = &"none"
-	_objective_id = 0
-	_objective_name = "-"
-	_objective_destination = Vector3.ZERO
-	_creep_combat_committed = false
-	last_creep_combat_committed = false
-	_invalidate_issued_orders()
+func _move_army_home_if_needed(army: Array) -> void:
+	if army.is_empty():
+		return
+	_ensure_assembly_position()
+	if assembly_position == Vector3.ZERO:
+		return
+	current_target = null
+	_issue_army_move(army, assembly_position, &"move", null)
 
 
-func _invalidate_issued_orders() -> void:
-	_issued_objective_id = -1
-	_issued_army_count = -1
-	_issued_had_hero = false
-	_issued_order_kind = &""
-
-
-func _needs_fresh_group_order(army: Array, order_kind: StringName) -> bool:
-	if _objective_kind == &"none":
+func _should_reissue(army: Array, order_kind: StringName, target: Node3D) -> bool:
+	var target_id: int = target.get_instance_id() if target != null and NodeSafety.is_alive_node(target) else 0
+	if _last_command_kind != order_kind:
 		return true
-	if _issued_objective_id != _objective_id:
+	if _last_command_target_id != target_id:
 		return true
-	if _issued_order_kind != order_kind:
-		return true
-	if _issued_army_count != army.size():
-		return true
-	if _issued_had_hero != last_hero_alive:
+	## New unit appeared — include it in the group order.
+	if army.size() > _last_command_army_count:
 		return true
 	return false
 
 
-func _mark_group_order_issued(army: Array, order_kind: StringName) -> void:
-	_issued_objective_id = _objective_id
-	_issued_army_count = army.size()
-	_issued_had_hero = last_hero_alive
-	_issued_order_kind = order_kind
+func _mark_command_issued(army: Array, order_kind: StringName, target: Node3D) -> void:
+	_last_command_kind = order_kind
+	_last_command_target_id = target.get_instance_id() if target != null and NodeSafety.is_alive_node(target) else 0
+	_last_command_army_count = army.size()
 
 
-func _resolve_objective_node() -> Node3D:
-	if _objective_id != 0:
-		var obj: Object = instance_from_id(_objective_id)
-		if obj != null and is_instance_valid(obj) and obj is Node3D:
-			return obj as Node3D
-	if _objective_kind == &"camp":
-		return _resolve_camp_by_name()
-	return null
-
-
-func _resolve_camp_by_name() -> Node3D:
-	if _objective_name.is_empty() or _objective_name == "-":
-		return null
-	var tree: SceneTree = get_tree()
-	if tree == null:
-		return null
-	for camp: Node3D in CreepCampSafety.collect_active_camps(tree):
-		if camp == null or not is_instance_valid(camp):
-			continue
-		if String(camp.name) == _objective_name:
-			_objective_id = camp.get_instance_id()
-			return camp
-	for node_variant: Variant in tree.get_nodes_in_group(&"creep_camps"):
-		if not NodeSafety.is_alive_node(node_variant):
-			continue
-		if not node_variant is Node3D:
-			continue
-		var camp: Node3D = node_variant as Node3D
-		if String(camp.name) == _objective_name:
-			_objective_id = camp.get_instance_id()
-			return camp
-	return null
-
-
-## One MAIN ARMY group command — never split Hero from Pikemen.
-func _issue_army_move(units: Array, destination: Vector3, order_kind: StringName) -> void:
+func _issue_army_move(units: Array, destination: Vector3, order_kind: StringName, target: Node3D) -> void:
 	if units.is_empty() or destination == Vector3.ZERO:
 		return
-
 	var living: Array = []
 	for unit_ref: Variant in units:
 		if NodeSafety.is_alive_node(unit_ref):
 			living.append(unit_ref)
 	if living.is_empty():
+		return
+	if not _should_reissue(living, order_kind, target):
 		return
 
 	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
@@ -1101,37 +785,7 @@ func _issue_army_move(units: Array, destination: Vector3, order_kind: StringName
 	)
 	last_move_handled = bool(result.get("handled", false))
 	last_move_squad_size = int(result.get("squad_size", 0))
-	_mark_group_order_issued(living, order_kind)
-	if last_move_handled:
-		strategic_orders_issued += 1
-
-
-func _issue_army_attack(units: Array, target: Node3D) -> void:
-	if units.is_empty() or not NodeSafety.is_alive_node(target):
-		return
-
-	## Custom RTS travel to target, then explicit combat commitment.
-	var destination := Vector3(target.global_position.x, 0.0, target.global_position.z)
-	_issue_army_move(units, destination, &"attack_move")
-
-	for unit_ref: Variant in units:
-		if not NodeSafety.is_alive_node(unit_ref):
-			continue
-		_issue_single_unit_attack(unit_ref as Unit, target)
-
-
-func _issue_single_unit_order(unit: Unit, destination: Vector3, order_kind: StringName) -> void:
-	if not NodeSafety.is_alive_node(unit) or destination == Vector3.ZERO:
-		return
-	var result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
-		[unit],
-		destination,
-		order_kind,
-		false,
-		COMMAND_SOURCE
-	)
-	last_move_handled = bool(result.get("handled", false))
-	last_move_squad_size = int(result.get("squad_size", 0))
+	_mark_command_issued(living, order_kind, target)
 	if last_move_handled:
 		strategic_orders_issued += 1
 
@@ -1196,73 +850,7 @@ func _is_valid_assembly_site(world: Vector3) -> bool:
 	return true
 
 
-# --- Production / economy ----------------------------------------------------
-
-func _refresh_hero_queued() -> void:
-	var altar: HeroAltar = _find_completed_hero_altar()
-	last_hero_queued = altar != null and altar.is_training_hero()
-
-
-## One invariant: no living enemy Hero + complete altar + can pay + not queued → queue Hero.
-func _try_ensure_hero() -> bool:
-	if last_hero_alive:
-		_refresh_hero_queued()
-		return false
-	var altar: HeroAltar = _find_completed_hero_altar()
-	if altar == null:
-		last_hero_queued = false
-		return false
-	if altar.is_training_hero():
-		last_hero_queued = true
-		return true
-	if altar.try_train_enemy_hero():
-		strategic_orders_issued += 1
-		last_hero_queued = true
-		return true
-	last_hero_queued = false
-	return false
-
-
-func _hero_training_blocks_pikemen() -> bool:
-	## While Hero is missing and not yet queued, do not spend gold/food on more Pikemen.
-	if last_hero_alive:
-		return false
-	var altar: HeroAltar = _find_completed_hero_altar()
-	if altar == null:
-		return false
-	if altar.is_training_hero():
-		return false
-	return true
-
-
-func _try_train_pikeman_if_ready() -> void:
-	if not _has_completed_barracks():
-		return
-	_try_train_pikeman()
-
-
-func _try_train_pikeman() -> void:
-	if _hero_training_blocks_pikemen():
-		_try_ensure_hero()
-		return
-	var barracks: Barracks = _find_completed_barracks()
-	if barracks == null:
-		return
-	if barracks.try_train_enemy_spearman():
-		strategic_orders_issued += 1
-
-
-func _maintain_workers() -> void:
-	var living: int = _count_living_workers()
-	var pending: int = _count_pending_workers()
-	if living + pending >= MIN_WORKERS:
-		return
-	var cc: CommandCenter = _find_enemy_command_center()
-	if cc == null:
-		return
-	if cc.try_train_enemy_worker():
-		strategic_orders_issued += 1
-
+# --- Building / economy lookups ----------------------------------------------
 
 func _count_living_workers() -> int:
 	var tree: SceneTree = get_tree()
@@ -1423,11 +1011,11 @@ func _log_authority_proof(force: bool) -> void:
 	if composition != null:
 		old_active = composition.is_old_military_runtime_active()
 	print(
-		"Simple WC3 AI active: YES | Old Military AI active: %s | Simple orders: %d | State: %s"
+		"Simple WC3 AI active: YES | Old Military AI active: %s | Simple orders: %d | Priority: %s"
 		% [
 			"YES" if old_active else "NO",
 			strategic_orders_issued,
-			get_state_label(),
+			get_priority_label(),
 		]
 	)
 
@@ -1453,17 +1041,14 @@ func _ensure_debug_label() -> void:
 func _update_debug_label() -> void:
 	if _debug_label == null or not is_instance_valid(_debug_label):
 		return
-	var early_n: int = mini(_camps_cleared, EARLY_CREEP_CAMPS)
+	var hero_txt: String = ("lvl %d" % last_hero_level) if last_hero_alive else "none"
 	_debug_label.text = (
 		"WC3 SIMPLE AI\n"
-		+ "State: %s\n" % get_state_label()
-		+ "Hero: lvl %d\n" % last_hero_level
-		+ "Army: %d\n" % last_army_count
+		+ "Priority: %s\n" % get_priority_label()
+		+ "Hero: %s\n" % hero_txt
 		+ "Pikemen: %d\n" % last_pikeman_count
-		+ "Camps cleared: %d\n" % _camps_cleared
-		+ "Early creep: %d/%d\n" % [early_n, EARLY_CREEP_CAMPS]
-		+ "Hero queued: %s\n" % ("YES" if last_hero_queued else "NO")
-		+ "Target:\n%s\n" % _objective_name
-		+ "AI Power: %.0f\n" % last_ai_power
-		+ "Player Power: %.0f" % last_player_power
+		+ "Army: %d\n" % last_army_count
+		+ "Camps: %d/%d\n" % [_camps_cleared, EARLY_CREEP_CAMPS]
+		+ "Target: %s\n" % get_objective_name()
+		+ "Power: %.0f / %.0f" % [last_ai_power, last_player_power]
 	)
