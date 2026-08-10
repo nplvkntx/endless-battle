@@ -14,12 +14,15 @@ const CAMP_CLEAR_RADIUS: float = 14.0
 ## SLOT_SPACING 1.4; Hero 5.4 vs Spearman 4.5 stretches ~0.9m/s. 12m catches
 ## mid-march separation within a few strategic ticks without spanning half the map.
 const COHESION_RADIUS: float = 12.0
-## Hero leash vs main soldier cluster — slightly looser than soldier packing so
-## brief engage leads do not flip CREEP↔REGROUP every tick. 20m+ still breaks it.
-const HERO_COHESION_RADIUS: float = 18.0
+## Hero leash vs main soldier cluster. MUST match comfortable packing, not a wide
+## outer failure ring: attack may begin the same tick together becomes true.
+## Old 18m allowed starts within one uncapped Hero tick (≈2.7m) of failure when
+## soldiers lag/idle — proven ATTACK_PLAYER↔REGROUP flap. 12m = soldier COHESION.
+## Was 18.0.
+const HERO_COHESION_RADIUS: float = 12.0
 ## Order-follow tolerance around the shared strategic destination (slots + path noise).
 const ORDER_DEST_RADIUS: float = 16.0
-## Regroup arrival — Hero/soldiers considered gathered at the cluster point.
+## Regroup arrival — gather clearly inside HERO_COHESION (12), not at its edge.
 const REGROUP_ARRIVE_RADIUS: float = 6.0
 ## Far attack-move standoff short of the objective (not the Town Center itself).
 const ATTACK_APPROACH_STANDOFF: float = 14.0
@@ -1340,9 +1343,11 @@ func _attack_player_with_whole_army() -> void:
 		return
 
 	## Near: whole local force fights the objective — Hero must never be the sole attacker.
+	## Keep strategic speed caps: clearing them let the Hero race the soldier centroid
+	## and flip cohesion in one tick while Pikes were still idle / slower.
 	_assert_cohesive_strategic_order(CMD_ATTACK)
-	_clear_army_strategic_speed_caps()
 	_whole_army_attack(target, CMD_ATTACK)
+	_apply_strategic_speed_caps(_w.army as Array)
 	_refresh_idle_attack_participants(target)
 
 
@@ -1767,26 +1772,59 @@ func _army_near_position(position: Vector3, radius: float) -> int:
 ## Majority of combat soldiers within COHESION of the main soldier centroid,
 ## AND Hero within HERO_COHESION of that same centroid.
 func _army_is_together() -> bool:
+	return bool(_cohesion_snapshot().get("result", false))
+
+
+## Live cohesion breakdown — query only (no stored strategic state).
+func _cohesion_snapshot() -> Dictionary:
 	var hero: Hero = _w.hero as Hero
+	var empty := {
+		"result": false,
+		"army_count": 0,
+		"soldiers_total": 0,
+		"soldiers_in_main_cluster": 0,
+		"required_cluster_count": 0,
+		"hero_inside": false,
+		"majority_inside": false,
+		"hero_to_center": -1.0,
+		"cohesion_radius": COHESION_RADIUS,
+		"hero_cohesion_radius": HERO_COHESION_RADIUS,
+		"hero_pos": Vector3.ZERO,
+		"main_center": Vector3.ZERO,
+	}
 	if hero == null or not NodeSafety.is_alive_node(hero):
-		return false
+		return empty
 
 	var soldiers: Array = _get_live_soldiers()
 	## Hero alone is never a strategic attack force.
 	if soldiers.is_empty():
-		return false
+		empty["hero_pos"] = hero.global_position
+		return empty
 
 	var facts: Dictionary = _compute_main_army_facts(soldiers)
 	var main_count: int = int(facts.get("main_count", 0))
+	var soldiers_total: int = soldiers.size()
+	var required: int = int(ceili(float(soldiers_total) / 2.0))
+	var centroid: Vector3 = facts.get("centroid", hero.global_position) as Vector3
+	var hero_to_center: float = _horizontal_distance(hero.global_position, centroid)
 	## Main-force majority — one fresh spawn at base must not cancel a cohesive field army,
 	## and a tiny escort with Hero must not count while the bulk lags behind.
-	if main_count * 2 < soldiers.size():
-		return false
-
-	var centroid: Vector3 = facts.get("centroid", hero.global_position) as Vector3
-	if _horizontal_distance(hero.global_position, centroid) > HERO_COHESION_RADIUS:
-		return false
-	return true
+	var majority_inside: bool = main_count * 2 >= soldiers_total
+	var hero_inside: bool = hero_to_center <= HERO_COHESION_RADIUS
+	return {
+		"result": majority_inside and hero_inside,
+		"army_count": soldiers_total,
+		"soldiers_total": soldiers_total,
+		"soldiers_in_main_cluster": main_count,
+		"required_cluster_count": required,
+		"hero_inside": hero_inside,
+		"majority_inside": majority_inside,
+		"hero_to_center": hero_to_center,
+		"cohesion_radius": COHESION_RADIUS,
+		"hero_cohesion_radius": HERO_COHESION_RADIUS,
+		"hero_pos": hero.global_position,
+		"main_center": centroid,
+	}
 
 
 func _count_soldiers() -> int:
@@ -2338,13 +2376,17 @@ func _log_condition_change_if_needed(previous_bucket: StringName) -> void:
 	_debug_last_logged_condition = _debug_condition_bucket
 	_condition_change_times_msec.append(Time.get_ticks_msec())
 	_prune_condition_change_window()
+	var snap: Dictionary = _cohesion_snapshot()
 	print(
-		"[AI CONDITION] %s -> %s | army=%d cohesive=%s cmd=%s tgt=%s"
+		"[AI CONDITION] %s -> %s | army=%d cohesive=%s hero→cluster=%.1f main=%d/%d cmd=%s tgt=%s"
 		% [
 			previous,
 			String(_debug_condition_bucket),
-			_count_soldiers(),
-			str(_army_is_together()),
+			int(snap.get("army_count", _count_soldiers())),
+			"Y" if bool(snap.get("result", false)) else "N",
+			float(snap.get("hero_to_center", -1.0)),
+			int(snap.get("soldiers_in_main_cluster", 0)),
+			int(snap.get("soldiers_total", 0)),
 			String(_last_command_kind),
 			_strategic_target_label(),
 		]
@@ -2732,6 +2774,15 @@ func get_debug_condition_bucket_for_test() -> StringName:
 func is_army_together_for_test() -> bool:
 	_read_live_world()
 	return _army_is_together()
+
+
+func get_cohesion_snapshot_for_test() -> Dictionary:
+	_read_live_world()
+	return _cohesion_snapshot()
+
+
+func get_hero_cohesion_radius_for_test() -> float:
+	return HERO_COHESION_RADIUS
 
 
 func get_regroup_destination_for_test() -> Vector3:

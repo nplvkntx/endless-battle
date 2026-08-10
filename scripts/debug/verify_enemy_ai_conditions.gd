@@ -49,6 +49,7 @@ func _ready() -> void:
 	await _test_creep_strategy_stays_camp_based()
 	await _test_army_cohesion_conditions()
 	await _test_attack_player_force_and_hero_death()
+	await _test_attack_regroup_oscillation_regression()
 	await _test_condition_stability_and_hero_unstuck()
 	await _test_difficulty_economy_knobs()
 
@@ -1071,6 +1072,176 @@ func _test_attack_player_force_and_hero_death() -> void:
 		not _ai.can_continue_enemy_base_fight_without_hero_for_test()
 	)
 	_expect("SCENARIO D economy still wants Hero", _ai.get_debug_priority() == &"HERO")
+
+
+func _test_attack_regroup_oscillation_regression() -> void:
+	print("--- ATTACK_PLAYER ↔ REGROUP oscillation regression ---")
+	_expect(
+		"hero cohesion radius is pack-scale (not 18m boundary ring)",
+		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), 12.0)
+	)
+
+	## PROOF GEOMETRY — Hero just inside old 18m leash with idle soldiers flips in one tick.
+	## With pack-scale 12m leash this starting geometry is already not-together.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
+	var cluster := _cc.global_position + Vector3(30, 0, 0)
+	var hero: Hero = _spawn_enemy_hero(cluster + Vector3(17.5, 0, 0))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var pikes: Array = []
+	for i: int in 8:
+		pikes.append(_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.7, 0, 0)))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	var snap_boundary: Dictionary = _ai.get_cohesion_snapshot_for_test()
+	_expect(
+		"old-boundary lead (17.5m) is NOT cohesive under pack leash",
+		not bool(snap_boundary.get("result", true))
+	)
+	_expect(
+		"old-boundary fail reason is hero_inside",
+		bool(snap_boundary.get("majority_inside", false))
+		and not bool(snap_boundary.get("hero_inside", true))
+	)
+
+	## Cohesive field army → ATTACK_PLAYER, then advance Hero one uncapped tick while soldiers idle.
+	## Must NOT immediately alternate ATTACK↔REGROUP across subsequent observations.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
+	cluster = player_cc.global_position + Vector3(-20, 0, 0)
+	hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	pikes.clear()
+	for i: int in 8:
+		pikes.append(_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.7 - 2.5, 0, 1.0)))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_expect("cohesive pack together before attack", _ai.is_army_together_for_test())
+	_ai.force_tick_for_test()
+	_expect(
+		"cohesive pack selects ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+
+	## Simulate one strategic interval of Hero pull-ahead while soldiers remain (worst idle case).
+	## Pack leash + speed-cap engage path: one 2.7m lead must not flip cohesion when starting packed.
+	var snap0: Dictionary = _ai.get_cohesion_snapshot_for_test()
+	var hd0: float = float(snap0.get("hero_to_center", 0.0))
+	hero.global_position = hero.global_position + Vector3(2.7, 0, 0)
+	await get_tree().process_frame
+	var snap1: Dictionary = _ai.get_cohesion_snapshot_for_test()
+	_expect(
+		"one Hero tick from packed start stays cohesive",
+		bool(snap1.get("result", false))
+	)
+	_ai.force_tick_for_test()
+	_expect(
+		"still ATTACK_PLAYER after one Hero lead tick",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+
+	## Engage path must keep strategic speed caps (Hero not free to race soldiers).
+	_expect(
+		"ATTACK engage keeps Hero strategic speed cap",
+		hero.has_strategic_move_speed_cap()
+	)
+
+	## One distant reinforcement must not redefine main cluster / force REGROUP.
+	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 1))
+	await get_tree().process_frame
+	_expect(
+		"distant reinforcement keeps field army cohesive",
+		_ai.is_army_together_for_test()
+	)
+	_ai.force_tick_for_test()
+	_expect(
+		"distant reinforcement does not force REGROUP",
+		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
+	)
+
+	## Genuine majority separation → REGROUP, and destination packs inside cohesion.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	_spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 40))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"majority separated → REGROUP",
+		_ai.get_debug_condition_bucket_for_test() == &"REGROUP"
+	)
+	var regroup_dest: Vector3 = _ai.get_regroup_destination_for_test()
+	var main_center: Vector3 = _ai.get_main_army_centroid_for_test()
+	var dest_to_main: float = Vector3(regroup_dest.x, 0, regroup_dest.z).distance_to(
+		Vector3(main_center.x, 0, main_center.z)
+	)
+	_expect(
+		"REGROUP destination near main cluster (clear pack geometry)",
+		dest_to_main <= EnemyAI.COHESION_RADIUS + 1.0
+	)
+	## Move Hero onto the regroup point — must become clearly cohesive (inside pack leash).
+	hero.global_position = regroup_dest
+	## Snap soldiers onto cluster as regroup completion would.
+	var living_soldiers: Array = []
+	for unit_variant: Variant in _ai.get_enemy_army_for_test():
+		if unit_variant is Unit and not (unit_variant is Hero) and NodeSafety.is_alive_node(unit_variant):
+			living_soldiers.append(unit_variant)
+	for i: int in living_soldiers.size():
+		var soldier: Unit = living_soldiers[i] as Unit
+		soldier.global_position = regroup_dest + Vector3(float(i % 4) * 0.8, 0, float(i / 4) * 0.8)
+	await get_tree().process_frame
+	var snap_regrouped: Dictionary = _ai.get_cohesion_snapshot_for_test()
+	_expect("REGROUP completion geometry is cohesive", bool(snap_regrouped.get("result", false)))
+	_expect(
+		"REGROUP completion hero→cluster comfortably inside leash",
+		float(snap_regrouped.get("hero_to_center", 99.0)) <= 6.5
+	)
+	_ai.force_tick_for_test()
+	## With player present and army strong enough, attack may open; must not be REGROUP.
+	_expect(
+		"after clear regroup pack not stuck in REGROUP",
+		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
+	)
+
+	## Multi-tick stability: packed ATTACK must not alternate every tick while facts stay packed.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
+	hero = _spawn_enemy_hero(player_cc.global_position + Vector3(-8, 0, 0))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(player_cc.global_position + Vector3(-8.0 + float(i) * 0.7, 0, 1.2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	var buckets: PackedStringArray = PackedStringArray()
+	for _i: int in 6:
+		_ai.force_tick_for_test()
+		buckets.append(String(_ai.get_debug_condition_bucket_for_test()))
+	var attack_regroup_flips: int = 0
+	for i: int in range(1, buckets.size()):
+		var prev_b: String = buckets[i - 1]
+		var cur_b: String = buckets[i]
+		if (
+			(prev_b == "ATTACK_PLAYER" and cur_b == "REGROUP")
+			or (prev_b == "REGROUP" and cur_b == "ATTACK_PLAYER")
+		):
+			attack_regroup_flips += 1
+	_expect(
+		"packed near-base attack does not ATTACK↔REGROUP every tick",
+		attack_regroup_flips == 0
+	)
+	_expect("hd0 recorded for packed start", hd0 >= 0.0)
+	_expect("player_cc alive for attack scenarios", NodeSafety.is_alive_node(player_cc))
 
 
 func _test_condition_stability_and_hero_unstuck() -> void:
