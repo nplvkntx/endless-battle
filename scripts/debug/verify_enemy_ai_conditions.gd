@@ -939,6 +939,15 @@ func _test_attack_player_force_and_hero_death() -> void:
 			idle_nearby += 1
 	_expect("SCENARIO A all 5 Pikes participate", participating == 5)
 	_expect("SCENARIO A no nearby idle Pike", idle_nearby == 0)
+	var intent_a: Dictionary = _ai.classify_army_attack_intent_for_test(player_cc.global_position)
+	_expect(
+		"SCENARIO A intent has no unexpected idle",
+		int(intent_a.get("idle", 0)) == 0
+	)
+	_expect(
+		"SCENARIO A intent combat or travel",
+		int(intent_a.get("combat", 0)) + int(intent_a.get("travel", 0)) >= 5
+	)
 
 	## Prove dedupe refreshes a missing Pike instead of skipping the whole army.
 	var dropped: Unit = pikes[0] as Unit

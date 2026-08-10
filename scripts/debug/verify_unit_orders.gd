@@ -7,6 +7,8 @@ const REPORT_PATH := "user://unit_orders_verify_result.txt"
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
+const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
+const CC_SCENE: PackedScene = preload("res://scenes/buildings/command_center.tscn")
 
 
 func _ready() -> void:
@@ -18,6 +20,8 @@ func _ready() -> void:
 	_verify_hold_position(failures)
 	_verify_patrol_points(failures)
 	await _verify_attack_move_resume(failures)
+	await _verify_enemy_pike_combat_targets(failures)
+	await _verify_enemy_attack_move_objective_continuation(failures)
 	_verify_queued_moves(failures)
 	await _verify_queued_move_then_attack(failures)
 	_verify_invalid_queued_target(failures)
@@ -163,6 +167,114 @@ func _verify_attack_move_resume(failures: PackedStringArray) -> void:
 	first.queue_free()
 	second.queue_free()
 	camp_fighter.queue_free()
+	await get_tree().process_frame
+
+
+## A/B — Enemy Pike can command_attack player Hero and Town Hall and deal damage.
+func _verify_enemy_pike_combat_targets(failures: PackedStringArray) -> void:
+	var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var hero: Hero = HERO_SCENE.instantiate() as Hero
+	add_child(pike)
+	add_child(hero)
+	await get_tree().process_frame
+	pike.global_position = Vector3(0, 0, 0)
+	pike.team_id = 1
+	pike.add_to_group(&"enemies")
+	hero.global_position = Vector3(1.5, 0, 0)
+	hero.team_id = TeamVisuals.PLAYER_TEAM_ID
+	hero.add_to_group(&"heroes")
+	hero.add_to_group(&"units")
+	_expect(
+		failures,
+		"A: pike may attack player Hero",
+		CombatTargetValidation.is_attack_target_for_attacker(pike, hero)
+	)
+	var hero_hp_before: int = hero.get_current_health()
+	pike.command_attack(hero)
+	_expect(failures, "A: pike attack target is Hero", pike._attack_target == hero)
+	## Place already in melee range and strike once through the combat pipeline.
+	DamageService.apply(hero, float(pike.attack_damage), pike)
+	_expect(failures, "A: Hero took damage from Pike", hero.get_current_health() < hero_hp_before)
+	hero.queue_free()
+	pike.queue_free()
+	await get_tree().process_frame
+
+	var pike2: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var town_hall: CommandCenter = CC_SCENE.instantiate() as CommandCenter
+	add_child(pike2)
+	add_child(town_hall)
+	await get_tree().process_frame
+	pike2.global_position = Vector3(10, 0, 0)
+	pike2.team_id = 1
+	pike2.add_to_group(&"enemies")
+	town_hall.global_position = Vector3(12, 0, 0)
+	town_hall.team_id = TeamVisuals.PLAYER_TEAM_ID
+	town_hall.set_completed()
+	if town_hall.is_in_group(&"enemy_command_center"):
+		town_hall.remove_from_group(&"enemy_command_center")
+	town_hall.add_to_group(&"player_command_center")
+	town_hall.add_to_group(&"buildings")
+	_expect(
+		failures,
+		"B: pike may attack player Town Hall",
+		CombatTargetValidation.is_attack_target_for_attacker(pike2, town_hall)
+	)
+	var th_hp_before: int = town_hall.get_node("HealthComponent").current_health
+	pike2.command_attack(town_hall)
+	_expect(failures, "B: pike attack target is Town Hall", pike2._attack_target == town_hall)
+	DamageService.apply(town_hall, float(pike2.attack_damage), pike2)
+	var th_hp_after: int = town_hall.get_node("HealthComponent").current_health
+	_expect(failures, "B: Town Hall took damage from Pike", th_hp_after < th_hp_before)
+	town_hall.queue_free()
+	pike2.queue_free()
+	await get_tree().process_frame
+
+
+## C — Enemy attack-move at approach standoff reacquires Town Hall after local target death.
+func _verify_enemy_attack_move_objective_continuation(failures: PackedStringArray) -> void:
+	var pike: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var local_enemy: Hero = HERO_SCENE.instantiate() as Hero
+	var town_hall: CommandCenter = CC_SCENE.instantiate() as CommandCenter
+	add_child(pike)
+	add_child(local_enemy)
+	add_child(town_hall)
+	await get_tree().process_frame
+
+	town_hall.global_position = Vector3(40, 0, 0)
+	town_hall.team_id = TeamVisuals.PLAYER_TEAM_ID
+	town_hall.set_completed()
+	if town_hall.is_in_group(&"enemy_command_center"):
+		town_hall.remove_from_group(&"enemy_command_center")
+	town_hall.add_to_group(&"player_command_center")
+	town_hall.add_to_group(&"buildings")
+
+	## Approach standoff slot: outside short engage ring historically, inside objective range.
+	pike.global_position = town_hall.global_position + Vector3(-16, 0, 4)
+	pike.team_id = 1
+	pike.add_to_group(&"enemies")
+	local_enemy.global_position = pike.global_position + Vector3(1.2, 0, 0)
+	local_enemy.team_id = TeamVisuals.PLAYER_TEAM_ID
+	local_enemy.add_to_group(&"heroes")
+	local_enemy.add_to_group(&"units")
+
+	var approach: Vector3 = pike.global_position
+	pike.command_attack_move(approach)
+	_expect(failures, "C: amove set", pike._has_attack_move_destination)
+	pike._begin_attack_on_target(local_enemy, -1, false)
+	_expect(failures, "C: fighting local Hero", pike._attack_target == local_enemy)
+
+	local_enemy.get_node("HealthComponent").current_health = 0
+	pike._sanitize_attack_target()
+	_expect(failures, "C: keeps amove after local death", pike._has_attack_move_destination)
+	## At destination: must reacquire Town Hall instead of cancelling into IDLE.
+	var engaged: bool = pike._try_attack_move_engagement()
+	_expect(failures, "C: reacquires objective after local death", engaged)
+	_expect(failures, "C: objective is Town Hall", pike._attack_target == town_hall)
+	_expect(failures, "C: not idle after continuation", pike._attack_target != null)
+
+	local_enemy.queue_free()
+	town_hall.queue_free()
+	pike.queue_free()
 	await get_tree().process_frame
 
 

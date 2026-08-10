@@ -12,6 +12,9 @@ extends Unit
 const HEALTH_BAR_WIDTH := 1.2
 const HEALTH_BAR_HUE_GREEN := 0.333333
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
+## Enemy attack-move / post-kill reacquire must cover approach standoff + formation slots
+## so units do not cancel into IDLE beside a Town Hall just outside the short engage ring.
+const ENEMY_OBJECTIVE_ACQUIRE_RANGE := 26.0
 const HOLD_RETURN_DISTANCE := 1.25
 const OPPORTUNISTIC_CHASE_LEASH := 18.0
 ## Idle alert radius beyond attack range.
@@ -114,6 +117,10 @@ func _finish_attack_target_lost() -> void:
 	var was_committed: bool = _committed_attack_order
 	cancel_attack()
 	if _resume_attack_move_or_patrol():
+		return
+	## Committed focus-fire / local kill must not dump the unit into permanent IDLE
+	## while another valid combatant or structure is still in the fight area.
+	if _try_reacquire_local_combat_target(was_committed):
 		return
 	if was_committed:
 		notify_order_completed(UnitOrder.Type.ATTACK)
@@ -431,9 +438,7 @@ func _on_movement_arrived() -> void:
 
 	if _has_attack_move_destination and _is_at_attack_move_destination():
 		## Keep strategic attack-move while a local engagement target remains.
-		var nearby: Node3D = _find_engagement_target_in_range()
-		if nearby != null:
-			_begin_attack_on_target(nearby, -1, false)
+		if _try_attack_move_engagement():
 			return
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
@@ -490,10 +495,7 @@ func _physics_process(delta: float) -> void:
 		if _is_patrolling:
 			_advance_patrol_waypoint()
 		elif _is_at_attack_move_destination():
-			var nearby_at_dest: Node3D = _find_engagement_target_in_range()
-			if nearby_at_dest != null:
-				_begin_attack_on_target(nearby_at_dest, -1, false)
-			else:
+			if not _try_attack_move_engagement():
 				cancel_attack_move()
 				notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 
@@ -560,13 +562,43 @@ func _find_closest_attack_target_in_range() -> Node3D:
 	)
 
 
-func _find_engagement_target_in_range() -> Node3D:
+func _get_attack_move_search_range() -> float:
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	if CombatTargetValidation.is_enemy_faction(self):
+		return maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	return search_range
+
+
+func _find_engagement_target_in_range() -> Node3D:
+	var search_range: float = _get_attack_move_search_range()
 	if CombatTargetValidation.is_enemy_faction(self):
 		return CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
 			self, search_range
 		)
 	return CombatTargetValidation.find_best_auto_acquire_target_in_range(self, search_range)
+
+
+## After a local kill / invalid target: keep fighting if anything valid remains nearby.
+func _try_reacquire_local_combat_target(prefer_committed: bool = false) -> bool:
+	var search_range: float = get_acquisition_range()
+	if CombatTargetValidation.is_enemy_faction(self):
+		search_range = maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	elif _has_attack_move_destination:
+		search_range = maxf(search_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+
+	var next_target: Node3D = null
+	if CombatTargetValidation.is_enemy_faction(self):
+		next_target = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+			self, search_range
+		)
+	else:
+		next_target = CombatTargetValidation.find_best_auto_acquire_target_in_range(
+			self, search_range
+		)
+	if next_target == null:
+		return false
+	_begin_attack_on_target(next_target, -1, prefer_committed)
+	return _attack_target == next_target
 
 
 func _try_retarget_higher_priority_during_attack() -> void:
@@ -586,7 +618,9 @@ func _try_retarget_higher_priority_during_attack() -> void:
 
 	var search_range: float = get_acquisition_range()
 	if _has_attack_move_destination:
-		search_range = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+		search_range = _get_attack_move_search_range()
+	elif CombatTargetValidation.is_enemy_faction(self):
+		search_range = maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
 
 	var candidate: Node3D = null
 	if CombatTargetValidation.is_enemy_faction(self):
@@ -804,10 +838,12 @@ func _update_chase_movement(delta: float = 0.0, force: bool = false) -> void:
 		_has_chase_target = true
 
 
-func _try_attack_move_engagement() -> void:
+func _try_attack_move_engagement() -> bool:
 	var closest_target: Node3D = _find_engagement_target_in_range()
-	if closest_target != null:
-		_begin_attack_on_target(closest_target, -1, false)
+	if closest_target == null:
+		return false
+	_begin_attack_on_target(closest_target, -1, false)
+	return _attack_target == closest_target
 
 
 func _should_break_opportunistic_chase() -> bool:
@@ -826,18 +862,28 @@ func _should_break_opportunistic_chase() -> bool:
 			return true
 		return false
 
+	var chase_leash: float = _get_opportunistic_chase_leash()
 	var distance: float = CombatTargetValidation.get_horizontal_attack_distance(self, _attack_target)
-	if distance > OPPORTUNISTIC_CHASE_LEASH:
+	if distance > chase_leash:
 		return true
 
 	# Prefer staying near the attack-move / patrol destination rather than chasing forever.
 	if _has_attack_move_destination:
 		var target_from_dest: Vector3 = _attack_target.global_position - _attack_move_destination
 		target_from_dest.y = 0.0
-		if target_from_dest.length() > OPPORTUNISTIC_CHASE_LEASH:
+		if target_from_dest.length() > chase_leash:
 			return true
 
 	return false
+
+
+func _get_opportunistic_chase_leash() -> float:
+	if (
+		_has_attack_move_destination
+		and CombatTargetValidation.is_enemy_faction(self)
+	):
+		return maxf(OPPORTUNISTIC_CHASE_LEASH, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	return OPPORTUNISTIC_CHASE_LEASH
 
 
 func _break_opportunistic_or_auto_chase() -> void:
@@ -890,9 +936,7 @@ func _resume_attack_move_or_patrol() -> bool:
 
 	if _is_at_attack_move_destination():
 		## Stay on attack-move while another local engagement target is available.
-		var nearby: Node3D = _find_engagement_target_in_range()
-		if nearby != null:
-			_begin_attack_on_target(nearby, -1, false)
+		if _try_attack_move_engagement():
 			return true
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)

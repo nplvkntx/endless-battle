@@ -91,6 +91,8 @@ var _hero_micro_timer: float = 0.0
 var _creep_route_failures: Dictionary = {} ## camp_id -> fail count
 var _invalid_creep_camp_ids: Dictionary = {}
 var _condition_change_times_msec: Array[int] = []
+## Debug-only: instance ids already logged as unexpected ATTACK_PLAYER idle (edge-triggered).
+var _attack_idle_logged_ids: Dictionary = {}
 
 var _build_manager: EnemyBuildManager = null
 var _gather_manager: EnemyGatherManager = null
@@ -126,6 +128,7 @@ func reset_match_state() -> void:
 	_creep_route_failures.clear()
 	_invalid_creep_camp_ids.clear()
 	_condition_change_times_msec.clear()
+	_attack_idle_logged_ids.clear()
 	_w.clear()
 	_update_debug_overlay()
 
@@ -1325,6 +1328,7 @@ func _attack_player_with_whole_army() -> void:
 		_assert_cohesive_strategic_order(CMD_ATTACK_MARCH)
 		var approach: Vector3 = _compute_attack_approach(target_pos, army_center)
 		_issue_army_move(approach, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
+		_refresh_idle_attack_participants(target)
 		return
 
 	## Close only when the army itself arrived — never focus-fire from afar.
@@ -1332,12 +1336,14 @@ func _attack_player_with_whole_army() -> void:
 		_assert_cohesive_strategic_order(CMD_ATTACK_MARCH)
 		var approach_close: Vector3 = _compute_attack_approach(target_pos, army_center)
 		_issue_army_move(approach_close, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
+		_refresh_idle_attack_participants(target)
 		return
 
 	## Near: whole local force fights the objective — Hero must never be the sole attacker.
 	_assert_cohesive_strategic_order(CMD_ATTACK)
 	_clear_army_strategic_speed_caps()
 	_whole_army_attack(target, CMD_ATTACK)
+	_refresh_idle_attack_participants(target)
 
 
 ## Live facts only — no attack_started memory.
@@ -1467,6 +1473,49 @@ func _classify_army_attack_intent(expected_destination: Vector3) -> Dictionary:
 		"blocked": blocked,
 		"other": other,
 	}
+
+
+## During ATTACK_PLAYER near the objective: refresh only unexpected IDLE members.
+## Does not reissue the whole army — only units with no attack / move / attack-move intent.
+func _refresh_idle_attack_participants(objective: Node3D) -> void:
+	if not NodeSafety.is_alive_node(objective):
+		return
+
+	var objective_pos: Vector3 = objective.global_position
+	var army: Array = _w.army as Array
+	for unit_variant: Variant in army:
+		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
+			continue
+		var unit: Unit = unit_variant as Unit
+		if _horizontal_distance(unit.global_position, objective_pos) > ENEMY_BASE_COMBAT_RADIUS:
+			continue
+		if "_attack_target" in unit and NodeSafety.is_alive_node(unit.get("_attack_target")):
+			continue
+		if unit.has_move_target:
+			continue
+		if (
+			"_has_attack_move_destination" in unit
+			and bool(unit.get("_has_attack_move_destination"))
+		):
+			continue
+		if unit.has_method(&"is_physically_blocked_from_current_move"):
+			if bool(unit.call(&"is_physically_blocked_from_current_move")):
+				continue
+		if not CombatTargetValidation.is_attack_target_for_attacker(unit, objective):
+			## Objective temporarily invalid for this unit — attack-move into the fight area.
+			unit.command_attack_move(objective_pos)
+			unit.record_strategic_order_provenance_for_tests(
+				"EnemyAI",
+				"ATTACK_MOVE",
+				objective_pos
+			)
+			continue
+		unit.command_attack(objective)
+		unit.record_strategic_order_provenance_for_tests(
+			"EnemyAI",
+			"ATTACK",
+			objective.global_position
+		)
 
 
 func _army_home() -> void:
@@ -1951,6 +2000,7 @@ func _unit_has_compatible_strategic_order(
 		return _unit_destination_near_expected(unit, expected_destination, true)
 
 	## Attack-march: active travel toward the shared area, or local fight near it.
+	## Standing idle at the approach slot with no attack is NOT following — refresh that unit.
 	if command_kind == CMD_ATTACK_MARCH:
 		if "_attack_target" in unit:
 			var march_target: Variant = unit.get("_attack_target")
@@ -1959,7 +2009,16 @@ func _unit_has_compatible_strategic_order(
 				and CombatTargetValidation.is_attack_target_for_attacker(unit, march_target)
 			):
 				return true
-		return _unit_destination_near_expected(unit, expected_destination, true)
+		if unit.has_move_target:
+			return _unit_destination_near_expected(unit, expected_destination, true)
+		if "_has_attack_move_destination" in unit and bool(unit.get("_has_attack_move_destination")):
+			var am_dest: Vector3 = unit.get("_attack_move_destination") as Vector3
+			var to_am: Vector3 = unit.global_position - am_dest
+			to_am.y = 0.0
+			## Still marching toward the attack-move point.
+			if to_am.length() > unit.get_movement_acceptance_radius():
+				return _horizontal_distance(am_dest, expected_destination) <= ORDER_DEST_RADIUS
+		return false
 
 	## Move / regroup / home: standing inside the expected area counts as following.
 	return _unit_destination_near_expected(unit, expected_destination, false)
@@ -2425,6 +2484,9 @@ func _rebuild_debug_overlay_lines() -> void:
 				int(intent.get("other", 0)),
 			]
 		)
+		_log_unexpected_attack_idles(attack_focus)
+	else:
+		_attack_idle_logged_ids.clear()
 	var warnings: PackedStringArray = _collect_invariant_warnings(
 		(_w.player_army as Array).size(),
 		army_cohesive,
@@ -2436,6 +2498,93 @@ func _rebuild_debug_overlay_lines() -> void:
 
 func get_debug_overlay_lines() -> PackedStringArray:
 	return _debug_overlay_lines
+
+
+func _log_unexpected_attack_idles(attack_focus: Vector3) -> void:
+	if not OS.is_debug_build():
+		return
+	var living_ids: Dictionary = {}
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
+			continue
+		var unit: Unit = unit_variant as Unit
+		var unit_id: int = unit.get_instance_id()
+		living_ids[unit_id] = true
+		var has_attack: bool = (
+			"_attack_target" in unit and NodeSafety.is_alive_node(unit.get("_attack_target"))
+		)
+		var has_am: bool = (
+			"_has_attack_move_destination" in unit
+			and bool(unit.get("_has_attack_move_destination"))
+		)
+		var is_blocked: bool = false
+		if unit.has_method(&"is_physically_blocked_from_current_move"):
+			is_blocked = bool(unit.call(&"is_physically_blocked_from_current_move"))
+		var is_unexpected_idle: bool = (
+			not has_attack
+			and not has_am
+			and not unit.has_move_target
+			and not is_blocked
+			and attack_focus != Vector3.ZERO
+			and _horizontal_distance(unit.global_position, attack_focus) <= ENEMY_BASE_COMBAT_RADIUS
+		)
+		if not is_unexpected_idle:
+			_attack_idle_logged_ids.erase(unit_id)
+			continue
+		if _attack_idle_logged_ids.has(unit_id):
+			continue
+		_attack_idle_logged_ids[unit_id] = true
+		var attack_target_label: String = "-"
+		if "_attack_target" in unit:
+			var at: Variant = unit.get("_attack_target")
+			if NodeSafety.is_alive_node(at) and at is Node:
+				attack_target_label = (at as Node).name
+		var move_label: String = "-"
+		if unit.has_move_target:
+			move_label = str(unit.get_movement_destination())
+		elif has_am:
+			move_label = str(unit.get("_attack_move_destination"))
+		var order_label: String = "-"
+		var active: UnitOrder = unit.get_active_order()
+		if active != null:
+			order_label = str(active.type)
+		var provenance: Dictionary = unit.get_strategic_order_provenance()
+		var reason: String = _debug_reason_no_attack_target(unit)
+		print(
+			"[ATTACK IDLE]\nunit=%s\nposition=%s\nstrategic_condition=%s\nstrategic_command=%s\nactual_order=%s\nmove_target=%s\nattack_target=%s\nlast_order_source=%s\nreason_no_target=%s"
+			% [
+				unit.name,
+				str(unit.global_position),
+				String(_debug_condition_bucket),
+				_strategic_order_label(),
+				order_label,
+				move_label,
+				attack_target_label,
+				str(provenance.get("source", "-")),
+				reason,
+			]
+		)
+	## Drop logs for units that left the army.
+	var stale_ids: Array = []
+	for logged_id: Variant in _attack_idle_logged_ids.keys():
+		if not living_ids.has(logged_id):
+			stale_ids.append(logged_id)
+	for stale_id: Variant in stale_ids:
+		_attack_idle_logged_ids.erase(stale_id)
+
+
+func _debug_reason_no_attack_target(unit: Unit) -> String:
+	if not NodeSafety.is_alive_node(unit):
+		return "unit_invalid"
+	var search_range: float = 26.0
+	if "attack_range" in unit:
+		search_range = maxf(float(unit.get("attack_range")) + 3.5, search_range)
+	var found: Node3D = CombatTargetValidation.find_best_attack_target_for_attacker_in_range(
+		unit, search_range
+	)
+	if found != null:
+		return "has_valid_target_but_no_order:%s" % found.name
+	return "no_valid_target_in_range"
 
 
 func _count_pending_spearmen(barracks: Barracks) -> int:

@@ -17,6 +17,8 @@ const ATTACK_LUNGE_DURATION := 0.12
 const ATTACK_WINDUP_DURATION := 0.12
 const MOVE_SPEED_PER_LEVEL_AFTER_18 := HeroStats.MOVE_SPEED_PER_LEVEL_AFTER_18
 const ATTACK_MOVE_ENGAGEMENT_RANGE := 14.0
+## Enemy attack-move / post-kill reacquire must cover approach standoff + formation slots.
+const ENEMY_OBJECTIVE_ACQUIRE_RANGE := 26.0
 const HOLD_RETURN_DISTANCE := 1.25
 const OPPORTUNISTIC_CHASE_LEASH := 18.0
 const ACQUISITION_RANGE_BONUS := 3.5
@@ -813,6 +815,8 @@ func _finish_attack_target_lost() -> void:
 	cancel_attack()
 	if _resume_attack_move_or_patrol():
 		return
+	if _try_reacquire_local_combat_target(was_committed):
+		return
 	if was_committed:
 		notify_order_completed(UnitOrder.Type.ATTACK)
 
@@ -866,10 +870,7 @@ func _on_movement_arrived() -> void:
 		return
 	if _has_attack_move_destination and _is_at_attack_move_destination():
 		## Keep strategic attack-move while a local engagement target remains.
-		var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-		var nearby: Node3D = _find_auto_acquire_target_in_search_range(search_range)
-		if nearby != null:
-			_begin_attack_on_target(nearby, -1, false)
+		if _try_attack_move_engagement():
 			return
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
@@ -965,11 +966,7 @@ func _physics_process(delta: float) -> void:
 		if _is_patrolling:
 			_advance_patrol_waypoint()
 		elif _is_at_attack_move_destination():
-			var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-			var nearby_at_dest: Node3D = _find_auto_acquire_target_in_search_range(search_range)
-			if nearby_at_dest != null:
-				_begin_attack_on_target(nearby_at_dest, -1, false)
-			else:
+			if not _try_attack_move_engagement():
 				cancel_attack_move()
 				notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 
@@ -1040,7 +1037,9 @@ func _try_retarget_higher_priority_during_attack() -> void:
 
 	var search_range: float = get_acquisition_range()
 	if _has_attack_move_destination:
-		search_range = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+		search_range = _get_attack_move_search_range()
+	elif CombatTargetValidation.is_enemy_faction(self):
+		search_range = maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
 
 	var candidate: Node3D = _find_auto_acquire_target_in_search_range(search_range)
 	if candidate == null or candidate == _attack_target:
@@ -1441,11 +1440,35 @@ func _reclaim_unreachable_approach_slot() -> void:
 	)
 
 
-func _try_attack_move_engagement() -> void:
+func _get_attack_move_search_range() -> float:
 	var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-	var closest_target: Node3D = _find_auto_acquire_target_in_search_range(search_range)
-	if closest_target != null:
-		_begin_attack_on_target(closest_target, -1, false)
+	if CombatTargetValidation.is_enemy_faction(self):
+		return maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	return search_range
+
+
+## After a local kill / invalid target: keep fighting if anything valid remains nearby.
+func _try_reacquire_local_combat_target(prefer_committed: bool = false) -> bool:
+	var search_range: float = get_acquisition_range()
+	if CombatTargetValidation.is_enemy_faction(self):
+		search_range = maxf(search_range, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	elif _has_attack_move_destination:
+		search_range = maxf(search_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+	var next_target: Node3D = _find_auto_acquire_target_in_search_range(search_range)
+	if next_target == null:
+		return false
+	_begin_attack_on_target(next_target, -1, prefer_committed)
+	return _attack_target == next_target
+
+
+func _try_attack_move_engagement() -> bool:
+	var closest_target: Node3D = _find_auto_acquire_target_in_search_range(
+		_get_attack_move_search_range()
+	)
+	if closest_target == null:
+		return false
+	_begin_attack_on_target(closest_target, -1, false)
+	return _attack_target == closest_target
 
 
 func _should_break_opportunistic_chase() -> bool:
@@ -1463,15 +1486,25 @@ func _should_break_opportunistic_chase() -> bool:
 			return true
 		return false
 
+	var chase_leash: float = _get_opportunistic_chase_leash()
 	var distance: float = CombatTargetValidation.get_horizontal_attack_distance(self, _attack_target)
-	if distance > OPPORTUNISTIC_CHASE_LEASH:
+	if distance > chase_leash:
 		return true
 	if _has_attack_move_destination:
 		var target_from_dest: Vector3 = _attack_target.global_position - _attack_move_destination
 		target_from_dest.y = 0.0
-		if target_from_dest.length() > OPPORTUNISTIC_CHASE_LEASH:
+		if target_from_dest.length() > chase_leash:
 			return true
 	return false
+
+
+func _get_opportunistic_chase_leash() -> float:
+	if (
+		_has_attack_move_destination
+		and CombatTargetValidation.is_enemy_faction(self)
+	):
+		return maxf(OPPORTUNISTIC_CHASE_LEASH, ENEMY_OBJECTIVE_ACQUIRE_RANGE)
+	return OPPORTUNISTIC_CHASE_LEASH
 
 
 func _break_opportunistic_or_auto_chase() -> void:
@@ -1523,10 +1556,7 @@ func _resume_attack_move_or_patrol() -> bool:
 
 	if _is_at_attack_move_destination():
 		## Keep attack-move intent; pick the next local target instead of dropping the order.
-		var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
-		var nearby: Node3D = _find_auto_acquire_target_in_search_range(search_range)
-		if nearby != null:
-			_begin_attack_on_target(nearby, -1, false)
+		if _try_attack_move_engagement():
 			return true
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
