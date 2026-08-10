@@ -177,6 +177,8 @@ func _collect_enemy_ai_lines(tree: SceneTree) -> PackedStringArray:
 
 
 func _collect_unit_stats(tree: SceneTree) -> Dictionary:
+	## Group arrays are valid at cache-build time only. Entries can die later in the
+	## same process frame — never typed-assign or cast before is_instance_valid().
 	var player_units: Array = CombatTargetValidation.get_cached_group_nodes(tree, &"units")
 	var enemy_units: Array = CombatTargetValidation.get_cached_group_nodes(tree, &"enemies")
 	var player_workers: Array = CombatTargetValidation.get_cached_group_nodes(tree, &"workers")
@@ -184,26 +186,52 @@ func _collect_unit_stats(tree: SceneTree) -> Dictionary:
 	var creeps: Array = CombatTargetValidation.get_cached_group_nodes(tree, &"neutral_creeps")
 	var buildings: Array = CombatTargetValidation.get_cached_group_nodes(tree, &"buildings")
 
-	var workers: int = player_workers.size() + enemy_workers.size()
-	var player_military: int = maxi(0, player_units.size() - player_workers.size())
-	var enemy_military: int = maxi(0, enemy_units.size() - enemy_workers.size())
-	var moving_units: int = 0
-	for node: Node in player_units:
-		if node is Unit and (node as Unit).has_move_target:
-			moving_units += 1
-	for node: Node in enemy_units:
-		if node is Unit and (node as Unit).has_move_target:
-			moving_units += 1
-	for node: Node in creeps:
-		if node is Unit and (node as Unit).has_move_target:
-			moving_units += 1
+	var player_unit_count: int = _count_valid_nodes(player_units)
+	var enemy_unit_count: int = _count_valid_nodes(enemy_units)
+	var player_worker_count: int = _count_valid_nodes(player_workers)
+	var enemy_worker_count: int = _count_valid_nodes(enemy_workers)
+	var creep_count: int = _count_valid_nodes(creeps)
+	var building_count: int = _count_valid_nodes(buildings)
+
+	var workers: int = player_worker_count + enemy_worker_count
+	var player_military: int = maxi(0, player_unit_count - player_worker_count)
+	var enemy_military: int = maxi(0, enemy_unit_count - enemy_worker_count)
+	var moving_units: int = (
+		_count_moving_units(player_units)
+		+ _count_moving_units(enemy_units)
+		+ _count_moving_units(creeps)
+	)
 
 	return {
-		"total_units": player_units.size() + enemy_units.size() + creeps.size(),
+		"total_units": player_unit_count + enemy_unit_count + creep_count,
 		"moving_units": moving_units,
 		"player_military": player_military,
 		"enemy_military": enemy_military,
 		"workers": workers,
-		"creeps": creeps.size(),
-		"buildings": buildings.size(),
+		"creeps": creep_count,
+		"buildings": building_count,
 	}
+
+
+func _count_valid_nodes(nodes: Array) -> int:
+	var count := 0
+	for value: Variant in nodes:
+		if value != null and is_instance_valid(value):
+			count += 1
+	return count
+
+
+func _count_moving_units(nodes: Array) -> int:
+	var moving := 0
+	for node_variant: Variant in nodes:
+		if node_variant == null:
+			continue
+		if not is_instance_valid(node_variant):
+			continue
+		if not node_variant is Unit:
+			continue
+
+		var unit: Unit = node_variant as Unit
+		if unit.has_move_target:
+			moving += 1
+	return moving

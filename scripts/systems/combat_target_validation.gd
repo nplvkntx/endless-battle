@@ -94,6 +94,9 @@ static func reset_match_state() -> void:
 	_shared_enemy_target_cache.clear()
 
 
+## Per-process-frame group snapshot. Entries are validated when the cache is built.
+## "Valid when cached" does NOT mean still alive when a later same-frame consumer
+## iterates — callers must re-check is_instance_valid before typed Node assignment.
 static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> Array:
 	if tree == null:
 		return []
