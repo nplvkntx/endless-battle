@@ -1026,6 +1026,7 @@ func _army_below_minimum() -> bool:
 
 func _needs_early_creep() -> bool:
 	## Prefer creeping until Hero level 3 OR 3 camps cleared — whichever first.
+	_release_cleared_committed_creep_camp()
 	if int(_w.hero_level) >= EARLY_HERO_LEVEL_TARGET:
 		return false
 	if _camps_cleared >= EARLY_CAMPS_REQUIRED:
@@ -1108,6 +1109,7 @@ func _should_attack_player() -> bool:
 
 
 func _useful_creep_exists() -> bool:
+	_release_cleared_committed_creep_camp()
 	return _pick_safe_creep_camp() != null
 
 
@@ -1115,26 +1117,32 @@ func _creep_with_whole_army() -> void:
 	var camp: Node3D = _resolve_creep_camp()
 	if camp == null:
 		return
-
-	var living_creep: Node3D = _find_living_creep_in_camp(camp)
-	if living_creep == null:
+	## Living creeps gate camp validity; individual creeps are never strategic targets.
+	if _find_living_creep_in_camp(camp) == null:
 		return
 
+	var camp_id: int = camp.get_instance_id()
 	var staging: Vector3 = _compute_creep_staging_point(camp)
 	var hero: Hero = _w.hero as Hero
 	var hero_pos: Vector3 = hero.global_position if hero != null else staging
-	var near_staging: bool = _horizontal_distance(hero_pos, staging) <= CREEP_ARRIVE_RADIUS
-	var near_camp: bool = _horizontal_distance(hero_pos, camp.global_position) <= CREEP_ENGAGE_RADIUS
-	var fighting_camp: bool = _army_is_fighting_node(living_creep)
-	## Travel while far; once at staging / camp / already fighting, engage locally.
-	if not near_staging and not near_camp and not fighting_camp:
-		_assert_cohesive_strategic_order(CMD_CREEP)
-		_issue_army_move(staging, &"attack_move", CMD_CREEP, camp.get_instance_id())
-		return
+	var near_camp: bool = (
+		_horizontal_distance(hero_pos, staging) <= CREEP_ARRIVE_RADIUS
+		or _horizontal_distance(hero_pos, camp.global_position) <= CREEP_ENGAGE_RADIUS
+	)
 
 	_assert_cohesive_strategic_order(CMD_CREEP)
-	_clear_army_strategic_speed_caps()
-	_whole_army_attack(living_creep, CMD_CREEP)
+	## Far: attack-move to staging. Near: attack-move into camp area.
+	## Local Unit/Hero combat acquires individual creeps — never command_attack from EnemyAI.
+	if near_camp:
+		_clear_army_strategic_speed_caps()
+		_issue_army_move(
+			_nearest_walkable_dest(camp.global_position),
+			&"attack_move",
+			CMD_CREEP,
+			camp_id
+		)
+		return
+	_issue_army_move(staging, &"attack_move", CMD_CREEP, camp_id)
 
 
 ## Walkable staging on the HOME-facing side of the camp (avoids converging into creep bodies).
@@ -1149,23 +1157,6 @@ func _compute_creep_staging_point(camp: Node3D) -> Vector3:
 		away = away.normalized()
 	var staging: Vector3 = camp_pos + away * CREEP_STAGING_STANDOFF
 	return _nearest_walkable_dest(staging)
-
-
-func _army_is_fighting_node(target: Node3D) -> bool:
-	if not NodeSafety.is_alive_node(target):
-		return false
-	var target_id: int = target.get_instance_id()
-	for unit_variant: Variant in _w.army as Array:
-		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
-			continue
-		var unit: Unit = unit_variant as Unit
-		if not ("_attack_target" in unit):
-			continue
-		var attack_target: Variant = unit.get("_attack_target")
-		if NodeSafety.is_alive_node(attack_target) and attack_target is Object:
-			if (attack_target as Object).get_instance_id() == target_id:
-				return true
-	return false
 
 
 func _hero_is_physically_stuck() -> bool:
@@ -1758,13 +1749,15 @@ func _unit_has_compatible_strategic_order(
 			return (attack_target as Object).get_instance_id() == target_id
 		return false
 
-	## Creep close-in may be focus-firing the camp creep.
+	## Creep: strategic target is the camp; local combat may attack any living creep.
 	if command_kind == CMD_CREEP:
 		if "_attack_target" in unit:
 			var creep_target: Variant = unit.get("_attack_target")
-			if NodeSafety.is_alive_node(creep_target) and creep_target is Object:
-				if (creep_target as Object).get_instance_id() == target_id:
-					return true
+			if (
+				NodeSafety.is_alive_node(creep_target)
+				and CombatTargetValidation.is_neutral_creep(creep_target)
+			):
+				return true
 		return _unit_destination_near_expected(unit, expected_destination)
 
 	## Move / regroup / attack-march: must still be pathing toward the shared area.
@@ -1833,25 +1826,44 @@ func _select_player_target() -> Node3D:
 
 
 func _resolve_creep_camp() -> Node3D:
-	## Only continue a prior camp target if it is still an active camp.
+	## Strategic creep target is always a CAMP id — never an individual creep.
+	_release_cleared_committed_creep_camp()
 	if _current_target_id != 0 and is_instance_id_valid(_current_target_id):
 		var existing: Variant = instance_from_id(_current_target_id)
-		## Validate before any `is` / cast — freed Object makes `is` itself error.
-		if NodeSafety.is_alive_node(existing) and existing is Node3D:
-			var existing_camp: Node3D = existing as Node3D
-			if _is_active_camp(existing_camp):
-				if _find_living_creep_in_camp(existing_camp) != null:
-					return existing_camp
-				## Committed camp is empty — count the clear, then pick another.
-				_camps_cleared += 1
-			_current_target_id = 0
-			_last_command_kind = CMD_NONE
-			_last_command_target_id = 0
+		if NodeSafety.is_alive_node(existing) and existing is CreepCamp:
+			if _find_living_creep_in_camp(existing as Node3D) != null:
+				return existing as Node3D
 
 	var best: Node3D = _pick_safe_creep_camp()
 	if best != null:
 		_current_target_id = best.get_instance_id()
 	return best
+
+
+## If the committed camp id has no living creeps (or is stale), count clear + drop cache.
+func _release_cleared_committed_creep_camp() -> void:
+	if _current_target_id == 0:
+		return
+	if not is_instance_id_valid(_current_target_id):
+		_current_target_id = 0
+		if _last_command_kind == CMD_CREEP:
+			_last_command_kind = CMD_NONE
+			_last_command_target_id = 0
+		return
+	var existing: Variant = instance_from_id(_current_target_id)
+	if not NodeSafety.is_alive_node(existing) or not (existing is CreepCamp):
+		_current_target_id = 0
+		if _last_command_kind == CMD_CREEP:
+			_last_command_kind = CMD_NONE
+			_last_command_target_id = 0
+		return
+	if _find_living_creep_in_camp(existing as Node3D) != null:
+		return
+	_camps_cleared += 1
+	_current_target_id = 0
+	if _last_command_kind == CMD_CREEP:
+		_last_command_kind = CMD_NONE
+		_last_command_target_id = 0
 
 
 func _pick_safe_creep_camp() -> Node3D:
@@ -2095,7 +2107,9 @@ func _strategic_order_label() -> String:
 			return "MOVE"
 		CMD_ATTACK_MARCH:
 			return "ATTACK_MOVE"
-		CMD_ATTACK, CMD_DEFEND, CMD_CREEP:
+		CMD_CREEP:
+			return "CREEP"
+		CMD_ATTACK, CMD_DEFEND:
 			return "ATTACK"
 		_:
 			return "NONE"
@@ -2353,6 +2367,18 @@ func get_main_army_centroid_for_test() -> Vector3:
 
 func get_last_command_kind_for_test() -> StringName:
 	return _last_command_kind
+
+
+func get_last_command_target_id_for_test() -> int:
+	return _last_command_target_id
+
+
+func get_current_target_id_for_test() -> int:
+	return _current_target_id
+
+
+func get_strategic_order_label_for_test() -> String:
+	return _strategic_order_label()
 
 
 func get_player_army_for_test() -> Array:

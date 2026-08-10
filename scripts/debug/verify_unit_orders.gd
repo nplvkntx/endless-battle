@@ -140,6 +140,31 @@ func _verify_attack_move_resume(failures: PackedStringArray) -> void:
 	unit.queue_free()
 	await get_tree().process_frame
 
+	## At destination with a second local target: keep attack-move and re-engage.
+	var camp_fighter: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	var first: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var second: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	add_child(camp_fighter)
+	add_child(first)
+	add_child(second)
+	await get_tree().process_frame
+	camp_fighter.global_position = Vector3(20, 0, 0)
+	first.global_position = Vector3(21, 0, 0)
+	second.global_position = Vector3(21.5, 0, 0)
+	first.add_to_group(&"enemies")
+	second.add_to_group(&"enemies")
+	camp_fighter.command_attack_move(Vector3(20, 0, 0))
+	camp_fighter._begin_attack_on_target(first, -1, false)
+	_expect(failures, "amove@dest: attacking first", camp_fighter._attack_target == first)
+	first._health_component.current_health = 0
+	camp_fighter._sanitize_attack_target()
+	_expect(failures, "amove@dest: keeps attack-move", camp_fighter._has_attack_move_destination)
+	_expect(failures, "amove@dest: re-engages second", camp_fighter._attack_target == second)
+	first.queue_free()
+	second.queue_free()
+	camp_fighter.queue_free()
+	await get_tree().process_frame
+
 
 func _verify_queued_moves(failures: PackedStringArray) -> void:
 	var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman

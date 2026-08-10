@@ -1511,6 +1511,12 @@ func _resume_attack_move_or_patrol() -> bool:
 		return false
 
 	if _is_at_attack_move_destination():
+		## Keep attack-move intent; pick the next local target instead of dropping the order.
+		var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+		var nearby: Node3D = _find_auto_acquire_target_in_search_range(search_range)
+		if nearby != null:
+			_begin_attack_on_target(nearby, -1, false)
+			return true
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 		return false

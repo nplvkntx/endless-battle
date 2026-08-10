@@ -46,6 +46,7 @@ func _ready() -> void:
 	await _test_faction_classification_invariants()
 	await _test_player_power_with_unset_team_id()
 	await _test_freed_creep_camp_count()
+	await _test_creep_strategy_stays_camp_based()
 	await _test_army_cohesion_conditions()
 	await _test_condition_stability_and_hero_unstuck()
 	await _test_difficulty_economy_knobs()
@@ -653,6 +654,80 @@ func _test_freed_creep_camp_count() -> void:
 	)
 	_kill_unit(creep_c)
 	await get_tree().process_frame
+
+
+func _test_creep_strategy_stays_camp_based() -> void:
+	print("--- creep strategy stays camp-based ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Army already at camp so EARLY_CREEP issues camp-area attack-move (not travel staging).
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(20, 0, 0))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(20.0 + float(i) * 0.7, 0, 0))
+	## Keep ATTACK_PLAYER closed.
+	for i: int in 14:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+
+	var camp := CreepCamp.new()
+	camp.name = "CreepCampStrategic"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(22, 0, 0)
+
+	var creep_a: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	var creep_b: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(-1, 0, 0))
+	var creep_c: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(0, 0, 1))
+	creep_a.reparent(camp)
+	creep_b.reparent(camp)
+	creep_c.reparent(camp)
+	_ai.set_camps_cleared_for_test(0)
+	await get_tree().process_frame
+
+	var camp_id: int = camp.get_instance_id()
+	var creep_c_id: int = creep_c.get_instance_id()
+
+	_ai.force_tick_for_test()
+	_expect("camp strategy → EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
+	_expect("camp strategy cmd=creep", _ai.get_last_command_kind_for_test() == &"creep")
+	_expect("camp strategy F3 label CREEP", _ai.get_strategic_order_label_for_test() == "CREEP")
+	_expect("camp strategy current target is camp", _ai.get_current_target_id_for_test() == camp_id)
+	_expect("camp strategy last_command target is camp", _ai.get_last_command_target_id_for_test() == camp_id)
+
+	## One creep death must not clear strategic camp commitment / command cache.
+	_kill_unit(creep_a)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("after creep A still EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
+	_expect("after creep A target still camp", _ai.get_current_target_id_for_test() == camp_id)
+	_expect("after creep A cmd still creep", _ai.get_last_command_kind_for_test() == &"creep")
+	_expect("after creep A last_target still camp", _ai.get_last_command_target_id_for_test() == camp_id)
+
+	_kill_unit(creep_b)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("after creep B target still camp", _ai.get_current_target_id_for_test() == camp_id)
+	_expect("after creep B cmd still creep", _ai.get_last_command_kind_for_test() == &"creep")
+
+	## Repeated ticks must not retarget strategy onto the remaining individual creep.
+	for _i: int in 3:
+		_ai.force_tick_for_test()
+		_expect("ticks keep camp strategic id", _ai.get_current_target_id_for_test() == camp_id)
+		_expect(
+			"ticks never write remaining creep as strategic target",
+			_ai.get_current_target_id_for_test() != creep_c_id
+		)
+		_expect("ticks keep cmd=creep", _ai.get_last_command_kind_for_test() == &"creep")
+
+	var cleared_before: int = _ai.get_camps_cleared()
+	_kill_unit(creep_c)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("camp clear increments camps_cleared", _ai.get_camps_cleared() == cleared_before + 1)
+	_expect(
+		"after camp clear leaves EARLY_CREEP",
+		_ai.get_debug_condition_bucket_for_test() != &"EARLY_CREEP"
+	)
 
 
 func _test_army_cohesion_conditions() -> void:

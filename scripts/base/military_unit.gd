@@ -880,6 +880,11 @@ func _resume_attack_move_or_patrol() -> bool:
 		return false
 
 	if _is_at_attack_move_destination():
+		## Stay on attack-move while another local engagement target is available.
+		var nearby: Node3D = _find_engagement_target_in_range()
+		if nearby != null:
+			_begin_attack_on_target(nearby, -1, false)
+			return true
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 		return false
