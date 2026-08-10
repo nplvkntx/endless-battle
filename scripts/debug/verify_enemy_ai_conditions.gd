@@ -53,7 +53,7 @@ func _ready() -> void:
 	await _test_army_cohesion_conditions()
 	await _test_attack_player_force_and_hero_death()
 	await _test_attack_regroup_oscillation_regression()
-	await _test_condition_stability_and_hero_unstuck()
+	await _test_condition_stability()
 	await _test_mixed_army_minimum()
 	await _test_attack_target_stability()
 	await _test_creep_approach_staging()
@@ -960,28 +960,32 @@ func _test_attack_player_force_and_hero_death() -> void:
 		_ai.select_player_target_for_test() == player_cc
 	)
 
-	## Prove order refresh reissues only a dropped Pike.
+	## Majority already on objective → do not reissue for one idle straggler.
 	var dropped: Unit = pikes[0] as Unit
 	dropped.cancel_attack()
 	dropped.cancel_attack_move()
 	dropped.stop_movement()
+	var approach_dest: Vector3 = _ai.get_last_command_destination_for_test()
 	_ai._last_command_kind = &"attack"
 	_ai._last_command_target_id = player_cc.get_instance_id()
 	_ai._last_command_army_count = _ai.get_enemy_army_for_test().size()
-	_ai._last_command_destination = player_cc.global_position
+	_ai._last_command_destination = approach_dest
 	for i: int in range(1, pikes.size()):
 		var other: Unit = pikes[i] as Unit
-		other.command_attack(player_cc)
-	hero.command_attack(player_cc)
+		other.command_attack_move(approach_dest)
+	hero.command_attack_move(approach_dest)
 	_ai.force_tick_for_test()
-	var refreshed_attack: bool = (
-		"_attack_target" in dropped and NodeSafety.is_alive_node(dropped.get("_attack_target"))
+	var still_idle: bool = (
+		not dropped.has_move_target
+		and not (
+			"_has_attack_move_destination" in dropped
+			and bool(dropped.get("_has_attack_move_destination"))
+		)
+		and not (
+			"_attack_target" in dropped and NodeSafety.is_alive_node(dropped.get("_attack_target"))
+		)
 	)
-	var refreshed_am: bool = (
-		"_has_attack_move_destination" in dropped
-		and bool(dropped.get("_has_attack_move_destination"))
-	)
-	_expect("idle Pike refreshed after drop", refreshed_attack or refreshed_am)
+	_expect("majority-follow skips reissue for one idle Pike", still_idle)
 
 	## SCENARIO B — Enemy Hero dies mid-fight → always HOME (no continue-attack exception).
 	await _clear_units_and_buildings_except_cc()
@@ -1039,12 +1043,11 @@ func _test_attack_player_force_and_hero_death() -> void:
 func _test_attack_regroup_oscillation_regression() -> void:
 	print("--- ATTACK_PLAYER ↔ REGROUP oscillation regression ---")
 	_expect(
-		"hero cohesion radius is pack-scale (not 18m boundary ring)",
-		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), 12.0)
+		"hero far threshold is generous (24m)",
+		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), 24.0)
 	)
 
-	## PROOF GEOMETRY — Hero just inside old 18m leash with idle soldiers flips in one tick.
-	## With pack-scale 12m leash this starting geometry is already not-together.
+	## Mid-march lead (17.5m) must NOT force REGROUP under generous threshold.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
@@ -1059,17 +1062,11 @@ func _test_attack_regroup_oscillation_regression() -> void:
 	await get_tree().process_frame
 	var snap_boundary: Dictionary = _ai.get_cohesion_snapshot_for_test()
 	_expect(
-		"old-boundary lead (17.5m) is NOT cohesive under pack leash",
-		not bool(snap_boundary.get("result", true))
-	)
-	_expect(
-		"old-boundary fail reason is hero_inside",
-		bool(snap_boundary.get("majority_inside", false))
-		and not bool(snap_boundary.get("hero_inside", true))
+		"mid-march lead (17.5m) stays with army under generous threshold",
+		bool(snap_boundary.get("result", false))
 	)
 
-	## Cohesive field army → ATTACK_PLAYER, then advance Hero one uncapped tick while soldiers idle.
-	## Must NOT immediately alternate ATTACK↔REGROUP across subsequent observations.
+	## Cohesive field army → ATTACK_PLAYER; small Hero lead must not flap.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
@@ -1089,15 +1086,13 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
 	)
 
-	## Simulate one strategic interval of Hero pull-ahead while soldiers remain (worst idle case).
-	## Pack leash + speed-cap engage path: one 2.7m lead must not flip cohesion when starting packed.
 	var snap0: Dictionary = _ai.get_cohesion_snapshot_for_test()
 	var hd0: float = float(snap0.get("hero_to_center", 0.0))
 	hero.global_position = hero.global_position + Vector3(2.7, 0, 0)
 	await get_tree().process_frame
 	var snap1: Dictionary = _ai.get_cohesion_snapshot_for_test()
 	_expect(
-		"one Hero tick from packed start stays cohesive",
+		"one Hero tick from packed start stays with army",
 		bool(snap1.get("result", false))
 	)
 	_ai.force_tick_for_test()
@@ -1106,17 +1101,11 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
 	)
 
-	## Engage path must keep strategic speed caps (Hero not free to race soldiers).
-	_expect(
-		"ATTACK engage keeps Hero strategic speed cap",
-		hero.has_strategic_move_speed_cap()
-	)
-
-	## One distant reinforcement must not redefine main cluster / force REGROUP.
+	## One distant reinforcement must not force REGROUP.
 	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 1))
 	await get_tree().process_frame
 	_expect(
-		"distant reinforcement keeps field army cohesive",
+		"distant reinforcement keeps field army together",
 		_ai.is_army_together_for_test()
 	)
 	_ai.force_tick_for_test()
@@ -1125,7 +1114,7 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
 	)
 
-	## Genuine majority separation → REGROUP, and destination packs inside cohesion.
+	## Obvious Hero separation → REGROUP near main soldier centroid.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	_spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
@@ -1138,7 +1127,7 @@ func _test_attack_regroup_oscillation_regression() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect(
-		"majority separated → REGROUP",
+		"obviously separated → REGROUP",
 		_ai.get_debug_condition_bucket_for_test() == &"REGROUP"
 	)
 	var regroup_dest: Vector3 = _ai.get_regroup_destination_for_test()
@@ -1147,12 +1136,10 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		Vector3(main_center.x, 0, main_center.z)
 	)
 	_expect(
-		"REGROUP destination near main cluster (clear pack geometry)",
-		dest_to_main <= EnemyAI.COHESION_RADIUS + 1.0
+		"REGROUP destination near main cluster",
+		dest_to_main <= EnemyAI.MAIN_CLUSTER_RADIUS + 1.0
 	)
-	## Move Hero onto the regroup point — must become clearly cohesive (inside pack leash).
 	hero.global_position = regroup_dest
-	## Snap soldiers onto cluster as regroup completion would.
 	var living_soldiers: Array = []
 	for unit_variant: Variant in _ai.get_enemy_army_for_test():
 		if unit_variant is Unit and not (unit_variant is Hero) and NodeSafety.is_alive_node(unit_variant):
@@ -1162,15 +1149,14 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		soldier.global_position = regroup_dest + Vector3(float(i % 4) * 0.8, 0, float(i / 4) * 0.8)
 	await get_tree().process_frame
 	var snap_regrouped: Dictionary = _ai.get_cohesion_snapshot_for_test()
-	_expect("REGROUP completion geometry is cohesive", bool(snap_regrouped.get("result", false)))
+	_expect("REGROUP completion geometry is with army", bool(snap_regrouped.get("result", false)))
 	_expect(
-		"REGROUP completion hero→cluster comfortably inside leash",
-		float(snap_regrouped.get("hero_to_center", 99.0)) <= 6.5
+		"REGROUP completion hero→cluster well under far threshold",
+		float(snap_regrouped.get("hero_to_center", 99.0)) <= EnemyAI.HERO_FAR_THRESHOLD
 	)
 	_ai.force_tick_for_test()
-	## With player present and army strong enough, attack may open; must not be REGROUP.
 	_expect(
-		"after clear regroup pack not stuck in REGROUP",
+		"after regroup pack not stuck in REGROUP",
 		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
 	)
 
@@ -1206,8 +1192,8 @@ func _test_attack_regroup_oscillation_regression() -> void:
 	_expect("player_cc alive for attack scenarios", NodeSafety.is_alive_node(player_cc))
 
 
-func _test_condition_stability_and_hero_unstuck() -> void:
-	print("--- condition stability + hero local unstuck ---")
+func _test_condition_stability() -> void:
+	print("--- condition stability (no CREEP↔REGROUP thrash) ---")
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(8, 0, 8))
@@ -1244,36 +1230,9 @@ func _test_condition_stability_and_hero_unstuck() -> void:
 		if buckets[i] != buckets[i - 1]:
 			flips += 1
 	_expect("condition flips in 6 stable ticks <= 2", flips <= 2)
-
-	## Hero local unstuck must not dump the whole army onto the Hero escape point.
-	await _clear_units_and_buildings_except_cc()
-	_spawn_basic_base(true, true, true)
-	hero = _spawn_enemy_hero(_cc.global_position + Vector3(10, 0, 10))
-	HeroProgressionStore.register_living_hero(hero)
-	for i: int in 5:
-		_spawn_enemy_spearman(_cc.global_position + Vector3(10.0 + float(i), 0, 10))
-	await get_tree().process_frame
-	_ai._read_live_world()
-	hero.set_movement_target(_cc.global_position + Vector3(40, 0, 40))
-	## Simulate confirmed stuck by calling fix directly (condition path requires physical watch).
-	_ai._fix_current_hero_movement()
-	var hero_escape: Vector3 = hero.get_movement_destination() if hero.has_move_target else Vector3.ZERO
-	var piled: int = 0
-	for unit_variant: Variant in _ai.get_enemy_army_for_test():
-		if not unit_variant is Unit or unit_variant is Hero:
-			continue
-		var soldier: Unit = unit_variant as Unit
-		if not NodeSafety.is_alive_node(soldier):
-			continue
-		var dest: Vector3 = (
-			soldier.get_movement_destination() if soldier.has_move_target else soldier.global_position
-		)
-		if dest.distance_to(hero_escape) < 2.5:
-			piled += 1
-	_expect("hero unstuck does not pile army onto escape (<2 soldiers)", piled < 2)
 	_expect(
-		"hero unstuck command kind",
-		_ai.get_last_command_kind_for_test() == &"hero_unstuck"
+		"stable ticks stay CREEP (not REGROUP)",
+		buckets[0] == "EARLY_CREEP" or buckets[0] == "EXTRA_CREEP"
 	)
 
 
