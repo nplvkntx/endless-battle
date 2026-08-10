@@ -865,6 +865,12 @@ func _on_movement_arrived() -> void:
 		_advance_patrol_waypoint()
 		return
 	if _has_attack_move_destination and _is_at_attack_move_destination():
+		## Keep strategic attack-move while a local engagement target remains.
+		var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+		var nearby: Node3D = _find_auto_acquire_target_in_search_range(search_range)
+		if nearby != null:
+			_begin_attack_on_target(nearby, -1, false)
+			return
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 		return
@@ -959,8 +965,13 @@ func _physics_process(delta: float) -> void:
 		if _is_patrolling:
 			_advance_patrol_waypoint()
 		elif _is_at_attack_move_destination():
-			cancel_attack_move()
-			notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
+			var search_range: float = maxf(attack_range, ATTACK_MOVE_ENGAGEMENT_RANGE)
+			var nearby_at_dest: Node3D = _find_auto_acquire_target_in_search_range(search_range)
+			if nearby_at_dest != null:
+				_begin_attack_on_target(nearby_at_dest, -1, false)
+			else:
+				cancel_attack_move()
+				notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 
 
 func _update_hold_position(can_scan_targets: bool, delta: float) -> void:

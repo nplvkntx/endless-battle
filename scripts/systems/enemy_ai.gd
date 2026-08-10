@@ -26,6 +26,10 @@ const ATTACK_APPROACH_STANDOFF: float = 14.0
 const ATTACK_ENGAGE_RADIUS: float = 18.0
 const CAMP_SEARCH_RANGE: float = 70.0
 const ATTACK_POWER_RATIO: float = 1.25
+## Live hero-death exception: keep pressing a winning local base fight.
+const CONTINUE_ATTACK_POWER_RATIO: float = 1.0
+const CONTINUE_ATTACK_MIN_SOLDIERS: int = 3
+const ENEMY_BASE_COMBAT_RADIUS: float = 27.0
 const FOOD_SAFETY_MARGIN: int = 4
 const MIN_EARLY_SPEARMEN: int = 5
 const EARLY_CAMPS_REQUIRED: int = 3
@@ -163,6 +167,16 @@ func _ai_tick() -> void:
 		return
 
 	if _w.hero == null:
+		## Hero death must not auto-HOME a winning live fight already inside the player base.
+		if _can_continue_current_enemy_base_fight_without_hero():
+			_attack_player_with_whole_army()
+			_finish_military_decision(
+				&"ATTACK_PLAYER",
+				&"ATTACK_NO_HERO_CONTINUE",
+				&"ATTACK_PLAYER",
+				_resolve_debug_target_node()
+			)
+			return
 		_army_home()
 		_finish_military_decision(&"HOME", &"HOME_NO_HERO", &"HERO", null)
 		return
@@ -450,6 +464,9 @@ func _read_live_world() -> void:
 		if not NodeSafety.is_alive_node(node) or not node is Building:
 			continue
 		var pb: Building = node as Building
+		## Scene defaults / mis-grouped enemy CCs must never count as the player Town Hall.
+		if not CombatTargetValidation.is_player_faction(pb):
+			continue
 		(_w.player_buildings as Array).append(pb)
 		if pb is CommandCenter and _w.player_cc == null:
 			_w.player_cc = pb
@@ -1317,9 +1334,139 @@ func _attack_player_with_whole_army() -> void:
 		_issue_army_move(approach_close, &"attack_move", CMD_ATTACK_MARCH, target.get_instance_id())
 		return
 
+	## Near: whole local force fights the objective — Hero must never be the sole attacker.
 	_assert_cohesive_strategic_order(CMD_ATTACK)
 	_clear_army_strategic_speed_caps()
 	_whole_army_attack(target, CMD_ATTACK)
+
+
+## Live facts only — no attack_started memory.
+func _can_continue_current_enemy_base_fight_without_hero() -> bool:
+	if (_w.army as Array).is_empty():
+		return false
+	if _count_soldiers() < CONTINUE_ATTACK_MIN_SOLDIERS:
+		return false
+	if not _army_is_currently_in_enemy_base_combat():
+		return false
+	return _remaining_army_strong_enough_to_continue_attack()
+
+
+func _army_is_currently_in_enemy_base_combat() -> bool:
+	var base: Node3D = null
+	if (
+		NodeSafety.is_alive_node(_w.player_cc)
+		and CombatTargetValidation.is_player_faction(_w.player_cc)
+	):
+		base = _w.player_cc as Node3D
+	else:
+		base = _select_player_target()
+	if base == null or not NodeSafety.is_alive_node(base):
+		return false
+	if not CombatTargetValidation.is_player_faction(base):
+		return false
+
+	var base_pos: Vector3 = base.global_position
+	var centroid: Vector3 = _main_army_centroid()
+	var soldiers_near: int = 0
+	for unit_variant: Variant in _get_live_soldiers():
+		if not unit_variant is Node3D or not NodeSafety.is_alive_node(unit_variant):
+			continue
+		if _horizontal_distance((unit_variant as Node3D).global_position, base_pos) <= ENEMY_BASE_COMBAT_RADIUS:
+			soldiers_near += 1
+	var soldiers_total: int = _count_soldiers()
+	var mass_near_base: bool = (
+		soldiers_near * 2 >= maxi(1, soldiers_total)
+		or _horizontal_distance(centroid, base_pos) <= ENEMY_BASE_COMBAT_RADIUS
+	)
+	if not mass_near_base:
+		return false
+
+	## Player combatants or the structure objective must still be local.
+	var local_player: Node3D = _nearest_from_list(
+		_w.player_army as Array,
+		centroid,
+		ENEMY_BASE_COMBAT_RADIUS
+	)
+	var structure_local: bool = _horizontal_distance(centroid, base_pos) <= ENEMY_BASE_COMBAT_RADIUS
+	if local_player == null and not structure_local:
+		return false
+
+	var intent: Dictionary = _classify_army_attack_intent(base_pos)
+	## Already fighting / marching there, or sitting on the objective idle (will re-issue).
+	return (
+		int(intent.get("combat", 0)) > 0
+		or int(intent.get("travel", 0)) > 0
+		or int(intent.get("blocked", 0)) > 0
+		or soldiers_near >= CONTINUE_ATTACK_MIN_SOLDIERS
+	)
+
+
+func _remaining_army_strong_enough_to_continue_attack() -> bool:
+	var our_power: float = float(_w.our_power)
+	var player_power: float = float(_w.player_power)
+	if our_power <= 0.0:
+		return false
+	return our_power >= player_power * CONTINUE_ATTACK_POWER_RATIO
+
+
+func _classify_army_attack_intent(expected_destination: Vector3) -> Dictionary:
+	var travel: int = 0
+	var combat: int = 0
+	var idle: int = 0
+	var blocked: int = 0
+	var other: int = 0
+	for unit_variant: Variant in _w.army as Array:
+		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
+			continue
+		var unit: Unit = unit_variant as Unit
+		var has_attack: bool = false
+		if "_attack_target" in unit:
+			var attack_target: Variant = unit.get("_attack_target")
+			if NodeSafety.is_alive_node(attack_target):
+				has_attack = true
+		var travelling: bool = (
+			unit.has_move_target
+			or (
+				"_has_attack_move_destination" in unit
+				and bool(unit.get("_has_attack_move_destination"))
+			)
+		)
+		var is_blocked: bool = false
+		if unit.has_method(&"is_physically_blocked_from_current_move"):
+			is_blocked = bool(unit.call(&"is_physically_blocked_from_current_move"))
+
+		if has_attack:
+			combat += 1
+		elif is_blocked and travelling:
+			blocked += 1
+		elif travelling:
+			travel += 1
+		elif (
+			not unit.has_move_target
+			and not (
+				"_has_attack_move_destination" in unit
+				and bool(unit.get("_has_attack_move_destination"))
+			)
+			and not has_attack
+		):
+			## Idle nearby objective still counts as idle for diagnostics.
+			if (
+				expected_destination != Vector3.ZERO
+				and _horizontal_distance(unit.global_position, expected_destination)
+				<= ENEMY_BASE_COMBAT_RADIUS
+			):
+				idle += 1
+			else:
+				other += 1
+		else:
+			other += 1
+	return {
+		"travel": travel,
+		"combat": combat,
+		"idle": idle,
+		"blocked": blocked,
+		"other": other,
+	}
 
 
 func _army_home() -> void:
@@ -1427,11 +1574,17 @@ func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
 		return
 	var army: Array = _w.army as Array
 	var target_id: int = target.get_instance_id()
-	if _should_skip_reissue(command_kind, target_id, army, target.global_position):
+	var recipients: Array = _units_needing_order_refresh(
+		command_kind,
+		target_id,
+		army,
+		target.global_position
+	)
+	if recipients.is_empty():
 		return
 
 	_clear_army_strategic_speed_caps()
-	for unit_variant: Variant in army:
+	for unit_variant: Variant in recipients:
 		if not unit_variant is Unit:
 			continue
 		var unit: Unit = unit_variant as Unit
@@ -1603,6 +1756,9 @@ func _assert_cohesive_strategic_order(command_kind: StringName) -> void:
 		return
 	if command_kind != CMD_ATTACK and command_kind != CMD_ATTACK_MARCH and command_kind != CMD_CREEP:
 		return
+	## Hero-less continue-attack is an intentional live exception.
+	if _w.hero == null:
+		return
 	if _army_is_together():
 		return
 	push_error(
@@ -1623,11 +1779,17 @@ func _issue_army_move(
 	var army: Array = _w.army as Array
 	if army.is_empty():
 		return
-	if _should_skip_reissue(command_kind, target_id, army, destination):
+	var recipients: Array = _units_needing_order_refresh(
+		command_kind,
+		target_id,
+		army,
+		destination
+	)
+	if recipients.is_empty():
 		return
 
 	var units: Array = []
-	for unit_variant: Variant in army:
+	for unit_variant: Variant in recipients:
 		if unit_variant is Unit and NodeSafety.is_alive_node(unit_variant):
 			units.append(unit_variant)
 
@@ -1635,7 +1797,7 @@ func _issue_army_move(
 		return
 
 	## Bound Hero strategic travel to the slowest soldier so the pack does not stretch.
-	_apply_strategic_speed_caps(units)
+	_apply_strategic_speed_caps(army)
 
 	var result: Dictionary = PlayerRouteNavigation.request_group_move(
 		units,
@@ -1694,21 +1856,54 @@ func _clear_army_strategic_speed_caps() -> void:
 			(unit_variant as Unit).clear_strategic_move_speed_cap()
 
 
-## Skip reissue only when cache matches AND the army still executes a compatible order
-## toward the expected destination area (idle / drifted units force refresh).
+## Cache match + missing units only — never skip a meaningful idle Pike because majority is fine.
+func _units_needing_order_refresh(
+	command_kind: StringName,
+	target_id: int,
+	army: Array,
+	expected_destination: Vector3
+) -> Array:
+	var living: Array = []
+	for unit_variant: Variant in army:
+		if unit_variant is Unit and NodeSafety.is_alive_node(unit_variant):
+			living.append(unit_variant)
+	if living.is_empty():
+		return []
+
+	var cache_matches: bool = (
+		_last_command_kind == command_kind
+		and _last_command_target_id == target_id
+		and _last_command_army_count == army.size()
+	)
+	if not cache_matches:
+		return living
+
+	var missing: Array = []
+	for unit_variant2: Variant in living:
+		var unit: Unit = unit_variant2 as Unit
+		if not _unit_has_compatible_strategic_order(
+			unit,
+			command_kind,
+			target_id,
+			expected_destination
+		):
+			missing.append(unit)
+	return missing
+
+
+## Skip reissue only when cache matches AND every living unit still executes a compatible order.
 func _should_skip_reissue(
 	command_kind: StringName,
 	target_id: int,
 	army: Array,
 	expected_destination: Vector3
 ) -> bool:
-	if (
-		_last_command_kind != command_kind
-		or _last_command_target_id != target_id
-		or _last_command_army_count != army.size()
-	):
-		return false
-	return _army_is_following_command(command_kind, target_id, expected_destination)
+	return _units_needing_order_refresh(
+		command_kind,
+		target_id,
+		army,
+		expected_destination
+	).is_empty()
 
 
 func _army_is_following_command(
@@ -1719,19 +1914,13 @@ func _army_is_following_command(
 	var army: Array = _w.army as Array
 	if army.is_empty():
 		return true
-	var ok: int = 0
-	var living: int = 0
 	for unit_variant: Variant in army:
 		if not unit_variant is Unit or not NodeSafety.is_alive_node(unit_variant):
 			continue
-		living += 1
 		var unit: Unit = unit_variant as Unit
-		if _unit_has_compatible_strategic_order(unit, command_kind, target_id, expected_destination):
-			ok += 1
-	if living <= 0:
-		return true
-	## Require ~75% still on the order — majority alone hid idle pikemen.
-	return ok * 4 >= living * 3
+		if not _unit_has_compatible_strategic_order(unit, command_kind, target_id, expected_destination):
+			return false
+	return true
 
 
 func _unit_has_compatible_strategic_order(
@@ -1758,13 +1947,29 @@ func _unit_has_compatible_strategic_order(
 				and CombatTargetValidation.is_neutral_creep(creep_target)
 			):
 				return true
-		return _unit_destination_near_expected(unit, expected_destination)
+		## Idle at staging with cancelled attack-move is NOT following.
+		return _unit_destination_near_expected(unit, expected_destination, true)
 
-	## Move / regroup / attack-march: must still be pathing toward the shared area.
-	return _unit_destination_near_expected(unit, expected_destination)
+	## Attack-march: active travel toward the shared area, or local fight near it.
+	if command_kind == CMD_ATTACK_MARCH:
+		if "_attack_target" in unit:
+			var march_target: Variant = unit.get("_attack_target")
+			if (
+				NodeSafety.is_alive_node(march_target)
+				and CombatTargetValidation.is_attack_target_for_attacker(unit, march_target)
+			):
+				return true
+		return _unit_destination_near_expected(unit, expected_destination, true)
+
+	## Move / regroup / home: standing inside the expected area counts as following.
+	return _unit_destination_near_expected(unit, expected_destination, false)
 
 
-func _unit_destination_near_expected(unit: Unit, expected_destination: Vector3) -> bool:
+func _unit_destination_near_expected(
+	unit: Unit,
+	expected_destination: Vector3,
+	require_active_travel: bool = false
+) -> bool:
 	if expected_destination == Vector3.ZERO:
 		## No dest to compare — require any active travel intent.
 		if unit.has_move_target:
@@ -1785,7 +1990,9 @@ func _unit_destination_near_expected(unit: Unit, expected_destination: Vector3) 
 
 	## Idle with no destination bookkeeping = dropped strategic intent.
 	if candidates.is_empty():
-		## Already standing inside the expected area counts as following.
+		if require_active_travel:
+			return false
+		## Already standing inside the expected area counts as following for plain moves.
 		return _horizontal_distance(unit.global_position, expected_destination) <= ORDER_DEST_RADIUS
 
 	for dest: Vector3 in candidates:
@@ -1804,7 +2011,10 @@ func _select_player_target() -> Node3D:
 		return _w.player_hero as Node3D
 
 	## 3) Player Command Center
-	if NodeSafety.is_alive_node(_w.player_cc):
+	if (
+		NodeSafety.is_alive_node(_w.player_cc)
+		and CombatTargetValidation.is_player_faction(_w.player_cc)
+	):
 		return _w.player_cc as Node3D
 
 	## 4) Production buildings
@@ -1814,13 +2024,18 @@ func _select_player_target() -> Node3D:
 		var building: Building = building_variant as Building
 		if not NodeSafety.is_alive_node(building):
 			continue
+		if not CombatTargetValidation.is_player_faction(building):
+			continue
 		if building is Barracks or building is Stable or building is ArtilleryDepot or building is HeroAltar:
 			return building
 
 	## 5) Any remaining important player building
 	for building_variant: Variant in _w.player_buildings as Array:
-		if building_variant is Building and NodeSafety.is_alive_node(building_variant):
-			return building_variant as Node3D
+		if not building_variant is Building or not NodeSafety.is_alive_node(building_variant):
+			continue
+		if not CombatTargetValidation.is_player_faction(building_variant):
+			continue
+		return building_variant as Node3D
 
 	return null
 
@@ -2160,7 +2375,7 @@ func _collect_invariant_warnings(
 		or _debug_condition_bucket == &"EARLY_CREEP"
 		or _debug_condition_bucket == &"EXTRA_CREEP"
 	)
-	if offense_intent and not army_cohesive:
+	if offense_intent and not army_cohesive and NodeSafety.is_alive_node(_w.get("hero", null)):
 		warnings.append("SOLO HERO WARNING")
 	if unfinished_without_builder > 0:
 		warnings.append("BUILDING ABANDONED")
@@ -2195,6 +2410,21 @@ func _rebuild_debug_overlay_lines() -> void:
 			_strategic_target_label(),
 		],
 	])
+	if _debug_condition_bucket == &"ATTACK_PLAYER":
+		var attack_focus: Vector3 = _last_command_destination
+		if attack_focus == Vector3.ZERO and NodeSafety.is_alive_node(_w.player_cc):
+			attack_focus = (_w.player_cc as Node3D).global_position
+		var intent: Dictionary = _classify_army_attack_intent(attack_focus)
+		_debug_overlay_lines.append(
+			"army attack intent: travel=%d combat=%d idle=%d blocked=%d other=%d"
+			% [
+				int(intent.get("travel", 0)),
+				int(intent.get("combat", 0)),
+				int(intent.get("idle", 0)),
+				int(intent.get("blocked", 0)),
+				int(intent.get("other", 0)),
+			]
+		)
 	var warnings: PackedStringArray = _collect_invariant_warnings(
 		(_w.player_army as Array).size(),
 		army_cohesive,
@@ -2379,6 +2609,33 @@ func get_current_target_id_for_test() -> int:
 
 func get_strategic_order_label_for_test() -> String:
 	return _strategic_order_label()
+
+
+func can_continue_enemy_base_fight_without_hero_for_test() -> bool:
+	_read_live_world()
+	return _can_continue_current_enemy_base_fight_without_hero()
+
+
+func classify_army_attack_intent_for_test(expected_destination: Vector3 = Vector3.ZERO) -> Dictionary:
+	_read_live_world()
+	var dest: Vector3 = expected_destination
+	if dest == Vector3.ZERO:
+		dest = _last_command_destination
+		if dest == Vector3.ZERO and NodeSafety.is_alive_node(_w.player_cc):
+			dest = (_w.player_cc as Node3D).global_position
+	return _classify_army_attack_intent(dest)
+
+
+func units_needing_attack_refresh_for_test(target: Node3D) -> Array:
+	_read_live_world()
+	if not NodeSafety.is_alive_node(target):
+		return []
+	return _units_needing_order_refresh(
+		CMD_ATTACK,
+		target.get_instance_id(),
+		_w.army as Array,
+		target.global_position
+	)
 
 
 func get_player_army_for_test() -> Array:

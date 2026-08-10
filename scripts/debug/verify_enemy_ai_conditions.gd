@@ -48,6 +48,7 @@ func _ready() -> void:
 	await _test_freed_creep_camp_count()
 	await _test_creep_strategy_stays_camp_based()
 	await _test_army_cohesion_conditions()
+	await _test_attack_player_force_and_hero_death()
 	await _test_condition_stability_and_hero_unstuck()
 	await _test_difficulty_economy_knobs()
 
@@ -92,8 +93,12 @@ func _setup_brain() -> void:
 	_ai._gather_manager = _gather
 
 	_cc = _spawn_completed_building(CC_SCENE, Vector3(30, 1, 28)) as CommandCenter
-	_cc.add_to_group(&"enemy_command_center")
 	_cc.team_id = 1
+	if _cc.is_in_group(&"player_command_center"):
+		_cc.remove_from_group(&"player_command_center")
+	_cc.add_to_group(&"enemy_command_center")
+	if _cc.has_method(&"_ensure_dropoff_registration"):
+		_cc.call(&"_ensure_dropoff_registration")
 	_ai.enemy_command_center_path = _ai.get_path_to(_cc)
 	await get_tree().process_frame
 
@@ -884,6 +889,181 @@ func _test_army_cohesion_conditions() -> void:
 	_expect("TEST J player_power > 0", _ai.get_player_power_for_test() > 0.0)
 
 
+func _test_attack_player_force_and_hero_death() -> void:
+	print("--- ATTACK_PLAYER force cohesion + hero-death continue ---")
+
+	## SCENARIO A — Hero + 5 Pikes vs Town Hall only: all participate, no nearby idle Pike.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
+	var hero: Hero = _spawn_enemy_hero(player_cc.global_position + Vector3(-6, 0, 0))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var pikes: Array = []
+	for i: int in 5:
+		pikes.append(
+			_spawn_enemy_spearman(player_cc.global_position + Vector3(-6.0 + float(i) * 0.9, 0, 1.5))
+		)
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"SCENARIO A → ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var hero_prov: Dictionary = hero.get_strategic_order_provenance()
+	_expect(
+		"SCENARIO A Hero ordered ATTACK or ATTACK_MOVE",
+		String(hero_prov.get("type", "")) == "ATTACK"
+		or String(hero_prov.get("type", "")) == "ATTACK_MOVE"
+	)
+	var idle_nearby: int = 0
+	var participating: int = 0
+	for pike_variant: Variant in pikes:
+		if not pike_variant is Unit or not NodeSafety.is_alive_node(pike_variant):
+			continue
+		var pike: Unit = pike_variant as Unit
+		var pike_prov: Dictionary = pike.get_strategic_order_provenance()
+		var order_type: String = String(pike_prov.get("type", ""))
+		var has_attack: bool = (
+			"_attack_target" in pike
+			and NodeSafety.is_alive_node(pike.get("_attack_target"))
+		)
+		var has_am: bool = (
+			"_has_attack_move_destination" in pike
+			and bool(pike.get("_has_attack_move_destination"))
+		)
+		if has_attack or has_am or order_type == "ATTACK" or order_type == "ATTACK_MOVE":
+			participating += 1
+		elif pike.global_position.distance_to(player_cc.global_position) <= 27.0:
+			idle_nearby += 1
+	_expect("SCENARIO A all 5 Pikes participate", participating == 5)
+	_expect("SCENARIO A no nearby idle Pike", idle_nearby == 0)
+
+	## Prove dedupe refreshes a missing Pike instead of skipping the whole army.
+	var dropped: Unit = pikes[0] as Unit
+	dropped.cancel_attack()
+	dropped.cancel_attack_move()
+	dropped.stop_movement()
+	_ai._last_command_kind = &"attack"
+	_ai._last_command_target_id = player_cc.get_instance_id()
+	_ai._last_command_army_count = _ai.get_enemy_army_for_test().size()
+	_ai._last_command_destination = player_cc.global_position
+	## Mark others as holding the attack target so cache matches.
+	for i: int in range(1, pikes.size()):
+		var other: Unit = pikes[i] as Unit
+		other.command_attack(player_cc)
+	hero.command_attack(player_cc)
+	var needing: Array = _ai.units_needing_attack_refresh_for_test(player_cc)
+	_expect("dedupe lists only the idle Pike", needing.size() == 1 and needing.has(dropped))
+	_ai.force_tick_for_test()
+	var refreshed_attack: bool = (
+		"_attack_target" in dropped and NodeSafety.is_alive_node(dropped.get("_attack_target"))
+	)
+	var refreshed_am: bool = (
+		"_has_attack_move_destination" in dropped
+		and bool(dropped.get("_has_attack_move_destination"))
+	)
+	_expect("idle Pike refreshed after dedupe", refreshed_attack or refreshed_am)
+
+	## SCENARIO B — Enemy Hero dies mid-fight; 5 Pikes vs player Hero → continue when stronger.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
+	hero = _spawn_enemy_hero(player_cc.global_position + Vector3(-5, 0, 0))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	pikes.clear()
+	for i: int in 5:
+		pikes.append(
+			_spawn_enemy_spearman(player_cc.global_position + Vector3(-5.0 + float(i) * 0.8, 0, 1.0))
+		)
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_kill_unit(hero)
+	HeroProgressionStore.clear()
+	var player_hero: Hero = HERO_SCENE.instantiate() as Hero
+	_world.add_child(player_hero)
+	player_hero.global_position = player_cc.global_position + Vector3(2, 0, 0)
+	player_hero.team_id = 0
+	player_hero.add_to_group(&"heroes")
+	player_hero.add_to_group(&"units")
+	HeroProgressionStore.register_living_hero(player_hero)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var continue_ok: bool = _ai.can_continue_enemy_base_fight_without_hero_for_test()
+	if continue_ok:
+		_expect(
+			"SCENARIO B stronger army continues ATTACK_PLAYER",
+			_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+		)
+	else:
+		## Power edge cases still allowed to HOME — record live power for diagnosis.
+		_expect(
+			"SCENARIO B continue gate evaluated (weaker → HOME)",
+			_ai.get_debug_condition_bucket_for_test() == &"HOME"
+		)
+
+	## SCENARIO C — Enemy Hero dies and army is genuinely weaker → HOME.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
+	hero = _spawn_enemy_hero(player_cc.global_position + Vector3(-4, 0, 0))
+	HeroProgressionStore.register_living_hero(hero)
+	var weak_pike: Unit = _spawn_enemy_spearman(player_cc.global_position + Vector3(-3, 0, 1))
+	## Strong player force around the fight.
+	for i: int in 8:
+		_spawn_player_spearman(player_cc.global_position + Vector3(float(i) * 0.7, 0, 2))
+	player_hero = HERO_SCENE.instantiate() as Hero
+	_world.add_child(player_hero)
+	player_hero.global_position = player_cc.global_position + Vector3(1, 0, 0)
+	player_hero.team_id = 0
+	player_hero.level = 5
+	player_hero.add_to_group(&"heroes")
+	player_hero.add_to_group(&"units")
+	HeroProgressionStore.register_living_hero(player_hero)
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_kill_unit(hero)
+	## Keep only the one weak pike alive for continue-min-soldiers failure + power loss.
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"SCENARIO C weak remnant → HOME (not continue)",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME"
+	)
+	_expect(
+		"SCENARIO C continue gate false",
+		not _ai.can_continue_enemy_base_fight_without_hero_for_test()
+	)
+	_expect("SCENARIO C weak_pike still alive for setup", NodeSafety.is_alive_node(weak_pike))
+
+	## SCENARIO D — Hero dies before army reaches player base → HOME still valid.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	_spawn_player_command_center(_cc.global_position + Vector3(70, 0, 0))
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 5:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_kill_unit(hero)
+	HeroProgressionStore.clear()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"SCENARIO D hero death at home → HOME",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME"
+	)
+	_expect(
+		"SCENARIO D continue gate false away from player base",
+		not _ai.can_continue_enemy_base_fight_without_hero_for_test()
+	)
+	_expect("SCENARIO D economy still wants Hero", _ai.get_debug_priority() == &"HERO")
+
+
 func _test_condition_stability_and_hero_unstuck() -> void:
 	print("--- condition stability + hero local unstuck ---")
 	await _clear_units_and_buildings_except_cc()
@@ -981,11 +1161,34 @@ func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:
 
 func _spawn_completed_building(scene: PackedScene, position: Vector3) -> Building:
 	var building: Building = scene.instantiate() as Building
+	## Set team before enter-tree so CommandCenter dropoff groups register correctly.
+	building.team_id = 1
 	_world.add_child(building)
 	building.global_position = position
-	building.team_id = 1
 	building.set_completed()
 	building.add_to_group(&"buildings")
+	if building.is_in_group(&"player_command_center"):
+		building.remove_from_group(&"player_command_center")
+	if not building.is_in_group(&"enemy_command_center"):
+		building.add_to_group(&"enemy_command_center")
+	if building.has_method(&"_ensure_dropoff_registration"):
+		building.call(&"_ensure_dropoff_registration")
+	return building
+
+
+func _spawn_player_command_center(position: Vector3) -> Building:
+	var building: Building = CC_SCENE.instantiate() as Building
+	building.team_id = TeamVisuals.PLAYER_TEAM_ID
+	_world.add_child(building)
+	building.global_position = position
+	building.set_completed()
+	building.add_to_group(&"buildings")
+	if building.is_in_group(&"enemy_command_center"):
+		building.remove_from_group(&"enemy_command_center")
+	if not building.is_in_group(&"player_command_center"):
+		building.add_to_group(&"player_command_center")
+	if building.has_method(&"_ensure_dropoff_registration"):
+		building.call(&"_ensure_dropoff_registration")
 	return building
 
 
