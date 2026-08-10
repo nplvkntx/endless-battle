@@ -28,7 +28,6 @@ const CAMP_SEARCH_RANGE: float = 70.0
 const ATTACK_POWER_RATIO: float = 1.25
 const FOOD_SAFETY_MARGIN: int = 4
 const MIN_EARLY_SPEARMEN: int = 5
-const MIN_CREEP_SOLDIERS_NEAR: int = 3
 const EARLY_CAMPS_REQUIRED: int = 3
 const EARLY_HERO_LEVEL_TARGET: int = 3
 const GOLD_WORKER_RATIO: float = 0.6
@@ -81,19 +80,11 @@ var _last_command_destination: Vector3 = Vector3.ZERO
 var _chosen_expansion_mine_id: int = 0
 var _debug_priority: StringName = &"BOOT"
 var _debug_condition_bucket: StringName = &"HOME"
-var _debug_condition_reason: StringName = &"BOOT"
-var _debug_threat_name: String = "-"
 var _debug_last_logged_condition: StringName = &""
 var _debug_previous_condition: StringName = &""
 var _debug_overlay_lines: PackedStringArray = PackedStringArray()
-var _debug_following_ok: int = 0
-var _debug_following_living: int = 0
-var _debug_army_trace_signature: String = ""
 var _hero_micro_timer: float = 0.0
-var _debug_last_hero_ability: String = "NONE"
-var _debug_last_hero_ability_msec: int = 0
 var _creep_route_failures: Dictionary = {} ## camp_id -> fail count
-var _creep_trace_cooldown: float = 0.0
 var _invalid_creep_camp_ids: Dictionary = {}
 var _condition_change_times_msec: Array[int] = []
 
@@ -124,19 +115,11 @@ func reset_match_state() -> void:
 	_chosen_expansion_mine_id = 0
 	_debug_priority = &"RESET"
 	_debug_condition_bucket = &"HOME"
-	_debug_condition_reason = &"RESET"
-	_debug_threat_name = "-"
 	_debug_last_logged_condition = &""
 	_debug_previous_condition = &""
 	_debug_overlay_lines = PackedStringArray()
-	_debug_following_ok = 0
-	_debug_following_living = 0
-	_debug_army_trace_signature = ""
 	_hero_micro_timer = 0.0
-	_debug_last_hero_ability = "NONE"
-	_debug_last_hero_ability_msec = 0
 	_creep_route_failures.clear()
-	_creep_trace_cooldown = 0.0
 	_invalid_creep_camp_ids.clear()
 	_condition_change_times_msec.clear()
 	_w.clear()
@@ -145,7 +128,6 @@ func reset_match_state() -> void:
 
 func _process(delta: float) -> void:
 	_hero_micro_timer += delta
-	_creep_trace_cooldown = maxf(0.0, _creep_trace_cooldown - delta)
 	_tick_timer += delta
 	if _tick_timer < TICK_INTERVAL_SECONDS:
 		return
@@ -176,11 +158,9 @@ func _ai_tick() -> void:
 	## Defense overrides regroup / offense when the base is under real threat.
 	var threat: Node3D = _find_base_threat()
 	if threat != null:
-		_debug_threat_name = threat.name
 		_whole_army_attack(threat, CMD_DEFEND)
 		_finish_military_decision(&"DEFEND", &"DEFEND", &"DEFEND", threat)
 		return
-	_debug_threat_name = "-"
 
 	if _w.hero == null:
 		_army_home()
@@ -476,7 +456,6 @@ func _read_live_world() -> void:
 
 	_w.our_power = _calc_force_power(_w.army as Array)
 	_w.player_power = _calc_force_power(_w.player_army as Array)
-	_validate_power_invariants()
 	_w.active_camps = CreepCampSafety.collect_active_camps(tree)
 
 	if _chosen_expansion_mine_id != 0:
@@ -998,30 +977,7 @@ func _use_hero_combat_micro_if_relevant() -> void:
 	_hero_micro_timer = 0.0
 	if not hero.has_method(&"try_ai_cast_abilities"):
 		return
-	var before_signature: String = _hero_ability_cooldown_signature(hero)
-	var context: Dictionary = _build_hero_ability_context(hero)
-	hero.call(&"try_ai_cast_abilities", context)
-	var after_signature: String = _hero_ability_cooldown_signature(hero)
-	if after_signature != before_signature:
-		_debug_last_hero_ability = String(hero.get_hero_kit_id())
-		_debug_last_hero_ability_msec = Time.get_ticks_msec()
-
-
-func _hero_ability_cooldown_signature(hero: Hero) -> String:
-	if hero == null or not NodeSafety.is_alive_node(hero):
-		return ""
-	var parts: PackedStringArray = PackedStringArray()
-	for ability_id: StringName in [
-		HeroAbilityProgression.ABILITY_Q,
-		HeroAbilityProgression.ABILITY_W,
-		HeroAbilityProgression.ABILITY_E,
-		HeroAbilityProgression.ABILITY_R,
-	]:
-		var remaining: float = 0.0
-		if hero.has_method(&"get_ability_cooldown_remaining"):
-			remaining = float(hero.call(&"get_ability_cooldown_remaining", ability_id))
-		parts.append("%.2f" % remaining)
-	return "|".join(parts)
+	hero.call(&"try_ai_cast_abilities", _build_hero_ability_context(hero))
 
 
 func _build_hero_ability_context(hero: Hero) -> Dictionary:
@@ -1054,7 +1010,7 @@ func _build_hero_ability_context(hero: Hero) -> Dictionary:
 		"nearby_enemy_count": nearby_enemies,
 		"aoe_needed": 3,
 		"defensive_hp_ratio": 0.4,
-		"retreating": _debug_condition_bucket == &"HOME" or _debug_condition_bucket == &"REGROUP",
+		"retreating": _last_command_kind == CMD_HOME or _last_command_kind == CMD_REGROUP,
 		"current_target": attack_target,
 		"allied_army_nearby": _soldiers_near_hero(COHESION_RADIUS),
 	}
@@ -1088,19 +1044,6 @@ func _find_base_threat() -> Node3D:
 			best_dist = dist
 			best = unit
 	return best
-
-
-func _count_base_threats() -> int:
-	## Same living-player-combat filters as `_find_base_threat`.
-	var seen: Dictionary = {}
-	for entry: Dictionary in _collect_base_threat_entries():
-		var unit: Node3D = entry.get("unit") as Node3D
-		if unit == null or not NodeSafety.is_alive_node(unit):
-			continue
-		seen[unit.get_instance_id()] = true
-	return seen.size()
-
-
 func _collect_base_threat_entries() -> Array:
 	var bases: Array = _w.command_centers as Array
 	if bases.is_empty() and _w.primary_cc != null:
@@ -1171,15 +1114,11 @@ func _useful_creep_exists() -> bool:
 func _creep_with_whole_army() -> void:
 	var camp: Node3D = _resolve_creep_camp()
 	if camp == null:
-		_army_home()
 		return
 
 	var living_creep: Node3D = _find_living_creep_in_camp(camp)
 	if living_creep == null:
-		_army_home()
 		return
-
-	_maybe_trace_creep_stuck(camp, living_creep)
 
 	var staging: Vector3 = _compute_creep_staging_point(camp)
 	var hero: Hero = _w.hero as Hero
@@ -1188,7 +1127,6 @@ func _creep_with_whole_army() -> void:
 	var near_camp: bool = _horizontal_distance(hero_pos, camp.global_position) <= CREEP_ENGAGE_RADIUS
 	var fighting_camp: bool = _army_is_fighting_node(living_creep)
 	## Travel while far; once at staging / camp / already fighting, engage locally.
-	## Avoid travel↔engage flip from tiny radius differences.
 	if not near_staging and not near_camp and not fighting_camp:
 		_assert_cohesive_strategic_order(CMD_CREEP)
 		_issue_army_move(staging, &"attack_move", CMD_CREEP, camp.get_instance_id())
@@ -1365,57 +1303,9 @@ func _pick_hero_escape_point(hero: Hero) -> Vector3:
 		if _horizontal_distance(hero.global_position, walkable) >= 1.5:
 			return walkable
 	return _nearest_walkable_dest(home)
-
-
-func _maybe_trace_creep_stuck(camp: Node3D, living_creep: Node3D) -> void:
-	if _creep_trace_cooldown > 0.0:
-		return
-	var hero: Hero = _w.hero as Hero
-	if hero == null or not NodeSafety.is_alive_node(hero):
-		return
-	if not hero.has_move_target and not hero.is_physically_blocked_from_current_move():
-		return
-	_creep_trace_cooldown = 1.0
-	var approach: Vector3 = _compute_creep_staging_point(camp)
-	var attack_target: Node3D = null
-	if hero is MeleeHero:
-		attack_target = (hero as MeleeHero).get_attack_target()
-	print(
-		"[CREEP TRACE]\ncondition=%s\nhero_pos=%s\nhero_move_target=%s\nhero_attack_target=%s\nhero_velocity=%s\nhero_distance_to_target=%.2f\nhero_distance_to_camp=%.2f\nhero_has_move_target=%s\nhero_attack_move_destination=%s\nhero_route_index=%d\nhero_route_size=%d\ncamp_pos=%s\ncamp_walkable=%s\nliving_creep=%s\nliving_creep_pos=%s\nattack_approach_pos=%s\napproach_walkable=%s\nsoldiers=%d\nsoldiers_near_hero=%d\narmy_cohesive=%s"
-		% [
-			String(_debug_condition_bucket),
-			str(hero.global_position),
-			str(hero.get_movement_destination()) if hero.has_move_target else "-",
-			attack_target.name if NodeSafety.is_alive_node(attack_target) else "-",
-			str(Vector3(hero.velocity.x, 0.0, hero.velocity.z)),
-			_horizontal_distance(hero.global_position, hero.get_movement_destination()) if hero.has_move_target else -1.0,
-			_horizontal_distance(hero.global_position, camp.global_position),
-			str(hero.has_move_target),
-			str(hero.get_movement_destination()) if hero.has_move_target else "-",
-			hero.get_custom_rts_route_index(),
-			hero.get_custom_rts_route_waypoint_count(),
-			str(camp.global_position),
-			str(PlayerRouteNavigation.is_world_walkable(camp.global_position)),
-			living_creep.name if living_creep != null else "-",
-			str(living_creep.global_position) if living_creep != null else "-",
-			str(approach),
-			str(PlayerRouteNavigation.is_world_walkable(approach)),
-			_count_soldiers(),
-			_soldiers_near_hero(COHESION_RADIUS),
-			str(_army_is_together()),
-		]
-	)
-
-
 func _attack_player_with_whole_army() -> void:
 	var target: Node3D = _select_player_target()
 	if target == null:
-		_army_home()
-		return
-
-	## Live cohesion again — never continue a player attack after the force splits.
-	if not _army_is_together():
-		_regroup_army()
 		return
 
 	var target_pos: Vector3 = target.global_position
@@ -1568,7 +1458,6 @@ func _whole_army_attack(target: Node3D, command_kind: StringName) -> void:
 	_last_command_army_count = army.size()
 	_last_command_destination = target.global_position
 	_current_target_id = target_id
-	_log_army_trace_if_needed(command_kind, target.global_position)
 
 
 # ---------------------------------------------------------------------------
@@ -1709,12 +1598,6 @@ func _army_is_together() -> bool:
 
 func _count_soldiers() -> int:
 	return _get_live_soldiers().size()
-
-
-func _soldier_centroid() -> Vector3:
-	return _main_army_centroid()
-
-
 func _hero_distance_to_soldier_centroid() -> float:
 	var hero: Hero = _w.hero as Hero
 	if hero == null or not NodeSafety.is_alive_node(hero):
@@ -1788,7 +1671,6 @@ func _issue_army_move(
 	_last_command_army_count = army.size()
 	_last_command_destination = destination
 	_current_target_id = target_id
-	_log_army_trace_if_needed(command_kind, destination)
 
 
 func _apply_strategic_speed_caps(units: Array) -> void:
@@ -1855,8 +1737,6 @@ func _army_is_following_command(
 		var unit: Unit = unit_variant as Unit
 		if _unit_has_compatible_strategic_order(unit, command_kind, target_id, expected_destination):
 			ok += 1
-	_debug_following_ok = ok
-	_debug_following_living = living
 	if living <= 0:
 		return true
 	## Require ~75% still on the order — majority alone hid idle pikemen.
@@ -1919,83 +1799,6 @@ func _unit_destination_near_expected(unit: Unit, expected_destination: Vector3) 
 		if _horizontal_distance(dest, expected_destination) <= ORDER_DEST_RADIUS:
 			return true
 	return false
-
-
-func _log_army_trace_if_needed(command_kind: StringName, destination: Vector3) -> void:
-	if not OS.is_debug_build():
-		return
-	var hero: Hero = _w.hero as Hero
-	var pike: Unit = null
-	for unit_variant: Variant in _get_live_soldiers():
-		if unit_variant is Unit and NodeSafety.is_alive_node(unit_variant):
-			pike = unit_variant as Unit
-			break
-
-	var hero_order: String = _unit_order_label(hero)
-	var pike_order: String = _unit_order_label(pike)
-	var hero_dist: float = 0.0
-	var pike_dist: float = -1.0
-	if hero != null and NodeSafety.is_alive_node(hero) and pike != null:
-		pike_dist = _horizontal_distance(pike.global_position, hero.global_position)
-	var signature: String = "%s|%s|%s|%.0f|%.0f" % [
-		String(command_kind),
-		hero_order,
-		pike_order,
-		destination.x,
-		pike_dist,
-	]
-	if signature == _debug_army_trace_signature:
-		return
-	_debug_army_trace_signature = signature
-
-	var centroid: Vector3 = _main_army_centroid()
-	print(
-		"[ARMY TRACE]\ncondition=%s\nunit=%s\norder=%s\nsource=EnemyAI\nhero_distance=%.1f\ndestination=(%.1f, %.1f, %.1f)\ncentroid=(%.1f, %.1f, %.1f)"
-		% [
-			String(command_kind),
-			hero.name if hero != null and NodeSafety.is_alive_node(hero) else "EnemyHero",
-			hero_order,
-			hero_dist,
-			destination.x,
-			destination.y,
-			destination.z,
-			centroid.x,
-			centroid.y,
-			centroid.z,
-		]
-	)
-	if pike != null and NodeSafety.is_alive_node(pike):
-		var pike_source: String = str(pike.get_strategic_order_provenance().get("source", "UNKNOWN"))
-		print(
-			"[ARMY TRACE]\ncondition=%s\nunit=%s\norder=%s\nsource=%s\nhero_distance=%.1f\ndestination=(%.1f, %.1f, %.1f)"
-			% [
-				String(command_kind),
-				pike.name,
-				pike_order,
-				pike_source,
-				pike_dist,
-				destination.x,
-				destination.y,
-				destination.z,
-			]
-		)
-
-
-func _unit_order_label(unit: Unit) -> String:
-	if unit == null or not NodeSafety.is_alive_node(unit):
-		return "NONE"
-	if "_attack_target" in unit and NodeSafety.is_alive_node(unit.get("_attack_target")):
-		var committed: bool = false
-		if "_committed_attack_order" in unit:
-			committed = bool(unit.get("_committed_attack_order"))
-		return "ATTACK" if committed else "ATTACK_CHASE"
-	if "_has_attack_move_destination" in unit and bool(unit.get("_has_attack_move_destination")):
-		return "ATTACK_MOVE"
-	if unit.has_move_target:
-		return "MOVE"
-	return "IDLE"
-
-
 func _select_player_target() -> Node3D:
 	## 1) Nearby player military relative to our main army centroid
 	var centroid: Vector3 = _main_army_centroid()
@@ -2149,37 +1952,6 @@ func _count_living_creeps_in_camp(camp: Node3D) -> int:
 		if _horizontal_distance(camp.global_position, creep.global_position) <= CAMP_CLEAR_RADIUS:
 			count += 1
 	return count
-
-
-func _has_creep_cohesion(camp_position: Vector3) -> bool:
-	var hero: Hero = _w.hero as Hero
-	if hero == null or not NodeSafety.is_alive_node(hero):
-		return false
-	if _horizontal_distance(hero.global_position, camp_position) > COHESION_RADIUS:
-		return false
-
-	var near_count: int = 0
-	for unit_variant: Variant in _w.army as Array:
-		if not unit_variant is Unit:
-			continue
-		var unit: Unit = unit_variant as Unit
-		if unit == hero:
-			continue
-		if not NodeSafety.is_alive_node(unit):
-			continue
-		if _horizontal_distance(unit.global_position, camp_position) <= COHESION_RADIUS:
-			near_count += 1
-
-	if near_count >= MIN_CREEP_SOLDIERS_NEAR:
-		return true
-	var army_size: int = maxi(1, (_w.army as Array).size() - 1)
-	return near_count * 2 >= army_size
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
 func _desired_worker_count() -> int:
 	return AIDifficultyConfig.get_desired_worker_count(
 		int(_w.tier),
@@ -2211,23 +1983,6 @@ func _army_mostly_near(position: Vector3, radius: float) -> bool:
 			if _horizontal_distance((unit_variant as Node3D).global_position, position) <= radius:
 				near += 1
 	return near * 2 >= army.size()
-
-
-func _army_centroid() -> Vector3:
-	var army: Array = _w.army as Array
-	if army.is_empty():
-		return _w.home as Vector3
-	var sum := Vector3.ZERO
-	var count: int = 0
-	for unit_variant: Variant in army:
-		if unit_variant is Node3D and NodeSafety.is_alive_node(unit_variant):
-			sum += (unit_variant as Node3D).global_position
-			count += 1
-	if count <= 0:
-		return _w.home as Vector3
-	return sum / float(count)
-
-
 func _nearest_from_list(nodes: Array, origin: Vector3, max_range: float) -> Node3D:
 	var best: Node3D = null
 	var best_dist: float = INF
@@ -2269,31 +2024,15 @@ func _calc_force_power(units: Array) -> float:
 	return total
 
 
-func _validate_power_invariants() -> void:
-	if not OS.is_debug_build():
-		return
-	var player_count: int = (_w.player_army as Array).size()
-	var enemy_count: int = (_w.army as Array).size()
-	if player_count > 0 and float(_w.player_power) <= 0.0:
-		push_error(
-			"[POWER INVARIANT] living player combat units=%d but player_power=0" % player_count
-		)
-	if enemy_count > 0 and float(_w.our_power) <= 0.0:
-		push_error(
-			"[POWER INVARIANT] living enemy combat units=%d but our_power=0" % enemy_count
-		)
-
-
 func _finish_military_decision(
 	bucket: StringName,
-	reason: StringName,
+	_reason: StringName,
 	legacy_priority: StringName,
 	_target: Node3D
 ) -> void:
 	_debug_priority = legacy_priority
 	var previous_bucket: StringName = _debug_condition_bucket
 	_debug_condition_bucket = bucket
-	_debug_condition_reason = reason
 	_log_condition_change_if_needed(previous_bucket)
 	_rebuild_debug_overlay_lines()
 	_update_debug_overlay()
@@ -2313,38 +2052,14 @@ func _log_condition_change_if_needed(previous_bucket: StringName) -> void:
 	_debug_last_logged_condition = _debug_condition_bucket
 	_condition_change_times_msec.append(Time.get_ticks_msec())
 	_prune_condition_change_window()
-
-	var hero: Hero = _w.hero as Hero
-	var hero_pos: String = "-"
-	var hero_vel: String = "-"
-	var hero_has_move: String = "N"
-	var hero_dest: String = "-"
-	var hero_stuck: String = "N"
-	if hero != null and NodeSafety.is_alive_node(hero):
-		hero_pos = "(%.1f,%.1f)" % [hero.global_position.x, hero.global_position.z]
-		hero_vel = "(%.1f,%.1f)" % [hero.velocity.x, hero.velocity.z]
-		hero_has_move = "Y" if hero.has_move_target else "N"
-		if hero.has_move_target:
-			var dest: Vector3 = hero.get_movement_destination()
-			hero_dest = "(%.1f,%.1f)" % [dest.x, dest.z]
-		hero_stuck = "Y" if hero.is_physically_blocked_from_current_move() else "N"
-	var facts: Dictionary = _compute_main_army_facts(_get_live_soldiers())
 	print(
-		"[AI CONDITION]\nprevious=%s\ncurrent=%s\nhero_pos=%s\nhero_velocity=%s\nhero_has_move=%s\nhero_destination=%s\narmy_count=%d\nmain_cluster=%d\nhero_to_cluster=%.1f\ncohesive=%s\ncurrent_command=%s\ncurrent_target=%s\nhero_stuck=%s\ncreep_camp=%s"
+		"[AI CONDITION] %s -> %s | army=%d cohesive=%s cmd=%s tgt=%s"
 		% [
 			previous,
 			String(_debug_condition_bucket),
-			hero_pos,
-			hero_vel,
-			hero_has_move,
-			hero_dest,
 			_count_soldiers(),
-			int(facts.get("main_count", 0)),
-			_hero_distance_to_soldier_centroid(),
 			str(_army_is_together()),
 			String(_last_command_kind),
-			_strategic_target_label(),
-			hero_stuck,
 			_strategic_target_label(),
 		]
 	)
@@ -2398,27 +2113,6 @@ func _strategic_target_label() -> String:
 	return "%s/%s" % [target.name, type_name]
 
 
-func _target_distance_from_army_centroid() -> float:
-	var target: Node3D = _resolve_debug_target_node()
-	if target == null:
-		return -1.0
-	return _horizontal_distance(_main_army_centroid(), target.global_position)
-
-
-func _count_unfinished_buildings() -> int:
-	var tree: SceneTree = _w.tree as SceneTree
-	if tree == null:
-		return 0
-	var count: int = 0
-	for node: Node in tree.get_nodes_in_group(&"enemy_command_center"):
-		if not node is Building or not NodeSafety.is_alive_node(node):
-			continue
-		var building: Building = node as Building
-		if building.is_being_constructed():
-			count += 1
-	return count
-
-
 func _count_unfinished_buildings_without_builder() -> int:
 	## Same abandonment criteria as `_find_unfinished_building_without_builder`.
 	var tree: SceneTree = _w.tree as SceneTree
@@ -2461,54 +2155,23 @@ func _collect_invariant_warnings(
 
 func _rebuild_debug_overlay_lines() -> void:
 	var soldiers: int = _count_soldiers()
-	var hero_centroid_dist: float = _hero_distance_to_soldier_centroid()
 	var army_cohesive: bool = _army_is_together()
-	var facts: Dictionary = _compute_main_army_facts(_get_live_soldiers())
-	var main_cluster: int = int(facts.get("main_count", 0))
-	var hero: Hero = _w.hero as Hero
-	var hero_moving: String = "N"
-	var hero_stuck: String = "N"
-	var hero_dest_text: String = "-"
-	if hero != null and NodeSafety.is_alive_node(hero):
-		var horiz_speed: float = Vector3(hero.velocity.x, 0.0, hero.velocity.z).length()
-		hero_moving = "Y" if hero.has_move_target or horiz_speed > 0.15 else "N"
-		hero_stuck = "Y" if _hero_is_physically_stuck() else "N"
-		if hero.has_move_target:
-			var dest: Vector3 = hero.get_movement_destination()
-			hero_dest_text = "(%.0f,%.0f)" % [dest.x, dest.z]
-
-	var staging_text: String = "-"
-	var camp_dist_text: String = "-"
-	var camp_node: Node3D = _resolve_debug_target_node()
-	if camp_node != null and (
-		_debug_condition_bucket == &"EARLY_CREEP" or _debug_condition_bucket == &"EXTRA_CREEP"
-	):
-		var staging: Vector3 = _compute_creep_staging_point(camp_node)
-		staging_text = "(%.0f,%.0f)" % [staging.x, staging.z]
-		if hero != null and NodeSafety.is_alive_node(hero):
-			camp_dist_text = "%.0f" % _horizontal_distance(hero.global_position, camp_node.global_position)
-
-	var ability_age: String = "-"
-	if _debug_last_hero_ability_msec > 0:
-		ability_age = "%.1fs" % (float(Time.get_ticks_msec() - _debug_last_hero_ability_msec) / 1000.0)
-
-	var prev_cond: String = (
-		String(_debug_previous_condition) if _debug_previous_condition != &"" else "-"
-	)
+	var hero_centroid_dist: float = _hero_distance_to_soldier_centroid()
 	var hero_dist_text: String = (
 		"-" if hero_centroid_dist < 0.0 else "%.1f" % hero_centroid_dist
 	)
-
+	var prev_cond: String = (
+		String(_debug_previous_condition) if _debug_previous_condition != &"" else "-"
+	)
 	_debug_overlay_lines = PackedStringArray([
-		"FPS %d | AI %s (was %s) Δ10s=%d"
+		"AI %s (was %s) power %.0f/%.0f Δ10s=%d"
 		% [
-			Engine.get_frames_per_second(),
 			String(_debug_condition_bucket),
 			prev_cond,
+			float(_w.get("our_power", 0.0)),
+			float(_w.get("player_power", 0.0)),
 			_condition_changes_last_10s(),
 		],
-		"Hero move=%s stuck=%s dest=%s"
-		% [hero_moving, hero_stuck, hero_dest_text],
 		"Army %d cohesive=%s hero→cluster=%s cmd=%s tgt=%s"
 		% [
 			soldiers,
@@ -2516,25 +2179,6 @@ func _rebuild_debug_overlay_lines() -> void:
 			hero_dist_text,
 			_strategic_order_label(),
 			_strategic_target_label(),
-		],
-		"Creep camp=%s staging=%s dist=%s"
-		% [_strategic_target_label() if camp_node != null else "-", staging_text, camp_dist_text],
-		"Hero kit=%s lastAI=%s age=%s | Workers %d/%d T%d G%d W%d"
-		% [
-			String(hero.get_hero_kit_id()) if hero != null else "-",
-			_debug_last_hero_ability,
-			ability_age,
-			(_w.workers as Array).size(),
-			_desired_worker_count(),
-			int(_w.tier),
-			int(_w.gold),
-			int(_w.wood),
-		],
-		"cluster %d/%d | %s"
-		% [
-			main_cluster,
-			soldiers,
-			AIDifficultyConfig.display_name(AIDifficultyConfig.get_current_difficulty()),
 		],
 	])
 	var warnings: PackedStringArray = _collect_invariant_warnings(
@@ -2642,16 +2286,6 @@ func _horizontal_distance(from_position: Vector3, to_position: Vector3) -> float
 	var dx: float = from_position.x - to_position.x
 	var dz: float = from_position.z - to_position.z
 	return sqrt(dx * dx + dz * dz)
-
-
-func _set_priority(priority: StringName) -> void:
-	_debug_priority = priority
-
-
-# ---------------------------------------------------------------------------
-# Debug
-# ---------------------------------------------------------------------------
-
 func _ensure_debug_overlay() -> void:
 	if _debug_label != null:
 		return
