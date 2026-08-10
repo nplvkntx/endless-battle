@@ -10,6 +10,9 @@ const ALTAR_SCENE: PackedScene = preload("res://scenes/buildings/hero_altar.tscn
 const BARRACKS_SCENE: PackedScene = preload("res://scenes/buildings/barracks.tscn")
 const BLACKSMITH_SCENE: PackedScene = preload("res://scenes/buildings/blacksmith.tscn")
 const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
+const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
+const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
+const LIGHT_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/light_cavalry.tscn")
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
 const NEUTRAL_CREEP_SCENE: PackedScene = preload("res://scenes/units/neutral_creep.tscn")
@@ -51,6 +54,10 @@ func _ready() -> void:
 	await _test_attack_player_force_and_hero_death()
 	await _test_attack_regroup_oscillation_regression()
 	await _test_condition_stability_and_hero_unstuck()
+	await _test_mixed_army_minimum()
+	await _test_attack_target_stability()
+	await _test_creep_approach_staging()
+	await _test_creep_condition_no_oscillation()
 	await _test_difficulty_economy_knobs()
 
 	var report: String
@@ -539,13 +546,17 @@ func _test_faction_classification_invariants() -> void:
 	_ai.force_tick_for_test()
 	_expect("TEST6b DEFEND ends after death", _ai.get_debug_priority() != &"DEFEND")
 
-	## TEST 7 — ATTACK_PLAYER target selects player entity only
+	## TEST 7 — strategic ATTACK target is player BASE/CC, never a moving unit or NeutralCreep
+	var player_cc_for_target: Building = _spawn_player_command_center(
+		_cc.global_position + Vector3(50, 0, 0)
+	)
 	player_pike = _spawn_player_spearman(_cc.global_position + Vector3(40, 0, 0))
 	var bait_creep: NeutralCreep = _spawn_neutral_creep(_cc.global_position + Vector3(8, 0, 0))
 	await get_tree().process_frame
 	var attack_target: Node3D = _ai.select_player_target_for_test()
 	_expect("TEST7 attack target is not null", attack_target != null)
-	_expect("TEST7 attack target is player pikeman", attack_target == player_pike)
+	_expect("TEST7 attack target is player Command Center", attack_target == player_cc_for_target)
+	_expect("TEST7 attack target is not player pikeman", attack_target != player_pike)
 	_expect(
 		"TEST7 attack target is not NeutralCreep",
 		attack_target != bait_creep and not CombatTargetValidation.is_neutral_creep(attack_target)
@@ -554,6 +565,7 @@ func _test_faction_classification_invariants() -> void:
 		"TEST7 near NeutralCreep still not base threat",
 		_ai.find_base_threat_for_test() == null
 	)
+	_kill_unit(player_cc_for_target)
 
 	## Cleanup locals that remain alive so later harness state stays clean.
 	_kill_unit(near_creep)
@@ -699,6 +711,13 @@ func _test_creep_strategy_stays_camp_based() -> void:
 	_expect("camp strategy F3 label CREEP", _ai.get_strategic_order_label_for_test() == "CREEP")
 	_expect("camp strategy current target is camp", _ai.get_current_target_id_for_test() == camp_id)
 	_expect("camp strategy last_command target is camp", _ai.get_last_command_target_id_for_test() == camp_id)
+	var staging0: Vector3 = _ai.get_creep_staging_point_for_test(camp)
+	var dest0: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect(
+		"camp strategy dest is staging area not camp center",
+		dest0.distance_to(camp.global_position) > 4.0
+		and dest0.distance_to(staging0) <= EnemyAI.ORDER_DEST_RADIUS
+	)
 
 	## One creep death must not clear strategic camp commitment / command cache.
 	_kill_unit(creep_a)
@@ -891,9 +910,9 @@ func _test_army_cohesion_conditions() -> void:
 
 
 func _test_attack_player_force_and_hero_death() -> void:
-	print("--- ATTACK_PLAYER force cohesion + hero-death continue ---")
+	print("--- ATTACK_PLAYER force cohesion + hero-death HOME ---")
 
-	## SCENARIO A — Hero + 5 Pikes vs Town Hall only: all participate, no nearby idle Pike.
+	## SCENARIO A — Hero + 5 Pikes vs Town Hall only: all participate.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
@@ -918,7 +937,6 @@ func _test_attack_player_force_and_hero_death() -> void:
 		String(hero_prov.get("type", "")) == "ATTACK"
 		or String(hero_prov.get("type", "")) == "ATTACK_MOVE"
 	)
-	var idle_nearby: int = 0
 	var participating: int = 0
 	for pike_variant: Variant in pikes:
 		if not pike_variant is Unit or not NodeSafety.is_alive_node(pike_variant):
@@ -936,21 +954,13 @@ func _test_attack_player_force_and_hero_death() -> void:
 		)
 		if has_attack or has_am or order_type == "ATTACK" or order_type == "ATTACK_MOVE":
 			participating += 1
-		elif pike.global_position.distance_to(player_cc.global_position) <= 27.0:
-			idle_nearby += 1
 	_expect("SCENARIO A all 5 Pikes participate", participating == 5)
-	_expect("SCENARIO A no nearby idle Pike", idle_nearby == 0)
-	var intent_a: Dictionary = _ai.classify_army_attack_intent_for_test(player_cc.global_position)
 	_expect(
-		"SCENARIO A intent has no unexpected idle",
-		int(intent_a.get("idle", 0)) == 0
-	)
-	_expect(
-		"SCENARIO A intent combat or travel",
-		int(intent_a.get("combat", 0)) + int(intent_a.get("travel", 0)) >= 5
+		"SCENARIO A strategic objective is player CC",
+		_ai.select_player_target_for_test() == player_cc
 	)
 
-	## Prove dedupe refreshes a missing Pike instead of skipping the whole army.
+	## Prove order refresh reissues only a dropped Pike.
 	var dropped: Unit = pikes[0] as Unit
 	dropped.cancel_attack()
 	dropped.cancel_attack_move()
@@ -959,13 +969,10 @@ func _test_attack_player_force_and_hero_death() -> void:
 	_ai._last_command_target_id = player_cc.get_instance_id()
 	_ai._last_command_army_count = _ai.get_enemy_army_for_test().size()
 	_ai._last_command_destination = player_cc.global_position
-	## Mark others as holding the attack target so cache matches.
 	for i: int in range(1, pikes.size()):
 		var other: Unit = pikes[i] as Unit
 		other.command_attack(player_cc)
 	hero.command_attack(player_cc)
-	var needing: Array = _ai.units_needing_attack_refresh_for_test(player_cc)
-	_expect("dedupe lists only the idle Pike", needing.size() == 1 and needing.has(dropped))
 	_ai.force_tick_for_test()
 	var refreshed_attack: bool = (
 		"_attack_target" in dropped and NodeSafety.is_alive_node(dropped.get("_attack_target"))
@@ -974,9 +981,9 @@ func _test_attack_player_force_and_hero_death() -> void:
 		"_has_attack_move_destination" in dropped
 		and bool(dropped.get("_has_attack_move_destination"))
 	)
-	_expect("idle Pike refreshed after dedupe", refreshed_attack or refreshed_am)
+	_expect("idle Pike refreshed after drop", refreshed_attack or refreshed_am)
 
-	## SCENARIO B — Enemy Hero dies mid-fight; 5 Pikes vs player Hero → continue when stronger.
+	## SCENARIO B — Enemy Hero dies mid-fight → always HOME (no continue-attack exception).
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
@@ -1002,54 +1009,13 @@ func _test_attack_player_force_and_hero_death() -> void:
 	HeroProgressionStore.register_living_hero(player_hero)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	var continue_ok: bool = _ai.can_continue_enemy_base_fight_without_hero_for_test()
-	if continue_ok:
-		_expect(
-			"SCENARIO B stronger army continues ATTACK_PLAYER",
-			_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
-		)
-	else:
-		## Power edge cases still allowed to HOME — record live power for diagnosis.
-		_expect(
-			"SCENARIO B continue gate evaluated (weaker → HOME)",
-			_ai.get_debug_condition_bucket_for_test() == &"HOME"
-		)
-
-	## SCENARIO C — Enemy Hero dies and army is genuinely weaker → HOME.
-	await _clear_units_and_buildings_except_cc()
-	_spawn_basic_base(true, true, true)
-	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
-	hero = _spawn_enemy_hero(player_cc.global_position + Vector3(-4, 0, 0))
-	HeroProgressionStore.register_living_hero(hero)
-	var weak_pike: Unit = _spawn_enemy_spearman(player_cc.global_position + Vector3(-3, 0, 1))
-	## Strong player force around the fight.
-	for i: int in 8:
-		_spawn_player_spearman(player_cc.global_position + Vector3(float(i) * 0.7, 0, 2))
-	player_hero = HERO_SCENE.instantiate() as Hero
-	_world.add_child(player_hero)
-	player_hero.global_position = player_cc.global_position + Vector3(1, 0, 0)
-	player_hero.team_id = 0
-	player_hero.level = 5
-	player_hero.add_to_group(&"heroes")
-	player_hero.add_to_group(&"units")
-	HeroProgressionStore.register_living_hero(player_hero)
-	_ai.set_camps_cleared_for_test(3)
-	await get_tree().process_frame
-	_kill_unit(hero)
-	## Keep only the one weak pike alive for continue-min-soldiers failure + power loss.
-	await get_tree().process_frame
-	_ai.force_tick_for_test()
 	_expect(
-		"SCENARIO C weak remnant → HOME (not continue)",
+		"SCENARIO B hero death → HOME (no continue-attack)",
 		_ai.get_debug_condition_bucket_for_test() == &"HOME"
 	)
-	_expect(
-		"SCENARIO C continue gate false",
-		not _ai.can_continue_enemy_base_fight_without_hero_for_test()
-	)
-	_expect("SCENARIO C weak_pike still alive for setup", NodeSafety.is_alive_node(weak_pike))
+	_expect("SCENARIO B economy still wants Hero", _ai.get_debug_priority() == &"HERO")
 
-	## SCENARIO D — Hero dies before army reaches player base → HOME still valid.
+	## SCENARIO C — Hero dies before army reaches player base → HOME.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	_spawn_player_command_center(_cc.global_position + Vector3(70, 0, 0))
@@ -1064,14 +1030,10 @@ func _test_attack_player_force_and_hero_death() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect(
-		"SCENARIO D hero death at home → HOME",
+		"SCENARIO C hero death at home → HOME",
 		_ai.get_debug_condition_bucket_for_test() == &"HOME"
 	)
-	_expect(
-		"SCENARIO D continue gate false away from player base",
-		not _ai.can_continue_enemy_base_fight_without_hero_for_test()
-	)
-	_expect("SCENARIO D economy still wants Hero", _ai.get_debug_priority() == &"HERO")
+	_expect("SCENARIO C economy still wants Hero", _ai.get_debug_priority() == &"HERO")
 
 
 func _test_attack_regroup_oscillation_regression() -> void:
@@ -1315,6 +1277,180 @@ func _test_condition_stability_and_hero_unstuck() -> void:
 	)
 
 
+func _test_mixed_army_minimum() -> void:
+	print("--- mixed T2/T3 army minimum ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Force T2 so early Spearman-only gate is closed.
+	_cc.command_center_tier = 2
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 4:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	for i: int in 5:
+		_spawn_enemy_unit(SWORDSMAN_SCENE, _cc.global_position + Vector3(float(i) * 0.8, 0, 3.5))
+	for i: int in 5:
+		_spawn_enemy_unit(ARCHER_SCENE, _cc.global_position + Vector3(float(i) * 0.8, 0, 5.0))
+	for i: int in 2:
+		_spawn_enemy_unit(LIGHT_CAVALRY_SCENE, _cc.global_position + Vector3(float(i) * 1.2, 0, 6.5))
+	## Stronger player so attack stays closed — we only care about HOME_ARMY_SMALL.
+	for i: int in 20:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"mixed army not HOME_ARMY_SMALL with Spearmen < 5",
+		_ai.get_debug_condition_bucket_for_test() != &"HOME"
+		or _ai.get_debug_priority() != &"BUILD_FORCE"
+	)
+	_expect(
+		"mixed army not blocked solely by Spearmen count",
+		_ai.get_debug_priority() != &"BUILD_FORCE"
+	)
+
+
+func _test_attack_target_stability() -> void:
+	print("--- ATTACK_PLAYER objective stays player base ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	## Player Hero far from enemy base (outside DEFENSE_RADIUS) so DEFEND does not win.
+	var player_hero: Hero = HERO_SCENE.instantiate() as Hero
+	_world.add_child(player_hero)
+	player_hero.global_position = player_cc.global_position + Vector3(4, 0, 4)
+	player_hero.team_id = 0
+	player_hero.add_to_group(&"heroes")
+	player_hero.add_to_group(&"units")
+	HeroProgressionStore.register_living_hero(player_hero)
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"strong AI → ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var objective0: Node3D = _ai.select_player_target_for_test()
+	_expect("objective0 is player CC", objective0 == player_cc)
+	var target_id0: int = _ai.get_last_command_target_id_for_test()
+	## Move player Hero around near the player base — strategic objective must remain CC.
+	player_hero.global_position = player_cc.global_position + Vector3(-3, 0, 6)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"after Hero move still ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("objective still player CC", _ai.select_player_target_for_test() == player_cc)
+	_expect(
+		"strategic target id stays player CC",
+		_ai.get_last_command_target_id_for_test() == target_id0
+		or _ai.get_last_command_target_id_for_test() == player_cc.get_instance_id()
+	)
+	_expect(
+		"strategic target is not player Hero instance",
+		_ai.get_last_command_target_id_for_test() != player_hero.get_instance_id()
+	)
+
+
+func _test_creep_approach_staging() -> void:
+	print("--- creep approach stays staging area ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(8, 0, 8))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(8.0 + float(i) * 0.7, 0, 8))
+	for i: int in 14:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+	var camp := CreepCamp.new()
+	camp.name = "ApproachCreepCamp"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(0, 0, 28)
+	var creep_a: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	var creep_b: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(-1, 0, 0))
+	creep_a.reparent(camp)
+	creep_b.reparent(camp)
+	_ai.set_camps_cleared_for_test(0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var staging: Vector3 = _ai.get_creep_staging_point_for_test(camp)
+	var dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("creep approach selects EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
+	_expect(
+		"strategic dest near staging not camp center",
+		dest.distance_to(staging) <= EnemyAI.ORDER_DEST_RADIUS
+		and dest.distance_to(camp.global_position) > 4.0
+	)
+	var camp_id: int = camp.get_instance_id()
+	_kill_unit(creep_a)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("after one creep death still EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
+	_expect("after one creep death camp commitment unchanged", _ai.get_current_target_id_for_test() == camp_id)
+	var dest2: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect(
+		"after creep death dest still staging area",
+		dest2.distance_to(camp.global_position) > 4.0
+	)
+
+
+func _test_creep_condition_no_oscillation() -> void:
+	print("--- CREEP condition stability vs REGROUP ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(10, 0, 10))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(10.0 + float(i) * 0.7, 0, 10))
+	for i: int in 14:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+	var camp := CreepCamp.new()
+	camp.name = "StableOscillationCamp"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(0, 0, 30)
+	var creep: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	creep.reparent(camp)
+	_ai.set_camps_cleared_for_test(0)
+	await get_tree().process_frame
+
+	var buckets: PackedStringArray = PackedStringArray()
+	for _i: int in 6:
+		_ai.force_tick_for_test()
+		buckets.append(String(_ai.get_debug_condition_bucket_for_test()))
+	var all_creep: bool = true
+	for b: String in buckets:
+		if b != "EARLY_CREEP" and b != "EXTRA_CREEP":
+			all_creep = false
+			break
+	_expect("stable cohesive creep stays CREEP across ticks", all_creep)
+	_expect("first tick CREEP", buckets[0] == "EARLY_CREEP" or buckets[0] == "EXTRA_CREEP")
+
+	## Move Hero meaningfully away → REGROUP.
+	hero.global_position = _cc.global_position + Vector3(10, 0, 40)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("hero separated → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
+
+	## Bring Hero back to the soldier pack → CREEP again.
+	hero.global_position = _cc.global_position + Vector3(12, 0, 10)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var after: StringName = _ai.get_debug_condition_bucket_for_test()
+	_expect(
+		"hero rejoined → CREEP",
+		after == &"EARLY_CREEP" or after == &"EXTRA_CREEP"
+	)
+
+
 func _test_difficulty_economy_knobs() -> void:
 	print("--- difficulty economy knobs ---")
 	_expect("T1 workers=13", AIDifficultyConfig.get_desired_worker_count(1, false) == 13)
@@ -1373,7 +1509,11 @@ func _spawn_player_command_center(position: Vector3) -> Building:
 
 
 func _spawn_enemy_spearman(position: Vector3) -> Unit:
-	var unit: Unit = SPEARMAN_SCENE.instantiate() as Unit
+	return _spawn_enemy_unit(SPEARMAN_SCENE, position)
+
+
+func _spawn_enemy_unit(scene: PackedScene, position: Vector3) -> Unit:
+	var unit: Unit = scene.instantiate() as Unit
 	_world.add_child(unit)
 	unit.global_position = position
 	unit.team_id = 1
