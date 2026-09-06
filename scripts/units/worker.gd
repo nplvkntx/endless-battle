@@ -407,6 +407,7 @@ func _physics_process(delta: float) -> void:
 		_disable_task_navigation()
 		if not _validate_construction_session():
 			return
+		_emit_construction_dust()
 		return
 
 	if _gather_state == GatherTripState.GATHER_WAIT and _is_gathering_wood():
@@ -432,7 +433,7 @@ func _physics_process(delta: float) -> void:
 		WorkerAiUnstuck.process_movement(self, delta)
 	elif _task_nudge_active:
 		_process_task_corner_nudge(delta)
-	elif has_move_target:
+	elif has_move_target or has_production_rally_join():
 		# Sole strategic travel backend: custom RTS (gather/return/build included).
 		super._physics_process(delta)
 		if _is_on_task_movement():
@@ -504,6 +505,7 @@ func stop_movement() -> void:
 
 
 func _prepare_for_new_player_order() -> void:
+	super._prepare_for_new_player_order()
 	cancel_gathering()
 	if _build_trip_state != BuildTripState.IDLE:
 		_cancel_build_trip()
@@ -1096,9 +1098,19 @@ func _assign_construction_target_point(advance_to_next: bool = false) -> void:
 	else:
 		_build_approach_candidate_index = preferred_index
 
-	var raw_point: Vector3 = _building_target.get_construction_point_by_index(
-		_build_approach_candidate_index
-	)
+	var raw_point: Vector3
+	if (
+		not advance_to_next
+		and (
+			_build_approach_candidate_index == preferred_index
+			or claimed_slot < 0
+		)
+	):
+		raw_point = _building_target.get_nearest_construction_point(global_position)
+	else:
+		raw_point = _building_target.get_construction_point_by_index(
+			_build_approach_candidate_index
+		)
 	raw_point.y = global_position.y
 	_construction_target_point = _snap_construction_target_to_navigation(raw_point)
 	_construction_target_point_valid = true
@@ -1140,6 +1152,19 @@ func _begin_construction_wait() -> void:
 
 	_build_trip_state = BuildTripState.CONSTRUCTION_WAIT
 	_building_target.register_builder(self)
+	_emit_construction_dust()
+
+
+func _emit_construction_dust() -> void:
+	if _build_trip_state != BuildTripState.CONSTRUCTION_WAIT:
+		return
+	if _building_target == null or not is_instance_valid(_building_target):
+		return
+
+	CommandFeedback.notify_construction_working(
+		self,
+		_building_target.get_construction_smoke_origin()
+	)
 
 
 func is_in_build_start_range() -> bool:
@@ -1286,10 +1311,23 @@ func _snap_construction_target_to_navigation(target: Vector3) -> Vector3:
 	if _building_target == null or not is_instance_valid(_building_target):
 		return _snap_task_target_to_navigation(target)
 
+	## Keep a valid perimeter standee. nearest_walkable_world snaps to 1m cell
+	## centers, which pulls builders off the building while occupancy is still
+	## unregistered during construction.
+	PlayerRouteNavigation.ensure_grid_ready()
+	if (
+		not _building_target.is_position_inside_footprint(target, 0.08)
+		and not _building_target.is_world_cell_blocked_when_complete(target)
+		and PlayerRouteNavigation.is_world_walkable(target)
+	):
+		return target
+
 	var snapped: Vector3 = _snap_task_target_to_navigation(target)
 	if _building_target.is_position_inside_footprint(
 		snapped, _get_collision_xz_radius(self)
 	):
+		return target
+	if _building_target.is_world_cell_blocked_when_complete(snapped):
 		return target
 
 	## Reject nav snaps that drift far from the intended standee / building site.

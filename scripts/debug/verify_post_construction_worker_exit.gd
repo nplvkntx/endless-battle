@@ -1,8 +1,8 @@
 extends Node
 
 ## Focused regression: after Barracks completes with the builder on a standee,
-## the worker must sit on a walkable custom-grid cell and accept a normal
-## PlayerRouteNavigation move — no generic stuck recovery.
+## the standee must already sit on a walkable custom-grid cell so the worker can
+## leave via normal PlayerRouteNavigation — no generic stuck recovery.
 ## Godot_v4.7-stable_win64.exe --headless --path <project> --scene res://scenes/debug/verify_post_construction_worker_exit.tscn
 
 const REPORT_PATH := "user://post_construction_worker_exit_verify_result.txt"
@@ -62,6 +62,11 @@ func _test_standee_sides_exit_and_move(failures: PackedStringArray) -> void:
 			continue
 
 		var standee: Vector3 = points[sample_index]
+		_expect(
+			failures,
+			"sample[%d]: standee tight to footprint" % sample_index,
+			barracks.is_position_inside_footprint(standee, 1.25)
+		)
 		var worker: Worker = WORKER_SCENE.instantiate() as Worker
 		root.add_child(worker)
 		worker.global_position = Vector3(standee.x, 0.5, standee.z)
@@ -89,8 +94,8 @@ func _test_standee_sides_exit_and_move(failures: PackedStringArray) -> void:
 		)
 		_expect(
 			failures,
-			"sample[%d]: standee itself blocked after complete" % sample_index,
-			not PlayerRouteNavigation.is_world_walkable(standee)
+			"sample[%d]: standee remains walkable after complete" % sample_index,
+			PlayerRouteNavigation.is_world_walkable(standee)
 		)
 		_expect(
 			failures,

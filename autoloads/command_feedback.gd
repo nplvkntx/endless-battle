@@ -14,6 +14,12 @@ enum TrackKind {
 	DUST,
 }
 
+enum DustKind {
+	FOOTSTEP,
+	START,
+	CONSTRUCTION,
+}
+
 ## Master switches — easy to disable or tune from the inspector / debugger.
 var enabled: bool = true
 var markers_enabled: bool = true
@@ -29,6 +35,10 @@ const MAX_ACTIVE_MARKERS := 10
 const DUST_START_LIFETIME := 0.32
 const DUST_FOOTSTEP_LIFETIME := 0.28
 const DUST_FOOTSTEP_COOLDOWN := 0.42
+const DUST_CONSTRUCTION_LIFETIME := 0.85
+const DUST_CONSTRUCTION_COOLDOWN := 0.48
+const DUST_CONSTRUCTION_RISE := 2.35
+const DUST_CONSTRUCTION_END_SCALE := 3.1
 const DUST_MIN_SPEED_SQ := 0.35
 const MAX_ACTIVE_DUST := 28
 const FOOTSTEP_COOLDOWN_PRUNE_LIMIT := 256
@@ -38,12 +48,15 @@ const MOVE_COLOR := Color(0.92, 0.95, 1.0, 0.92)
 const ATTACK_MOVE_COLOR := Color(1.0, 0.42, 0.18, 0.95)
 const PATROL_COLOR := Color(1.0, 0.92, 0.25, 0.95)
 const DUST_COLOR := Color(0.62, 0.52, 0.38, 0.55)
+const CONSTRUCTION_SMOKE_COLOR := Color(0.50, 0.50, 0.52, 0.78)
 
 ## Instance IDs only — never retain raw effect Nodes across delayed work.
 var _active_markers: PackedInt64Array = []
 var _active_dust: PackedInt64Array = []
 ## instance_id -> last footstep msec
 var _footstep_last_msec: Dictionary = {}
+## instance_id -> last construction dust msec
+var _construction_dust_last_msec: Dictionary = {}
 
 
 func _ready() -> void:
@@ -57,6 +70,7 @@ func clear_all() -> void:
 	_active_markers = PackedInt64Array()
 	_active_dust = PackedInt64Array()
 	_footstep_last_msec.clear()
+	_construction_dust_last_msec.clear()
 
 
 func get_active_marker_count() -> int:
@@ -103,7 +117,7 @@ func notify_movement_started(unit: Node3D) -> void:
 		return
 	if not _is_dust_eligible_unit(unit):
 		return
-	_spawn_dust_puff(unit.global_position, true)
+	_spawn_dust_puff(unit.global_position, DustKind.START)
 
 
 ## Lightweight footstep dust while moving (cooldown-gated, not per-frame spawn).
@@ -130,7 +144,30 @@ func notify_unit_moving(unit: Node3D) -> void:
 	if _footstep_last_msec.size() > FOOTSTEP_COOLDOWN_PRUNE_LIMIT:
 		_footstep_last_msec.clear()
 
-	_spawn_dust_puff(unit.global_position, false)
+	_spawn_dust_puff(unit.global_position, DustKind.FOOTSTEP)
+
+
+## Stronger pulsed dust while a worker is actively constructing. Cooldown-gated.
+func notify_construction_working(unit: Node3D, world_position: Vector3 = Vector3.ZERO) -> void:
+	if not enabled or not dust_enabled:
+		return
+	if not _is_dust_eligible_unit(unit):
+		return
+
+	var id: int = unit.get_instance_id()
+	var now_msec: int = Time.get_ticks_msec()
+	var last_msec: int = int(_construction_dust_last_msec.get(id, 0))
+	if now_msec - last_msec < int(DUST_CONSTRUCTION_COOLDOWN * 1000.0):
+		return
+
+	_construction_dust_last_msec[id] = now_msec
+	if _construction_dust_last_msec.size() > FOOTSTEP_COOLDOWN_PRUNE_LIMIT:
+		_construction_dust_last_msec.clear()
+
+	var puff_position: Vector3 = world_position
+	if puff_position == Vector3.ZERO or not puff_position.is_finite():
+		puff_position = unit.global_position
+	_spawn_dust_puff(puff_position, DustKind.CONSTRUCTION)
 
 
 func _show_marker(world_position: Vector3, kind: MarkerKind) -> void:
@@ -164,7 +201,7 @@ func _show_marker(world_position: Vector3, kind: MarkerKind) -> void:
 	)
 
 
-func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
+func _spawn_dust_puff(world_position: Vector3, kind: DustKind) -> void:
 	if not world_position.is_finite():
 		return
 
@@ -173,7 +210,7 @@ func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
 		_free_tracked_id(_active_dust[0])
 		_active_dust.remove_at(0)
 
-	var puff: Node3D = _build_dust_puff(is_start)
+	var puff: Node3D = _build_dust_puff(kind)
 	var parent: Node = _fx_parent()
 	if parent == null:
 		puff.free()
@@ -182,13 +219,16 @@ func _spawn_dust_puff(world_position: Vector3, is_start: bool) -> void:
 	## Defer add_child — notify_movement_started can run while SceneTree is locked.
 	var effect_id: int = puff.get_instance_id()
 	_active_dust.append(effect_id)
+	var attach_y: float = 0.04
+	if kind == DustKind.CONSTRUCTION:
+		attach_y = maxf(world_position.y, 0.45)
 	call_deferred(
 		&"_attach_tracked_effect",
 		effect_id,
 		parent.get_instance_id(),
-		Vector3(world_position.x, 0.04, world_position.z),
+		Vector3(world_position.x, attach_y, world_position.z),
 		TrackKind.DUST,
-		is_start
+		kind
 	)
 
 
@@ -198,7 +238,7 @@ func _attach_tracked_effect(
 	parent_id: int,
 	world_position: Vector3,
 	track_kind: TrackKind,
-	is_start_dust: bool
+	dust_kind: int
 ) -> void:
 	if not _track_contains(track_kind, effect_id):
 		_discard_orphan_effect(effect_id)
@@ -233,8 +273,16 @@ func _attach_tracked_effect(
 		TrackKind.MARKER:
 			_animate_fade_and_free(effect, MARKER_DURATION, MARKER_FADE_START_RATIO)
 		TrackKind.DUST:
-			var lifetime: float = DUST_START_LIFETIME if is_start_dust else DUST_FOOTSTEP_LIFETIME
-			_animate_dust(effect, lifetime)
+			var lifetime: float = DUST_FOOTSTEP_LIFETIME
+			var rise: float = 0.35
+			var end_scale: float = 1.8
+			if dust_kind == DustKind.START:
+				lifetime = DUST_START_LIFETIME
+			elif dust_kind == DustKind.CONSTRUCTION:
+				lifetime = DUST_CONSTRUCTION_LIFETIME
+				rise = DUST_CONSTRUCTION_RISE
+				end_scale = DUST_CONSTRUCTION_END_SCALE
+			_animate_dust(effect, lifetime, rise, end_scale)
 		_:
 			pass
 
@@ -281,22 +329,37 @@ func _build_marker(kind: MarkerKind) -> Node3D:
 	return root
 
 
-func _build_dust_puff(is_start: bool) -> Node3D:
+func _build_dust_puff(kind: DustKind) -> Node3D:
 	var root := Node3D.new()
 	root.name = "MovementDust"
-	var count: int = 3 if is_start else 2
-	var base_scale: float = 0.22 if is_start else 0.14
+	var count: int = 2
+	var base_scale: float = 0.14
+	var spread: float = 0.12
+	var color: Color = DUST_COLOR
+	match kind:
+		DustKind.START:
+			count = 3
+			base_scale = 0.22
+			spread = 0.12
+		DustKind.CONSTRUCTION:
+			root.name = "ConstructionSmoke"
+			count = 7
+			base_scale = 0.58
+			spread = 0.85
+			color = CONSTRUCTION_SMOKE_COLOR
+		_:
+			pass
 	for i: int in count:
 		var mesh_instance := MeshInstance3D.new()
 		var sphere := SphereMesh.new()
 		sphere.radius = base_scale * (0.7 + 0.15 * float(i))
 		sphere.height = sphere.radius * 2.0
 		mesh_instance.mesh = sphere
-		mesh_instance.material_override = _make_fx_material(DUST_COLOR)
+		mesh_instance.material_override = _make_fx_material(color)
 		mesh_instance.position = Vector3(
-			randf_range(-0.12, 0.12),
-			0.02,
-			randf_range(-0.12, 0.12)
+			randf_range(-spread, spread),
+			0.02 + (0.12 * float(i) if kind == DustKind.CONSTRUCTION else 0.0),
+			randf_range(-spread, spread)
 		)
 		root.add_child(mesh_instance)
 	return root
@@ -373,13 +436,18 @@ func _animate_fade_and_free(root: Node3D, duration: float, fade_start_ratio: flo
 	tween.chain().tween_callback(_finish_tracked_by_id.bind(effect_id, TrackKind.MARKER))
 
 
-func _animate_dust(root: Node3D, lifetime: float) -> void:
+func _animate_dust(
+	root: Node3D,
+	lifetime: float,
+	rise: float = 0.35,
+	end_scale: float = 1.8
+) -> void:
 	var effect_id: int = root.get_instance_id()
 	var materials: Array[StandardMaterial3D] = _collect_materials(root)
 	var tween: Tween = root.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(root, "position:y", root.position.y + 0.35, lifetime)
-	tween.tween_property(root, "scale", Vector3.ONE * 1.8, lifetime)
+	tween.tween_property(root, "position:y", root.position.y + rise, lifetime)
+	tween.tween_property(root, "scale", Vector3.ONE * end_scale, lifetime)
 	for material: StandardMaterial3D in materials:
 		tween.tween_property(material, "albedo_color:a", 0.0, lifetime)
 	tween.chain().tween_callback(_finish_tracked_by_id.bind(effect_id, TrackKind.DUST))

@@ -623,6 +623,11 @@ func _verify_enemy_hero_altar_construction_handoff(failures: PackedStringArray) 
 	)
 	_expect(
 		failures,
+		"altar handoff: standee tight to footprint",
+		altar.is_position_inside_footprint(standee, 1.25)
+	)
+	_expect(
+		failures,
 		"altar handoff: unfinished altar is not an RTS obstacle",
 		not PlayerRouteNavigation.grid.has_obstacle(altar.get_instance_id())
 	)
@@ -677,9 +682,8 @@ func _verify_enemy_hero_altar_construction_handoff(failures: PackedStringArray) 
 
 
 func _verify_builder_exits_completed_barracks_walkable(failures: PackedStringArray) -> void:
-	## Construction standees sit at footprint + CONSTRUCTION_EDGE_STANDOFF (0.75),
-	## but completed occupancy inflates by unit_radius + clearance (1.15). Without a
-	## one-shot exit correction the builder is left on a blocked custom-grid cell.
+	## Construction standees sit just outside the solid body. Occupancy uses a
+	## small clearance so those standees remain walkable after completion.
 	print("verify: builder exits completed Barracks onto walkable cells")
 	var harness: Dictionary = await _spawn_harness()
 	var root: Node3D = harness["root"]
@@ -715,6 +719,11 @@ func _verify_builder_exits_completed_barracks_walkable(failures: PackedStringArr
 			failures,
 			"barracks exit[%d]: unfinished standee walkable" % sample_index,
 			PlayerRouteNavigation.is_world_walkable(standee)
+		)
+		_expect(
+			failures,
+			"barracks exit[%d]: standee tight to footprint" % sample_index,
+			barracks.is_position_inside_footprint(standee, 1.25)
 		)
 
 		var worker: Worker = _spawn_worker(

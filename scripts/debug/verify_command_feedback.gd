@@ -23,6 +23,7 @@ func _ready() -> void:
 	_verify_marker_spam_cleanup(failures)
 	_verify_attack_pulse(failures)
 	await _verify_movement_dust(failures)
+	await _verify_construction_dust(failures)
 	await _verify_tree_exit_lifetime_safety(failures)
 	_verify_ai_does_not_spawn_markers(failures)
 	_verify_match_reset_clears(failures)
@@ -108,6 +109,34 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 	_expect(
 		failures,
 		"footstep cooldown blocks immediate spam",
+		CommandFeedback.get_active_dust_count() == before_cooldown
+	)
+
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+func _verify_construction_dust(failures: PackedStringArray) -> void:
+	CommandFeedback.clear_all()
+	var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	unit.global_position = Vector3.ZERO
+	await get_tree().process_frame
+
+	CommandFeedback.notify_construction_working(unit, unit.global_position)
+	_expect(failures, "construction dust spawned", CommandFeedback.get_active_dust_count() >= 1)
+	await get_tree().process_frame
+	_expect(
+		failures,
+		"construction dust attached after defer",
+		CommandFeedback.get_active_dust_count() >= 1
+	)
+
+	var before_cooldown: int = CommandFeedback.get_active_dust_count()
+	CommandFeedback.notify_construction_working(unit, unit.global_position)
+	_expect(
+		failures,
+		"construction dust cooldown blocks immediate spam",
 		CommandFeedback.get_active_dust_count() == before_cooldown
 	)
 

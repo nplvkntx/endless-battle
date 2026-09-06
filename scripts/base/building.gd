@@ -17,8 +17,15 @@ const STATE_CONSTRUCTING: StringName = &"constructing"
 const STATE_COMPLETED: StringName = &"completed"
 
 const CONSTRUCTION_PLACEHOLDER_ALPHA: float = 0.4
-const CONSTRUCTION_EDGE_STANDOFF: float = 0.75
-const BUILD_RANGE: float = 2.5
+## Worker center sits just outside the solid body (worker collision half-extent is 0.5).
+## Occupancy may add a short extra step so completion cannot trap the builder in a
+## blocked 1m cell — but that step stays on the inner walkable edge, not the cell center.
+const CONSTRUCTION_EDGE_STANDOFF: float = 0.50
+const CONSTRUCTION_STANDEE_STEP: float = 0.10
+const CONSTRUCTION_STANDEE_CELL_MARGIN: float = 0.08
+const CONSTRUCTION_SMOKE_HEIGHT: float = 0.90
+## Must reach the perimeter — not several meters away from the walls.
+const BUILD_RANGE: float = 1.15
 const FALLBACK_FOOTPRINT_HALF_EXTENT: float = 1.5
 const CONSTRUCTION_PROGRESS_BAR_NAME := &"ConstructionProgressBar"
 const CONSTRUCTION_PROGRESS_BAR_WIDTH := 1.4
@@ -97,6 +104,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	## Raw queue_free (without destroy_building) must still release builders/slots
 	## so workers and ConstructionReservations never keep freed building handles.
+	_clear_rally_marker()
 	_unregister_rts_occupancy()
 	ConstructionReservations.release_build_slots_for_building(self)
 	if not _registered_builders.is_empty():
@@ -140,6 +148,22 @@ const PRODUCTION_SPAWN_PHYSICS_MASK: int = (
 	PhysicsLayers.WORLD | PhysicsLayers.BUILDINGS | PhysicsLayers.UNITS
 )
 
+enum ProductionRallyType {
+	NONE,
+	POSITION,
+	UNIT_TARGET,
+}
+
+const RALLY_MARKER_Y: float = 0.05
+const RALLY_SLOT_SPACING: float = 2.0
+
+var _rally_type: ProductionRallyType = ProductionRallyType.NONE
+var _rally_point: Vector3 = Vector3.ZERO
+var _rally_unit_handle: EntityHandle = EntityHandle.empty()
+var _rally_marker: MeshInstance3D = null
+var _rally_next_slot: int = 0
+
+
 ## Production rally uses the same PlayerRouteNavigation backend as player RMB.
 ## Returns true when routing handled the order.
 func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
@@ -163,6 +187,129 @@ func issue_production_rally_move(unit: Unit, destination: Vector3) -> bool:
 	unit.issue_order(UnitOrder.move(destination))
 	unit.record_strategic_order_provenance_for_tests("RALLY", "MOVE", destination)
 	return false
+
+
+func set_rally_point(ground_position: Vector3) -> void:
+	if not ground_position.is_finite():
+		return
+	_rally_type = ProductionRallyType.POSITION
+	_rally_unit_handle = EntityHandle.empty()
+	_rally_point = Vector3(ground_position.x, global_position.y, ground_position.z)
+	_rally_next_slot = 0
+	_set_rally_marker_position(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
+	_sync_rally_marker_visibility()
+
+
+func set_rally_unit(unit: Unit) -> void:
+	if not NodeSafety.is_alive_node(unit) or not (unit is Unit):
+		return
+	_rally_type = ProductionRallyType.UNIT_TARGET
+	_rally_unit_handle = EntityHandle.from_node(unit, EntityHandle.Category.UNIT, unit.team_id)
+	_rally_point = Vector3(unit.global_position.x, global_position.y, unit.global_position.z)
+	_rally_next_slot = 0
+	_set_rally_marker_position(Vector3(unit.global_position.x, RALLY_MARKER_Y, unit.global_position.z))
+	_sync_rally_marker_visibility()
+
+
+func has_production_rally() -> bool:
+	return _rally_type != ProductionRallyType.NONE
+
+
+func apply_production_rally(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit) or not unit.is_inside_tree():
+		return
+	if _rally_type == ProductionRallyType.UNIT_TARGET:
+		var target: Unit = _resolve_rally_unit()
+		if target != null:
+			_rally_point = Vector3(
+				target.global_position.x,
+				unit.global_position.y,
+				target.global_position.z
+			)
+			issue_production_rally_move(unit, _rally_point)
+			unit.begin_production_rally_join(_rally_unit_handle)
+			return
+		if _rally_point != Vector3.ZERO:
+			issue_production_rally_move(unit, _claim_rally_move_target())
+		return
+	if _rally_type == ProductionRallyType.POSITION:
+		issue_production_rally_move(unit, _claim_rally_move_target())
+
+
+func _claim_rally_move_target() -> Vector3:
+	var slot_index: int = _rally_next_slot
+	_rally_next_slot += 1
+	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
+
+
+func _resolve_rally_unit() -> Unit:
+	if _rally_unit_handle == null or _rally_unit_handle.is_empty():
+		return null
+	var node: Node = _rally_unit_handle.resolve_without_registry()
+	if not NodeSafety.is_alive_node(node) or not (node is Unit):
+		_rally_unit_handle = EntityHandle.empty()
+		return null
+	return node as Unit
+
+
+func _has_rally_marker_state() -> bool:
+	return _rally_type != ProductionRallyType.NONE
+
+
+func _set_rally_marker_position(marker_position: Vector3) -> void:
+	if _rally_marker == null or not is_instance_valid(_rally_marker):
+		_rally_marker = MeshInstance3D.new()
+		var marker_mesh := CylinderMesh.new()
+		marker_mesh.top_radius = 0.45
+		marker_mesh.bottom_radius = 0.45
+		marker_mesh.height = 0.08
+		_rally_marker.mesh = marker_mesh
+		var marker_material := StandardMaterial3D.new()
+		marker_material.albedo_color = Color(0.2, 0.85, 0.35, 0.9)
+		marker_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_rally_marker.material_override = marker_material
+		var marker_parent: Node = get_parent()
+		if marker_parent == null:
+			_rally_marker.queue_free()
+			_rally_marker = null
+			return
+		marker_parent.add_child(_rally_marker)
+	_rally_marker.global_position = marker_position
+
+
+func _sync_rally_marker_visibility() -> void:
+	if _rally_marker == null or not is_instance_valid(_rally_marker):
+		if is_selected and _has_rally_marker_state():
+			_update_selected_rally_marker()
+		return
+	_rally_marker.visible = is_selected and _has_rally_marker_state()
+
+
+func _update_selected_rally_marker() -> void:
+	if not is_selected or not _has_rally_marker_state():
+		if _rally_marker != null and is_instance_valid(_rally_marker):
+			_rally_marker.visible = false
+		return
+	if _rally_type == ProductionRallyType.UNIT_TARGET:
+		var target: Unit = _resolve_rally_unit()
+		if target != null:
+			_rally_point = Vector3(target.global_position.x, _rally_point.y, target.global_position.z)
+			_set_rally_marker_position(
+				Vector3(target.global_position.x, RALLY_MARKER_Y, target.global_position.z)
+			)
+		elif _rally_point != Vector3.ZERO:
+			_set_rally_marker_position(Vector3(_rally_point.x, RALLY_MARKER_Y, _rally_point.z))
+	elif _rally_marker == null or not is_instance_valid(_rally_marker):
+		if _rally_point != Vector3.ZERO:
+			_set_rally_marker_position(Vector3(_rally_point.x, RALLY_MARKER_Y, _rally_point.z))
+	if _rally_marker != null and is_instance_valid(_rally_marker):
+		_rally_marker.visible = true
+
+
+func _clear_rally_marker() -> void:
+	if _rally_marker != null and is_instance_valid(_rally_marker):
+		_rally_marker.queue_free()
+	_rally_marker = null
 
 
 ## Deterministic walkable exit outside this producer: grid walkable, outside footprint,
@@ -288,6 +435,7 @@ func set_selected(selected: bool) -> void:
 		_selection_indicator.visible = selected
 	if selected:
 		play_selection_pulse()
+	_update_selected_rally_marker()
 
 
 func play_selection_pulse() -> void:
@@ -417,6 +565,7 @@ func destroy_building() -> void:
 	_release_registered_builders_on_destroy()
 	_cleanup_construction_stage_visuals()
 	_cleanup_damage_visuals()
+	_clear_rally_marker()
 	DeathEffects.play_building_destruction(self)
 	NodeSafety.prepare_node_for_death(self)
 	_unregister_with_entity_registry()
@@ -451,6 +600,7 @@ func _release_registered_builders_on_destroy() -> void:
 
 ## Shows an unfinished placeholder until a worker finishes construction.
 func _process(delta: float) -> void:
+	_update_selected_rally_marker()
 	if building_state == STATE_COMPLETED:
 		return
 
@@ -597,14 +747,29 @@ func get_construction_points() -> Array[Vector3]:
 
 	var points: Array[Vector3] = []
 	for local_offset: Vector3 in local_offsets:
-		points.append(_footprint_offset_to_world(local_offset))
+		points.append(
+			_push_standee_outside_completed_occupancy(_footprint_offset_to_world(local_offset))
+		)
 
 	return points
 
 
 func get_nearest_construction_point(from_position: Vector3) -> Vector3:
-	return get_construction_point_by_index(
-		get_nearest_construction_point_index(from_position)
+	if not is_inside_tree():
+		return global_position
+
+	var half_extents: Vector2 = _get_footprint_half_extents()
+	var ring := Vector2(
+		half_extents.x + CONSTRUCTION_EDGE_STANDOFF,
+		half_extents.y + CONSTRUCTION_EDGE_STANDOFF
+	)
+	var local_position: Vector3 = global_transform.affine_inverse() * from_position
+	var on_ring: Vector2 = _closest_point_on_rect_perimeter(
+		Vector2(local_position.x, local_position.z),
+		ring
+	)
+	return _push_standee_outside_completed_occupancy(
+		_footprint_offset_to_world(Vector3(on_ring.x, 0.0, on_ring.y))
 	)
 
 
@@ -675,6 +840,18 @@ func is_position_inside_footprint(from_position: Vector3, padding: float = 0.0) 
 	)
 
 
+## True when the custom-grid cell of `world` would be blocked after this building completes.
+func is_world_cell_blocked_when_complete(world: Vector3) -> bool:
+	if not is_inside_tree():
+		return false
+	PlayerRouteNavigation.ensure_grid_ready()
+	return PlayerRouteNavigation.grid.cell_overlaps_aabb(
+		world,
+		global_position,
+		get_rts_occupancy_half_extents()
+	)
+
+
 func _is_within_xz_range_of_footprint(from_position: Vector3, range: float) -> bool:
 	if not is_inside_tree():
 		return false
@@ -734,6 +911,74 @@ func _footprint_offset_to_world(local_offset: Vector3) -> Vector3:
 		global_position.y,
 		global_position.z + world_offset.z
 	)
+
+
+func _closest_point_on_rect_perimeter(local_xz: Vector2, half: Vector2) -> Vector2:
+	var hx: float = maxf(half.x, 0.05)
+	var hz: float = maxf(half.y, 0.05)
+	var x: float = local_xz.x
+	var z: float = local_xz.y
+	if absf(x) <= hx and absf(z) <= hz:
+		var dist_x: float = hx - absf(x)
+		var dist_z: float = hz - absf(z)
+		if dist_x < dist_z:
+			x = hx if x >= 0.0 else -hx
+		else:
+			z = hz if z >= 0.0 else -hz
+		return Vector2(x, z)
+	return Vector2(clampf(x, -hx, hx), clampf(z, -hz, hz))
+
+
+## World point for construction smoke: the building mass, not worker feet.
+func get_construction_smoke_origin() -> Vector3:
+	return Vector3(
+		global_position.x,
+		global_position.y + CONSTRUCTION_SMOKE_HEIGHT,
+		global_position.z
+	)
+
+
+## Push a perimeter standee onto a cell that stays walkable after occupancy registers.
+## Keep the worker on the inner edge of that cell. Snapping to the 1m cell center
+## used to park builders a meter-plus off large footprints (Hero Altar).
+func _push_standee_outside_completed_occupancy(world: Vector3) -> Vector3:
+	if not is_inside_tree():
+		return world
+
+	PlayerRouteNavigation.ensure_grid_ready()
+	var origin: Vector3 = global_position
+	var direction: Vector3 = Vector3(world.x - origin.x, 0.0, world.z - origin.z)
+	if direction.length_squared() < 0.0001:
+		direction = Vector3(0.0, 0.0, -1.0)
+	else:
+		direction = direction.normalized()
+
+	var point: Vector3 = Vector3(world.x, origin.y, world.z)
+	if is_position_inside_footprint(point, 0.08):
+		var half_extents: Vector2 = _get_footprint_half_extents()
+		var local_position: Vector3 = global_transform.affine_inverse() * point
+		var on_ring: Vector2 = _closest_point_on_rect_perimeter(
+			Vector2(local_position.x, local_position.z),
+			Vector2(
+				half_extents.x + CONSTRUCTION_EDGE_STANDOFF,
+				half_extents.y + CONSTRUCTION_EDGE_STANDOFF
+			)
+		)
+		point = _footprint_offset_to_world(Vector3(on_ring.x, 0.0, on_ring.y))
+
+	for _step: int in 24:
+		if (
+			not is_world_cell_blocked_when_complete(point)
+			and not is_position_inside_footprint(point, 0.08)
+		):
+			break
+		point += direction * CONSTRUCTION_STANDEE_STEP
+
+	if not is_world_cell_blocked_when_complete(point):
+		var padded: Vector3 = point + direction * CONSTRUCTION_STANDEE_CELL_MARGIN
+		if not is_world_cell_blocked_when_complete(padded):
+			point = padded
+	return point
 
 
 func unregister_builder(worker: Worker) -> void:
@@ -840,8 +1085,8 @@ func _on_construction_timer_finished() -> void:
 	if building_state == STATE_COMPLETED:
 		return
 
-	## Occupancy registers on complete; builders may still stand on standees that
-	## are inside the inflated blocked ring. Clear footprint once before clearing build state.
+	## Occupancy registers on complete. Construction standees are already outside
+	## the completed blocked cells, so builders leave without a recovery pass.
 	complete_construction()
 	for builder_ref: Variant in _registered_builders:
 		if NodeSafety.is_alive_node(builder_ref):
