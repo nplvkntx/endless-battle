@@ -7,6 +7,8 @@ extends Node
 const TICK_INTERVAL_SECONDS: float = 0.5
 const ENEMY_TEAM_ID: int = 1
 const DEFENSE_RADIUS: float = 36.0
+const DEFENSE_RELEASE_RADIUS: float = 48.0
+const DEFENSE_STANDOFF: float = 10.0
 const HOME_NEAR_RADIUS: float = 8.0
 const COHESION_RADIUS: float = 18.0
 const CAMP_CLEAR_RADIUS: float = 14.0
@@ -92,6 +94,7 @@ var _dbg_farthest_name: String = ""
 var _dbg_farthest_dist: float = 0.0
 var _dbg_last_camp: Node3D = null
 var _dbg_attack: Dictionary = {}
+var _dbg_defense: Dictionary = {}
 var _dbg_order: Dictionary = {}
 var _dbg_objective_name: String = ""
 var _dbg_objective_type: String = ""
@@ -185,11 +188,7 @@ func _ai_tick() -> void:
 func _tick_military() -> void:
 	var threat: Node3D = _find_base_threat()
 	var base_threatened: bool = threat != null
-	_debug_record_condition(&"BASE_THREATENED", base_threatened, {
-		"nearest_threat": _dbg_threat_dist,
-		"required": DEFENSE_RADIUS,
-		"threat_name": _dbg_threat_name,
-	})
+	_debug_record_condition(&"BASE_THREATENED", base_threatened, _dbg_defense.duplicate())
 	if base_threatened:
 		_set_condition(&"DEFEND")
 		_defend(threat)
@@ -1455,10 +1454,20 @@ func _needs_early_creep() -> bool:
 		_dbg_creep["hero_level_goal"] = EARLY_HERO_LEVEL_TARGET
 	return needed
 
+func _defense_scan_radius() -> float:
+	if _last_command_kind == CMD_DEFEND:
+		return DEFENSE_RELEASE_RADIUS
+	return DEFENSE_RADIUS
+
+
 func _find_base_threat() -> Node3D:
+	var scan_radius: float = _defense_scan_radius()
+	var currently_defending: bool = _last_command_kind == CMD_DEFEND
 	var best: Node3D = null
+	var best_base: Node3D = null
 	var best_dist: float = INF
 	var nearest_any: float = INF
+	var nearest_any_unit: Node3D = null
 	var bases: Array = _w.command_centers as Array
 	if bases.is_empty() and _w.primary_cc != null:
 		bases = [_w.primary_cc]
@@ -1475,12 +1484,30 @@ func _find_base_threat() -> Node3D:
 			var d: float = _horizontal_distance(base.global_position, unit.global_position)
 			if d < nearest_any:
 				nearest_any = d
-			if d <= DEFENSE_RADIUS and d < best_dist:
+				nearest_any_unit = unit
+			if d <= scan_radius and d < best_dist:
 				best_dist = d
 				best = unit
+				best_base = base
+	var hysteresis: bool = (
+		currently_defending
+		and best != null
+		and nearest_any > DEFENSE_RADIUS
+	)
+	_dbg_defense = {
+		"nearest_threat": nearest_any,
+		"required": scan_radius,
+		"entry_radius": DEFENSE_RADIUS,
+		"release_radius": DEFENSE_RELEASE_RADIUS,
+		"currently_defending": currently_defending,
+		"hysteresis": hysteresis,
+		"reason": "DEFENSE_RELEASE_HYSTERESIS" if hysteresis else "",
+		"threat_name": best.name if best != null else (nearest_any_unit.name if nearest_any_unit != null else ""),
+		"threatened_base": best_base.name if best_base != null else "",
+	}
 	if _debug_enabled:
 		_dbg_threat_dist = nearest_any
-		_dbg_threat_name = best.name if best != null else ""
+		_dbg_threat_name = String(_dbg_defense.get("threat_name", ""))
 	return best
 
 func _should_attack_player() -> bool:
@@ -1512,8 +1539,20 @@ func _should_attack_player() -> bool:
 func _defend(threat: Node3D) -> void:
 	if not NodeSafety.is_alive_node(threat):
 		return
-	_debug_set_objective(threat)
-	_issue_army_move(threat.global_position, &"attack_move", CMD_DEFEND, threat.get_instance_id())
+	var base: Node3D = _nearest_own_command_center(threat.global_position)
+	if base == null or not NodeSafety.is_alive_node(base):
+		return
+	var dest: Vector3 = _defense_intercept_point(base, threat)
+	_debug_set_objective(base)
+	if _debug_enabled:
+		_dbg_objective_type = "THREATENED_BASE"
+	_dbg_defense["threatened_base"] = base.name
+	_dbg_defense["threat_name"] = threat.name
+	_dbg_defense["strategic_point"] = dest
+	_dbg_defense["point_type"] = "base_intercept"
+	_dbg_defense["threat_position"] = threat.global_position
+	_dbg_defense["threat_position_is_not_route_target"] = true
+	_issue_army_move(dest, &"attack_move", CMD_DEFEND, base.get_instance_id())
 
 func _army_home() -> void:
 	var home: Vector3 = _w.home as Vector3
@@ -1661,6 +1700,34 @@ func _attack_approach(target: Vector3, army_center: Vector3) -> Vector3:
 	else:
 		away = away.normalized()
 	return _nearest_walkable(target + away * ATTACK_APPROACH_STANDOFF)
+
+
+func _nearest_own_command_center(to_position: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_dist: float = INF
+	var bases: Array = _w.command_centers as Array
+	if bases.is_empty() and _w.primary_cc != null:
+		bases = [_w.primary_cc]
+	for base_v: Variant in bases:
+		if not base_v is Node3D or not NodeSafety.is_alive_node(base_v):
+			continue
+		var base: Node3D = base_v as Node3D
+		var d: float = _horizontal_distance(base.global_position, to_position)
+		if d < best_dist:
+			best_dist = d
+			best = base
+	return best
+
+
+func _defense_intercept_point(base: Node3D, threat: Node3D) -> Vector3:
+	var base_pos: Vector3 = base.global_position
+	var toward: Vector3 = threat.global_position - base_pos
+	toward.y = 0.0
+	if toward.length_squared() < 0.01:
+		toward = Vector3(1, 0, 0)
+	else:
+		toward = toward.normalized()
+	return _nearest_walkable(base_pos + toward * DEFENSE_STANDOFF)
 
 func _nearest_walkable(pos: Vector3) -> Vector3:
 	if PlayerRouteNavigation.is_world_walkable(pos):
@@ -2212,6 +2279,10 @@ func get_last_command_kind_for_test() -> StringName:
 	return _last_command_kind
 
 
+func get_defense_debug_for_test() -> Dictionary:
+	return _dbg_defense.duplicate()
+
+
 func get_last_command_target_id_for_test() -> int:
 	return _last_command_target_id
 
@@ -2441,6 +2512,7 @@ func _debug_clear_tick_buffers() -> void:
 	_dbg_farthest_dist = 0.0
 	_dbg_last_camp = null
 	_dbg_attack.clear()
+	_dbg_defense.clear()
 	_dbg_order.clear()
 	_dbg_objective_name = ""
 	_dbg_objective_type = ""
@@ -2538,12 +2610,24 @@ func _debug_reason_for(condition_name: StringName, result: bool, facts: Dictiona
 	match condition_name:
 		&"BASE_THREATENED":
 			var nearest: float = float(facts.get("nearest_threat", _dbg_threat_dist))
-			var required: float = float(facts.get("required", DEFENSE_RADIUS))
+			var entry: float = float(facts.get("entry_radius", DEFENSE_RADIUS))
+			var release: float = float(facts.get("release_radius", DEFENSE_RELEASE_RADIUS))
 			if nearest == INF:
 				return "no player army near bases"
+			if bool(facts.get("hysteresis", false)):
+				return "DEFENSE_RELEASE_HYSTERESIS nearest=%.1fm entry=%.0fm release=%.0fm" % [
+					nearest,
+					entry,
+					release,
+				]
 			if result:
-				return "nearest_threat=%.1fm required<=%.0fm" % [nearest, required]
-			return "nearest_threat=%.1fm required<=%.0fm" % [nearest, required]
+				return "nearest=%.1fm entry_radius=%.0fm" % [nearest, entry]
+			return "nearest=%.1fm entry_radius=%.0fm release_radius=%.0fm currently_defending=%s" % [
+				nearest,
+				entry,
+				release,
+				"YES" if bool(facts.get("currently_defending", false)) else "NO",
+			]
 		&"HERO_MISSING":
 			return "hero_alive=%s" % ("NO" if result else "YES")
 		&"ARMY_TOO_SMALL":
@@ -2989,6 +3073,7 @@ func _debug_print_tick() -> void:
 	_debug_print_if_tree()
 	print("DECISION=%s" % String(_last_condition))
 	print("")
+	_debug_print_defense()
 	_debug_print_attack()
 	_debug_print_power()
 	_debug_print_creep()
@@ -3073,11 +3158,27 @@ func _debug_print_if_tree() -> void:
 		match StringName(name):
 			&"BASE_THREATENED":
 				var nearest: float = float(facts.get("nearest_threat", _dbg_threat_dist))
+				var entry: float = float(facts.get("entry_radius", DEFENSE_RADIUS))
+				var release: float = float(facts.get("release_radius", DEFENSE_RELEASE_RADIUS))
+				var currently_defending: bool = bool(facts.get("currently_defending", false))
 				if nearest == INF:
-					print("nearest_threat=none")
+					print("nearest=none")
 				else:
-					print("nearest_threat=%.1fm" % nearest)
-				print("required<=%.0fm" % float(facts.get("required", DEFENSE_RADIUS)))
+					print("nearest=%.1fm" % nearest)
+				print("entry_radius=%.0fm" % entry)
+				print("release_radius=%.0fm" % release)
+				print("currently_defending=%s" % _debug_yes(currently_defending))
+				if state == "TRUE":
+					var threatened_base: String = String(facts.get("threatened_base", ""))
+					if not threatened_base.is_empty():
+						print("threatened_base=%s" % threatened_base)
+					var threat_name: String = String(facts.get("threat_name", _dbg_threat_name))
+					if not threat_name.is_empty():
+						print("nearest_threat=%s" % threat_name)
+					if nearest != INF:
+						print("distance=%.1fm" % nearest)
+					if bool(facts.get("hysteresis", false)):
+						print("reason=DEFENSE_RELEASE_HYSTERESIS")
 			&"HERO_MISSING":
 				print("hero_alive=%s" % ("NO" if state == "TRUE" else "YES"))
 			&"ARMY_TOO_SMALL":
@@ -3116,15 +3217,47 @@ func _debug_print_if_tree() -> void:
 		idx += 1
 
 
+func _debug_print_defense() -> void:
+	print("BASE_THREATENED = %s" % ("TRUE" if _debug_condition_state(&"BASE_THREATENED") == "TRUE" else "FALSE"))
+	var nearest: float = float(_dbg_defense.get("nearest_threat", _dbg_threat_dist))
+	if nearest == INF:
+		print("nearest=none")
+	else:
+		print("nearest=%.1fm" % nearest)
+	print("entry_radius=%.0fm" % float(_dbg_defense.get("entry_radius", DEFENSE_RADIUS)))
+	print("release_radius=%.0fm" % float(_dbg_defense.get("release_radius", DEFENSE_RELEASE_RADIUS)))
+	print("currently_defending=%s" % _debug_yes(bool(_dbg_defense.get("currently_defending", false))))
+	if _last_condition == &"DEFEND":
+		var threatened_base: String = String(_dbg_defense.get("threatened_base", _dbg_objective_name))
+		if not threatened_base.is_empty():
+			print("threatened_base=%s" % threatened_base)
+		var threat_name: String = String(_dbg_defense.get("threat_name", _dbg_threat_name))
+		if not threat_name.is_empty():
+			print("nearest_threat=%s" % threat_name)
+		if bool(_dbg_defense.get("hysteresis", false)):
+			print("reason=DEFENSE_RELEASE_HYSTERESIS")
+		print("")
+		print("DEFENSE")
+		print("strategic_point=%s" % _debug_fmt_vec(_dbg_defense.get("strategic_point", _last_command_destination) as Vector3))
+		print("point_type=%s" % String(_dbg_defense.get("point_type", "base_intercept")))
+		print("threat_position=%s" % _debug_fmt_vec(_dbg_defense.get("threat_position", Vector3.ZERO) as Vector3))
+		print("threat_position_is_not_route_target=%s" % _debug_yes(bool(_dbg_defense.get("threat_position_is_not_route_target", true))))
+	print("")
+
+
 func _debug_print_order() -> void:
 	print("[AI ORDER]")
 	if _dbg_order.is_empty():
+		print("decision=%s" % String(_last_condition))
 		print("command=NONE")
 		print("source=enemy_ai")
 		print("reason=no army order this tick")
 		print("")
 		return
+	print("decision=%s" % String(_last_condition))
+	print("objective=%s" % String(_dbg_order.get("objective", _dbg_objective_name)))
 	print("command=%s" % String(_dbg_order.get("command", "")))
+	print("strategic_destination=%s" % _debug_fmt_vec(_dbg_order.get("destination", _last_command_destination) as Vector3))
 	print("source=%s" % String(_dbg_order.get("source", "enemy_ai")))
 	print("army_total=%d" % int(_dbg_order.get("army", 0)))
 	print("hero_included=%s" % _debug_yes(bool(_dbg_order.get("hero_included", false))))
@@ -3191,6 +3324,7 @@ func _debug_panel_text() -> String:
 		"",
 		"IF",
 		"Threat %s" % _debug_check_short(&"BASE_THREATENED", true),
+		_debug_threat_radius_short(),
 		"Hero %s" % _debug_check_short(&"HERO_MISSING", false),
 		"Army %s" % _debug_army_size_short(),
 		"Together %s" % _debug_check_short(&"ARMY_NOT_TOGETHER", false),
@@ -3243,6 +3377,18 @@ func _debug_check_short(condition_name: StringName, true_means_yes: bool) -> Str
 	if state == "TRUE":
 		return "YES" if true_means_yes else "NO"
 	return "NO" if true_means_yes else "YES"
+
+
+func _debug_threat_radius_short() -> String:
+	var nearest: float = float(_dbg_defense.get("nearest_threat", _dbg_threat_dist))
+	var entry: float = float(_dbg_defense.get("entry_radius", DEFENSE_RADIUS))
+	var release: float = float(_dbg_defense.get("release_radius", DEFENSE_RELEASE_RADIUS))
+	var currently_defending: bool = bool(_dbg_defense.get("currently_defending", false))
+	if nearest == INF:
+		return "no combat threat e%.0f r%.0f" % [entry, release]
+	if currently_defending and bool(_dbg_defense.get("hysteresis", false)):
+		return "%.0fm hold r%.0f" % [nearest, release]
+	return "%.0fm e%.0f r%.0f" % [nearest, entry, release]
 
 
 func _debug_army_size_short() -> String:

@@ -43,6 +43,7 @@ func _ready() -> void:
 	await _test_build_force_and_home()
 	await _test_production_beyond_five()
 	await _test_defend_beats_creep()
+	await _test_defend_hysteresis_and_stable_destination()
 	await _test_early_creep_and_attack_gate()
 	await _test_rebuild_after_hero_death()
 	await _test_tech_requests()
@@ -324,6 +325,147 @@ func _test_defend_beats_creep() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect("threat removed → not DEFEND", _ai.get_debug_priority() != &"DEFEND")
+
+
+func _test_defend_hysteresis_and_stable_destination() -> void:
+	print("--- defend hysteresis + stable destination ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(-8, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(-8.0 + float(i) * 0.7, 0, 2))
+	PlayerRouteNavigation.ensure_grid_ready()
+	_ai.set_camps_cleared_for_test(3)
+	_ai.set_brain_debug(true)
+	await get_tree().process_frame
+
+	## TEST A — player combatant inside entry radius → DEFEND wins.
+	var threat: Unit = _spawn_player_spearman(_cc.global_position + Vector3(20, 0, 0))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST A DEFEND wins inside entry radius", _ai.get_debug_priority() == &"DEFEND")
+	_expect(
+		"TEST A last strategic command is DEFEND",
+		_ai.get_last_command_kind_for_test() == EnemyAI.CMD_DEFEND
+	)
+	var dest0: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("TEST A defense destination exists", dest0 != Vector3.ZERO)
+	_expect(
+		"TEST A objective is the threatened Town Center",
+		_ai.get_last_command_target_id_for_test() == _cc.get_instance_id()
+	)
+	_expect(
+		"TEST A destination is not the threat unit position",
+		not _destinations_equivalent_for_test(dest0, threat.global_position)
+	)
+	var defense0: Dictionary = _ai.get_defense_debug_for_test()
+	_expect("TEST A point_type is base_intercept", String(defense0.get("point_type", "")) == "base_intercept")
+	_expect(
+		"TEST A threat position is not the route target",
+		bool(defense0.get("threat_position_is_not_route_target", false))
+	)
+	_expect(
+		"TEST A first defense tick uses entry radius",
+		is_equal_approx(float(defense0.get("entry_radius", 0.0)), EnemyAI.DEFENSE_RADIUS)
+	)
+	var routes_after_first: int = _ai.get_strategic_group_route_request_count_for_test()
+	var first_order: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("TEST A/E first defense tick requests a route", bool(first_order.get("route_request", false)))
+	_expect("TEST A/E first defense tick recorded a group route", routes_after_first >= 1)
+
+	## TEST B — currently defending, threat slightly outside entry but inside release → DEFEND stays.
+	threat.global_position = _cc.global_position + Vector3(42, 0, 0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST B DEFEND remains inside release hysteresis", _ai.get_debug_priority() == &"DEFEND")
+	var defense_b: Dictionary = _ai.get_defense_debug_for_test()
+	_expect("TEST B hysteresis flag is set", bool(defense_b.get("hysteresis", false)))
+	_expect(
+		"TEST B reason is DEFENSE_RELEASE_HYSTERESIS",
+		String(defense_b.get("reason", "")) == "DEFENSE_RELEASE_HYSTERESIS"
+	)
+	_expect(
+		"TEST B destination stays equivalent",
+		_destinations_equivalent_for_test(_ai.get_last_command_destination_for_test(), dest0)
+	)
+
+	## TEST D — threat moves several meters on the same side; destination does not chase.
+	threat.global_position = _cc.global_position + Vector3(24, 0, 0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST D still DEFEND after small inward move", _ai.get_debug_priority() == &"DEFEND")
+	var dest_d: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("TEST D destination stays equivalent after a few meters", _destinations_equivalent_for_test(dest_d, dest0))
+	_expect(
+		"TEST D destination still is not the moving threat position",
+		not _destinations_equivalent_for_test(dest_d, threat.global_position)
+	)
+	threat.global_position = _cc.global_position + Vector3(27, 0, 0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST D destination stays equivalent after another few meters",
+		_destinations_equivalent_for_test(_ai.get_last_command_destination_for_test(), dest0)
+	)
+
+	## TEST E — unchanged defense area does not mint extra routes.
+	var routes_before_stable: int = _ai.get_strategic_group_route_request_count_for_test()
+	for _i: int in 4:
+		_ai.force_tick_for_test()
+		_expect("TEST E ticks stay DEFEND", _ai.get_debug_priority() == &"DEFEND")
+		_expect(
+			"TEST E destination stays equivalent",
+			_destinations_equivalent_for_test(_ai.get_last_command_destination_for_test(), dest0)
+		)
+		var tick_order: Dictionary = _ai.get_last_order_debug_for_test()
+		_expect("TEST E route_request=NO on unchanged ticks", not bool(tick_order.get("route_request", false)))
+		_expect(
+			"TEST E destination_change stays near zero",
+			float(tick_order.get("destination_change", 99.0)) <= EnemyAI.ORDER_DEST_RADIUS
+		)
+	_expect(
+		"TEST E unchanged ticks issue no extra group routes",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_before_stable
+	)
+
+	## TEST F — nearest combatant swaps; same threatened base keeps destination.
+	var threat_b: Unit = _spawn_player_spearman(_cc.global_position + Vector3(22, 0, 1))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST F DEFEND with two combatants", _ai.get_debug_priority() == &"DEFEND")
+	threat.global_position = _cc.global_position + Vector3(30, 0, 0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST F still DEFEND after nearest swap", _ai.get_debug_priority() == &"DEFEND")
+	_expect(
+		"TEST F objective stays the threatened Town Center",
+		_ai.get_last_command_target_id_for_test() == _cc.get_instance_id()
+	)
+	_expect(
+		"TEST F destination does not churn when nearest unit changes",
+		_destinations_equivalent_for_test(_ai.get_last_command_destination_for_test(), dest0)
+	)
+	var order_f: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("TEST F nearest swap does not request a new route", not bool(order_f.get("route_request", false)))
+
+	## TEST C — all combat threats leave the release radius → DEFEND ends.
+	threat.global_position = _cc.global_position + Vector3(70, 0, 0)
+	threat_b.global_position = _cc.global_position + Vector3(72, 0, 2)
+	await get_tree().process_frame
+	_expect("TEST C find_base_threat is null outside release", _ai.find_base_threat_for_test() == null)
+	_ai.force_tick_for_test()
+	_expect("TEST C DEFEND releases outside release radius", _ai.get_debug_priority() != &"DEFEND")
+	_expect(
+		"TEST C last command is no longer DEFEND",
+		_ai.get_last_command_kind_for_test() != EnemyAI.CMD_DEFEND
+	)
+
+	_kill_unit(threat)
+	_kill_unit(threat_b)
+	_ai.set_brain_debug(false)
+	await get_tree().process_frame
 
 
 func _test_early_creep_and_attack_gate() -> void:
@@ -1619,6 +1761,11 @@ func _test_brain_debug_black_box() -> void:
 		names.append(String(line.get("name", "")))
 		states.append("%s=%s" % [String(line.get("name", "")), String(line.get("state", ""))])
 	_expect("IF tree records BASE_THREATENED", names.has("BASE_THREATENED"))
+	var overlay: String = "\n".join(lines)
+	_expect(
+		"P overlay reports defense entry/release radii",
+		overlay.contains("e36") and overlay.contains("r48")
+	)
 	_expect("IF tree records HERO_MISSING", names.has("HERO_MISSING"))
 	_expect("IF tree records HOME_WAIT", names.has("HOME_WAIT"))
 	var skipped_after_hero: bool = false
