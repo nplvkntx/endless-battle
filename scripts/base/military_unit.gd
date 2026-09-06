@@ -48,6 +48,8 @@ var _auto_acquire_origin: Vector3 = Vector3.ZERO
 var _has_auto_acquire_origin: bool = false
 var _is_returning_from_leash: bool = false
 var _leash_return_destination: Vector3 = Vector3.ZERO
+## Observational: opportunistic local combat while a strategic ATTACK_MOVE is live.
+var _diag_local_combat_source: StringName = &""
 
 
 func _ready() -> void:
@@ -60,6 +62,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	_clear_local_combat_source()
 	cancel_attack_move()
 	cancel_attack()
 	super._exit_tree()
@@ -147,10 +150,32 @@ func get_attack_facing_direction() -> Vector3:
 	return direction.normalized()
 
 
+func has_attack_move_destination() -> bool:
+	return _has_attack_move_destination
+
+
+func get_attack_move_destination() -> Vector3:
+	return _attack_move_destination
+
+
+func is_committed_attack_order() -> bool:
+	return _committed_attack_order
+
+
+func get_local_combat_source() -> StringName:
+	return _diag_local_combat_source
+
+
+func get_attack_target() -> Node3D:
+	return _attack_target
+
+
 func _prepare_for_new_player_order() -> void:
+	super._prepare_for_new_player_order()
 	_clear_hold_position_state()
 	_clear_patrol_state()
 	_clear_auto_acquire_leash()
+	_clear_local_combat_source()
 	cancel_attack_move()
 	cancel_attack()
 
@@ -174,6 +199,7 @@ func command_attack(target: Node3D, assigned_slot: int = -1) -> void:
 		_active_order = UnitOrder.attack(target, assigned_slot)
 		_clear_hold_position_state()
 		_clear_patrol_state()
+		_clear_local_combat_source()
 		cancel_attack_move()
 
 	_begin_attack_on_target(target, assigned_slot, true)
@@ -304,6 +330,7 @@ func command_hold_position() -> void:
 		_order_queue.clear()
 		_active_order = UnitOrder.hold_position()
 		_clear_patrol_state()
+		_clear_local_combat_source()
 		cancel_attack_move()
 		cancel_attack()
 
@@ -371,7 +398,12 @@ func _advance_patrol_waypoint() -> void:
 
 
 func cancel_attack_move() -> void:
+	if _has_attack_move_destination and _diag_local_combat_source != &"":
+		_emit_p_attack_move_event(
+			"WARNING %s lost strategic ATTACK_MOVE" % _debug_combat_unit_label()
+		)
 	_has_attack_move_destination = false
+	_clear_local_combat_source()
 
 
 func cancel_attack() -> void:
@@ -412,10 +444,12 @@ func set_movement_target(
 	elif not _issuing_order:
 		# AI / formation moves: cancel combat overlays without treating as player replace.
 		_clear_auto_acquire_leash()
+		_clear_local_combat_source()
 		cancel_attack_move()
 		cancel_attack()
 	else:
 		_clear_auto_acquire_leash()
+		_clear_local_combat_source()
 		cancel_attack_move()
 		cancel_attack()
 	if urgency != RepathUrgency.PLAYER_ORDER:
@@ -426,6 +460,7 @@ func set_movement_target(
 func stop_movement() -> void:
 	_clear_hold_position_state()
 	_clear_patrol_state()
+	_clear_local_combat_source()
 	cancel_attack_move()
 	cancel_attack()
 	super.stop_movement()
@@ -440,6 +475,7 @@ func _on_movement_arrived() -> void:
 		## Keep strategic attack-move while a local engagement target remains.
 		if _try_attack_move_engagement():
 			return
+		_clear_local_combat_source()
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 		return
@@ -496,6 +532,7 @@ func _physics_process(delta: float) -> void:
 			_advance_patrol_waypoint()
 		elif _is_at_attack_move_destination():
 			if not _try_attack_move_engagement():
+				_clear_local_combat_source()
 				cancel_attack_move()
 				notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 
@@ -535,6 +572,8 @@ func _try_auto_attack() -> void:
 	var closest_target: Node3D = _find_auto_acquire_target()
 	if closest_target != null:
 		_begin_attack_on_target(closest_target, -1, false)
+		if _has_attack_move_destination and _attack_target == closest_target:
+			_note_opportunistic_attack_move_combat(&"attack_move_acquire")
 
 
 func get_acquisition_range() -> float:
@@ -598,7 +637,10 @@ func _try_reacquire_local_combat_target(prefer_committed: bool = false) -> bool:
 	if next_target == null:
 		return false
 	_begin_attack_on_target(next_target, -1, prefer_committed)
-	return _attack_target == next_target
+	var engaged: bool = _attack_target == next_target
+	if engaged and _has_attack_move_destination and not prefer_committed:
+		_note_opportunistic_attack_move_combat(&"attack_move_acquire")
+	return engaged
 
 
 func _try_retarget_higher_priority_during_attack() -> void:
@@ -609,9 +651,11 @@ func _try_retarget_higher_priority_during_attack() -> void:
 	## AI keeps a valid in-range target unless a significantly better threat appears.
 	if (
 		CombatTargetValidation.is_enemy_faction(self)
-		and _is_in_attack_range(_attack_target)
 		and CombatTargetValidation.is_valid_combat_target(_attack_target)
 	):
+		## Creep/assault travel: do not thrash targets while the current one is still valid.
+		if _is_in_attack_range(_attack_target):
+			return
 		## Only re-evaluate on a slower cadence than acquire scans.
 		if not should_run_staggered_update(5):
 			return
@@ -713,6 +757,10 @@ func _stop_and_attack(delta: float) -> void:
 
 
 func _should_reposition_for_preferred_range() -> bool:
+	# Melee / short-range units must never kite backward for "preferred range".
+	if not CombatTargetValidation.is_ranged_attack_range(attack_range):
+		_is_backing_off_for_range = false
+		return false
 	if not NodeSafety.is_alive_node(_attack_target):
 		_is_backing_off_for_range = false
 		return false
@@ -783,13 +831,20 @@ func _on_combat_damage_received(result: Dictionary) -> void:
 	if not UnitCombatDamage.should_enemy_retaliate(self, resolved_attacker):
 		return
 
+	var attacker_node: Node3D = resolved_attacker as Node3D
 	if _is_holding_position:
-		if CombatTargetValidation.is_within_attack_range(
-			self, resolved_attacker as Node3D, attack_range
-		):
-			_begin_attack_on_target(resolved_attacker as Node3D, -1, false)
-	else:
-		command_attack(resolved_attacker as Node3D)
+		if CombatTargetValidation.is_within_attack_range(self, attacker_node, attack_range):
+			_begin_attack_on_target(attacker_node, -1, false)
+		return
+
+	## Local retaliation during ATTACK_MOVE must not become a committed Attack.
+	if _has_attack_move_destination:
+		_begin_attack_on_target(attacker_node, -1, false)
+		if _attack_target == attacker_node:
+			_note_opportunistic_attack_move_combat(&"retaliation")
+		return
+
+	command_attack(attacker_node)
 
 
 func get_current_health() -> int:
@@ -803,6 +858,7 @@ func _on_health_depleted() -> void:
 	_active_order = null
 	_clear_hold_position_state()
 	_clear_patrol_state()
+	_clear_local_combat_source()
 	cancel_attack_move()
 	cancel_attack()
 	clear_move_target()
@@ -843,7 +899,10 @@ func _try_attack_move_engagement() -> bool:
 	if closest_target == null:
 		return false
 	_begin_attack_on_target(closest_target, -1, false)
-	return _attack_target == closest_target
+	var engaged: bool = _attack_target == closest_target
+	if engaged:
+		_note_opportunistic_attack_move_combat(&"attack_move_acquire")
+	return engaged
 
 
 func _should_break_opportunistic_chase() -> bool:
@@ -938,14 +997,24 @@ func _resume_attack_move_or_patrol() -> bool:
 		## Stay on attack-move while another local engagement target is available.
 		if _try_attack_move_engagement():
 			return true
+		_clear_local_combat_source()
 		cancel_attack_move()
 		notify_order_completed(UnitOrder.Type.ATTACK_MOVE)
 		return false
 
 	_has_chase_target = false
+	var had_local_combat: bool = _diag_local_combat_source != &""
+	var resumed: bool = false
 	if try_resume_custom_rts_route(_attack_move_destination):
-		return true
-	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
+		resumed = true
+	else:
+		_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
+		resumed = true
+	if resumed and had_local_combat:
+		_emit_p_attack_move_event(
+			"%s resumed ATTACK_MOVE, no strategic refresh" % _debug_combat_unit_label()
+		)
+		_clear_local_combat_source()
 	return true
 
 
@@ -983,3 +1052,29 @@ func _assign_attack_approach_slot(target: Node3D, assigned_slot: int) -> void:
 		)
 	elif _attack_target != target:
 		_attack_approach_slot = CombatTargetValidation.claim_attack_approach_slot(target, self)
+
+
+func _note_opportunistic_attack_move_combat(source: StringName) -> void:
+	if not _has_attack_move_destination:
+		return
+	if _diag_local_combat_source != &"":
+		return
+	_diag_local_combat_source = source
+	_emit_p_attack_move_event(
+		"%s local attack (%s), strategic ATTACK_MOVE preserved"
+		% [_debug_combat_unit_label(), String(source)]
+	)
+
+
+func _clear_local_combat_source() -> void:
+	_diag_local_combat_source = &""
+
+
+func _debug_combat_unit_label() -> String:
+	return name
+
+
+func _emit_p_attack_move_event(text: String) -> void:
+	if text.is_empty():
+		return
+	EnemyAI.report_brain_debug_event(text)

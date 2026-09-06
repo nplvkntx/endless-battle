@@ -124,6 +124,7 @@ var _dbg_health_samples: Array[Dictionary] = []
 var _dbg_unit_orders: Dictionary = {}
 var _dbg_unit_order_changes: Array[Dictionary] = []
 var _dbg_last_health_warning: String = ""
+static var _brain_debug_listener: EnemyAI = null
 
 func _ready() -> void:
 	_resolve_managers()
@@ -2450,11 +2451,14 @@ func set_brain_debug(enabled: bool) -> void:
 	_debug_enabled = enabled
 	show_debug_overlay = enabled
 	if enabled:
+		_brain_debug_listener = self
 		_ensure_debug_panel()
 		if _debug_panel != null:
 			_debug_panel.call("show_panel")
 			_debug_update_panel()
 	else:
+		if _brain_debug_listener == self:
+			_brain_debug_listener = null
 		_debug_clear_tick_buffers()
 		_debug_reset_persistent_trace()
 		if _debug_panel != null:
@@ -2463,6 +2467,18 @@ func set_brain_debug(enabled: bool) -> void:
 
 func is_brain_debug_enabled() -> bool:
 	return _debug_enabled
+
+
+## Observational hook for unit-level P events (attack-move preserve / resume).
+static func report_brain_debug_event(text: String) -> void:
+	if _brain_debug_listener == null or not is_instance_valid(_brain_debug_listener):
+		return
+	_brain_debug_listener._debug_event(text)
+	_brain_debug_listener._debug_update_panel()
+
+
+func get_brain_debug_events_for_test() -> Array:
+	return _debug_events.duplicate()
 
 
 func _debug_reset_persistent_trace() -> void:
@@ -3679,6 +3695,15 @@ func _debug_print_army_members() -> void:
 			print("dist_to_objective=%.1f" % dist_obj)
 		print("moving=%s" % _debug_yes(unit.has_move_target))
 		print("combat=%s" % _debug_yes(_debug_unit_in_combat(unit)))
+		if unit is MilitaryUnit:
+			var military: MilitaryUnit = unit as MilitaryUnit
+			if military.has_attack_move_destination():
+				print("strategic=ATTACK_MOVE")
+				print("strategic_preserved=YES")
+			var local_source: StringName = military.get_local_combat_source()
+			if local_source != &"":
+				print("local_combat=ATTACK")
+				print("combat_source=%s" % String(local_source))
 		if unit.has_method("get_custom_rts_route_index") and unit.has_custom_rts_route():
 			print(
 				"route_index=%d/%d"

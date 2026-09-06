@@ -20,6 +20,11 @@ func _ready() -> void:
 	_verify_hold_position(failures)
 	_verify_patrol_points(failures)
 	await _verify_attack_move_resume(failures)
+	await _verify_attack_move_survives_retaliation(failures)
+	await _verify_attack_move_survives_auto_acquire(failures)
+	await _verify_explicit_attack_does_not_resume_stale_attack_move(failures)
+	await _verify_stop_cancels_attack_move_resume(failures)
+	await _verify_hold_does_not_resume_attack_move(failures)
 	await _verify_enemy_pike_combat_targets(failures)
 	await _verify_enemy_attack_move_objective_continuation(failures)
 	_verify_queued_moves(failures)
@@ -167,6 +172,216 @@ func _verify_attack_move_resume(failures: PackedStringArray) -> void:
 	first.queue_free()
 	second.queue_free()
 	camp_fighter.queue_free()
+	await get_tree().process_frame
+
+
+## A — Retaliation during ATTACK_MOVE must not destroy the strategic destination.
+func _verify_attack_move_survives_retaliation(failures: PackedStringArray) -> void:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var attacker: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	add_child(attacker)
+	await get_tree().process_frame
+	unit.global_position = Vector3.ZERO
+	unit.team_id = 1
+	unit.add_to_group(&"enemies")
+	attacker.global_position = Vector3(1.5, 0, 0)
+	attacker.team_id = TeamVisuals.PLAYER_TEAM_ID
+	attacker.add_to_group(&"units")
+
+	var dest: Vector3 = Vector3(24, 0, 0)
+	unit.command_attack_move(dest)
+	_expect(failures, "A: ATTACK_MOVE active", unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"A: active order is ATTACK_MOVE",
+		unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.ATTACK_MOVE
+	)
+	var dest_before: Vector3 = unit.get_attack_move_destination()
+	var generation_before: int = unit.get_player_squad_command_generation()
+
+	unit._on_combat_damage_received({DamageService.RESULT_ATTACKER: attacker})
+	_expect(failures, "A: entered local combat with attacker", unit._attack_target == attacker)
+	_expect(failures, "A: opportunistic not committed", not unit._committed_attack_order)
+	_expect(failures, "A: ATTACK_MOVE destination preserved", unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"A: destination unchanged",
+		unit.get_attack_move_destination().distance_to(dest_before) < 0.01
+	)
+	_expect(
+		failures,
+		"A: active order still ATTACK_MOVE",
+		unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.ATTACK_MOVE
+	)
+	_expect(failures, "A: combat source is retaliation", unit.get_local_combat_source() == &"retaliation")
+
+	attacker._health_component.current_health = 0
+	unit._sanitize_attack_target()
+	_expect(failures, "A: local target cleared", unit._attack_target == null)
+	_expect(failures, "A: resumes ATTACK_MOVE after kill", unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"A: still moving toward original destination",
+		unit.has_move_target or unit.has_custom_rts_route()
+	)
+	_expect(
+		failures,
+		"A: no new squad command generation required",
+		unit.get_player_squad_command_generation() == generation_before
+	)
+	_expect(
+		failures,
+		"A: active order remains ATTACK_MOVE after resume",
+		unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.ATTACK_MOVE
+	)
+
+	attacker.queue_free()
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+## B — Attack-move auto-acquire is opportunistic and resumes the original destination.
+func _verify_attack_move_survives_auto_acquire(failures: PackedStringArray) -> void:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var enemy: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	add_child(enemy)
+	await get_tree().process_frame
+	unit.global_position = Vector3.ZERO
+	unit.team_id = 1
+	unit.add_to_group(&"enemies")
+	enemy.global_position = Vector3(2, 0, 0)
+	enemy.team_id = TeamVisuals.PLAYER_TEAM_ID
+	enemy.add_to_group(&"units")
+
+	var dest: Vector3 = Vector3(18, 0, 0)
+	unit.command_attack_move(dest)
+	_expect(failures, "B: ATTACK_MOVE active", unit._has_attack_move_destination)
+	var engaged: bool = unit._try_attack_move_engagement()
+	_expect(failures, "B: auto-acquire engaged", engaged and unit._attack_target == enemy)
+	_expect(failures, "B: auto-acquire not committed", not unit._committed_attack_order)
+	_expect(failures, "B: ATTACK_MOVE preserved during acquire", unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"B: active order still ATTACK_MOVE",
+		unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.ATTACK_MOVE
+	)
+
+	enemy._health_component.current_health = 0
+	unit._sanitize_attack_target()
+	_expect(failures, "B: resumes ATTACK_MOVE after acquire kill", unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"B: destination still original A",
+		unit.get_attack_move_destination().distance_to(Vector3(dest.x, unit.global_position.y, dest.z)) < 0.01
+	)
+	_expect(
+		failures,
+		"B: resumes travel toward A",
+		unit.has_move_target or unit.has_custom_rts_route()
+	)
+
+	enemy.queue_free()
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+## C — Explicit committed Attack must not auto-resume a stale ATTACK_MOVE.
+func _verify_explicit_attack_does_not_resume_stale_attack_move(failures: PackedStringArray) -> void:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var enemy: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	add_child(enemy)
+	await get_tree().process_frame
+	unit.global_position = Vector3.ZERO
+	enemy.global_position = Vector3(1.5, 0, 0)
+	enemy.add_to_group(&"enemies")
+
+	unit.command_attack_move(Vector3(16, 0, 0))
+	_expect(failures, "C: had ATTACK_MOVE", unit._has_attack_move_destination)
+	unit.command_attack(enemy)
+	_expect(failures, "C: explicit Attack is committed", unit._committed_attack_order)
+	_expect(failures, "C: explicit Attack cancels ATTACK_MOVE", not unit._has_attack_move_destination)
+	_expect(
+		failures,
+		"C: active order is ATTACK",
+		unit.get_active_order() != null and unit.get_active_order().type == UnitOrder.Type.ATTACK
+	)
+
+	enemy._health_component.current_health = 0
+	unit._sanitize_attack_target()
+	_expect(failures, "C: does not restore ATTACK_MOVE", not unit._has_attack_move_destination)
+
+	enemy.queue_free()
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+## D — STOP remains authoritative; no later automatic ATTACK_MOVE resume.
+func _verify_stop_cancels_attack_move_resume(failures: PackedStringArray) -> void:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var enemy: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	add_child(enemy)
+	await get_tree().process_frame
+	unit.global_position = Vector3.ZERO
+	unit.team_id = 1
+	unit.add_to_group(&"enemies")
+	enemy.global_position = Vector3(1.5, 0, 0)
+	enemy.team_id = TeamVisuals.PLAYER_TEAM_ID
+	enemy.add_to_group(&"units")
+
+	unit.command_attack_move(Vector3(14, 0, 0))
+	unit._on_combat_damage_received({DamageService.RESULT_ATTACKER: enemy})
+	_expect(failures, "D: fighting before STOP", unit._attack_target == enemy)
+	unit.issue_stop()
+	_expect(failures, "D: STOP clears ATTACK_MOVE", not unit._has_attack_move_destination)
+	_expect(failures, "D: STOP clears attack", unit._attack_target == null)
+	_expect(failures, "D: STOP clears active order", unit.get_active_order() == null)
+
+	enemy._health_component.current_health = 0
+	unit._sanitize_attack_target()
+	_expect(failures, "D: no ATTACK_MOVE resume after STOP", not unit._has_attack_move_destination)
+	_expect(failures, "D: remains idle after STOP", not unit.has_move_target)
+
+	enemy.queue_free()
+	unit.queue_free()
+	await get_tree().process_frame
+
+
+## E — HOLD remains correct and does not resume a cancelled ATTACK_MOVE.
+func _verify_hold_does_not_resume_attack_move(failures: PackedStringArray) -> void:
+	var unit: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	var enemy: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	add_child(enemy)
+	await get_tree().process_frame
+	unit.global_position = Vector3.ZERO
+	unit.team_id = 1
+	unit.add_to_group(&"enemies")
+	enemy.global_position = Vector3(1.2, 0, 0)
+	enemy.team_id = TeamVisuals.PLAYER_TEAM_ID
+	enemy.add_to_group(&"units")
+
+	unit.command_attack_move(Vector3(12, 0, 0))
+	unit.command_hold_position()
+	_expect(failures, "E: HOLD is active", unit._is_holding_position)
+	_expect(failures, "E: HOLD cancels ATTACK_MOVE", not unit._has_attack_move_destination)
+	_expect(failures, "E: HOLD has no move target", not unit.has_move_target)
+
+	unit._on_combat_damage_received({DamageService.RESULT_ATTACKER: enemy})
+	_expect(failures, "E: HOLD stays holding after hit", unit._is_holding_position)
+	_expect(failures, "E: HOLD does not restore ATTACK_MOVE", not unit._has_attack_move_destination)
+
+	if unit._attack_target == enemy:
+		enemy._health_component.current_health = 0
+		unit._sanitize_attack_target()
+	_expect(failures, "E: still holding after local target ends", unit._is_holding_position)
+	_expect(failures, "E: still no ATTACK_MOVE after hold combat", not unit._has_attack_move_destination)
+
+	enemy.queue_free()
+	unit.queue_free()
 	await get_tree().process_frame
 
 

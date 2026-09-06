@@ -62,6 +62,7 @@ func _ready() -> void:
 	await _test_difficulty_economy_knobs()
 	await _test_new_unit_receives_current_army_order()
 	await _test_stable_attack_move_skips_identical_routes()
+	await _test_attack_move_survives_local_combat_without_route()
 	await _test_brain_debug_black_box()
 
 	var report: String
@@ -1744,6 +1745,120 @@ func _test_stable_attack_move_skips_identical_routes() -> void:
 		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first + 1
 	)
 	_expect("player CC still present for stable-route scenario", NodeSafety.is_alive_node(player_cc))
+	_ai.set_brain_debug(false)
+
+
+func _test_attack_move_survives_local_combat_without_route() -> void:
+	print("--- ATTACK_MOVE survives local combat without EnemyAI refresh ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Keep the fight outside defense radius so Task #2 DEFEND does not take over.
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -80))
+	var cluster: Vector3 = _cc.global_position + Vector3(0, 0, -50)
+	var hero: Hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var army: Array = []
+	army.append(hero)
+	for i: int in 8:
+		army.append(_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0)))
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	_ai.set_brain_debug(true)
+	await get_tree().process_frame
+
+	_ai.force_tick_for_test()
+	_expect(
+		"local-combat seed selects ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("local-combat seed has a strategic destination", expected_dest != Vector3.ZERO)
+	var routes_after_first: int = _ai.get_strategic_group_route_request_count_for_test()
+	_expect("local-combat first tick issued a group route", routes_after_first >= 1)
+
+	var fighter: MilitaryUnit = null
+	for member_v: Variant in army:
+		if member_v is Spearman:
+			fighter = member_v as MilitaryUnit
+			break
+	_expect("local-combat found a Spearman", fighter != null)
+	if fighter == null:
+		_ai.set_brain_debug(false)
+		return
+	_expect(
+		"Spearman has ATTACK_MOVE before local fight",
+		_unit_has_attack_move_toward(fighter, expected_dest)
+	)
+	var generation_before: int = fighter.get_player_squad_command_generation()
+
+	var interrupter: Unit = _spawn_player_spearman(fighter.global_position + Vector3(1.2, 0, 0))
+	await get_tree().process_frame
+	fighter._on_combat_damage_received({DamageService.RESULT_ATTACKER: interrupter})
+	_expect("Spearman entered local combat", fighter.get_attack_target() == interrupter)
+	_expect("local combat is opportunistic", not fighter.is_committed_attack_order())
+	_expect("ATTACK_MOVE survived retaliation", fighter.has_attack_move_destination())
+	_expect(
+		"active order still ATTACK_MOVE during local fight",
+		_unit_has_attack_move_toward(fighter, expected_dest)
+	)
+	_expect(
+		"P tags opportunistic local combat source",
+		fighter.get_local_combat_source() == &"retaliation"
+		or fighter.get_local_combat_source() == &"attack_move_acquire"
+	)
+	var preserve_events: Array = _ai.get_brain_debug_events_for_test()
+	var saw_preserve: bool = false
+	for event_v: Variant in preserve_events:
+		if not event_v is Dictionary:
+			continue
+		var preserve_text: String = String((event_v as Dictionary).get("text", ""))
+		if preserve_text.contains("local attack") and preserve_text.contains("ATTACK_MOVE preserved"):
+			saw_preserve = true
+	_expect("P recorded local attack with ATTACK_MOVE preserved", saw_preserve)
+
+	_ai.force_tick_for_test()
+	_expect(
+		"EnemyAI does not re-issue a route while ATTACK_MOVE is preserved",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first
+	)
+	_expect(
+		"tick during local fight keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var during_fight: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("tick during local fight issues no group route", not bool(during_fight.get("route_request", false)))
+
+	if interrupter.get_node_or_null("HealthComponent") != null:
+		(interrupter.get_node("HealthComponent") as HealthComponent).current_health = 0
+	fighter._sanitize_attack_target()
+	_expect("resumes ATTACK_MOVE after local target dies", fighter.has_attack_move_destination())
+	_expect(
+		"still matching strategic ATTACK_MOVE after resume",
+		_unit_has_attack_move_toward(fighter, expected_dest)
+	)
+	_expect(
+		"resume does not mint a new squad command generation",
+		fighter.get_player_squad_command_generation() == generation_before
+	)
+	var resume_events: Array = _ai.get_brain_debug_events_for_test()
+	var saw_resume: bool = false
+	for event_v2: Variant in resume_events:
+		if not event_v2 is Dictionary:
+			continue
+		var resume_text: String = String((event_v2 as Dictionary).get("text", ""))
+		if resume_text.contains("resumed ATTACK_MOVE") and resume_text.contains("no strategic refresh"):
+			saw_resume = true
+	_expect("P recorded resume without strategic refresh", saw_resume)
+
+	_ai.force_tick_for_test()
+	_expect(
+		"EnemyAI still issues no restore route after local fight",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first
+	)
+	var after_resume: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("tick after resume issues no group route", not bool(after_resume.get("route_request", false)))
+	_expect("player CC still present for local-combat scenario", NodeSafety.is_alive_node(player_cc))
 	_ai.set_brain_debug(false)
 
 
