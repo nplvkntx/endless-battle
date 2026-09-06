@@ -59,6 +59,9 @@ func _ready() -> void:
 	await _test_creep_approach_staging()
 	await _test_creep_condition_no_oscillation()
 	await _test_difficulty_economy_knobs()
+	await _test_new_unit_receives_current_army_order()
+	await _test_stable_attack_move_skips_identical_routes()
+	await _test_brain_debug_black_box()
 
 	var report: String
 	if _failures.is_empty():
@@ -99,6 +102,7 @@ func _setup_brain() -> void:
 	_world.add_child(_ai)
 	_ai._build_manager = _build
 	_ai._gather_manager = _gather
+	PlayerRouteNavigation.ensure_grid_ready()
 
 	_cc = _spawn_completed_building(CC_SCENE, Vector3(30, 1, 28)) as CommandCenter
 	_cc.team_id = 1
@@ -237,7 +241,7 @@ func _test_hero_priority() -> void:
 	await get_tree().process_frame
 
 	_ai.force_tick_for_test()
-	_expect("no Hero → HERO priority", _ai.get_debug_priority() == &"HERO")
+	_expect("no Hero → HOME_NO_HERO priority", _ai.get_debug_priority() == &"HOME_NO_HERO")
 
 	var altar: HeroAltar = null
 	for node: Node in get_tree().get_nodes_in_group(&"enemy_command_center"):
@@ -263,7 +267,7 @@ func _test_build_force_and_home() -> void:
 	await get_tree().process_frame
 
 	_ai.force_tick_for_test()
-	_expect("<5 Spearmen → BUILD_FORCE", _ai.get_debug_priority() == &"BUILD_FORCE")
+	_expect("<5 Spearmen → HOME_ARMY_SMALL", _ai.get_debug_priority() == &"HOME_ARMY_SMALL")
 
 
 func _test_production_beyond_five() -> void:
@@ -333,31 +337,35 @@ func _test_early_creep_and_attack_gate() -> void:
 		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
 	await get_tree().process_frame
 
-	## Level < 3 and camps cleared < 3 → EARLY_CREEP when a camp exists.
-	## Harness has no camps, so early IF fails and later IFs (ATTACK/WAIT) may win.
+	## Level < 3 → EARLY_CREEP when a useful camp exists.
+	## Harness has no camps, so later IFs (ATTACK/HOME_WAIT) may win.
+	## camps_cleared gating was removed with the simple AI replacement.
 	_ai.set_camps_cleared_for_test(0)
 	_ai.force_tick_for_test()
 	var early_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"hero L1 camps_cleared 0 → EARLY_CREEP/WAIT/ATTACK (no camps in harness)",
+		"hero L1 no camps → EARLY_CREEP/HOME_WAIT/ATTACK/REGROUP",
 		early_priority == &"EARLY_CREEP"
-		or early_priority == &"WAIT"
+		or early_priority == &"HOME_WAIT"
 		or early_priority == &"ATTACK_PLAYER"
 		or early_priority == &"EXTRA_CREEP"
+		or early_priority == &"REGROUP"
 	)
 	_expect("hero L1 is not stuck on DEFEND", early_priority != &"DEFEND")
 
-	## Still early while level 2 and only 2 camps cleared.
+	## Level 2 still prefers early creep when a camp exists; without camps, wait/attack/regroup.
 	hero.level = 2
 	_ai.set_camps_cleared_for_test(2)
 	_ai.force_tick_for_test()
 	var mid_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"hero L2 camps_cleared 2 still early gate (not ATTACK from early exit)",
-		mid_priority == &"EARLY_CREEP" or mid_priority == &"WAIT" or mid_priority == &"EXTRA_CREEP" or mid_priority == &"ATTACK_PLAYER"
+		"hero L2 no camps → not DEFEND-only gate",
+		mid_priority == &"EARLY_CREEP"
+		or mid_priority == &"HOME_WAIT"
+		or mid_priority == &"EXTRA_CREEP"
+		or mid_priority == &"ATTACK_PLAYER"
+		or mid_priority == &"REGROUP"
 	)
-	## With no camps in harness, EARLY_CREEP can't win — WAIT is correct.
-	## With camps_cleared still < 3 and level < 3, attack may win only if early camp check fails.
 	_expect("hero L2 does not require camps_cleared>=2 to leave early", true)
 
 	## Level >= 3 exits early creep requirement.
@@ -366,8 +374,11 @@ func _test_early_creep_and_attack_gate() -> void:
 	_ai.force_tick_for_test()
 	var post_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"hero L3 → early creep requirement ends (ATTACK/EXTRA_CREEP/WAIT)",
-		post_priority == &"ATTACK_PLAYER" or post_priority == &"EXTRA_CREEP" or post_priority == &"WAIT"
+		"hero L3 → early creep requirement ends (ATTACK/EXTRA_CREEP/HOME_WAIT/REGROUP)",
+		post_priority == &"ATTACK_PLAYER"
+		or post_priority == &"EXTRA_CREEP"
+		or post_priority == &"HOME_WAIT"
+		or post_priority == &"REGROUP"
 	)
 	_expect("hero L3 is not EARLY_CREEP", post_priority != &"EARLY_CREEP")
 
@@ -388,7 +399,7 @@ func _test_rebuild_after_hero_death() -> void:
 	HeroProgressionStore.clear()
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("Hero dies → HERO priority naturally wins", _ai.get_debug_priority() == &"HERO")
+	_expect("Hero dies → HOME_NO_HERO priority naturally wins", _ai.get_debug_priority() == &"HOME_NO_HERO")
 
 
 func _test_tech_requests() -> void:
@@ -702,15 +713,13 @@ func _test_creep_strategy_stays_camp_based() -> void:
 	_ai.set_camps_cleared_for_test(0)
 	await get_tree().process_frame
 
-	var camp_id: int = camp.get_instance_id()
 	var creep_c_id: int = creep_c.get_instance_id()
 
 	_ai.force_tick_for_test()
 	_expect("camp strategy → EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
 	_expect("camp strategy cmd=creep", _ai.get_last_command_kind_for_test() == &"creep")
 	_expect("camp strategy F3 label CREEP", _ai.get_strategic_order_label_for_test() == "CREEP")
-	_expect("camp strategy current target is camp", _ai.get_current_target_id_for_test() == camp_id)
-	_expect("camp strategy last_command target is camp", _ai.get_last_command_target_id_for_test() == camp_id)
+	## Camp instance commitment / camps_cleared counters were removed from simple AI.
 	var staging0: Vector3 = _ai.get_creep_staging_point_for_test(camp)
 	var dest0: Vector3 = _ai.get_last_command_destination_for_test()
 	_expect(
@@ -719,36 +728,34 @@ func _test_creep_strategy_stays_camp_based() -> void:
 		and dest0.distance_to(staging0) <= EnemyAI.ORDER_DEST_RADIUS
 	)
 
-	## One creep death must not clear strategic camp commitment / command cache.
+	## One creep death must not retarget onto the remaining individual creep.
 	_kill_unit(creep_a)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect("after creep A still EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
-	_expect("after creep A target still camp", _ai.get_current_target_id_for_test() == camp_id)
 	_expect("after creep A cmd still creep", _ai.get_last_command_kind_for_test() == &"creep")
-	_expect("after creep A last_target still camp", _ai.get_last_command_target_id_for_test() == camp_id)
+	_expect(
+		"after creep A never writes remaining creep as strategic target",
+		_ai.get_current_target_id_for_test() != creep_c_id
+	)
 
 	_kill_unit(creep_b)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("after creep B target still camp", _ai.get_current_target_id_for_test() == camp_id)
 	_expect("after creep B cmd still creep", _ai.get_last_command_kind_for_test() == &"creep")
 
 	## Repeated ticks must not retarget strategy onto the remaining individual creep.
 	for _i: int in 3:
 		_ai.force_tick_for_test()
-		_expect("ticks keep camp strategic id", _ai.get_current_target_id_for_test() == camp_id)
 		_expect(
 			"ticks never write remaining creep as strategic target",
 			_ai.get_current_target_id_for_test() != creep_c_id
 		)
 		_expect("ticks keep cmd=creep", _ai.get_last_command_kind_for_test() == &"creep")
 
-	var cleared_before: int = _ai.get_camps_cleared()
 	_kill_unit(creep_c)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("camp clear increments camps_cleared", _ai.get_camps_cleared() == cleared_before + 1)
 	_expect(
 		"after camp clear leaves EARLY_CREEP",
 		_ai.get_debug_condition_bucket_for_test() != &"EARLY_CREEP"
@@ -766,7 +773,10 @@ func _test_army_cohesion_conditions() -> void:
 	_ai.set_camps_cleared_for_test(3)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("TEST A Hero+0 → HOME_ARMY_SMALL or HOME", _ai.get_debug_priority() == &"BUILD_FORCE")
+	_expect(
+		"TEST A Hero+0 → HOME_ARMY_SMALL",
+		_ai.get_debug_priority() == &"HOME_ARMY_SMALL"
+	)
 	_expect("TEST A not together with 0 soldiers", not _ai.is_army_together_for_test())
 
 	## TEST B — Hero + 2 soldiers, minimum = 5 → HOME
@@ -780,7 +790,7 @@ func _test_army_cohesion_conditions() -> void:
 	_ai.set_camps_cleared_for_test(3)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("TEST B Hero+2 → BUILD_FORCE/HOME", _ai.get_debug_priority() == &"BUILD_FORCE")
+	_expect("TEST B Hero+2 → HOME_ARMY_SMALL", _ai.get_debug_priority() == &"HOME_ARMY_SMALL")
 
 	## TEST C — Hero + 8 together, attack false → not ATTACK_PLAYER necessarily (WAIT/CREEP)
 	await _clear_units_and_buildings_except_cc()
@@ -805,6 +815,7 @@ func _test_army_cohesion_conditions() -> void:
 	## TEST D — Hero + 8 together and AI stronger → ATTACK_PLAYER
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
+	_spawn_player_command_center(_cc.global_position + Vector3(45, 0, 0))
 	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
 	hero.level = 5
 	HeroProgressionStore.register_living_hero(hero)
@@ -912,7 +923,7 @@ func _test_army_cohesion_conditions() -> void:
 func _test_attack_player_force_and_hero_death() -> void:
 	print("--- ATTACK_PLAYER force cohesion + hero-death HOME ---")
 
-	## SCENARIO A — Hero + 5 Pikes vs Town Hall only: all participate.
+	## SCENARIO A — Hero + 6 Pikes vs Town Hall only: all participate (T2 minimum soldiers=6).
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
@@ -920,7 +931,7 @@ func _test_attack_player_force_and_hero_death() -> void:
 	hero.level = 5
 	HeroProgressionStore.register_living_hero(hero)
 	var pikes: Array = []
-	for i: int in 5:
+	for i: int in 6:
 		pikes.append(
 			_spawn_enemy_spearman(player_cc.global_position + Vector3(-6.0 + float(i) * 0.9, 0, 1.5))
 		)
@@ -931,42 +942,30 @@ func _test_attack_player_force_and_hero_death() -> void:
 		"SCENARIO A → ATTACK_PLAYER",
 		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
 	)
-	var hero_prov: Dictionary = hero.get_strategic_order_provenance()
 	_expect(
-		"SCENARIO A Hero ordered ATTACK or ATTACK_MOVE",
-		String(hero_prov.get("type", "")) == "ATTACK"
-		or String(hero_prov.get("type", "")) == "ATTACK_MOVE"
+		"SCENARIO A command is attack_player",
+		_ai.get_last_command_kind_for_test() == &"attack_player"
 	)
-	var participating: int = 0
-	for pike_variant: Variant in pikes:
-		if not pike_variant is Unit or not NodeSafety.is_alive_node(pike_variant):
-			continue
-		var pike: Unit = pike_variant as Unit
-		var pike_prov: Dictionary = pike.get_strategic_order_provenance()
-		var order_type: String = String(pike_prov.get("type", ""))
-		var has_attack: bool = (
-			"_attack_target" in pike
-			and NodeSafety.is_alive_node(pike.get("_attack_target"))
-		)
-		var has_am: bool = (
-			"_has_attack_move_destination" in pike
-			and bool(pike.get("_has_attack_move_destination"))
-		)
-		if has_attack or has_am or order_type == "ATTACK" or order_type == "ATTACK_MOVE":
-			participating += 1
-	_expect("SCENARIO A all 5 Pikes participate", participating == 5)
+	var attack_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect(
+		"SCENARIO A army ordered toward player base approach",
+		attack_dest.distance_to(player_cc.global_position) <= 20.0
+	)
+	## Old strategic-order provenance recording was removed with simple AI.
+	## Participation is the shared PlayerRouteNavigation group attack-move.
 	_expect(
 		"SCENARIO A strategic objective is player CC",
 		_ai.select_player_target_for_test() == player_cc
 	)
 
-	## Majority already on objective → do not reissue for one idle straggler.
+	## One idle member used to be skipped when the majority already had the order.
+	## Full reinforcement coverage is `_test_new_unit_receives_current_army_order`.
 	var dropped: Unit = pikes[0] as Unit
 	dropped.cancel_attack()
 	dropped.cancel_attack_move()
 	dropped.stop_movement()
 	var approach_dest: Vector3 = _ai.get_last_command_destination_for_test()
-	_ai._last_command_kind = &"attack"
+	_ai._last_command_kind = &"attack_player"
 	_ai._last_command_target_id = player_cc.get_instance_id()
 	_ai._last_command_army_count = _ai.get_enemy_army_for_test().size()
 	_ai._last_command_destination = approach_dest
@@ -975,19 +974,12 @@ func _test_attack_player_force_and_hero_death() -> void:
 		other.command_attack_move(approach_dest)
 	hero.command_attack_move(approach_dest)
 	_ai.force_tick_for_test()
-	var still_idle: bool = (
-		not dropped.has_move_target
-		and not (
-			"_has_attack_move_destination" in dropped
-			and bool(dropped.get("_has_attack_move_destination"))
-		)
-		and not (
-			"_attack_target" in dropped and NodeSafety.is_alive_node(dropped.get("_attack_target"))
-		)
+	_expect(
+		"already-ordered Pikes keep ATTACK_MOVE after one idle member",
+		_unit_has_attack_move_toward(pikes[1] as Unit, approach_dest)
 	)
-	_expect("majority-follow skips reissue for one idle Pike", still_idle)
 
-	## SCENARIO B — Enemy Hero dies mid-fight → always HOME (no continue-attack exception).
+	## SCENARIO B — Enemy Hero dies mid-fight → always HOME_NO_HERO (no continue-attack exception).
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(40, 0, 0))
@@ -995,7 +987,7 @@ func _test_attack_player_force_and_hero_death() -> void:
 	hero.level = 5
 	HeroProgressionStore.register_living_hero(hero)
 	pikes.clear()
-	for i: int in 5:
+	for i: int in 6:
 		pikes.append(
 			_spawn_enemy_spearman(player_cc.global_position + Vector3(-5.0 + float(i) * 0.8, 0, 1.0))
 		)
@@ -1014,18 +1006,18 @@ func _test_attack_player_force_and_hero_death() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect(
-		"SCENARIO B hero death → HOME (no continue-attack)",
-		_ai.get_debug_condition_bucket_for_test() == &"HOME"
+		"SCENARIO B hero death → HOME_NO_HERO (no continue-attack)",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME_NO_HERO"
 	)
-	_expect("SCENARIO B economy still wants Hero", _ai.get_debug_priority() == &"HERO")
+	_expect("SCENARIO B economy still wants Hero", _ai.get_debug_priority() == &"HOME_NO_HERO")
 
-	## SCENARIO C — Hero dies before army reaches player base → HOME.
+	## SCENARIO C — Hero dies before army reaches player base → HOME_NO_HERO.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	_spawn_player_command_center(_cc.global_position + Vector3(70, 0, 0))
 	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
 	HeroProgressionStore.register_living_hero(hero)
-	for i: int in 5:
+	for i: int in 6:
 		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i), 0, 2))
 	_ai.set_camps_cleared_for_test(3)
 	await get_tree().process_frame
@@ -1034,20 +1026,20 @@ func _test_attack_player_force_and_hero_death() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect(
-		"SCENARIO C hero death at home → HOME",
-		_ai.get_debug_condition_bucket_for_test() == &"HOME"
+		"SCENARIO C hero death at home → HOME_NO_HERO",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME_NO_HERO"
 	)
-	_expect("SCENARIO C economy still wants Hero", _ai.get_debug_priority() == &"HERO")
+	_expect("SCENARIO C economy still wants Hero", _ai.get_debug_priority() == &"HOME_NO_HERO")
 
 
 func _test_attack_regroup_oscillation_regression() -> void:
 	print("--- ATTACK_PLAYER ↔ REGROUP oscillation regression ---")
 	_expect(
-		"hero far threshold is generous (24m)",
-		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), 24.0)
+		"hero cohesion radius matches simple AI COHESION_RADIUS",
+		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), EnemyAI.COHESION_RADIUS)
 	)
 
-	## Mid-march lead (17.5m) must NOT force REGROUP under generous threshold.
+	## Mid-march lead inside cohesion radius must NOT force REGROUP.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
@@ -1348,12 +1340,10 @@ func _test_creep_approach_staging() -> void:
 		dest.distance_to(staging) <= EnemyAI.ORDER_DEST_RADIUS
 		and dest.distance_to(camp.global_position) > 4.0
 	)
-	var camp_id: int = camp.get_instance_id()
 	_kill_unit(creep_a)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect("after one creep death still EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
-	_expect("after one creep death camp commitment unchanged", _ai.get_current_target_id_for_test() == camp_id)
 	var dest2: Vector3 = _ai.get_last_command_destination_for_test()
 	_expect(
 		"after creep death dest still staging area",
@@ -1420,6 +1410,246 @@ func _test_difficulty_economy_knobs() -> void:
 	_expect("Hard train 1.5", is_equal_approx(AIDifficultyConfig.HARD_TRAIN_SPEED_MULTIPLIER, 1.5))
 	_expect("Easy max military 1", AIDifficultyConfig.MAX_MILITARY_EASY == 1)
 	_expect("Normal/Hard max military 3", AIDifficultyConfig.MAX_MILITARY_NORMAL_HARD == 3)
+
+
+func _test_new_unit_receives_current_army_order() -> void:
+	print("--- new military unit receives current army ATTACK_MOVE ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Stay inside the custom RTS grid (−50..50). Off-grid group moves issue no unit orders.
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -20))
+	var cluster: Vector3 = player_cc.global_position + Vector3(0, 0, 6)
+	var hero: Hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var existing: Array = []
+	existing.append(hero)
+	for i: int in 8:
+		existing.append(
+			_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+		)
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"seed army selects ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect(
+		"seed army has a strategic destination",
+		expected_dest != Vector3.ZERO
+	)
+	for member_v: Variant in existing:
+		(member_v as Unit).command_attack_move(expected_dest)
+	await get_tree().process_frame
+	var generations_before: Dictionary = {}
+	for member_v2: Variant in existing:
+		var member: Unit = member_v2 as Unit
+		_expect(
+			"seed army member has ATTACK_MOVE before reinforcement",
+			_unit_has_attack_move_toward(member, expected_dest)
+		)
+		generations_before[member.get_instance_id()] = member.get_player_squad_command_generation()
+
+	var recruit: Unit = _spawn_enemy_spearman(_cc.global_position + Vector3(0, 0, -5) + Vector3(1, 0, 0))
+	await get_tree().process_frame
+	_expect(
+		"new Spearman has no matching strategic ATTACK_MOVE before tick",
+		not _unit_has_attack_move_toward(recruit, expected_dest)
+	)
+
+	_ai.force_tick_for_test()
+	_expect(
+		"new Spearman receives ATTACK_MOVE toward existing army destination",
+		_unit_has_attack_move_toward(recruit, expected_dest)
+	)
+	for member_v3: Variant in existing:
+		var ordered: Unit = member_v3 as Unit
+		_expect(
+			"existing army member still has ATTACK_MOVE after reinforcement",
+			_unit_has_attack_move_toward(ordered, expected_dest)
+		)
+		_expect(
+			"existing army member is not re-issued a navigation generation",
+			ordered.get_player_squad_command_generation()
+			== int(generations_before.get(ordered.get_instance_id(), -2))
+		)
+	_expect("player CC still present for reinforcement scenario", NodeSafety.is_alive_node(player_cc))
+
+
+func _test_stable_attack_move_skips_identical_routes() -> void:
+	print("--- stable ATTACK_MOVE does not re-request routes ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	## Stay on the custom RTS grid. Keep the army far from the player CC so the
+	## first tick must travel, and later ticks do not enter local combat.
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -24))
+	var cluster: Vector3 = _cc.global_position + Vector3(0, 0, 2)
+	var hero: Hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var existing: Array = []
+	existing.append(hero)
+	for i: int in 8:
+		existing.append(
+			_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+		)
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	_ai.set_brain_debug(true)
+	await get_tree().process_frame
+
+	_ai.force_tick_for_test()
+	_expect(
+		"stable-route seed selects ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("stable-route seed has a strategic destination", expected_dest != Vector3.ZERO)
+	var routes_after_first: int = _ai.get_strategic_group_route_request_count_for_test()
+	_expect("first legitimate ATTACK_MOVE issues one group route", routes_after_first >= 1)
+	var first_order: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("first tick records a real route request", bool(first_order.get("route_request", false)))
+	_expect(
+		"first tick orders the living army",
+		int(first_order.get("ordered", 0)) == existing.size()
+	)
+
+	var generations_before: Dictionary = {}
+	for member_v: Variant in existing:
+		var member: Unit = member_v as Unit
+		_expect(
+			"seed army member has ATTACK_MOVE after first tick",
+			_unit_has_attack_move_toward(member, expected_dest)
+		)
+		generations_before[member.get_instance_id()] = member.get_player_squad_command_generation()
+
+	for _i: int in 6:
+		_ai.force_tick_for_test()
+		_expect(
+			"stable ticks keep ATTACK_PLAYER",
+			_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+		)
+		_expect(
+			"stable ticks keep equivalent destination",
+			_destinations_equivalent_for_test(_ai.get_last_command_destination_for_test(), expected_dest)
+		)
+		var tick_order: Dictionary = _ai.get_last_order_debug_for_test()
+		_expect("stable tick issues no group route", not bool(tick_order.get("route_request", false)))
+		_expect("stable tick needs_order is 0", int(tick_order.get("needs_order", 0)) == 0)
+		_expect("stable tick ordered is 0", int(tick_order.get("ordered", 0)) == 0)
+		_expect("stable tick marks identical skip", bool(tick_order.get("identical_skipped", false)))
+
+	_expect(
+		"unchanged ticks issue no extra group routes",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first
+	)
+	for member_v2: Variant in existing:
+		var ordered: Unit = member_v2 as Unit
+		_expect(
+			"stable ticks leave existing ATTACK_MOVE unchanged",
+			_unit_has_attack_move_toward(ordered, expected_dest)
+		)
+		_expect(
+			"stable ticks do not bump command generation",
+			ordered.get_player_squad_command_generation()
+			== int(generations_before.get(ordered.get_instance_id(), -2))
+		)
+
+	var health_stable: Dictionary = _ai.get_order_health_totals_for_test()
+	_expect("stable window records the first route", int(health_stable.get("route_requests", 0)) == 1)
+	_expect("stable window skips later identical ticks", int(health_stable.get("identical_skipped", 0)) >= 6)
+	_expect("stable window has no destination changes", int(health_stable.get("destination_changes", 0)) == 0)
+
+	var recruit: Unit = _spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, -5))
+	await get_tree().process_frame
+	_expect(
+		"new Spearman has no matching ATTACK_MOVE before reinforcement tick",
+		not _unit_has_attack_move_toward(recruit, expected_dest)
+	)
+	_ai.force_tick_for_test()
+	var reinforce_order: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("reinforcement tick requests one route", bool(reinforce_order.get("route_request", false)))
+	_expect("reinforcement tick needs_order is 1", int(reinforce_order.get("needs_order", 0)) == 1)
+	_expect("reinforcement tick ordered is 1", int(reinforce_order.get("ordered", 0)) == 1)
+	_expect(
+		"reinforcement tick keeps existing army already_correct",
+		int(reinforce_order.get("already_correct", 0)) == existing.size()
+	)
+	_expect(
+		"reinforcement issues exactly one extra group route",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first + 1
+	)
+	_expect(
+		"new Spearman receives ATTACK_MOVE toward existing destination",
+		_unit_has_attack_move_toward(recruit, expected_dest)
+	)
+	for member_v3: Variant in existing:
+		var kept: Unit = member_v3 as Unit
+		_expect(
+			"existing army is not re-issued a navigation generation",
+			kept.get_player_squad_command_generation()
+			== int(generations_before.get(kept.get_instance_id(), -2))
+		)
+
+	_ai.force_tick_for_test()
+	var after_reinforce: Dictionary = _ai.get_last_order_debug_for_test()
+	_expect("tick after reinforcement skips the route", not bool(after_reinforce.get("route_request", false)))
+	_expect(
+		"tick after reinforcement issues no extra group route",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_after_first + 1
+	)
+	_expect("player CC still present for stable-route scenario", NodeSafety.is_alive_node(player_cc))
+	_ai.set_brain_debug(false)
+
+
+func _test_brain_debug_black_box() -> void:
+	print("--- brain debug black box observability ---")
+	await _clear_units_and_buildings_except_cc()
+	_ai.set_brain_debug(true)
+	_ai.force_tick_for_test()
+	_expect("P debug enables", _ai.is_brain_debug_enabled())
+	var lines: PackedStringArray = _ai.get_debug_overlay_lines()
+	_expect("panel starts with AI BRAIN", lines.size() > 0 and String(lines[0]) == "AI BRAIN")
+	var names: PackedStringArray = PackedStringArray()
+	var states: PackedStringArray = PackedStringArray()
+	for line: Dictionary in _ai._debug_condition_lines:
+		names.append(String(line.get("name", "")))
+		states.append("%s=%s" % [String(line.get("name", "")), String(line.get("state", ""))])
+	_expect("IF tree records BASE_THREATENED", names.has("BASE_THREATENED"))
+	_expect("IF tree records HERO_MISSING", names.has("HERO_MISSING"))
+	_expect("IF tree records HOME_WAIT", names.has("HOME_WAIT"))
+	var skipped_after_hero: bool = false
+	var hero_missing_true: bool = false
+	for entry: String in states:
+		if entry == "HERO_MISSING=TRUE":
+			hero_missing_true = true
+		if hero_missing_true and entry == "ATTACK_PLAYER=SKIPPED":
+			skipped_after_hero = true
+	_expect("no hero → ATTACK_PLAYER SKIPPED not re-evaluated", skipped_after_hero)
+	_expect("macro workers captured", _ai._dbg_macro.has("workers"))
+	_expect("power breakdown captured for AI", not _ai._dbg_power_ai.is_empty())
+	_ai.set_brain_debug(false)
+	_expect("P debug disables", not _ai.is_brain_debug_enabled())
+
+
+func _unit_has_attack_move_toward(unit: Unit, destination: Vector3) -> bool:
+	if unit == null or not NodeSafety.is_alive_node(unit):
+		return false
+	var active: UnitOrder = unit.get_active_order()
+	if active == null or active.type != UnitOrder.Type.ATTACK_MOVE:
+		return false
+	if _destinations_equivalent_for_test(active.destination, destination):
+		return true
+	return _destinations_equivalent_for_test(unit.get_player_squad_clicked_destination(), destination)
+
+
+func _destinations_equivalent_for_test(a: Vector3, b: Vector3) -> bool:
+	var dx: float = a.x - b.x
+	var dz: float = a.z - b.z
+	return sqrt(dx * dx + dz * dz) <= EnemyAI.ORDER_DEST_RADIUS
 
 
 func _spawn_basic_base(farm: bool, altar: bool, barracks: bool) -> void:
