@@ -13,6 +13,9 @@ const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
 const SWORDSMAN_SCENE: PackedScene = preload("res://scenes/units/swordsman.tscn")
 const ARCHER_SCENE: PackedScene = preload("res://scenes/units/archer.tscn")
 const LIGHT_CAVALRY_SCENE: PackedScene = preload("res://scenes/units/light_cavalry.tscn")
+const CANNON_SCENE: PackedScene = preload("res://scenes/units/cannon.tscn")
+const STABLE_SCENE: PackedScene = preload("res://scenes/buildings/stable.tscn")
+const ARTILLERY_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/artillery_depot.tscn")
 const WORKER_SCENE: PackedScene = preload("res://scenes/units/worker.tscn")
 const HERO_SCENE: PackedScene = preload("res://scenes/units/hero.tscn")
 const NEUTRAL_CREEP_SCENE: PackedScene = preload("res://scenes/units/neutral_creep.tscn")
@@ -64,6 +67,7 @@ func _ready() -> void:
 	await _test_new_unit_receives_current_army_order()
 	await _test_stable_attack_move_skips_identical_routes()
 	await _test_attack_move_survives_local_combat_without_route()
+	await _test_reinforcement_joining_coverage()
 	await _test_brain_debug_black_box()
 
 	var report: String
@@ -2111,6 +2115,371 @@ func _test_brain_debug_black_box() -> void:
 	_expect("power breakdown captured for AI", not _ai._dbg_power_ai.is_empty())
 	_ai.set_brain_debug(false)
 	_expect("P debug disables", not _ai.is_brain_debug_enabled())
+
+
+func _test_reinforcement_joining_coverage() -> void:
+	print("--- reinforcement joining coverage A-H ---")
+	await _test_reinforcement_a_t1_attack_player()
+	await _test_reinforcement_b_waiting_for_all()
+	await _test_reinforcement_c_multiple()
+	await _test_reinforcement_d_t2_cavalry()
+	await _test_reinforcement_e_t3_cannon()
+	await _test_reinforcement_f_hero_appears()
+	await _test_reinforcement_g_dies_while_joining()
+	await _test_reinforcement_h_home_not_stale()
+
+
+func _seed_away_attack_army(existing_count: int = 8) -> Dictionary:
+	_spawn_basic_base(true, true, true)
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(-40, 0, 0))
+	var cluster: Vector3 = _cc.global_position + Vector3(0, 0, 2)
+	var hero: Hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	var existing: Array = [hero]
+	for i: int in existing_count:
+		existing.append(
+			_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+		)
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	return {
+		"player_cc": player_cc,
+		"hero": hero,
+		"existing": existing,
+		"cluster": cluster,
+	}
+
+
+func _capture_generations(units: Array) -> Dictionary:
+	var generations: Dictionary = {}
+	for member_v: Variant in units:
+		if not member_v is Unit or not NodeSafety.is_alive_node(member_v):
+			continue
+		var member: Unit = member_v as Unit
+		generations[member.get_instance_id()] = member.get_player_squad_command_generation()
+	return generations
+
+
+func _expect_generations_unchanged(units: Array, generations_before: Dictionary, label: String) -> void:
+	for member_v: Variant in units:
+		if not member_v is Unit or not NodeSafety.is_alive_node(member_v):
+			continue
+		var member: Unit = member_v as Unit
+		_expect(
+			"%s existing member not re-issued" % label,
+			member.get_player_squad_command_generation()
+			== int(generations_before.get(member.get_instance_id(), -2))
+		)
+
+
+func _await_reinforcement_join(unit: Unit) -> void:
+	_expect("production spawned a living unit", NodeSafety.is_alive_node(unit))
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _test_reinforcement_a_t1_attack_player() -> void:
+	print("--- TEST A T1 Spearman joins ATTACK_PLAYER ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	var existing: Array = seed.get("existing", []) as Array
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST A seed is ATTACK_PLAYER", _ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER")
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("TEST A seed has destination", expected_dest != Vector3.ZERO)
+	var generations_before: Dictionary = _capture_generations(existing)
+	var routes_before: int = _ai.get_strategic_group_route_request_count_for_test()
+	var army_before: int = _ai.get_enemy_army_for_test().size()
+	var march_before: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	var required_before: int = int(march_before.get("required", 0))
+	var generation_before: int = PlayerRouteNavigation.get_army_march_generation_for_test()
+	var barracks: Barracks = _find_enemy_barracks()
+	_expect("TEST A barracks exists", barracks != null)
+	if barracks == null:
+		return
+	var recruit: Unit = barracks._spawn_spearman()
+	await _await_reinforcement_join(recruit)
+	_expect("TEST A army membership increased", _ai.get_enemy_army_for_test().size() == army_before + 1)
+	_expect(
+		"TEST A Spearman received current join ATTACK_MOVE",
+		_unit_has_attack_move_toward(recruit, expected_dest)
+	)
+	_expect_generations_unchanged(existing, generations_before, "TEST A")
+	_expect(
+		"TEST A existing army not fully repathed",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_before + 1
+	)
+	var march_after: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	if bool(march_before.get("active", false)):
+		_expect(
+			"TEST A march required count increased",
+			int(march_after.get("required", 0)) == required_before + 1
+		)
+		_expect(
+			"TEST A join used current march, not a new army route",
+			PlayerRouteNavigation.get_army_march_generation_for_test() == generation_before
+		)
+	_expect("TEST A player CC still present", NodeSafety.is_alive_node(seed.get("player_cc")))
+	var reinforce_dbg: Dictionary = _ai.get_last_reinforcement_debug_for_test()
+	_expect("TEST A P debug recorded Spearman", String(reinforce_dbg.get("type", "")) == "Spearman")
+	_expect("TEST A P debug ordered only the new unit", int(reinforce_dbg.get("ordered_units", 0)) == 1)
+
+
+func _test_reinforcement_b_waiting_for_all() -> void:
+	print("--- TEST B Archer joins WAITING_FOR_ALL ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	var existing: Array = seed.get("existing", []) as Array
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST B seed is ATTACK_PLAYER", _ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER")
+	_expect("TEST B march started", PlayerRouteNavigation.is_enemy_army_march_in_progress())
+	var checkpoint: Vector3 = PlayerRouteNavigation.get_army_march_checkpoint_for_test()
+	var seg: int = PlayerRouteNavigation.get_army_march_segment_index_for_test()
+	var generation: int = PlayerRouteNavigation.get_army_march_generation_for_test()
+	## Leave the last soldier behind so the march is waiting, not releasing.
+	for i: int in existing.size() - 1:
+		var member: Unit = existing[i] as Unit
+		member.global_position = checkpoint + Vector3(float(i) * 0.4, 0.0, 0.0)
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test()
+	_expect(
+		"TEST B army waiting at checkpoint",
+		PlayerRouteNavigation.is_enemy_army_march_waiting_for_all()
+	)
+	var required_before: int = int(PlayerRouteNavigation.get_army_march_debug_snapshot().get("required", 0))
+	var barracks: Barracks = _find_enemy_barracks()
+	_expect("TEST B barracks exists", barracks != null)
+	if barracks == null:
+		return
+	var recruit: Unit = barracks._spawn_archer()
+	await _await_reinforcement_join(recruit)
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test()
+	var snap: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	_expect("TEST B required count increased", int(snap.get("required", 0)) == required_before + 1)
+	_expect(
+		"TEST B next segment did not release before Archer arrived",
+		PlayerRouteNavigation.get_army_march_segment_index_for_test() == seg
+	)
+	_expect(
+		"TEST B did not rebuild army strategic route",
+		PlayerRouteNavigation.get_army_march_generation_for_test() == generation
+	)
+	_expect(
+		"TEST B Archer travels toward current checkpoint",
+		recruit.has_army_march_checkpoint() or recruit.has_move_target
+	)
+	if recruit.has_army_march_checkpoint():
+		_expect(
+			"TEST B Archer join target is the waiting checkpoint",
+			_destinations_equivalent_for_test(recruit.get_army_march_checkpoint(), checkpoint)
+			or _flat_test_dist(recruit.get_army_march_checkpoint(), checkpoint) <= PlayerRouteNavigation.MARCH_ARRIVAL_RADIUS
+		)
+
+
+func _test_reinforcement_c_multiple() -> void:
+	print("--- TEST C multiple reinforcements ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	var existing: Array = seed.get("existing", []) as Array
+	var stable: Stable = _spawn_completed_building(
+		STABLE_SCENE, _cc.global_position + Vector3(-6, 0, -5)
+	) as Stable
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	var generations_before: Dictionary = _capture_generations(existing)
+	var routes_before: int = _ai.get_strategic_group_route_request_count_for_test()
+	var army_before: int = _ai.get_enemy_army_for_test().size()
+	var barracks: Barracks = _find_enemy_barracks()
+	_expect("TEST C barracks exists", barracks != null)
+	if barracks == null:
+		return
+	var spearman: Unit = barracks._spawn_spearman()
+	await _await_reinforcement_join(spearman)
+	var archer: Unit = barracks._spawn_archer()
+	await _await_reinforcement_join(archer)
+	var cavalry: Unit = stable._spawn_light_cavalry()
+	await _await_reinforcement_join(cavalry)
+	_expect("TEST C all three joined army", _ai.get_enemy_army_for_test().size() == army_before + 3)
+	_expect("TEST C Spearman joined", _unit_has_attack_move_toward(spearman, expected_dest))
+	_expect("TEST C Archer joined", _unit_has_attack_move_toward(archer, expected_dest))
+	_expect("TEST C Cavalry joined", _unit_has_attack_move_toward(cavalry, expected_dest))
+	_expect_generations_unchanged(existing, generations_before, "TEST C")
+	_expect(
+		"TEST C three individual join routes, no full-army repath",
+		_ai.get_strategic_group_route_request_count_for_test() == routes_before + 3
+	)
+
+
+func _test_reinforcement_d_t2_cavalry() -> void:
+	print("--- TEST D T2 Light Cavalry joins ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	var existing: Array = seed.get("existing", []) as Array
+	var stable: Stable = _spawn_completed_building(
+		STABLE_SCENE, _cc.global_position + Vector3(-6, 0, -5)
+	) as Stable
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	var generations_before: Dictionary = _capture_generations(existing)
+	var recruit: Unit = stable._spawn_light_cavalry()
+	await _await_reinforcement_join(recruit)
+	_expect("TEST D recruit is LightCavalry", recruit is LightCavalry)
+	_expect("TEST D T2 unit received current join order", _unit_has_attack_move_toward(recruit, expected_dest))
+	_expect_generations_unchanged(existing, generations_before, "TEST D")
+
+
+func _test_reinforcement_e_t3_cannon() -> void:
+	print("--- TEST E T3 Cannon joins ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	var existing: Array = seed.get("existing", []) as Array
+	var depot: ArtilleryDepot = _spawn_completed_building(
+		ARTILLERY_DEPOT_SCENE, _cc.global_position + Vector3(6, 0, -5)
+	) as ArtilleryDepot
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var expected_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	var generations_before: Dictionary = _capture_generations(existing)
+	var recruit: Unit = depot._spawn_cannon()
+	await _await_reinforcement_join(recruit)
+	_expect("TEST E recruit is Cannon", recruit is Cannon)
+	_expect("TEST E Cannon received current join order", _unit_has_attack_move_toward(recruit, expected_dest))
+	_expect_generations_unchanged(existing, generations_before, "TEST E")
+
+
+func _test_reinforcement_f_hero_appears() -> void:
+	print("--- TEST F hero appears into main army ---")
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var cluster: Vector3 = _cc.global_position + Vector3(0, 0, 2)
+	var soldiers: Array = []
+	for i: int in 8:
+		soldiers.append(_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0)))
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST F military without hero is HOME_NO_HERO", _ai.get_debug_condition_bucket_for_test() == &"HOME_NO_HERO")
+	var home_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	var altar: HeroAltar = _find_enemy_altar()
+	_expect("TEST F altar exists", altar != null)
+	if altar == null:
+		return
+	var hero: Hero = altar._spawn_enemy_hero()
+	await _await_reinforcement_join(hero)
+	_expect("TEST F hero is living army member", _ai.get_enemy_army_for_test().has(hero))
+	_expect(
+		"TEST F hero did not open a unique creep mission on spawn",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME_NO_HERO"
+	)
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST F next tick is not a hero-only mission",
+		_ai.get_debug_condition_bucket_for_test() != &"HERO_STUCK"
+	)
+	_expect("TEST F hero remains in main army", _ai.get_enemy_army_for_test().has(hero))
+	var after_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	if after_dest != Vector3.ZERO:
+		_expect(
+			"TEST F hero shares the army destination",
+			_unit_has_ground_order_toward(hero, after_dest)
+			or _destinations_equivalent_for_test(hero.global_position, after_dest)
+			or _destinations_equivalent_for_test(hero.global_position, home_dest)
+		)
+
+
+func _test_reinforcement_g_dies_while_joining() -> void:
+	print("--- TEST G joining reinforcement dies ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	var barracks: Barracks = _find_enemy_barracks()
+	_expect("TEST G barracks exists", barracks != null)
+	if barracks == null:
+		return
+	var recruit: Unit = barracks._spawn_spearman()
+	await _await_reinforcement_join(recruit)
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test()
+	var required_with_recruit: int = int(PlayerRouteNavigation.get_army_march_debug_snapshot().get("required", 0))
+	_kill_unit(recruit)
+	await get_tree().process_frame
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test()
+	var required_after_death: int = int(PlayerRouteNavigation.get_army_march_debug_snapshot().get("required", 0))
+	_expect(
+		"TEST G live required count dropped after death",
+		required_after_death == required_with_recruit - 1 or required_after_death < required_with_recruit
+	)
+	_expect("TEST G no crash after freed reinforcement", true)
+
+
+func _test_reinforcement_h_home_not_stale() -> void:
+	print("--- TEST H HOME spawn is not a stale CREEP/ATTACK ---")
+	await _clear_units_and_buildings_except_cc()
+	var seed: Dictionary = _seed_away_attack_army(8)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST H first objective is ATTACK_PLAYER", _ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER")
+	var attack_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	var existing: Array = seed.get("existing", []) as Array
+	## Shrink below late-army minimum so HOME_ARMY_SMALL wins.
+	for i: int in range(2, existing.size()):
+		_kill_unit(existing[i] as Node)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST H army returns HOME after shrinking", _ai.get_debug_condition_bucket_for_test() == &"HOME_ARMY_SMALL")
+	var home_dest: Vector3 = _ai.get_last_command_destination_for_test()
+	_expect("TEST H home dest is not the previous attack dest", not _destinations_equivalent_for_test(home_dest, attack_dest))
+	var barracks: Barracks = _find_enemy_barracks()
+	_expect("TEST H barracks exists", barracks != null)
+	if barracks == null:
+		return
+	var recruit: Unit = barracks._spawn_spearman()
+	await _await_reinforcement_join(recruit)
+	_expect(
+		"TEST H recruit is not sent to stale ATTACK dest",
+		not _unit_has_attack_move_toward(recruit, attack_dest)
+	)
+	_expect(
+		"TEST H recruit joins HOME behavior",
+		_unit_has_ground_order_toward(recruit, home_dest)
+		or _destinations_equivalent_for_test(recruit.global_position, home_dest)
+	)
+
+
+func _find_enemy_barracks() -> Barracks:
+	for child: Node in _world.get_children():
+		if child is Barracks and NodeSafety.is_alive_node(child):
+			return child as Barracks
+	return null
+
+
+func _find_enemy_altar() -> HeroAltar:
+	for child: Node in _world.get_children():
+		if child is HeroAltar and NodeSafety.is_alive_node(child):
+			return child as HeroAltar
+	return null
+
+
+func _unit_has_ground_order_toward(unit: Unit, destination: Vector3) -> bool:
+	if unit == null or not NodeSafety.is_alive_node(unit):
+		return false
+	if _unit_has_attack_move_toward(unit, destination):
+		return true
+	var active: UnitOrder = unit.get_active_order()
+	if active != null and active.type == UnitOrder.Type.MOVE:
+		if _destinations_equivalent_for_test(active.destination, destination):
+			return true
+	return _destinations_equivalent_for_test(unit.get_player_squad_clicked_destination(), destination)
+
+
+func _flat_test_dist(a: Vector3, b: Vector3) -> float:
+	var dx: float = a.x - b.x
+	var dz: float = a.z - b.z
+	return sqrt(dx * dx + dz * dz)
 
 
 func _unit_has_attack_move_toward(unit: Unit, destination: Vector3) -> bool:

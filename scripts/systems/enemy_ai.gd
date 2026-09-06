@@ -142,6 +142,8 @@ func reset_match_state() -> void:
 	_camps_cleared = 0
 	_last_command_target_id = 0
 	_last_command_army_count = 0
+	_reinforcement_watch.clear()
+	_last_reinforcement_debug.clear()
 	_w.clear()
 	_debug_clear_tick_buffers()
 	_debug_events.clear()
@@ -180,6 +182,7 @@ func _ai_tick() -> void:
 	_use_hero_combat_micro_if_relevant()
 
 	_tick_military()
+	_update_reinforcement_watch()
 
 	if _debug_enabled:
 		_debug_finish_tick()
@@ -1548,7 +1551,8 @@ func _army_home() -> void:
 	var home: Vector3 = _w.home as Vector3
 	if home == Vector3.ZERO:
 		return
-	if _majority_near(home, HOME_NEAR_RADIUS):
+	## Majority-near must not ignore a newly spawned unit still at production.
+	if _all_army_near(home, HOME_NEAR_RADIUS):
 		_remember_strategic_command(CMD_HOME, home, (_w.army as Array).size(), 0)
 		_debug_record_order(&"move", CMD_HOME, false, "already at home", true)
 		return
@@ -1834,6 +1838,20 @@ func _majority_near(position: Vector3, radius: float) -> bool:
 			near += 1
 	return valid == 0 or near * 2 >= valid
 
+
+func _all_army_near(position: Vector3, radius: float) -> bool:
+	var army: Array = _w.army as Array
+	if army.is_empty():
+		return true
+	for u_v: Variant in army:
+		if not u_v is Node3D or not NodeSafety.is_alive_node(u_v):
+			continue
+		if not _is_living_combatant(u_v):
+			continue
+		if _horizontal_distance((u_v as Node3D).global_position, position) > radius:
+			return false
+	return true
+
 func _issue_army_move(
 	destination: Vector3,
 	order_kind: StringName,
@@ -1973,6 +1991,221 @@ func _request_strategic_group_move(
 		return
 	_strategic_group_route_requests += 1
 	PlayerRouteNavigation.request_group_move(units, destination, order_kind, false, command_source)
+
+
+func _strategic_ground_order_kind(command_kind: StringName) -> StringName:
+	if command_kind == CMD_HOME:
+		return &"move"
+	return &"attack_move"
+
+
+## Production buildings call this after enemy military finalize (deferred join).
+static func request_spawned_military_join(unit: Unit, source_name: String) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+	var tree: SceneTree = unit.get_tree()
+	if tree == null:
+		return
+	for node: Node in tree.get_nodes_in_group(&"enemy_ai"):
+		if not NodeSafety.is_alive_node(node) or not node is EnemyAI:
+			continue
+		(node as EnemyAI).notify_enemy_military_spawned(unit, source_name)
+		return
+
+
+func notify_enemy_military_spawned(unit: Unit, source_name: String) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+	call_deferred("_join_spawned_military", unit.get_instance_id(), source_name)
+
+
+func _join_spawned_military(unit_id: int, source_name: String) -> void:
+	if not is_instance_id_valid(unit_id):
+		return
+	var node: Object = instance_from_id(unit_id)
+	if not NodeSafety.is_alive_node(node) or not node is Unit:
+		return
+	var unit: Unit = node as Unit
+	if unit is Worker:
+		return
+	if not unit.is_inside_tree():
+		return
+	if not CombatTargetValidation.is_enemy_faction(unit):
+		return
+	if not _is_living_combatant(unit):
+		return
+
+	var army_before: int = (_w.get("army", []) as Array).size()
+	_read_live_world()
+	var army_after: int = (_w.army as Array).size()
+
+	var spawn_ok: bool = true
+	var fail_reason: String = ""
+	PlayerRouteNavigation.ensure_grid_ready()
+	if not PlayerRouteNavigation.is_world_walkable(unit.global_position):
+		spawn_ok = false
+		fail_reason = "INVALID_SPAWN_POSITION"
+
+	var command_kind: StringName = _last_command_kind
+	var dest: Vector3 = _last_command_destination
+	var order_kind: StringName = _strategic_ground_order_kind(command_kind)
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	var march_mode: String = String(march.get("mode", "NONE"))
+	var join_target: Vector3 = dest
+	var join_label: String = _debug_fmt_vec(dest)
+	if bool(march.get("active", false)):
+		join_target = march.get("checkpoint", dest) as Vector3
+		if march_mode == "FINAL_APPROACH":
+			join_label = "Final"
+		else:
+			join_label = "Checkpoint_%d" % int(march.get("segment_index", 0))
+	var final_label: String = _dbg_objective_name
+	if final_label.is_empty():
+		final_label = _debug_fmt_vec(dest)
+
+	var routes_before: int = _strategic_group_route_requests
+	if spawn_ok and command_kind != CMD_NONE and dest != Vector3.ZERO:
+		_issue_army_move(dest, order_kind, command_kind, _last_command_target_id)
+	var route_request: bool = _strategic_group_route_requests > routes_before
+	var ordered_units: int = 1 if route_request else 0
+	var join_status: String = "JOINING"
+	if not spawn_ok:
+		join_status = "FAILED"
+
+	var payload := {
+		"unit_id": unit_id,
+		"unit_name": unit.name,
+		"type": _debug_unit_type_key(unit),
+		"source": source_name,
+		"army_before": army_before,
+		"army_after": army_after,
+		"strategic_decision": String(_last_condition),
+		"command_kind": String(command_kind),
+		"final_objective": final_label,
+		"final_destination": dest,
+		"march_mode": march_mode,
+		"join_target": join_label,
+		"join_destination": join_target,
+		"order": String(order_kind).to_upper() if command_kind != CMD_NONE else "NONE",
+		"route_request": route_request,
+		"ordered_units": ordered_units,
+		"join_status": join_status,
+		"fail_reason": fail_reason,
+		"followup_logged": false,
+	}
+	_reinforcement_watch[unit_id] = payload
+	_last_reinforcement_debug = payload
+	_debug_log_reinforcement_spawn(payload)
+
+
+func _update_reinforcement_watch() -> void:
+	if _reinforcement_watch.is_empty():
+		return
+	var stale_ids: Array = []
+	for id_v: Variant in _reinforcement_watch.keys():
+		var unit_id: int = int(id_v)
+		var row: Dictionary = _reinforcement_watch[id_v] as Dictionary
+		if not is_instance_id_valid(unit_id):
+			stale_ids.append(unit_id)
+			continue
+		var node: Object = instance_from_id(unit_id)
+		if not NodeSafety.is_alive_node(node) or not node is Unit or not _is_living_combatant(node):
+			stale_ids.append(unit_id)
+			continue
+		var unit: Unit = node as Unit
+		var status: String = _compute_reinforcement_join_status(unit, row)
+		var prev_status: String = String(row.get("join_status", ""))
+		var followup_logged: bool = bool(row.get("followup_logged", false))
+		row["join_status"] = status
+		row["distance"] = _reinforcement_join_distance(unit, row)
+		var active: UnitOrder = unit.get_active_order()
+		row["active_order"] = _debug_order_type_name(active)
+		_reinforcement_watch[unit_id] = row
+		_last_reinforcement_debug = row
+		var should_log: bool = (not followup_logged) or status != prev_status
+		if should_log:
+			_debug_log_reinforcement_followup(row, unit)
+			row["followup_logged"] = true
+			_reinforcement_watch[unit_id] = row
+		if status == "ARRIVED" or status == "FAILED":
+			if _debug_enabled and status == "ARRIVED" and prev_status != "ARRIVED":
+				_debug_event("%s reached army" % String(row.get("type", unit.name)))
+			stale_ids.append(unit_id)
+	for stale_id: int in stale_ids:
+		_reinforcement_watch.erase(stale_id)
+
+
+func _reinforcement_join_distance(unit: Unit, row: Dictionary) -> float:
+	var dest: Vector3 = row.get("join_destination", _last_command_destination) as Vector3
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	if bool(march.get("active", false)):
+		dest = march.get("checkpoint", dest) as Vector3
+	elif dest == Vector3.ZERO:
+		dest = _last_command_destination
+	return _horizontal_distance(unit.global_position, dest)
+
+
+func _compute_reinforcement_join_status(unit: Unit, row: Dictionary) -> String:
+	if String(row.get("fail_reason", "")) == "INVALID_SPAWN_POSITION":
+		return "FAILED"
+	var dist: float = _reinforcement_join_distance(unit, row)
+	if dist <= PlayerRouteNavigation.MARCH_ARRIVAL_RADIUS:
+		return "ARRIVED"
+	var command_kind: StringName = StringName(String(row.get("command_kind", "")))
+	if command_kind == CMD_NONE:
+		return "JOINING"
+	var order_kind: StringName = _strategic_ground_order_kind(command_kind)
+	var dest: Vector3 = row.get("final_destination", _last_command_destination) as Vector3
+	if _unit_has_matching_strategic_order(unit, order_kind, dest):
+		return "JOINING"
+	if unit.has_army_march_checkpoint() or unit.has_move_target:
+		return "JOINING"
+	var active: UnitOrder = unit.get_active_order()
+	if active == null:
+		row["fail_reason"] = "NO_ACTIVE_ORDER"
+		return "FAILED"
+	return "JOINING"
+
+
+func _debug_log_reinforcement_spawn(payload: Dictionary) -> void:
+	if not _debug_enabled:
+		return
+	print("[REINFORCEMENT]")
+	print("unit=%s" % String(payload.get("unit_name", "")))
+	print("type=%s" % String(payload.get("type", "")))
+	print("source=%s" % String(payload.get("source", "")))
+	print("army_before=%d" % int(payload.get("army_before", 0)))
+	print("army_after=%d" % int(payload.get("army_after", 0)))
+	print("")
+	print("strategic_decision=%s" % String(payload.get("strategic_decision", "")))
+	print("final_objective=%s" % String(payload.get("final_objective", "")))
+	print("")
+	print("march_mode=%s" % String(payload.get("march_mode", "NONE")))
+	print("join_target=%s" % String(payload.get("join_target", "")))
+	print("")
+	print("order=%s" % String(payload.get("order", "NONE")))
+	print("route_request=%s" % ("YES" if bool(payload.get("route_request", false)) else "NO"))
+	print("ordered_units=%d" % int(payload.get("ordered_units", 0)))
+	print("")
+	_debug_event("%s reinforcement joining" % String(payload.get("type", "unit")))
+	_debug_update_panel()
+
+
+func _debug_log_reinforcement_followup(payload: Dictionary, unit: Unit) -> void:
+	if not _debug_enabled:
+		return
+	var status: String = String(payload.get("join_status", "JOINING"))
+	var follow_status: String = status
+	if status == "JOINING":
+		follow_status = "CATCHING_UP"
+	print("[REINFORCEMENT]")
+	print("%s active_order=%s" % [unit.name, String(payload.get("active_order", "NONE"))])
+	print("join_status=%s" % follow_status)
+	if status == "FAILED":
+		print("reason=%s" % String(payload.get("fail_reason", "UNKNOWN")))
+	else:
+		print("distance_to_checkpoint=%.1fm" % float(payload.get("distance", 0.0)))
+	print("")
 
 func _count_living_creeps_in_camp(camp: Node3D) -> int:
 	if not NodeSafety.is_alive_node(camp):
@@ -2222,6 +2455,8 @@ const ORDER_DEST_RADIUS: float = 4.0
 var _camps_cleared: int = 0
 var _last_command_target_id: int = 0
 var _last_command_army_count: int = 0
+var _reinforcement_watch: Dictionary = {}
+var _last_reinforcement_debug: Dictionary = {}
 
 
 func get_debug_overlay_lines() -> PackedStringArray:
@@ -2285,6 +2520,10 @@ func get_strategic_group_route_request_count_for_test() -> int:
 
 func get_last_order_debug_for_test() -> Dictionary:
 	return _dbg_order.duplicate()
+
+
+func get_last_reinforcement_debug_for_test() -> Dictionary:
+	return _last_reinforcement_debug.duplicate()
 
 
 func get_order_health_totals_for_test() -> Dictionary:
@@ -3994,6 +4233,8 @@ func _debug_node_display_name(node: Node) -> String:
 
 
 func _debug_unit_type_key(unit: Node) -> String:
+	if unit is Hero:
+		return "Hero"
 	if unit is Spearman:
 		return "Spearman"
 	if unit is Swordsman:

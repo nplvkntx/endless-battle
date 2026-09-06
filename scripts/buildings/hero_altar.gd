@@ -9,10 +9,8 @@ signal hero_altar_state_changed()
 const TRAIN_GOLD_COST: int = HeroStats.TRAIN_GOLD_COST
 const TRAIN_FOOD_COST: int = HeroStats.TRAIN_FOOD_COST
 const TRAIN_SECONDS: float = HeroStats.TRAIN_SECONDS
-## Barracks/CC-style front exit (-Z). Must clear inflated custom-grid clearance (~2.65).
+## Barracks/CC-style front exit (-Z). Must clear completed occupancy (~collision half + 0.15).
 const HERO_SPAWN_OFFSET: Vector3 = Vector3(0.0, -0.5, -3.5)
-const RALLY_MARKER_Y: float = 0.05
-const RALLY_SLOT_SPACING: float = 2.0
 const HERO_GROUP: StringName = &"heroes"
 const ENEMY_TEAM_ID: int = 1
 
@@ -20,10 +18,6 @@ var _is_training: bool = false
 var _training_started_at: float = 0.0
 var _training_for_enemy: bool = false
 var _hero_training_session: int = 0
-var _has_rally_point: bool = false
-var _rally_point: Vector3 = Vector3.ZERO
-var _rally_marker: MeshInstance3D = null
-var _rally_next_slot: int = 0
 
 ## Kit locked in for the training session currently in progress.
 var _training_kit_id: StringName = HeroCatalog.KIT_PALADIN
@@ -232,46 +226,6 @@ func cancel_hero_training() -> bool:
 	return true
 
 
-func set_rally_point(ground_position: Vector3) -> void:
-	_has_rally_point = true
-	_rally_point = Vector3(
-		ground_position.x,
-		global_position.y + HERO_SPAWN_OFFSET.y,
-		ground_position.z
-	)
-	_rally_next_slot = 0
-	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
-
-
-func _claim_rally_move_target() -> Vector3:
-	var slot_index: int = _rally_next_slot
-	_rally_next_slot += 1
-	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
-
-
-func _update_rally_marker(marker_position: Vector3) -> void:
-	if _rally_marker == null:
-		_rally_marker = MeshInstance3D.new()
-		var marker_mesh := CylinderMesh.new()
-		marker_mesh.top_radius = 0.45
-		marker_mesh.bottom_radius = 0.45
-		marker_mesh.height = 0.08
-		_rally_marker.mesh = marker_mesh
-
-		var marker_material := StandardMaterial3D.new()
-		marker_material.albedo_color = Color(0.85, 0.65, 0.15, 0.9)
-		marker_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_rally_marker.material_override = marker_material
-
-		var marker_parent: Node = get_parent()
-		if marker_parent == null:
-			return
-
-		marker_parent.add_child(_rally_marker)
-
-	_rally_marker.global_position = marker_position
-
-
 func try_train_hero() -> void:
 	if not can_begin_hero_training(false):
 		if building_state == STATE_COMPLETED and has_living_owner_hero(false):
@@ -373,15 +327,15 @@ func _spawn_hero() -> void:
 
 	HeroProgressionStore.register_living_hero(hero)
 
-	if _has_rally_point:
-		issue_production_rally_move(hero, _claim_rally_move_target())
+	if has_production_rally():
+		apply_production_rally(hero)
 
 
-func _spawn_enemy_hero() -> void:
+func _spawn_enemy_hero() -> Hero:
 	var hero: Hero = HeroCatalog.load_scene(_training_kit_id).instantiate() as Hero
 	var spawn_parent: Node = get_parent()
 	if spawn_parent == null or hero == null:
-		return
+		return null
 
 	hero.team_id = ENEMY_TEAM_ID
 	hero.collision_layer = PhysicsLayers.UNITS
@@ -407,6 +361,10 @@ func _spawn_enemy_hero() -> void:
 	enable_spawned_unit_collision(hero)
 
 	HeroProgressionStore.register_living_hero(hero)
+	if not PlayerRouteNavigation.is_world_walkable(hero.global_position):
+		_place_unit_on_walkable_custom_cell(hero)
+	EnemyAI.request_spawned_military_join(hero, name)
+	return hero
 
 
 ## Pick a deterministic exit outside the altar via the shared Building spawn helper.
@@ -466,20 +424,8 @@ func _on_health_depleted() -> void:
 	_is_training = false
 	_training_for_enemy = false
 
-	_clear_rally_marker()
-
 	destroy_building()
 	queue_free()
-
-
-func _clear_rally_marker() -> void:
-	if _rally_marker != null and is_instance_valid(_rally_marker):
-		_rally_marker.queue_free()
-	_rally_marker = null
-
-
-func _exit_tree() -> void:
-	_clear_rally_marker()
 
 
 func _is_living_hero_node(node: Node) -> bool:

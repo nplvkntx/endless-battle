@@ -26,11 +26,9 @@ const ARCHER_TRAIN_FOOD_COST: int = UnitStats.ARCHER_FOOD_COST
 const TRAIN_SECONDS: float = UnitStats.SWORDSMAN_TRAIN_SECONDS
 const SPEARMAN_TRAIN_SECONDS: float = UnitStats.SPEARMAN_TRAIN_SECONDS
 const ARCHER_TRAIN_SECONDS: float = UnitStats.ARCHER_TRAIN_SECONDS
-const RALLY_MARKER_Y: float = 0.05
 const MAX_ENEMY_UNIT_QUEUE: int = 3
 const ENEMY_TEAM_ID: int = 1
 const ENEMY_GATHER_OFFSET: Vector3 = Vector3(-2.0, -0.5, 3.0)
-const RALLY_SLOT_SPACING: float = 2.0
 
 @export var spearman_spawn_offset: Vector3 = Vector3(-1.2, -0.5, -2.5)
 @export var swordsman_spawn_offset: Vector3 = Vector3(0.0, -0.5, -2.5)
@@ -46,10 +44,6 @@ var _current_training_seconds: float = 0.0
 var _repeat_enabled: bool = false
 var _repeat_unit_type: StringName = &""
 var _repeat_waiting_for_resources: bool = false
-var _has_rally_point: bool = false
-var _rally_point: Vector3 = Vector3.ZERO
-var _rally_marker: MeshInstance3D = null
-var _rally_next_slot: int = 0
 var _enemy_gather_next_slot: int = 0
 
 @onready var _health_component: HealthComponent = get_node_or_null(
@@ -93,6 +87,7 @@ func _clear_imported_mesh_overrides(node: Node) -> void:
 
 func _exit_tree() -> void:
 	_disconnect_player_resource_listener()
+	super._exit_tree()
 
 
 func is_enemy_training_busy() -> bool:
@@ -162,7 +157,10 @@ func _finalize_enemy_unit(unit: Unit) -> void:
 	if unit.is_in_group(&"units"):
 		unit.remove_from_group(&"units")
 
+	unit.collision_layer = PhysicsLayers.UNITS
+	unit.collision_mask = PhysicsLayers.UNIT_COLLISION_MASK
 	unit.apply_team_visuals()
+	EnemyAI.request_spawned_military_join(unit, name)
 
 
 func _on_health_depleted() -> void:
@@ -174,10 +172,6 @@ func _on_health_depleted() -> void:
 	_current_training_id = &""
 	_refund_all_queued_training()
 	_training_queue.clear()
-
-	if _rally_marker != null and is_instance_valid(_rally_marker):
-		_rally_marker.queue_free()
-		_rally_marker = null
 
 	destroy_building()
 	queue_free()
@@ -426,23 +420,6 @@ func _cancel_training_at_index(slot_index: int) -> bool:
 	return false
 
 
-func set_rally_point(ground_position: Vector3) -> void:
-	_has_rally_point = true
-	_rally_point = Vector3(
-		ground_position.x,
-		global_position.y + swordsman_spawn_offset.y,
-		ground_position.z
-	)
-	_rally_next_slot = 0
-	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
-
-
-func _claim_rally_move_target() -> Vector3:
-	var slot_index: int = _rally_next_slot
-	_rally_next_slot += 1
-	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
-
-
 func _claim_enemy_gather_target() -> Vector3:
 	return _claim_enemy_rally_target()
 
@@ -470,29 +447,6 @@ func _resolve_enemy_command_center_rally() -> Vector3:
 			pos.y = 0.0
 			return pos
 	return Vector3.ZERO
-
-
-func _update_rally_marker(marker_position: Vector3) -> void:
-	if _rally_marker == null:
-		_rally_marker = MeshInstance3D.new()
-		var marker_mesh := CylinderMesh.new()
-		marker_mesh.top_radius = 0.45
-		marker_mesh.bottom_radius = 0.45
-		marker_mesh.height = 0.08
-		_rally_marker.mesh = marker_mesh
-
-		var marker_material := StandardMaterial3D.new()
-		marker_material.albedo_color = Color(0.2, 0.85, 0.35, 0.9)
-		marker_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_rally_marker.material_override = marker_material
-
-		var marker_parent: Node = get_parent()
-		if marker_parent == null:
-			return
-
-		marker_parent.add_child(_rally_marker)
-
-	_rally_marker.global_position = marker_position
 
 
 func try_train_spearman() -> void:
@@ -688,16 +642,16 @@ func _on_player_resources_changed() -> void:
 	_try_repeat_training()
 
 
-func _spawn_spearman() -> void:
-	_spawn_trained_unit(SPEARMAN_SCENE, spearman_spawn_offset)
+func _spawn_spearman() -> Unit:
+	return _spawn_trained_unit(SPEARMAN_SCENE, spearman_spawn_offset)
 
 
-func _spawn_swordsman() -> void:
-	_spawn_trained_unit(SWORDSMAN_SCENE, swordsman_spawn_offset)
+func _spawn_swordsman() -> Unit:
+	return _spawn_trained_unit(SWORDSMAN_SCENE, swordsman_spawn_offset)
 
 
-func _spawn_archer() -> void:
-	_spawn_trained_unit(ARCHER_SCENE, archer_spawn_offset)
+func _spawn_archer() -> Unit:
+	return _spawn_trained_unit(ARCHER_SCENE, archer_spawn_offset)
 
 
 func _refund_training_cost(train_id: StringName) -> void:
@@ -723,26 +677,30 @@ func _emit_queue_changed() -> void:
 	training_queue_changed.emit()
 
 
-func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> void:
+func _spawn_trained_unit(scene: PackedScene, spawn_offset: Vector3) -> Unit:
 	var unit: Unit = scene.instantiate() as Unit
 	var spawn_parent: Node = get_parent()
 	if spawn_parent == null or unit == null:
-		return
+		return null
 
 	disable_spawned_unit_collision(unit)
 	var spawn_pos: Vector3 = _claim_unit_spawn_position(spawn_offset)
 	spawn_parent.add_child(unit)
 	unit.global_position = spawn_pos
 
-	if is_in_group(&"enemy_command_center"):
+	if _is_enemy_owned() or is_in_group(&"enemy_command_center"):
 		_finalize_enemy_unit(unit)
 		UpgradeManager.apply_enemy_upgrades_to_unit(unit)
 		enable_spawned_unit_collision(unit)
-	elif _has_rally_point:
+		if not PlayerRouteNavigation.is_world_walkable(unit.global_position):
+			_place_unit_on_walkable_custom_cell(unit)
+		return unit
+	elif has_production_rally():
 		_finalize_spawned_unit(unit)
-		issue_production_rally_move(unit, _claim_rally_move_target())
-	else:
-		_finalize_spawned_unit(unit)
+		apply_production_rally(unit)
+		return unit
+	_finalize_spawned_unit(unit)
+	return unit
 
 
 ## Deterministic walkable exit outside the Barracks footprint (shared Building helper).
