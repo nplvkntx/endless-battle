@@ -127,6 +127,7 @@ var _dbg_last_health_warning: String = ""
 static var _brain_debug_listener: EnemyAI = null
 
 func _ready() -> void:
+	add_to_group(&"enemy_ai")
 	_resolve_managers()
 	MatchSession.register_match_reset(&"EnemyAI", reset_match_state)
 	set_process(true)
@@ -230,9 +231,13 @@ func _tick_military() -> void:
 		"required_radius": COHESION_RADIUS,
 	})
 	if not together:
-		_set_condition(&"REGROUP")
-		_regroup()
-		return
+		if PlayerRouteNavigation.is_enemy_army_march_waiting_for_all():
+			## Catch-up wait is execution, not a REGROUP mission.
+			pass
+		else:
+			_set_condition(&"REGROUP")
+			_regroup()
+			return
 
 	var early_creep: bool = _needs_early_creep()
 	_debug_record_condition(&"EARLY_CREEP", early_creep, {
@@ -2340,6 +2345,20 @@ func get_player_army_for_test() -> Array:
 	return (_w.player_army as Array).duplicate()
 
 
+func get_cached_strategic_army() -> Array:
+	var out: Array = []
+	var army: Array = _w.get("army", []) as Array
+	for unit_v: Variant in army:
+		if not NodeSafety.is_alive_node(unit_v):
+			continue
+		if not unit_v is Unit:
+			continue
+		if not _is_living_combatant(unit_v):
+			continue
+		out.append(unit_v)
+	return out
+
+
 func get_enemy_army_for_test() -> Array:
 	_read_live_world()
 	return (_w.army as Array).duplicate()
@@ -3319,10 +3338,29 @@ func _debug_panel_text() -> String:
 	var order_cmd: String = String(order.get("command", "NONE"))
 	if order_cmd.is_empty():
 		order_cmd = "NONE"
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	var execution_line: String = order_cmd
+	if bool(march.get("active", false)):
+		execution_line = "MARCH %s" % String(march.get("mode", ""))
 	var lines: PackedStringArray = PackedStringArray([
 		"AI BRAIN",
-		decision,
-		"Target: %s" % objective,
+		"THINKING: %s" % decision,
+		"OBJECTIVE: %s" % objective,
+		"EXECUTION: %s" % execution_line,
+	])
+	if bool(march.get("active", false)):
+		lines.append(
+			"Arrived %d/%d"
+			% [int(march.get("arrived", 0)), int(march.get("required", 0))]
+		)
+		lines.append("Hero %s" % ("ARRIVED" if bool(march.get("hero_arrived", false)) else "NO"))
+		var wait_name: String = String(march.get("farthest_name", ""))
+		if int(march.get("waiting_for", 0)) > 0 and not wait_name.is_empty():
+			lines.append(
+				"Waiting: %s %.1fm"
+				% [wait_name, float(march.get("farthest_distance", 0.0))]
+			)
+	lines.append_array(PackedStringArray([
 		"",
 		"Hero %s" % hero_line,
 		"Army %d" % int(_debug_summary.get("army", 0)),
@@ -3365,7 +3403,7 @@ func _debug_panel_text() -> String:
 			int(order.get("ordered", 0)),
 		],
 		"route=%s" % ("YES" if bool(order.get("route_request", false)) else "NO"),
-	])
+	]))
 	if int(order.get("combat_overwrote", 0)) > 0:
 		lines.append("combat_overwrote=%d" % int(order.get("combat_overwrote", 0)))
 	lines.append_array(PackedStringArray([
@@ -3765,11 +3803,30 @@ func _debug_print_diagnosis() -> void:
 	print("objective=%s" % (_dbg_objective_name if not _dbg_objective_name.is_empty() else "-"))
 	print("")
 	print("EXECUTION:")
-	print("strategic_order=%s" % (wanted if not wanted.is_empty() else "NONE"))
-	print("army_members=%d" % army.size())
-	print("matching_order=%d" % matching)
-	print("different_order=%d" % different)
-	print("no_order=%d" % none)
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	if bool(march.get("active", false)):
+		print("MARCH %s" % String(march.get("mode", "")))
+		print(
+			"%d/%d arrived"
+			% [int(march.get("arrived", 0)), int(march.get("required", 0))]
+		)
+		print("hero_arrived=%s" % _debug_yes(bool(march.get("hero_arrived", false))))
+		print("checkpoint=%s" % _debug_fmt_vec(march.get("checkpoint", Vector3.ZERO) as Vector3))
+		print("final_objective=%s" % _debug_fmt_vec(march.get("final_objective", Vector3.ZERO) as Vector3))
+		print("segment_index=%d" % int(march.get("segment_index", 0)))
+		print("next_segment_release=%s" % String(march.get("next_segment_release", "")))
+		var wait_name: String = String(march.get("farthest_name", ""))
+		if int(march.get("waiting_for", 0)) > 0 and not wait_name.is_empty():
+			print(
+				"farthest_member=%s %.1fm"
+				% [wait_name, float(march.get("farthest_distance", 0.0))]
+			)
+	else:
+		print("strategic_order=%s" % (wanted if not wanted.is_empty() else "NONE"))
+		print("army_members=%d" % army.size())
+		print("matching_order=%d" % matching)
+		print("different_order=%d" % different)
+		print("no_order=%d" % none)
 	print("")
 	print("THINKING=%s" % String(_last_condition))
 	print("EXECUTION_MATCH=%d/%d" % [matching, army.size()])

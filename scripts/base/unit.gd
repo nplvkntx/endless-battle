@@ -31,6 +31,7 @@ const REPATH_STAGGER_OFFSET_SECONDS := 0.14
 const CHASE_TARGET_MOVE_THRESHOLD := 1.75
 const CHASE_UPDATE_INTERVAL := 0.35
 const CHASE_UPDATE_JITTER := 0.25
+const RALLY_JOIN_DISTANCE := 3.5
 const COMBAT_TARGET_SCAN_INTERVAL := 0.45
 const COMBAT_TARGET_SCAN_JITTER := 0.30
 ## AI armies use a slower staggered acquire cadence to cut search storms.
@@ -79,6 +80,7 @@ var _original_move_destination: Vector3 = Vector3.ZERO
 var _combat_target_scan_timer: float = 0.0
 var _combat_target_validate_timer: float = 0.0
 var _chase_update_timer: float = 0.0
+var _rally_join_handle: EntityHandle = EntityHandle.empty()
 var _last_issued_move_destination: Vector3 = Vector3.ZERO
 var _last_requested_destination: Vector3 = Vector3.ZERO
 var _last_path_request_msec: int = 0
@@ -112,12 +114,18 @@ var _player_squad_final_arrival: Vector3 = Vector3.ZERO
 var _player_squad_command_type: StringName = &""
 
 ## Custom RTS route follow — sole strategic/combat locomotion backend.
+## Authority hierarchy while travelling: route > world slide > friendly sep > final slot.
 const CUSTOM_RTS_WAYPOINT_RADIUS := 0.9
 const CUSTOM_RTS_ARRIVE_RADIUS := 0.7
 const CUSTOM_RTS_SEPARATION_RADIUS := 1.35
-const CUSTOM_RTS_SEPARATION_WEIGHT := 0.35
+## Small lateral correction only — must not equal route authority.
+const CUSTOM_RTS_SEPARATION_WEIGHT := 0.22
 const CUSTOM_RTS_ROUTE_WEIGHT := 1.0
 const CUSTOM_RTS_FINAL_SLOT_WEIGHT := 0.55
+const CUSTOM_RTS_SLOT_FAR_WEIGHT := 0.05
+const CUSTOM_RTS_SLOT_NEAR_DISTANCE := 6.0
+## Min forward progress vs route while still far from the strategic destination.
+const CUSTOM_RTS_MIN_FORWARD := 0.35
 ## Soft mobile-vs-mobile peel — capped neighbors, staggered refresh (not every physics frame).
 const CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS := 6
 const CUSTOM_RTS_SEPARATION_STAGGER_BUCKETS := 5
@@ -126,11 +134,19 @@ var _custom_rts_active: bool = false
 var _custom_rts_pending: bool = false
 var _custom_rts_route: PackedVector3Array = PackedVector3Array()
 var _custom_rts_route_index: int = 0
+## Strategic progress saved across combat pause / chase so resume never rewinds to WP0.
+var _custom_rts_paused_route_index: int = -1
 var _custom_rts_generation: int = -1
 var _custom_rts_separation_cache: Vector3 = Vector3.ZERO
 var _custom_rts_separation_cache_frame: int = -999999
 static var _custom_rts_probe_shape: SphereShape3D = null
 static var _custom_rts_query: PhysicsShapeQueryParameters3D = null
+
+## Enemy army march execution cap. Strategic order destination stays the final objective.
+var _army_march_enabled: bool = false
+var _army_march_checkpoint: Vector3 = Vector3.ZERO
+var _army_march_cap_index: int = -1
+var _army_march_is_final: bool = false
 
 ## Shared player order queue (WC3-style). Non-shift replaces; Shift appends.
 var _order_queue: Array[UnitOrder] = []
@@ -576,7 +592,43 @@ func _start_order(order: UnitOrder) -> bool:
 
 ## Override to cancel attack / hold / patrol / gather before a replacement order.
 func _prepare_for_new_player_order() -> void:
-	pass
+	clear_production_rally_join()
+
+
+func begin_production_rally_join(target_handle: EntityHandle) -> void:
+	if target_handle == null or target_handle.is_empty():
+		clear_production_rally_join()
+		return
+	_rally_join_handle = target_handle.duplicate_handle()
+
+
+func clear_production_rally_join() -> void:
+	_rally_join_handle = EntityHandle.empty()
+
+
+func has_production_rally_join() -> bool:
+	return _rally_join_handle != null and not _rally_join_handle.is_empty()
+
+
+func _tick_production_rally_join(delta: float) -> void:
+	if _rally_join_handle == null or _rally_join_handle.is_empty():
+		return
+	var node: Node = _rally_join_handle.resolve_without_registry()
+	if not NodeSafety.is_alive_node(node) or not (node is Unit):
+		clear_production_rally_join()
+		return
+	var target: Unit = node as Unit
+	var to_target := Vector3(
+		target.global_position.x - global_position.x,
+		0.0,
+		target.global_position.z - global_position.z
+	)
+	if to_target.length() <= RALLY_JOIN_DISTANCE:
+		clear_production_rally_join()
+		return
+	if not tick_chase_update_timer(delta, false):
+		return
+	request_movement_target(target.global_position, RepathUrgency.CHASE)
 
 
 ## Worker override: promote in-progress gather/build into `_active_order` for Shift-append.
@@ -699,6 +751,9 @@ func clear_move_target(preserve_custom_rts: bool = false) -> void:
 		_invalidate_movement_generation()
 	has_move_target = false
 	if preserve_custom_rts and not _custom_rts_route.is_empty():
+		# Freeze strategic progress before combat/micro pause.
+		if _custom_rts_paused_route_index < 0:
+			_custom_rts_paused_route_index = _custom_rts_route_index
 		_custom_rts_active = false
 		_custom_rts_pending = false
 	else:
@@ -796,10 +851,12 @@ func prepare_custom_rts_route(
 	clicked_destination: Vector3,
 	command_type: StringName
 ) -> void:
+	clear_army_march_checkpoint()
 	_custom_rts_pending = true
 	_custom_rts_active = false
 	_custom_rts_route = route.duplicate()
 	_custom_rts_route_index = 0
+	_custom_rts_paused_route_index = -1
 	_custom_rts_generation = generation
 	bind_player_squad_command(generation, clicked_destination, final_arrival, command_type)
 
@@ -809,7 +866,47 @@ func clear_custom_rts_route() -> void:
 	_custom_rts_pending = false
 	_custom_rts_route = PackedVector3Array()
 	_custom_rts_route_index = 0
+	_custom_rts_paused_route_index = -1
 	_custom_rts_generation = -1
+	clear_army_march_checkpoint()
+
+
+func bind_army_march_checkpoint(checkpoint: Vector3, cap_index: int, is_final: bool) -> void:
+	_army_march_enabled = true
+	_army_march_checkpoint = Vector3(checkpoint.x, 0.0, checkpoint.z)
+	_army_march_cap_index = cap_index
+	_army_march_is_final = is_final
+
+
+func clear_army_march_checkpoint() -> void:
+	_army_march_enabled = false
+	_army_march_checkpoint = Vector3.ZERO
+	_army_march_cap_index = -1
+	_army_march_is_final = false
+
+
+func has_army_march_checkpoint() -> bool:
+	return _army_march_enabled
+
+
+func get_army_march_checkpoint() -> Vector3:
+	return _army_march_checkpoint
+
+
+func is_within_army_march_arrival() -> bool:
+	if not _army_march_enabled:
+		return false
+	return _horizontal_distance_xz(global_position, _army_march_checkpoint) <= PlayerRouteNavigation.MARCH_ARRIVAL_RADIUS
+
+
+func replace_custom_rts_route(route: PackedVector3Array) -> void:
+	if route.is_empty():
+		return
+	_custom_rts_route = route.duplicate()
+	if _custom_rts_route_index > _custom_rts_route.size():
+		_custom_rts_route_index = _custom_rts_route.size()
+	if _custom_rts_paused_route_index > _custom_rts_route.size():
+		_custom_rts_paused_route_index = _custom_rts_route.size()
 
 
 func is_custom_rts_movement_active() -> bool:
@@ -835,6 +932,7 @@ func get_movement_backend_label() -> String:
 
 
 ## Reactivate a preserved custom route after combat interrupt (attack-move resume).
+## Never rewinds to waypoint 0 — that caused visible forward/back marches.
 func try_resume_custom_rts_route(destination: Vector3) -> bool:
 	if _custom_rts_route.is_empty():
 		return false
@@ -843,7 +941,17 @@ func try_resume_custom_rts_route(destination: Vector3) -> bool:
 	_last_issued_move_destination = next_target
 	_last_path_request_msec = Time.get_ticks_msec()
 	_last_move_order_msec = _last_path_request_msec
-	_activate_pending_custom_rts_route(next_target)
+	_custom_rts_pending = false
+	_custom_rts_active = true
+	if _custom_rts_paused_route_index >= 0:
+		_custom_rts_route_index = _custom_rts_paused_route_index
+		_custom_rts_paused_route_index = -1
+	_snap_custom_rts_route_index_to_progress(next_target)
+	_movement_target = next_target
+	_original_move_destination = next_target
+	has_move_target = true
+	_reset_unstuck_state()
+	_blocked_arrival_time = 0.0
 	return true
 
 
@@ -851,6 +959,7 @@ func _activate_pending_custom_rts_route(destination: Vector3) -> void:
 	_custom_rts_pending = false
 	_custom_rts_active = true
 	_custom_rts_route_index = 0
+	_custom_rts_paused_route_index = -1
 	_movement_target = destination
 	_original_move_destination = destination
 	has_move_target = true
@@ -863,6 +972,9 @@ func _activate_pending_custom_rts_route(destination: Vector3) -> void:
 func _activate_custom_rts_direct_target(destination: Vector3) -> void:
 	_custom_rts_pending = false
 	_custom_rts_active = true
+	# Preserve strategic progress before chase overrides the follow index.
+	if _custom_rts_paused_route_index < 0 and not _custom_rts_route.is_empty():
+		_custom_rts_paused_route_index = _custom_rts_route_index
 	# Past last waypoint → route direction falls through to _movement_target.
 	_custom_rts_route_index = _custom_rts_route.size()
 	_movement_target = destination
@@ -877,11 +989,37 @@ func _activate_custom_rts_direct_move(destination: Vector3) -> void:
 	_custom_rts_active = true
 	_custom_rts_route = PackedVector3Array()
 	_custom_rts_route_index = 0
+	_custom_rts_paused_route_index = -1
 	_movement_target = destination
 	_original_move_destination = destination
 	has_move_target = true
 	_reset_unstuck_state()
 	_blocked_arrival_time = 0.0
+
+
+## Skip waypoints already reached or behind the remaining strategic travel.
+func _snap_custom_rts_route_index_to_progress(destination: Vector3) -> void:
+	if _custom_rts_route.is_empty():
+		return
+	var dest_dir: Vector3 = _flat_xz(destination - global_position)
+	if dest_dir.length_squared() > 0.0001:
+		dest_dir = dest_dir.normalized()
+	else:
+		dest_dir = Vector3.ZERO
+	while _custom_rts_route_index < _custom_rts_route.size():
+		if _army_march_route_index_is_past_cap():
+			break
+		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
+		var to_wp: Vector3 = _flat_xz(wp - global_position)
+		var dist: float = to_wp.length()
+		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS:
+			_custom_rts_route_index += 1
+			continue
+		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0:
+			_custom_rts_route_index += 1
+			continue
+		break
+	_clamp_custom_rts_route_index_to_march_cap()
 
 
 func _custom_rts_is_intermediate_target() -> bool:
@@ -895,13 +1033,33 @@ func _custom_rts_is_intermediate_target() -> bool:
 	return _horizontal_distance_xz(_movement_target, final_slot) > CUSTOM_RTS_ARRIVE_RADIUS
 
 
-## Pause custom locomotion without dissolving the strategic route (chase arrive / micro stop).
+func _should_wait_at_army_march_checkpoint() -> bool:
+	if not _army_march_enabled:
+		return false
+	if _is_engaged_in_local_combat():
+		return false
+	return (
+		_horizontal_distance_xz(global_position, _army_march_checkpoint)
+		<= PlayerRouteNavigation.MARCH_ARRIVAL_RADIUS
+	)
+
+
+func _is_engaged_in_local_combat() -> bool:
+	if not has_method("get_attack_target"):
+		return false
+	return NodeSafety.is_alive_node(call("get_attack_target"))
+
+
 func _pause_custom_rts_preserving_route() -> void:
 	clear_move_target(true)
 
 
 func _process_custom_rts_movement(delta: float) -> void:
 	if not _custom_rts_active:
+		return
+
+	if _should_wait_at_army_march_checkpoint():
+		_pause_custom_rts_preserving_route()
 		return
 
 	var slot: Vector3 = _movement_target
@@ -915,24 +1073,11 @@ func _process_custom_rts_movement(delta: float) -> void:
 		_complete_movement_arrival()
 		return
 
-	var route_dir: Vector3 = _custom_rts_route_direction()
-	var separation: Vector3 = _custom_rts_separation_vector()
 	var slot_dir: Vector3 = to_slot.normalized() if dist_to_slot > 0.001 else Vector3.ZERO
-	var near_end: bool = (
-		_custom_rts_route.is_empty()
-		or _custom_rts_route_index >= _custom_rts_route.size() - 1
-	)
-	var slot_w: float = (
-		CUSTOM_RTS_FINAL_SLOT_WEIGHT if near_end or dist_to_slot < 4.0 else 0.15
-	)
-
-	var desired: Vector3 = (
-		route_dir * CUSTOM_RTS_ROUTE_WEIGHT
-		+ separation * CUSTOM_RTS_SEPARATION_WEIGHT
-		+ slot_dir * slot_w
-	)
+	var steering: Dictionary = compose_custom_rts_steering_for_tests(slot_dir, dist_to_slot)
+	var desired: Vector3 = steering.get("final_desired", Vector3.ZERO) as Vector3
 	if desired.length_squared() < 0.0001:
-		desired = slot_dir if slot_dir.length_squared() > 0.0 else route_dir
+		desired = slot_dir if slot_dir.length_squared() > 0.0 else (steering.get("route_dir", Vector3.ZERO) as Vector3)
 	if desired.length_squared() < 0.0001:
 		if _custom_rts_is_intermediate_target():
 			_pause_custom_rts_preserving_route()
@@ -980,16 +1125,121 @@ func _process_custom_rts_movement(delta: float) -> void:
 	CommandFeedback.notify_unit_moving(self)
 
 
+## Observational / test helper: route-dominant custom RTS steering components.
+## Hierarchy: route > friendly separation (lateral) > final slot (near end only).
+func compose_custom_rts_steering_for_tests(
+	slot_dir: Vector3 = Vector3.ZERO,
+	dist_to_slot: float = -1.0
+) -> Dictionary:
+	var route_dir: Vector3 = _custom_rts_route_direction()
+	var separation_raw: Vector3 = _custom_rts_separation_vector()
+	var to_slot: Vector3 = _flat_xz(_movement_target - global_position)
+	if dist_to_slot < 0.0:
+		dist_to_slot = to_slot.length()
+	if slot_dir.length_squared() < 0.0001 and dist_to_slot > 0.001:
+		slot_dir = to_slot.normalized()
+
+	var final_arrival: Vector3 = _player_squad_final_arrival
+	if final_arrival.length_squared() <= 0.0001:
+		final_arrival = _original_move_destination
+	var dist_to_final: float = dist_to_slot
+	if final_arrival.length_squared() > 0.0001:
+		dist_to_final = _horizontal_distance_xz(global_position, final_arrival)
+
+	var near_end: bool = (
+		_custom_rts_route.is_empty()
+		or _custom_rts_route_index >= _custom_rts_route.size() - 1
+	)
+	var slot_w: float = CUSTOM_RTS_SLOT_FAR_WEIGHT
+	if near_end or dist_to_final < CUSTOM_RTS_SLOT_NEAR_DISTANCE:
+		var proximity: float = 1.0 - clampf(
+			dist_to_final / CUSTOM_RTS_SLOT_NEAR_DISTANCE, 0.0, 1.0
+		)
+		slot_w = lerpf(CUSTOM_RTS_SLOT_FAR_WEIGHT, CUSTOM_RTS_FINAL_SLOT_WEIGHT, proximity)
+		if near_end and dist_to_slot < 4.0:
+			slot_w = CUSTOM_RTS_FINAL_SLOT_WEIGHT
+
+	# Friendly separation may only add lateral / slight slow — never reverse route.
+	var separation: Vector3 = separation_raw
+	if route_dir.length_squared() > 0.0001 and separation.length_squared() > 0.0001:
+		var anti_route: float = separation.dot(route_dir)
+		if anti_route < 0.0:
+			separation -= route_dir * anti_route
+		if separation.length() > 1.0:
+			separation = separation.normalized()
+
+	# Far from destination: ignore slot pull that fights the strategic route.
+	var slot_contrib: Vector3 = slot_dir
+	if (
+		route_dir.length_squared() > 0.0001
+		and slot_dir.length_squared() > 0.0001
+		and dist_to_final > CUSTOM_RTS_SLOT_NEAR_DISTANCE
+		and slot_dir.dot(route_dir) < 0.0
+	):
+		slot_contrib = Vector3.ZERO
+		slot_w = 0.0
+
+	var desired: Vector3 = (
+		route_dir * CUSTOM_RTS_ROUTE_WEIGHT
+		+ separation * CUSTOM_RTS_SEPARATION_WEIGHT
+		+ slot_contrib * slot_w
+	)
+	if desired.length_squared() < 0.0001:
+		desired = slot_dir if slot_dir.length_squared() > 0.0 else route_dir
+
+	var final_desired: Vector3 = desired
+	if final_desired.length_squared() > 0.0001:
+		final_desired = final_desired.normalized()
+		# While still marching, enforce forward progress along the strategic route.
+		if route_dir.length_squared() > 0.0001 and dist_to_final > CUSTOM_RTS_SLOT_NEAR_DISTANCE:
+			var forward: float = final_desired.dot(route_dir)
+			if forward < CUSTOM_RTS_MIN_FORWARD:
+				final_desired = (
+					final_desired + route_dir * (CUSTOM_RTS_MIN_FORWARD - forward)
+				).normalized()
+			if final_desired.dot(route_dir) < 0.0:
+				final_desired = route_dir
+
+	return {
+		"route_dir": route_dir,
+		"separation": separation_raw,
+		"separation_clamped": separation,
+		"slot_dir": slot_dir,
+		"slot_w": slot_w,
+		"dist_to_final": dist_to_final,
+		"final_desired": final_desired,
+		"route_dot": (
+			final_desired.dot(route_dir)
+			if route_dir.length_squared() > 0.0001 and final_desired.length_squared() > 0.0001
+			else 0.0
+		),
+	}
+
+
 func _custom_rts_route_direction() -> Vector3:
 	if _custom_rts_route.is_empty():
 		return _flat_xz(_movement_target - global_position).normalized()
+	var dest_dir: Vector3 = _flat_xz(_movement_target - global_position)
+	if dest_dir.length_squared() > 0.0001:
+		dest_dir = dest_dir.normalized()
+	else:
+		dest_dir = Vector3.ZERO
 	while _custom_rts_route_index < _custom_rts_route.size():
+		if _army_march_route_index_is_past_cap():
+			return _flat_xz(_army_march_checkpoint - global_position).normalized()
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
 		var to_wp: Vector3 = _flat_xz(wp - global_position)
-		if to_wp.length() <= CUSTOM_RTS_WAYPOINT_RADIUS:
+		var dist: float = to_wp.length()
+		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS:
+			_custom_rts_route_index += 1
+			continue
+		# Never steer back to waypoints already behind the remaining destination.
+		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0:
 			_custom_rts_route_index += 1
 			continue
 		return to_wp.normalized()
+	if _army_march_enabled and not _army_march_is_final:
+		return _flat_xz(_army_march_checkpoint - global_position).normalized()
 	return _flat_xz(_movement_target - global_position).normalized()
 
 
@@ -997,11 +1247,28 @@ func _custom_rts_advance_waypoint() -> void:
 	if _custom_rts_route.is_empty():
 		return
 	while _custom_rts_route_index < _custom_rts_route.size():
+		if _army_march_route_index_is_past_cap():
+			_clamp_custom_rts_route_index_to_march_cap()
+			return
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
 		if _horizontal_distance_xz(global_position, wp) <= CUSTOM_RTS_WAYPOINT_RADIUS:
 			_custom_rts_route_index += 1
 			continue
 		break
+	_clamp_custom_rts_route_index_to_march_cap()
+
+
+func _army_march_route_index_is_past_cap() -> bool:
+	if not _army_march_enabled or _army_march_is_final or _army_march_cap_index < 0:
+		return false
+	return _custom_rts_route_index > _army_march_cap_index
+
+
+func _clamp_custom_rts_route_index_to_march_cap() -> void:
+	if not _army_march_enabled or _army_march_is_final or _army_march_cap_index < 0:
+		return
+	if _custom_rts_route_index > _army_march_cap_index:
+		_custom_rts_route_index = _army_march_cap_index
 
 
 func _custom_rts_separation_vector() -> Vector3:
@@ -1645,6 +1912,8 @@ func _physics_process(delta: float) -> void:
 		_clear_residual_movement()
 		_reset_physical_stuck_watch()
 		return
+
+	_tick_production_rally_join(delta)
 
 	if not has_move_target:
 		_reset_unstuck_state()

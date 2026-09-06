@@ -8,6 +8,13 @@ extends Node
 
 const SLOT_SPACING := 1.4
 const GROUND_Y := 0.0
+## Meaningful army travel chunk before waiting for every living member.
+## Map is 100m across; Spearman 4.5 m/s, cavalry 8.5 m/s, heroes ~5.4–6.0.
+const ARMY_MARCH_SEGMENT_DISTANCE := 16.0
+## Cluster tolerance around the current checkpoint — not pixel-perfect overlap.
+const MARCH_ARRIVAL_RADIUS := 6.0
+const ARMY_MARCH_OBJECTIVE_EQUIV_RADIUS := 4.0
+const ENEMY_ARMY_MARCH_SOURCE: StringName = &"enemy_ai"
 
 var grid: PlayerRtsOccupancyGrid = PlayerRtsOccupancyGrid.new()
 
@@ -22,11 +29,32 @@ var last_command_source: StringName = &""
 var last_squad_size: int = 0
 var last_route_waypoints: int = 0
 
+## Enemy army cohesive-march execution (HOW). EnemyAI still owns WHAT.
+var _army_march_active: bool = false
+var _army_march_mode: StringName = &""
+var _army_march_route: PackedVector3Array = PackedVector3Array()
+var _army_march_route_cum: PackedFloat32Array = PackedFloat32Array()
+var _army_march_final: Vector3 = Vector3.ZERO
+var _army_march_clicked: Vector3 = Vector3.ZERO
+var _army_march_order_kind: StringName = &""
+var _army_march_generation: int = -1
+var _army_march_checkpoint: Vector3 = Vector3.ZERO
+var _army_march_checkpoint_dist: float = 0.0
+var _army_march_cap_index: int = 0
+var _army_march_segment_index: int = 0
+var _army_march_member_ids: PackedInt64Array = PackedInt64Array()
+var _army_march_prev_checkpoint: Vector3 = Vector3.ZERO
+var _army_march_last_arrived: int = -1
+var _army_march_last_required: int = -1
+var _army_march_last_waiting_name: String = ""
+var _army_march_logged_hero_ids: Dictionary = {}
+
 
 func _ready() -> void:
 	MatchSession.register_match_reset(&"PlayerRouteNavigation", clear_all)
 	_setup_default_grid()
 	set_process(false)
+	set_physics_process(false)
 
 
 func clear_all() -> void:
@@ -36,6 +64,7 @@ func clear_all() -> void:
 	last_command_source = &""
 	last_squad_size = 0
 	last_route_waypoints = 0
+	_clear_army_march()
 	grid.clear_all()
 	_grid_ready = true
 	_scan_pending = true
@@ -123,6 +152,11 @@ func request_group_move(
 			_issue_unit_ground_order(unit, slot, order_kind, true)
 		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		return result
+
+	if command_source == ENEMY_ARMY_MARCH_SOURCE:
+		return _request_enemy_army_march_move(
+			ordered_units, destination, order_kind, command_source, result
+		)
 
 	_global_command_generation += 1
 	path_calculations_this_command = 0
@@ -496,3 +530,603 @@ func _issue_unit_ground_order(
 				unit.issue_order(UnitOrder.move(target), queued)
 		_:
 			unit.issue_order(UnitOrder.move(target), queued)
+
+
+func _physics_process(_delta: float) -> void:
+	if _army_march_active:
+		_evaluate_army_march()
+
+
+func is_enemy_army_march_in_progress() -> bool:
+	return _army_march_active and (
+		_army_march_mode == &"MOVING"
+		or _army_march_mode == &"WAITING_FOR_ALL"
+		or _army_march_mode == &"FINAL_APPROACH"
+	)
+
+
+func is_enemy_army_march_waiting_for_all() -> bool:
+	return _army_march_active and _army_march_mode == &"WAITING_FOR_ALL"
+
+
+func get_army_march_debug_snapshot() -> Dictionary:
+	if not _army_march_active:
+		return {
+			"active": false,
+			"mode": &"NONE",
+			"checkpoint": Vector3.ZERO,
+			"final_objective": Vector3.ZERO,
+			"segment_index": 0,
+			"route_progress": 0.0,
+			"required": 0,
+			"arrived": 0,
+			"waiting_for": 0,
+			"farthest_name": "",
+			"farthest_distance": 0.0,
+			"hero_arrived": false,
+			"next_segment_release": "READY",
+			"waiting_examples": [],
+		}
+	var tally: Dictionary = _tally_army_march_members()
+	var required: int = int(tally.get("required", 0))
+	var arrived: int = int(tally.get("arrived", 0))
+	return {
+		"active": true,
+		"mode": _army_march_mode,
+		"checkpoint": _army_march_checkpoint,
+		"final_objective": _army_march_final,
+		"segment_index": _army_march_segment_index,
+		"route_progress": _army_march_checkpoint_dist,
+		"required": required,
+		"arrived": arrived,
+		"waiting_for": maxi(0, required - arrived),
+		"farthest_name": String(tally.get("farthest_name", "")),
+		"farthest_distance": float(tally.get("farthest_distance", 0.0)),
+		"hero_arrived": bool(tally.get("hero_arrived", false)),
+		"next_segment_release": (
+			"READY" if required > 0 and arrived >= required else "WAITING"
+		),
+		"waiting_examples": tally.get("waiting_examples", []),
+	}
+
+
+func evaluate_enemy_army_march_for_test() -> void:
+	_evaluate_army_march()
+
+
+func get_army_march_checkpoint_for_test() -> Vector3:
+	return _army_march_checkpoint
+
+
+func get_army_march_mode_for_test() -> StringName:
+	return _army_march_mode
+
+
+func get_army_march_shared_route_for_test() -> PackedVector3Array:
+	return _army_march_route.duplicate()
+
+
+func get_army_march_generation_for_test() -> int:
+	return _army_march_generation
+
+
+func get_army_march_segment_index_for_test() -> int:
+	return _army_march_segment_index
+
+
+func _request_enemy_army_march_move(
+	ordered_units: Array,
+	destination: Vector3,
+	order_kind: StringName,
+	command_source: StringName,
+	result: Dictionary
+) -> Dictionary:
+	ensure_grid_ready()
+	result["squad_size"] = ordered_units.size()
+
+	var group_destination := Vector3(destination.x, GROUND_Y, destination.z)
+	if not grid.is_world_walkable(group_destination):
+		group_destination = grid.nearest_walkable_world(group_destination)
+
+	if (
+		_army_march_active
+		and _horizontal_distance(_army_march_final, group_destination)
+			<= ARMY_MARCH_OBJECTIVE_EQUIV_RADIUS
+	):
+		path_calculations_this_command = 0
+		_join_units_to_army_march(ordered_units, order_kind, result)
+		result["handled"] = true
+		result["route_valid"] = not _army_march_route.is_empty()
+		result["accepted_destination"] = _army_march_final
+		result["route_waypoints"] = _army_march_route.size()
+		result["path_calculations"] = path_calculations_this_command
+		_record_command_telemetry(ordered_units.size(), _army_march_route.size(), command_source)
+		return result
+
+	_global_command_generation += 1
+	path_calculations_this_command = 0
+
+	var origin: Vector3 = _group_centroid(ordered_units)
+	var shared_route: PackedVector3Array = grid.find_path(origin, group_destination)
+	path_calculations_this_command += 1
+	total_path_calculations += 1
+	result["path_calculations"] = path_calculations_this_command
+	result["route_waypoints"] = shared_route.size()
+	PerfCounters.record_strategic_route_request()
+	PerfCounters.record_navigation_path_request()
+
+	if shared_route.is_empty():
+		result["route_failure_reason"] = "no_path"
+		_record_command_telemetry(ordered_units.size(), 0, command_source)
+		return result
+
+	var slots: Array[Vector3] = _make_destination_slots(
+		group_destination, ordered_units.size()
+	)
+	for i: int in slots.size():
+		if not grid.is_world_walkable(slots[i]):
+			slots[i] = grid.nearest_walkable_world(slots[i])
+
+	_start_army_march(
+		shared_route,
+		group_destination,
+		order_kind,
+		_global_command_generation,
+		ordered_units
+	)
+
+	var slot_targets_out: Array = []
+	for index: int in ordered_units.size():
+		var unit: Unit = ordered_units[index] as Unit
+		var slot: Vector3 = slots[index] if index < slots.size() else group_destination
+		slot_targets_out.append(slot)
+		_bind_unit_to_army_march(unit, shared_route, slot, order_kind, false)
+		_issue_unit_ground_order(unit, slot, order_kind, false)
+
+	result["handled"] = true
+	result["route_valid"] = true
+	result["accepted_destination"] = group_destination
+	result["slot_targets"] = slot_targets_out
+	_record_command_telemetry(ordered_units.size(), shared_route.size(), command_source)
+	return result
+
+
+func _start_army_march(
+	shared_route: PackedVector3Array,
+	final_dest: Vector3,
+	order_kind: StringName,
+	generation: int,
+	members: Array
+) -> void:
+	_army_march_active = true
+	_army_march_route = shared_route.duplicate()
+	_army_march_route_cum = _build_route_cumulative(_army_march_route)
+	_army_march_final = final_dest
+	_army_march_clicked = final_dest
+	_army_march_order_kind = order_kind
+	_army_march_generation = generation
+	_army_march_segment_index = 0
+	_army_march_prev_checkpoint = Vector3.ZERO
+	_army_march_last_arrived = -1
+	_army_march_last_required = -1
+	_army_march_last_waiting_name = ""
+	_army_march_logged_hero_ids.clear()
+	_army_march_member_ids = PackedInt64Array()
+	for member_v: Variant in members:
+		var live: Unit = _as_live_unit(member_v)
+		if live == null:
+			continue
+		_army_march_member_ids.append(live.get_instance_id())
+	_set_checkpoint_at_distance(ARMY_MARCH_SEGMENT_DISTANCE, true)
+	set_physics_process(true)
+
+
+func _join_units_to_army_march(
+	units: Array,
+	order_kind: StringName,
+	result: Dictionary
+) -> void:
+	var slot_targets_out: Array = result.get("slot_targets", []) as Array
+	for unit_v: Variant in units:
+		var unit: Unit = _as_live_unit(unit_v)
+		if unit == null:
+			continue
+		_remember_march_member(unit)
+		var join_route: PackedVector3Array = grid.find_path(
+			Vector3(unit.global_position.x, GROUND_Y, unit.global_position.z),
+			_army_march_checkpoint
+		)
+		path_calculations_this_command += 1
+		total_path_calculations += 1
+		PerfCounters.record_navigation_path_request()
+		if join_route.is_empty():
+			join_route = _army_march_route.duplicate()
+		var slot: Vector3 = _army_march_final
+		if not grid.is_world_walkable(slot):
+			slot = grid.nearest_walkable_world(slot)
+		slot_targets_out.append(slot)
+		_bind_unit_to_army_march(unit, join_route, slot, order_kind, true)
+		_issue_unit_ground_order(unit, slot, order_kind, false)
+	result["slot_targets"] = slot_targets_out
+
+
+func _bind_unit_to_army_march(
+	unit: Unit,
+	route: PackedVector3Array,
+	slot: Vector3,
+	order_kind: StringName,
+	_is_join: bool
+) -> void:
+	unit.prepare_custom_rts_route(
+		route,
+		slot,
+		_army_march_generation,
+		_army_march_clicked,
+		order_kind
+	)
+	unit.bind_army_march_checkpoint(
+		_army_march_checkpoint,
+		_army_march_cap_index,
+		_army_march_mode == &"FINAL_APPROACH"
+	)
+
+
+func _remember_march_member(unit: Unit) -> void:
+	if not NodeSafety.is_alive_node(unit):
+		return
+	var id: int = unit.get_instance_id()
+	for existing: int in _army_march_member_ids:
+		if existing == id:
+			return
+	_army_march_member_ids.append(id)
+
+
+func _set_checkpoint_at_distance(target_dist: float, is_new_march: bool) -> void:
+	var sampled: Dictionary = _sample_route_at_distance(target_dist)
+	var point: Vector3 = sampled.get("point", _army_march_final) as Vector3
+	if not grid.is_world_walkable(point):
+		point = grid.nearest_walkable_world(point)
+	var prev: Vector3 = _army_march_checkpoint
+	_army_march_prev_checkpoint = prev
+	_army_march_checkpoint = point
+	_army_march_checkpoint_dist = float(sampled.get("dist", 0.0))
+	_army_march_cap_index = int(sampled.get("index", 0))
+	if bool(sampled.get("is_end", false)):
+		_army_march_checkpoint = _army_march_final
+		_army_march_mode = &"FINAL_APPROACH"
+	else:
+		_army_march_mode = &"MOVING"
+	if is_new_march:
+		_army_march_segment_index = 1
+	else:
+		_army_march_segment_index += 1
+	_army_march_last_arrived = -1
+	_army_march_last_waiting_name = ""
+	var dist_from_prev: float = 0.0
+	if prev != Vector3.ZERO:
+		dist_from_prev = _horizontal_distance(prev, _army_march_checkpoint)
+	elif not _army_march_route.is_empty():
+		dist_from_prev = _horizontal_distance(_army_march_route[0], _army_march_checkpoint)
+	_log_march_event(
+		"new checkpoint\ndistance from previous=%.1fm\nrequired=%d"
+		% [dist_from_prev, _army_march_member_ids.size()]
+	)
+	if _army_march_mode == &"FINAL_APPROACH":
+		_log_march_event("final approach")
+
+
+func _build_route_cumulative(route: PackedVector3Array) -> PackedFloat32Array:
+	var cum := PackedFloat32Array()
+	cum.resize(route.size())
+	if route.is_empty():
+		return cum
+	cum[0] = 0.0
+	for i: int in range(1, route.size()):
+		cum[i] = cum[i - 1] + _horizontal_distance(route[i - 1], route[i])
+	return cum
+
+
+func _sample_route_at_distance(target_dist: float) -> Dictionary:
+	var route: PackedVector3Array = _army_march_route
+	var cum: PackedFloat32Array = _army_march_route_cum
+	if route.is_empty():
+		return {
+			"point": _army_march_final,
+			"index": 0,
+			"dist": 0.0,
+			"is_end": true,
+		}
+	var total: float = cum[cum.size() - 1] if cum.size() > 0 else 0.0
+	if total <= target_dist + 0.05:
+		return {
+			"point": route[route.size() - 1],
+			"index": route.size() - 1,
+			"dist": total,
+			"is_end": true,
+		}
+	for i: int in range(1, route.size()):
+		if cum[i] + 0.001 >= target_dist:
+			var seg: float = cum[i] - cum[i - 1]
+			var t: float = 0.0
+			if seg > 0.001:
+				t = clampf((target_dist - cum[i - 1]) / seg, 0.0, 1.0)
+			var point: Vector3 = route[i - 1].lerp(route[i], t)
+			point.y = GROUND_Y
+			return {
+				"point": point,
+				"index": i,
+				"dist": target_dist,
+				"is_end": false,
+			}
+	return {
+		"point": route[route.size() - 1],
+		"index": route.size() - 1,
+		"dist": total,
+		"is_end": true,
+	}
+
+
+func _evaluate_army_march() -> void:
+	if not _army_march_active:
+		set_physics_process(false)
+		return
+	var tally: Dictionary = _tally_army_march_members()
+	var required: int = int(tally.get("required", 0))
+	if required <= 0:
+		_clear_army_march()
+		return
+	var arrived: int = int(tally.get("arrived", 0))
+	var waiting_name: String = String(tally.get("farthest_name", ""))
+	if arrived < required:
+		if arrived > 0 and _army_march_mode != &"FINAL_APPROACH":
+			_army_march_mode = &"WAITING_FOR_ALL"
+		elif arrived <= 0 and _army_march_mode != &"FINAL_APPROACH":
+			_army_march_mode = &"MOVING"
+		if arrived > 0:
+			_log_wait_if_changed(arrived, required, waiting_name, tally)
+		return
+	if _army_march_mode == &"FINAL_APPROACH":
+		_finish_army_march(tally.get("members", []) as Array)
+		return
+	_log_march_event("ALL_ARRIVED\n%d/%d\nreleasing next segment" % [arrived, required])
+	_release_next_march_segment(tally.get("members", []) as Array)
+
+
+func _log_wait_if_changed(
+	arrived: int,
+	required: int,
+	waiting_name: String,
+	tally: Dictionary
+) -> void:
+	if (
+		arrived == _army_march_last_arrived
+		and required == _army_march_last_required
+		and waiting_name == _army_march_last_waiting_name
+	):
+		return
+	_army_march_last_arrived = arrived
+	_army_march_last_required = required
+	_army_march_last_waiting_name = waiting_name
+	if bool(tally.get("hero_just_arrived", false)):
+		_log_march_event("Hero arrived\n%d/%d arrived" % [arrived, required])
+	_log_march_event(
+		"WAITING_FOR_ALL\n%d/%d arrived\nwaiting_for=%s"
+		% [arrived, required, waiting_name]
+	)
+	if not _march_p_debug_enabled():
+		return
+	var examples: Array = tally.get("waiting_examples", []) as Array
+	for row_v: Variant in examples:
+		if not row_v is Dictionary:
+			continue
+		var row: Dictionary = row_v as Dictionary
+		print(
+			"waiting_for=%s distance=%.1fm moving=%s stuck_flag=%s"
+			% [
+				String(row.get("name", "")),
+				float(row.get("distance", 0.0)),
+				"YES" if bool(row.get("moving", false)) else "NO",
+				"YES" if bool(row.get("stuck", false)) else "NO",
+			]
+		)
+
+
+func _release_next_march_segment(members: Array) -> void:
+	var next_dist: float = _army_march_checkpoint_dist + ARMY_MARCH_SEGMENT_DISTANCE
+	_set_checkpoint_at_distance(next_dist, false)
+	for member_v: Variant in members:
+		var unit: Unit = _as_live_unit(member_v)
+		if unit == null:
+			continue
+		if unit.get_custom_rts_route_waypoint_count() != _army_march_route.size():
+			unit.replace_custom_rts_route(_army_march_route)
+		unit.bind_army_march_checkpoint(
+			_army_march_checkpoint,
+			_army_march_cap_index,
+			_army_march_mode == &"FINAL_APPROACH"
+		)
+		if _unit_in_local_combat(unit):
+			continue
+		unit.try_resume_custom_rts_route(_army_march_clicked)
+
+
+func _tally_army_march_members() -> Dictionary:
+	var members: Array = _collect_live_march_members()
+	var arrived: int = 0
+	var farthest_name: String = ""
+	var farthest_dist: float = -1.0
+	var hero_arrived: bool = true
+	var hero_present: bool = false
+	var hero_just_arrived: bool = false
+	var waiting_examples: Array = []
+	for member_v: Variant in members:
+		var unit: Unit = _as_live_unit(member_v)
+		if unit == null:
+			continue
+		var dist: float = _horizontal_distance(unit.global_position, _army_march_checkpoint)
+		var is_arrived: bool = dist <= MARCH_ARRIVAL_RADIUS
+		if is_arrived:
+			arrived += 1
+			if unit is Hero:
+				hero_present = true
+				hero_arrived = true
+				var hero_id: int = unit.get_instance_id()
+				if not _army_march_logged_hero_ids.has(hero_id):
+					_army_march_logged_hero_ids[hero_id] = true
+					hero_just_arrived = true
+		else:
+			if unit is Hero:
+				hero_present = true
+				hero_arrived = false
+			if dist >= farthest_dist:
+				farthest_dist = dist
+				farthest_name = unit.name
+			if waiting_examples.size() < 3:
+				waiting_examples.append({
+					"name": unit.name,
+					"distance": dist,
+					"moving": unit.has_move_target,
+					"stuck": unit.is_physically_blocked_from_current_move(),
+				})
+	if not hero_present:
+		hero_arrived = false
+	return {
+		"members": members,
+		"required": members.size(),
+		"arrived": arrived,
+		"farthest_name": farthest_name,
+		"farthest_distance": maxf(0.0, farthest_dist),
+		"hero_arrived": hero_arrived,
+		"hero_just_arrived": hero_just_arrived,
+		"waiting_examples": waiting_examples,
+	}
+
+
+func _collect_live_march_members() -> Array:
+	var seen: Dictionary = {}
+	var members: Array = []
+	var ai: EnemyAI = _resolve_enemy_ai()
+	if ai != null:
+		for unit_v: Variant in ai.get_cached_strategic_army():
+			var from_ai: Unit = _as_live_unit(unit_v)
+			if from_ai == null:
+				continue
+			if not _is_living_army_member(from_ai):
+				continue
+			var id: int = from_ai.get_instance_id()
+			if seen.has(id):
+				continue
+			seen[id] = true
+			members.append(from_ai)
+	for stored_id: int in _army_march_member_ids:
+		if seen.has(stored_id):
+			continue
+		var node: Object = instance_from_id(stored_id)
+		if not NodeSafety.is_alive_node(node):
+			continue
+		if not node is Unit:
+			continue
+		var stored: Unit = node as Unit
+		if not _is_living_army_member(stored):
+			continue
+		seen[stored_id] = true
+		members.append(stored)
+	return members
+
+
+func _as_live_unit(value: Variant) -> Unit:
+	if not NodeSafety.is_alive_node(value):
+		return null
+	if not value is Unit:
+		return null
+	return value as Unit
+
+
+func _is_living_army_member(unit: Unit) -> bool:
+	if not NodeSafety.is_alive_node(unit):
+		return false
+	if unit is Worker:
+		return false
+	var health: HealthComponent = unit.get_node_or_null("HealthComponent") as HealthComponent
+	if health != null and health.current_health <= 0.0:
+		return false
+	return true
+
+
+func _unit_in_local_combat(unit: Unit) -> bool:
+	if unit == null or not NodeSafety.is_alive_node(unit):
+		return false
+	if not unit.has_method("get_attack_target"):
+		return false
+	return NodeSafety.is_alive_node(unit.call("get_attack_target"))
+
+
+func _resolve_enemy_ai() -> EnemyAI:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return null
+	for node: Node in tree.get_nodes_in_group(&"enemy_ai"):
+		if not NodeSafety.is_alive_node(node):
+			continue
+		if node is EnemyAI:
+			return node as EnemyAI
+	return null
+
+
+func _finish_army_march(members: Array) -> void:
+	for member_v: Variant in members:
+		var unit: Unit = _as_live_unit(member_v)
+		if unit == null:
+			continue
+		unit.clear_army_march_checkpoint()
+		if _unit_in_local_combat(unit):
+			continue
+		var slot: Vector3 = unit.get_player_squad_final_arrival()
+		if slot == Vector3.ZERO:
+			slot = _army_march_final
+		if not unit.has_move_target:
+			unit.try_resume_custom_rts_route(slot)
+	_clear_army_march()
+
+
+func _clear_army_march() -> void:
+	_army_march_active = false
+	_army_march_mode = &""
+	_army_march_route = PackedVector3Array()
+	_army_march_route_cum = PackedFloat32Array()
+	_army_march_final = Vector3.ZERO
+	_army_march_clicked = Vector3.ZERO
+	_army_march_order_kind = &""
+	_army_march_generation = -1
+	_army_march_checkpoint = Vector3.ZERO
+	_army_march_checkpoint_dist = 0.0
+	_army_march_cap_index = 0
+	_army_march_segment_index = 0
+	_army_march_member_ids = PackedInt64Array()
+	_army_march_prev_checkpoint = Vector3.ZERO
+	_army_march_last_arrived = -1
+	_army_march_last_required = -1
+	_army_march_last_waiting_name = ""
+	_army_march_logged_hero_ids.clear()
+	set_physics_process(false)
+
+
+func _log_march_event(text: String) -> void:
+	if not _march_p_debug_enabled():
+		return
+	print("[MARCH]")
+	print(text)
+	print("")
+	var compact: String = text.replace("\n", " | ")
+	EnemyAI.report_brain_debug_event("[MARCH] %s" % compact)
+
+
+func _march_p_debug_enabled() -> bool:
+	var ai: EnemyAI = _resolve_enemy_ai()
+	return ai != null and ai.is_brain_debug_enabled()
+
+
+func _horizontal_distance(a: Vector3, b: Vector3) -> float:
+	var dx: float = a.x - b.x
+	var dz: float = a.z - b.z
+	return sqrt(dx * dx + dz * dz)
