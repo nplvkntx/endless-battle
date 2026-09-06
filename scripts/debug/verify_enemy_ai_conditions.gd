@@ -52,6 +52,7 @@ func _ready() -> void:
 	await _test_freed_creep_camp_count()
 	await _test_creep_strategy_stays_camp_based()
 	await _test_army_cohesion_conditions()
+	await _test_temporary_spacing_preserves_objectives()
 	await _test_attack_player_force_and_hero_death()
 	await _test_attack_regroup_oscillation_regression()
 	await _test_condition_stability()
@@ -487,12 +488,11 @@ func _test_early_creep_and_attack_gate() -> void:
 	_ai.force_tick_for_test()
 	var early_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"hero L1 no camps → EARLY_CREEP/HOME_WAIT/ATTACK/REGROUP",
+		"hero L1 no camps → EARLY_CREEP/HOME_WAIT/ATTACK",
 		early_priority == &"EARLY_CREEP"
 		or early_priority == &"HOME_WAIT"
 		or early_priority == &"ATTACK_PLAYER"
 		or early_priority == &"EXTRA_CREEP"
-		or early_priority == &"REGROUP"
 	)
 	_expect("hero L1 is not stuck on DEFEND", early_priority != &"DEFEND")
 
@@ -507,7 +507,6 @@ func _test_early_creep_and_attack_gate() -> void:
 		or mid_priority == &"HOME_WAIT"
 		or mid_priority == &"EXTRA_CREEP"
 		or mid_priority == &"ATTACK_PLAYER"
-		or mid_priority == &"REGROUP"
 	)
 	_expect("hero L2 does not require camps_cleared>=2 to leave early", true)
 
@@ -517,11 +516,10 @@ func _test_early_creep_and_attack_gate() -> void:
 	_ai.force_tick_for_test()
 	var post_priority: StringName = _ai.get_debug_priority()
 	_expect(
-		"hero L3 → early creep requirement ends (ATTACK/EXTRA_CREEP/HOME_WAIT/REGROUP)",
+		"hero L3 → early creep requirement ends (ATTACK/EXTRA_CREEP/HOME_WAIT)",
 		post_priority == &"ATTACK_PLAYER"
 		or post_priority == &"EXTRA_CREEP"
 		or post_priority == &"HOME_WAIT"
-		or post_priority == &"REGROUP"
 	)
 	_expect("hero L3 is not EARLY_CREEP", post_priority != &"EARLY_CREEP")
 
@@ -974,14 +972,29 @@ func _test_army_cohesion_conditions() -> void:
 		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
 	)
 
-	## TEST E — During ATTACK, move Hero far ahead → next tick REGROUP
+	## TEST E — During ATTACK, move Hero far ahead → objective stays ATTACK_PLAYER.
 	hero.global_position = _cc.global_position + Vector3(0, 0, 40)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("TEST E hero ahead → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
-	_expect("TEST E not together", not _ai.is_army_together_for_test())
+	_expect(
+		"TEST E hero ahead keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST E not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+	_expect(
+		"TEST E not HOME from spacing",
+		_ai.get_debug_condition_bucket_for_test() != &"HOME_WAIT"
+		and _ai.get_debug_condition_bucket_for_test() != &"HOME_NO_HERO"
+		and _ai.get_debug_condition_bucket_for_test() != &"HOME_ARMY_SMALL"
+	)
+	_expect("TEST E physically not together", not _ai.is_army_together_for_test())
+	_expect(
+		"TEST E command remains attack_player",
+		_ai.get_last_command_kind_for_test() == EnemyAI.CMD_ATTACK
+	)
 
-	## TEST F — Regroup destination does not advance farther toward player than soldiers
+	## TEST F — Temporary spacing must not rewrite the attack destination onto the soldier centroid.
+	var attack_dest: Vector3 = _ai.get_last_command_destination_for_test()
 	var soldiers_center := Vector3.ZERO
 	var scount := 0
 	for unit_variant: Variant in _ai.get_enemy_army_for_test():
@@ -990,19 +1003,19 @@ func _test_army_cohesion_conditions() -> void:
 			scount += 1
 	if scount > 0:
 		soldiers_center /= float(scount)
-	var regroup_dest: Vector3 = _ai.get_regroup_destination_for_test()
 	var player_pike_pos: Vector3 = _cc.global_position + Vector3(45, 0, 0)
-	## Find actual player unit
 	var player_units: Array = _ai.get_player_army_for_test()
 	if not player_units.is_empty() and player_units[0] is Node3D:
 		player_pike_pos = (player_units[0] as Node3D).global_position
-	var soldier_to_player: float = soldiers_center.distance_to(player_pike_pos)
-	var dest_to_player: float = Vector3(regroup_dest.x, 0, regroup_dest.z).distance_to(
+	var dest_to_player: float = Vector3(attack_dest.x, 0, attack_dest.z).distance_to(
 		Vector3(player_pike_pos.x, 0, player_pike_pos.z)
 	)
+	var dest_to_soldiers: float = Vector3(attack_dest.x, 0, attack_dest.z).distance_to(
+		Vector3(soldiers_center.x, 0, soldiers_center.z)
+	)
 	_expect(
-		"TEST F regroup does not advance toward player",
-		dest_to_player + 0.5 >= soldier_to_player - 1.0
+		"TEST F attack destination stays toward player, not soldier centroid regroup",
+		dest_to_player + 1.0 <= dest_to_soldiers or dest_to_player <= 20.0
 	)
 
 	## TEST G — One reinforcement at base does not cancel cohesive field army
@@ -1021,13 +1034,14 @@ func _test_army_cohesion_conditions() -> void:
 	_expect("TEST G main force still together", _ai.is_army_together_for_test())
 	_ai.force_tick_for_test()
 	_expect(
-		"TEST G one straggler does not force REGROUP alone",
+		"TEST G one straggler does not force REGROUP",
 		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
 	)
 
-	## TEST H — Majority behind Hero → REGROUP
+	## TEST H — Majority behind Hero → keep current strategic mission, not REGROUP
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
+	_spawn_player_command_center(_cc.global_position + Vector3(45, 0, 0))
 	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 35))
 	hero.level = 5
 	HeroProgressionStore.register_living_hero(hero)
@@ -1036,13 +1050,17 @@ func _test_army_cohesion_conditions() -> void:
 	_ai.set_camps_cleared_for_test(3)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("TEST H majority behind → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
+	_expect(
+		"TEST H majority behind keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST H not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
 
-	## TEST I — Base threat during separation → DEFEND overrides REGROUP
+	## TEST I — Base threat during separation → DEFEND remains winner
 	var threat: Unit = _spawn_player_spearman(_cc.global_position + Vector3(5, 0, 0))
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("TEST I DEFEND overrides REGROUP", _ai.get_debug_priority() == &"DEFEND")
+	_expect("TEST I DEFEND remains during army stretch", _ai.get_debug_priority() == &"DEFEND")
 	_kill_unit(threat)
 	await get_tree().process_frame
 
@@ -1061,6 +1079,208 @@ func _test_army_cohesion_conditions() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect("TEST J player_power > 0", _ai.get_player_power_for_test() > 0.0)
+
+
+func _test_temporary_spacing_preserves_objectives() -> void:
+	print("--- temporary spacing preserves CREEP/ATTACK/DEFEND/HOME ---")
+
+	## TEST A — CREEP separation: hero/front units ahead keep EARLY_CREEP.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(8, 0, 8))
+	hero.level = 1
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(8.0 + float(i) * 0.7, 0, 8))
+	for i: int in 14:
+		_spawn_player_spearman(_cc.global_position + Vector3(45.0 + float(i), 0, 0))
+	var camp := CreepCamp.new()
+	camp.name = "SpacingCreepCamp"
+	_world.add_child(camp)
+	camp.global_position = _cc.global_position + Vector3(0, 0, 28)
+	var creep: NeutralCreep = _spawn_neutral_creep(camp.global_position + Vector3(1, 0, 0))
+	creep.reparent(camp)
+	_ai.set_camps_cleared_for_test(0)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST A starts EARLY_CREEP",
+		_ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP"
+	)
+	hero.global_position = camp.global_position + Vector3(0, 0, 2)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST A CREEP survives temporary front-unit spacing",
+		_ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP"
+	)
+	_expect("TEST A not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+	_expect(
+		"TEST A not HOME",
+		_ai.get_debug_priority() != &"HOME_WAIT"
+		and _ai.get_debug_priority() != &"HOME_NO_HERO"
+		and _ai.get_debug_priority() != &"HOME_ARMY_SMALL"
+	)
+
+	## TEST B — ATTACK_PLAYER survives stretched army.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	var player_cc: Building = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -24))
+	var cluster: Vector3 = _cc.global_position + Vector3(0, 0, 2)
+	hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST B starts ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	hero.global_position = cluster + Vector3(0, 0, -18)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST B ATTACK_PLAYER survives stretched army",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST B not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+
+	## TEST C — DEFEND remains while threat exists and army is stretched.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	var threat: Unit = _spawn_player_spearman(_cc.global_position + Vector3(4, 0, 0))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST C starts DEFEND", _ai.get_debug_priority() == &"DEFEND")
+	hero.global_position = _cc.global_position + Vector3(0, 0, 30)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect("TEST C DEFEND survives army stretch", _ai.get_debug_priority() == &"DEFEND")
+	_expect("TEST C not REGROUP", _ai.get_debug_priority() != &"REGROUP")
+	_kill_unit(threat)
+
+	## TEST D — Reinforcement behind keeps ATTACK_PLAYER; march required count grows.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -24))
+	cluster = _cc.global_position + Vector3(0, 0, 2)
+	hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST D starts ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	var march0: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	var required0: int = int(march0.get("required", 0))
+	_spawn_enemy_spearman(_cc.global_position + Vector3(8, 0, 8))
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST D reinforcement keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST D not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+	var march1: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	if bool(march1.get("active", false)) and required0 > 0:
+		_expect(
+			"TEST D march required count includes reinforcement",
+			int(march1.get("required", 0)) >= required0
+		)
+
+	## TEST E — Hero reaches march checkpoint first and waits; no hero-only regroup route.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	player_cc = _spawn_player_command_center(_cc.global_position + Vector3(0, 0, -24))
+	cluster = _cc.global_position + Vector3(0, 0, 2)
+	hero = _spawn_enemy_hero(cluster)
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 8:
+		_spawn_enemy_spearman(cluster + Vector3(float(i) * 0.8 - 2.8, 0, 1.0))
+	_ai.set_camps_cleared_for_test(3)
+	PlayerRouteNavigation.ensure_grid_ready()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST E starts ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST E march started", PlayerRouteNavigation.is_enemy_army_march_in_progress())
+	var checkpoint: Vector3 = PlayerRouteNavigation.get_army_march_checkpoint_for_test()
+	hero.global_position = checkpoint
+	if hero.is_custom_rts_movement_active():
+		hero._process_custom_rts_movement(0.016)
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test()
+	_expect(
+		"TEST E hero wait is march WAITING_FOR_ALL",
+		PlayerRouteNavigation.is_enemy_army_march_waiting_for_all()
+	)
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST E hero-ahead keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect("TEST E not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+	_expect(
+		"TEST E command remains attack_player",
+		_ai.get_last_command_kind_for_test() == EnemyAI.CMD_ATTACK
+	)
+	var hero_source: String = String(hero.get_strategic_order_provenance().get("source", ""))
+	_expect("TEST E hero source is not enemy_ai_regroup", hero_source != "enemy_ai_regroup")
+
+	## TEST F — Real HOME_NO_HERO still wins when the hero dies.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	_spawn_player_command_center(_cc.global_position + Vector3(0, 0, -20))
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 5
+	HeroProgressionStore.register_living_hero(hero)
+	for i: int in 6:
+		_spawn_enemy_spearman(_cc.global_position + Vector3(float(i) * 0.8, 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_kill_unit(hero)
+	HeroProgressionStore.clear()
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST F hero death → HOME_NO_HERO",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME_NO_HERO"
+	)
+
+	## TEST G — Real HOME_ARMY_SMALL still wins below the current minimum.
+	await _clear_units_and_buildings_except_cc()
+	_spawn_basic_base(true, true, true)
+	hero = _spawn_enemy_hero(_cc.global_position + Vector3(0, 0, 3))
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
+	_spawn_enemy_spearman(_cc.global_position + Vector3(1, 0, 2))
+	_spawn_enemy_spearman(_cc.global_position + Vector3(2, 0, 2))
+	_ai.set_camps_cleared_for_test(3)
+	await get_tree().process_frame
+	_ai.force_tick_for_test()
+	_expect(
+		"TEST G small army → HOME_ARMY_SMALL",
+		_ai.get_debug_condition_bucket_for_test() == &"HOME_ARMY_SMALL"
+	)
 
 
 func _test_attack_player_force_and_hero_death() -> void:
@@ -1176,7 +1396,7 @@ func _test_attack_player_force_and_hero_death() -> void:
 
 
 func _test_attack_regroup_oscillation_regression() -> void:
-	print("--- ATTACK_PLAYER ↔ REGROUP oscillation regression ---")
+	print("--- ATTACK_PLAYER spacing must not cancel the attack ---")
 	_expect(
 		"hero cohesion radius matches simple AI COHESION_RADIUS",
 		is_equal_approx(_ai.get_hero_cohesion_radius_for_test(), EnemyAI.COHESION_RADIUS)
@@ -1245,11 +1465,15 @@ func _test_attack_regroup_oscillation_regression() -> void:
 	)
 	_ai.force_tick_for_test()
 	_expect(
+		"distant reinforcement keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
+	)
+	_expect(
 		"distant reinforcement does not force REGROUP",
 		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
 	)
 
-	## Obvious Hero separation → REGROUP near main soldier centroid.
+	## Obvious Hero separation → ATTACK_PLAYER remains; march handles catch-up.
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	_spawn_player_command_center(_cc.global_position + Vector3(55, 0, 0))
@@ -1262,38 +1486,16 @@ func _test_attack_regroup_oscillation_regression() -> void:
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
 	_expect(
-		"obviously separated → REGROUP",
-		_ai.get_debug_condition_bucket_for_test() == &"REGROUP"
+		"obviously separated keeps ATTACK_PLAYER",
+		_ai.get_debug_condition_bucket_for_test() == &"ATTACK_PLAYER"
 	)
-	var regroup_dest: Vector3 = _ai.get_regroup_destination_for_test()
-	var main_center: Vector3 = _ai.get_main_army_centroid_for_test()
-	var dest_to_main: float = Vector3(regroup_dest.x, 0, regroup_dest.z).distance_to(
-		Vector3(main_center.x, 0, main_center.z)
-	)
+	_expect("obviously separated is not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
 	_expect(
-		"REGROUP destination near main cluster",
-		dest_to_main <= EnemyAI.MAIN_CLUSTER_RADIUS + 1.0
+		"separated army still issues attack_player",
+		_ai.get_last_command_kind_for_test() == EnemyAI.CMD_ATTACK
 	)
-	hero.global_position = regroup_dest
-	var living_soldiers: Array = []
-	for unit_variant: Variant in _ai.get_enemy_army_for_test():
-		if unit_variant is Unit and not (unit_variant is Hero) and NodeSafety.is_alive_node(unit_variant):
-			living_soldiers.append(unit_variant)
-	for i: int in living_soldiers.size():
-		var soldier: Unit = living_soldiers[i] as Unit
-		soldier.global_position = regroup_dest + Vector3(float(i % 4) * 0.8, 0, float(i / 4) * 0.8)
-	await get_tree().process_frame
-	var snap_regrouped: Dictionary = _ai.get_cohesion_snapshot_for_test()
-	_expect("REGROUP completion geometry is with army", bool(snap_regrouped.get("result", false)))
-	_expect(
-		"REGROUP completion hero→cluster well under far threshold",
-		float(snap_regrouped.get("hero_to_center", 99.0)) <= EnemyAI.HERO_FAR_THRESHOLD
-	)
-	_ai.force_tick_for_test()
-	_expect(
-		"after regroup pack not stuck in REGROUP",
-		_ai.get_debug_condition_bucket_for_test() != &"REGROUP"
-	)
+	var snap_separated: Dictionary = _ai.get_cohesion_snapshot_for_test()
+	_expect("physical cohesion reports not together", not bool(snap_separated.get("result", true)))
 
 	## Multi-tick stability: packed ATTACK must not alternate every tick while facts stay packed.
 	await _clear_units_and_buildings_except_cc()
@@ -1323,12 +1525,13 @@ func _test_attack_regroup_oscillation_regression() -> void:
 		"packed near-base attack does not ATTACK↔REGROUP every tick",
 		attack_regroup_flips == 0
 	)
+	_expect("all packed ticks stay ATTACK_PLAYER", not buckets.has("REGROUP"))
 	_expect("hd0 recorded for packed start", hd0 >= 0.0)
 	_expect("player_cc alive for attack scenarios", NodeSafety.is_alive_node(player_cc))
 
 
 func _test_condition_stability() -> void:
-	print("--- condition stability (no CREEP↔REGROUP thrash) ---")
+	print("--- condition stability (no CREEP thrash from spacing) ---")
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(8, 0, 8))
@@ -1359,7 +1562,7 @@ func _test_condition_stability() -> void:
 		"stable creep travel does not alternate every tick",
 		unique.size() <= 2
 	)
-	## Must not thrash CREEP↔REGROUP↔CREEP↔REGROUP across 6 ticks when facts are stable.
+	## Must not thrash CREEP across 6 ticks when facts are stable.
 	var flips: int = 0
 	for i: int in range(1, buckets.size()):
 		if buckets[i] != buckets[i - 1]:
@@ -1369,6 +1572,7 @@ func _test_condition_stability() -> void:
 		"stable ticks stay CREEP (not REGROUP)",
 		buckets[0] == "EARLY_CREEP" or buckets[0] == "EXTRA_CREEP"
 	)
+	_expect("stable creep ticks never become REGROUP", not buckets.has("REGROUP"))
 
 
 func _test_mixed_army_minimum() -> void:
@@ -1495,7 +1699,7 @@ func _test_creep_approach_staging() -> void:
 
 
 func _test_creep_condition_no_oscillation() -> void:
-	print("--- CREEP condition stability vs REGROUP ---")
+	print("--- CREEP condition stability vs temporary spacing ---")
 	await _clear_units_and_buildings_except_cc()
 	_spawn_basic_base(true, true, true)
 	var hero: Hero = _spawn_enemy_hero(_cc.global_position + Vector3(10, 0, 10))
@@ -1526,13 +1730,19 @@ func _test_creep_condition_no_oscillation() -> void:
 	_expect("stable cohesive creep stays CREEP across ticks", all_creep)
 	_expect("first tick CREEP", buckets[0] == "EARLY_CREEP" or buckets[0] == "EXTRA_CREEP")
 
-	## Move Hero meaningfully away → REGROUP.
+	## Move Hero meaningfully away → CREEP must survive; march handles catch-up.
 	hero.global_position = _cc.global_position + Vector3(10, 0, 40)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
-	_expect("hero separated → REGROUP", _ai.get_debug_condition_bucket_for_test() == &"REGROUP")
+	_expect(
+		"hero separated keeps CREEP",
+		_ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP"
+		or _ai.get_debug_condition_bucket_for_test() == &"EXTRA_CREEP"
+	)
+	_expect("hero separated is not REGROUP", _ai.get_debug_condition_bucket_for_test() != &"REGROUP")
+	_expect("hero separated is not HOME", _ai.get_debug_priority() != &"HOME_WAIT")
 
-	## Bring Hero back to the soldier pack → CREEP again.
+	## Bring Hero back to the soldier pack → CREEP still.
 	hero.global_position = _cc.global_position + Vector3(12, 0, 10)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()
@@ -1883,6 +2093,12 @@ func _test_brain_debug_black_box() -> void:
 	)
 	_expect("IF tree records HERO_MISSING", names.has("HERO_MISSING"))
 	_expect("IF tree records HOME_WAIT", names.has("HOME_WAIT"))
+	_expect(
+		"IF tree no longer treats ARMY_NOT_TOGETHER as a winning mission",
+		not names.has("ARMY_NOT_TOGETHER")
+	)
+	_expect("P overlay separates PHYSICAL ARMY from thinking", overlay.contains("PHYSICAL ARMY"))
+	_expect("P overlay thinking is not REGROUP", not overlay.contains("THINKING: REGROUP"))
 	var skipped_after_hero: bool = false
 	var hero_missing_true: bool = false
 	for entry: String in states:

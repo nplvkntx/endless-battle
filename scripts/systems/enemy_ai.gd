@@ -41,7 +41,6 @@ const DESIRED_CANNONS: int = 2
 const CMD_NONE: StringName = &""
 const CMD_HOME: StringName = &"home"
 const CMD_DEFEND: StringName = &"defend"
-const CMD_REGROUP: StringName = &"regroup"
 const CMD_CREEP: StringName = &"creep"
 const CMD_ATTACK: StringName = &"attack_player"
 
@@ -50,7 +49,6 @@ const DEBUG_CONDITION_ORDER: Array[StringName] = [
 	&"HERO_MISSING",
 	&"ARMY_TOO_SMALL",
 	&"HERO_STUCK",
-	&"ARMY_NOT_TOGETHER",
 	&"EARLY_CREEP",
 	&"ATTACK_PLAYER",
 	&"EXTRA_CREEP",
@@ -188,6 +186,9 @@ func _ai_tick() -> void:
 
 
 func _tick_military() -> void:
+	## Physical spacing is march execution, never a strategic mission.
+	_army_is_together()
+
 	var threat: Node3D = _find_base_threat()
 	var base_threatened: bool = threat != null
 	_debug_record_condition(&"BASE_THREATENED", base_threatened, _dbg_defense.duplicate())
@@ -221,23 +222,6 @@ func _tick_military() -> void:
 		_set_condition(&"HERO_STUCK")
 		_free_hero_locally()
 		return
-
-	var together: bool = _army_is_together()
-	_debug_record_condition(&"ARMY_NOT_TOGETHER", not together, {
-		"together": together,
-		"hero_to_centroid": _dbg_hero_to_centroid,
-		"soldiers_near": _dbg_soldiers_near,
-		"soldiers_total": _dbg_soldiers,
-		"required_radius": COHESION_RADIUS,
-	})
-	if not together:
-		if PlayerRouteNavigation.is_enemy_army_march_waiting_for_all():
-			## Catch-up wait is execution, not a REGROUP mission.
-			pass
-		else:
-			_set_condition(&"REGROUP")
-			_regroup()
-			return
 
 	var early_creep: bool = _needs_early_creep()
 	_debug_record_condition(&"EARLY_CREEP", early_creep, {
@@ -1409,7 +1393,7 @@ func _build_hero_ability_context(hero: Hero) -> Dictionary:
 		"nearby_enemy_count": nearby_enemies,
 		"aoe_needed": 3,
 		"defensive_hp_ratio": 0.4,
-		"retreating": _last_command_kind == CMD_HOME or _last_command_kind == CMD_REGROUP,
+		"retreating": _last_command_kind == CMD_HOME,
 		"current_target": attack_target,
 		"allied_army_nearby": _soldiers_near_hero(COHESION_RADIUS),
 	}
@@ -1570,32 +1554,6 @@ func _army_home() -> void:
 		return
 	_debug_set_objective_name("Home")
 	_issue_army_move(home, &"move", CMD_HOME, 0)
-
-func _regroup() -> void:
-	var hero: Hero = _w.hero as Hero
-	if hero == null or not NodeSafety.is_alive_node(hero):
-		return
-	var soldiers: Array = _get_live_soldiers()
-	if soldiers.is_empty():
-		_army_home()
-		return
-	var facts: Dictionary = _main_army_facts(soldiers)
-	var center: Vector3 = facts.get("center", _w.home) as Vector3
-	var main_count: int = int(facts.get("main_count", 0))
-	if main_count * 2 < soldiers.size():
-		_army_home()
-		return
-	# Important: when Hero is ahead, move ONLY Hero back to the soldier mass.
-	if _horizontal_distance(hero.global_position, center) > COHESION_RADIUS:
-		_debug_set_objective_name("Army centroid")
-		var dest: Vector3 = _nearest_walkable(center)
-		if _unit_has_matching_strategic_order(hero, &"move", dest):
-			_remember_strategic_command(CMD_REGROUP, dest, 1, 0)
-			_debug_record_order(&"move", CMD_REGROUP, false, "hero regroup order still valid", true)
-			return
-		_request_strategic_group_move([hero], dest, &"move", &"enemy_ai_regroup")
-		_remember_strategic_command(CMD_REGROUP, dest, 1, 0)
-		_debug_record_order(&"move", CMD_REGROUP, true, "hero only")
 
 func _creep() -> void:
 	var camp: Node3D = _find_useful_creep_camp()
@@ -1790,6 +1748,9 @@ func _army_is_together() -> bool:
 			_dbg_soldiers = 0
 			_dbg_soldiers_near = 0
 			_dbg_hero_to_centroid = 0.0
+			_dbg_army_center = _w.home as Vector3
+			_dbg_farthest_name = ""
+			_dbg_farthest_dist = 0.0
 		return false
 	var soldiers: Array = _get_live_soldiers()
 	if soldiers.is_empty():
@@ -1799,23 +1760,22 @@ func _army_is_together() -> bool:
 			_dbg_soldiers = 0
 			_dbg_soldiers_near = 0
 			_dbg_hero_to_centroid = 0.0
+			_dbg_army_center = hero.global_position
+			_dbg_farthest_name = ""
+			_dbg_farthest_dist = 0.0
 		return false
 	var facts: Dictionary = _main_army_facts(soldiers)
 	var main_count: int = int(facts.get("main_count", 0))
 	var center: Vector3 = facts.get("center", hero.global_position) as Vector3
 	var hero_to_centroid: float = _horizontal_distance(hero.global_position, center)
+	var majority_together: bool = main_count * 2 >= soldiers.size()
+	var result: bool = majority_together and hero_to_centroid <= COHESION_RADIUS
 	if _debug_enabled:
 		_dbg_together_evaluated = true
+		_dbg_together = result
 		_dbg_soldiers = soldiers.size()
 		_dbg_soldiers_near = main_count
 		_dbg_hero_to_centroid = hero_to_centroid
-	if main_count * 2 < soldiers.size():
-		if _debug_enabled:
-			_dbg_together = false
-		return false
-	var result: bool = hero_to_centroid <= COHESION_RADIUS
-	if _debug_enabled:
-		_dbg_together = result
 		_dbg_army_center = center
 		_dbg_farthest_name = ""
 		_dbg_farthest_dist = 0.0
@@ -2307,8 +2267,6 @@ func get_strategic_order_label_for_test() -> String:
 			return "HOME"
 		CMD_DEFEND:
 			return "DEFEND"
-		CMD_REGROUP:
-			return "REGROUP"
 		CMD_CREEP:
 			return "CREEP"
 		CMD_ATTACK:
@@ -2425,11 +2383,6 @@ func get_cohesion_snapshot_for_test() -> Dictionary:
 
 func get_hero_cohesion_radius_for_test() -> float:
 	return HERO_FAR_THRESHOLD
-
-
-func get_regroup_destination_for_test() -> Vector3:
-	_read_live_world()
-	return _nearest_walkable(_main_army_center())
 
 
 func get_main_army_centroid_for_test() -> Vector3:
@@ -2677,15 +2630,6 @@ func _debug_reason_for(condition_name: StringName, result: bool, facts: Dictiona
 			]
 		&"HERO_STUCK":
 			return "stuck=%s" % ("YES" if result else "NO")
-		&"ARMY_NOT_TOGETHER":
-			if not _dbg_together_evaluated:
-				return "not evaluated"
-			return "hero_to_centroid=%.1fm soldiers_near_group=%d/%d required_radius=%.0fm" % [
-				float(facts.get("hero_to_centroid", _dbg_hero_to_centroid)),
-				int(facts.get("soldiers_near", _dbg_soldiers_near)),
-				int(facts.get("soldiers_total", _dbg_soldiers)),
-				float(facts.get("required_radius", COHESION_RADIUS)),
-			]
 		&"EARLY_CREEP":
 			var camp_name: String = String(facts.get("camp", _debug_camp_name()))
 			var hero_lvl: int = int(facts.get("hero_level", int(_w.hero_level)))
@@ -2959,7 +2903,6 @@ func _debug_emit_change_events() -> void:
 	var decision: StringName = _last_condition
 	var objective: String = _dbg_objective_name
 	var attack_state: String = _debug_condition_state(&"ATTACK_PLAYER")
-	var together_state: String = _debug_condition_state(&"ARMY_NOT_TOGETHER")
 	var hero_missing_state: String = _debug_condition_state(&"HERO_MISSING")
 	var threat_state: String = _debug_condition_state(&"BASE_THREATENED")
 	var army_small_state: String = _debug_condition_state(&"ARMY_TOO_SMALL")
@@ -2990,10 +2933,12 @@ func _debug_emit_change_events() -> void:
 	elif army_small_state == "FALSE" and _dbg_prev_army_small == "TRUE":
 		_debug_event("army minimum PASS")
 
-	if together_state == "TRUE" and _dbg_prev_together == "FALSE":
-		_debug_event("Cohesion YES -> NO")
-	elif together_state == "FALSE" and _dbg_prev_together == "TRUE":
-		_debug_event("Cohesion NO -> YES")
+	if _dbg_together_evaluated:
+		var together_now: String = "YES" if _dbg_together else "NO"
+		if together_now == "NO" and _dbg_prev_together == "YES":
+			_debug_event("Cohesion YES -> NO")
+		elif together_now == "YES" and _dbg_prev_together == "NO":
+			_debug_event("Cohesion NO -> YES")
 
 	if early_creep_state == "TRUE" and _dbg_prev_early_creep != "TRUE":
 		_debug_event("early creep started")
@@ -3062,7 +3007,7 @@ func _debug_emit_change_events() -> void:
 	_dbg_prev_decision = decision
 	_dbg_prev_objective = objective
 	_dbg_prev_attack = attack_state
-	_dbg_prev_together = together_state
+	_dbg_prev_together = ("YES" if _dbg_together else "NO") if _dbg_together_evaluated else ""
 	_dbg_prev_hero_missing = hero_missing_state
 	_dbg_prev_threat = threat_state
 	_dbg_prev_army_small = army_small_state
@@ -3224,17 +3169,6 @@ func _debug_print_if_tree() -> void:
 				print("minimum=%d" % int(facts.get("minimum", 0)))
 			&"HERO_STUCK":
 				print("stuck=%s" % ("YES" if state == "TRUE" else "NO"))
-			&"ARMY_NOT_TOGETHER":
-				if state != "SKIPPED":
-					print("hero_to_centroid=%.1fm" % float(facts.get("hero_to_centroid", _dbg_hero_to_centroid)))
-					print(
-						"soldiers_near_group=%d/%d"
-						% [
-							int(facts.get("soldiers_near", _dbg_soldiers_near)),
-							int(facts.get("soldiers_total", _dbg_soldiers)),
-						]
-					)
-					print("required_radius=%.0fm" % float(facts.get("required_radius", COHESION_RADIUS)))
 			&"EARLY_CREEP":
 				if state != "SKIPPED":
 					print("hero_lvl=%d" % int(facts.get("hero_level", int(_w.hero_level))))
@@ -3362,9 +3296,20 @@ func _debug_panel_text() -> String:
 			)
 	lines.append_array(PackedStringArray([
 		"",
+		"PHYSICAL ARMY",
+		"together=%s" % together_line,
+		"hero_to_center=%.1fm" % _dbg_hero_to_centroid,
+	]))
+	if not _dbg_farthest_name.is_empty():
+		lines.append(
+			"farthest=%s %.1fm" % [_dbg_farthest_name, _dbg_farthest_dist]
+		)
+	if together_line == "NO":
+		lines.append("reason=%s" % _debug_cohesion_reason())
+	lines.append_array(PackedStringArray([
+		"",
 		"Hero %s" % hero_line,
 		"Army %d" % int(_debug_summary.get("army", 0)),
-		"Together %s" % together_line,
 		"",
 		"Power",
 		"%.0f / %.0f" % [
@@ -3381,7 +3326,7 @@ func _debug_panel_text() -> String:
 		_debug_threat_radius_short(),
 		"Hero %s" % _debug_check_short(&"HERO_MISSING", false),
 		"Army %s" % _debug_army_size_short(),
-		"Together %s" % _debug_check_short(&"ARMY_NOT_TOGETHER", false),
+		"Stuck %s" % _debug_check_short(&"HERO_STUCK", true),
 		"Creep %s" % _debug_check_short(&"EARLY_CREEP", true),
 		"Attack %s" % _debug_check_short(&"ATTACK_PLAYER", true),
 		"",
@@ -3689,23 +3634,54 @@ func _debug_print_unit_order_changes() -> void:
 
 
 func _debug_print_cohesion() -> void:
-	print("COHESION")
+	print("PHYSICAL ARMY")
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
 	if not _dbg_together_evaluated:
-		print("evaluated=NO")
-		print("reason=earlier priority won")
-		print("")
-		return
-	print("army_center=%s" % _debug_fmt_vec(_dbg_army_center))
-	print("hero_distance=%.1fm" % _dbg_hero_to_centroid)
-	print("required_hero_distance<=%.0fm" % COHESION_RADIUS)
-	print("soldiers_total=%d" % _dbg_soldiers)
-	print("soldiers_near=%d" % _dbg_soldiers_near)
-	print("soldiers_far=%d" % maxi(0, _dbg_soldiers - _dbg_soldiers_near))
-	print("together=%s" % _debug_yes(_dbg_together))
-	if not _dbg_farthest_name.is_empty():
-		print("farthest_unit=%s" % _dbg_farthest_name)
-		print("farthest_distance=%.1fm" % _dbg_farthest_dist)
+		print("together=n/a")
+		print("reason=not evaluated")
+	else:
+		print("together=%s" % _debug_yes(_dbg_together))
+		print("reason=%s" % _debug_cohesion_reason())
+		print("army_center=%s" % _debug_fmt_vec(_dbg_army_center))
+		print("hero_to_center=%.1fm" % _dbg_hero_to_centroid)
+		print("required_hero_distance<=%.0fm" % COHESION_RADIUS)
+		print("soldiers_total=%d" % _dbg_soldiers)
+		print("soldiers_near=%d" % _dbg_soldiers_near)
+		print("soldiers_far=%d" % maxi(0, _dbg_soldiers - _dbg_soldiers_near))
+		if not _dbg_farthest_name.is_empty():
+			print("farthest=%s" % _dbg_farthest_name)
+			print("farthest_distance=%.1fm" % _dbg_farthest_dist)
+	if bool(march.get("active", false)):
+		print("march=%s" % String(march.get("mode", "")))
+		print(
+			"arrived=%d/%d"
+			% [int(march.get("arrived", 0)), int(march.get("required", 0))]
+		)
+		print("hero_arrived=%s" % _debug_yes(bool(march.get("hero_arrived", false))))
+		print("checkpoint=%s" % _debug_fmt_vec(march.get("checkpoint", Vector3.ZERO) as Vector3))
+	else:
+		print("march=NONE")
 	print("")
+
+
+func _debug_cohesion_reason() -> String:
+	if not _dbg_together_evaluated:
+		return "not evaluated"
+	if _dbg_together:
+		return "army packed"
+	var march: Dictionary = PlayerRouteNavigation.get_army_march_debug_snapshot()
+	if bool(march.get("active", false)):
+		var waiting: int = int(march.get("waiting_for", 0))
+		if waiting > 0:
+			return "%d units still catching up" % waiting
+		return "march %s" % String(march.get("mode", ""))
+	if _dbg_soldiers <= 0:
+		return "no soldiers"
+	if _dbg_hero_to_centroid > COHESION_RADIUS:
+		return "hero separated from centroid"
+	if _dbg_soldiers_near * 2 < _dbg_soldiers:
+		return "soldiers split"
+	return "temporarily stretched"
 
 
 func _debug_print_army_members() -> void:
