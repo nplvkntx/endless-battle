@@ -15,8 +15,6 @@ const TRAIN_GOLD_COST: int = UnitStats.WORKER_GOLD_COST
 const TRAIN_FOOD_COST: int = UnitStats.WORKER_FOOD_COST
 const TRAIN_SECONDS: float = UnitStats.WORKER_TRAIN_SECONDS
 const MAX_ENEMY_WORKER_QUEUE: int = 2
-const RALLY_MARKER_Y: float = 0.05
-const RALLY_SLOT_SPACING: float = 2.0
 ## Lateral spacing for sequential worker exit slots at the Command Center.
 const WORKER_SPAWN_SLOT_SPACING: float = 1.0
 const ENEMY_TEAM_ID: int = 1
@@ -45,6 +43,7 @@ enum RallyTargetType {
 	NONE,
 	GROUND,
 	RESOURCE,
+	UNIT_TARGET,
 }
 
 var _worker_queue_count: int = 0
@@ -54,11 +53,8 @@ var _training_started_at: float = 0.0
 var _repeat_enabled: bool = false
 var _repeat_unit_type: StringName = &""
 var _rally_target_type: RallyTargetType = RallyTargetType.NONE
-var _rally_point: Vector3 = Vector3.ZERO
 var _rally_resource: GatherableResource = null
 var _rally_resource_handle: EntityHandle = EntityHandle.empty()
-var _rally_marker: MeshInstance3D = null
-var _rally_next_slot: int = 0
 var _worker_spawn_next_slot: int = 0
 
 var command_center_tier: int = MIN_TIER
@@ -145,10 +141,6 @@ func _on_health_depleted() -> void:
 	_tier2_marker = null
 	_tier3_marker = null
 	_tier_visuals_root = null
-
-	if _rally_marker != null and is_instance_valid(_rally_marker):
-		_rally_marker.queue_free()
-		_rally_marker = null
 
 	destroy_building()
 	queue_free()
@@ -574,9 +566,14 @@ func set_rally_point(ground_position: Vector3) -> void:
 	_rally_target_type = RallyTargetType.GROUND
 	_rally_resource = null
 	_rally_resource_handle = EntityHandle.empty()
-	_rally_point = Vector3(ground_position.x, global_position.y + worker_spawn_offset.y, ground_position.z)
-	_rally_next_slot = 0
-	_update_rally_marker(Vector3(ground_position.x, RALLY_MARKER_Y, ground_position.z))
+	super.set_rally_point(ground_position)
+
+
+func set_rally_unit(unit: Unit) -> void:
+	_rally_target_type = RallyTargetType.UNIT_TARGET
+	_rally_resource = null
+	_rally_resource_handle = EntityHandle.empty()
+	super.set_rally_unit(unit)
 
 
 func set_rally_resource(resource: GatherableResource) -> void:
@@ -586,35 +583,35 @@ func set_rally_resource(resource: GatherableResource) -> void:
 	_rally_target_type = RallyTargetType.RESOURCE
 	_rally_resource = resource
 	_rally_resource_handle = EntityHandle.from_node(resource)
+	_rally_type = ProductionRallyType.NONE
+	_rally_unit_handle = EntityHandle.empty()
 	_rally_point = Vector3.ZERO
-
-	var marker_position: Vector3 = resource.global_position
-	marker_position.y = RALLY_MARKER_Y
-	_update_rally_marker(marker_position)
+	_set_rally_marker_position(
+		Vector3(resource.global_position.x, RALLY_MARKER_Y, resource.global_position.z)
+	)
+	_sync_rally_marker_visibility()
 	resource.play_target_feedback()
 
 
-func _update_rally_marker(marker_position: Vector3) -> void:
-	if _rally_marker == null:
-		_rally_marker = MeshInstance3D.new()
-		var marker_mesh := CylinderMesh.new()
-		marker_mesh.top_radius = 0.45
-		marker_mesh.bottom_radius = 0.45
-		marker_mesh.height = 0.08
-		_rally_marker.mesh = marker_mesh
+func _has_rally_marker_state() -> bool:
+	return _rally_target_type != RallyTargetType.NONE
 
-		var marker_material := StandardMaterial3D.new()
-		marker_material.albedo_color = Color(0.2, 0.85, 0.35, 0.9)
-		marker_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_rally_marker.material_override = marker_material
 
-		var marker_parent: Node = get_parent()
-		if marker_parent == null:
+func _update_selected_rally_marker() -> void:
+	if _rally_target_type == RallyTargetType.RESOURCE:
+		if not is_selected:
+			if _rally_marker != null and is_instance_valid(_rally_marker):
+				_rally_marker.visible = false
 			return
-
-		marker_parent.add_child(_rally_marker)
-
-	_rally_marker.global_position = marker_position
+		var resource: GatherableResource = _resolve_rally_resource()
+		if resource != null:
+			_set_rally_marker_position(
+				Vector3(resource.global_position.x, RALLY_MARKER_Y, resource.global_position.z)
+			)
+			if _rally_marker != null and is_instance_valid(_rally_marker):
+				_rally_marker.visible = true
+			return
+	super._update_selected_rally_marker()
 
 
 func try_train_worker() -> void:
@@ -873,18 +870,15 @@ func _apply_worker_rally(worker: Worker) -> void:
 	if _rally_target_type == RallyTargetType.RESOURCE and not _is_valid_rally_resource(_rally_resource):
 		_rally_resource = null
 		_rally_resource_handle = EntityHandle.empty()
+		_rally_target_type = RallyTargetType.NONE
 
-	match _rally_target_type:
-		RallyTargetType.GROUND:
-			issue_production_rally_move(worker, _claim_ground_rally_target())
-		RallyTargetType.RESOURCE:
-			_assign_worker_to_rally_resource(worker)
-
-
-func _claim_ground_rally_target() -> Vector3:
-	var slot_index: int = _rally_next_slot
-	_rally_next_slot += 1
-	return GroupMoveSpacing.compute_slot_target(_rally_point, slot_index, RALLY_SLOT_SPACING)
+	if (
+		_rally_target_type == RallyTargetType.GROUND
+		or _rally_target_type == RallyTargetType.UNIT_TARGET
+	):
+		apply_production_rally(worker)
+	elif _rally_target_type == RallyTargetType.RESOURCE:
+		_assign_worker_to_rally_resource(worker)
 
 
 func _assign_worker_to_rally_resource(worker: Worker) -> void:

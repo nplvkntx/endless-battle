@@ -22,6 +22,12 @@ func _ready() -> void:
 	await _verify_idle_cluster_no_slide(failures)
 	await _verify_stale_move_callback_ignored(failures)
 	_verify_separation_forward_preserve(failures)
+	await _verify_custom_rts_resume_preserves_progress(failures)
+	await _verify_custom_rts_rewind_reversal_fixed(failures)
+	await _verify_custom_rts_steering_never_reverses(failures)
+	await _verify_spearman_no_preferred_range_backoff(failures)
+	await _verify_attack_move_resume_keeps_route(failures)
+	await _verify_group_slots_compact(failures)
 	_verify_standing_uses_authoritative_path(failures)
 	_verify_movement_active_gate(failures)
 	_verify_custom_rts_api(failures)
@@ -350,6 +356,269 @@ func _verify_separation_forward_preserve(failures: PackedStringArray) -> void:
 	body.free()
 
 
+func _verify_custom_rts_resume_preserves_progress(failures: PackedStringArray) -> void:
+	print("verify: custom RTS resume does not rewind to WP0")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(0.0, 0.0, 0.0)
+	await _wait_nav_ready(unit)
+
+	var route := PackedVector3Array([
+		Vector3(0.0, 0.0, 0.0),
+		Vector3(4.0, 0.0, 0.0),
+		Vector3(8.0, 0.0, 0.0),
+		Vector3(12.0, 0.0, 0.0),
+		Vector3(16.0, 0.0, 0.0),
+	])
+	unit.prepare_custom_rts_route(route, Vector3(16.0, 0.0, 0.0), 7, Vector3(16.0, 0.0, 0.0), &"attack_move")
+	unit.set_movement_target(Vector3(16.0, 0.0, 0.0))
+	await get_tree().physics_frame
+	unit.global_position = Vector3(8.5, 0.0, 0.0)
+	# Simulate mid-route progress + combat pause.
+	unit._custom_rts_route_index = 3
+	unit.clear_move_target(true)
+	_expect(failures, "pause preserves route", unit.has_custom_rts_route())
+	_expect(failures, "pause clears active travel", not unit.is_custom_rts_movement_active())
+
+	var resumed: bool = unit.try_resume_custom_rts_route(Vector3(16.0, 0.0, 0.0))
+	_expect(failures, "resume succeeds", resumed)
+	_expect(failures, "resume does not rewind to 0", unit.get_custom_rts_route_index() >= 3)
+	_expect(failures, "resume reactivates custom RTS", unit.is_custom_rts_movement_active())
+
+	# BEFORE bug: resume called _activate_pending which forced index=0.
+	var before_bug_index: int = 0
+	_expect(
+		failures,
+		"before-bug rewind would have been 0",
+		before_bug_index == 0 and unit.get_custom_rts_route_index() > before_bug_index
+	)
+	await _free_harness(harness)
+
+
+func _verify_custom_rts_rewind_reversal_fixed(failures: PackedStringArray) -> void:
+	print("verify: first-frame WP0 rewind reversal is fixed")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	# Unit already past mid-route; old resume forced index=0 → route_dir toward origin.
+	unit.global_position = Vector3(10.0, 0.0, 0.0)
+	await _wait_nav_ready(unit)
+	var route := PackedVector3Array([
+		Vector3(0.0, 0.0, 0.0),
+		Vector3(4.0, 0.0, 0.0),
+		Vector3(8.0, 0.0, 0.0),
+		Vector3(12.0, 0.0, 0.0),
+		Vector3(16.0, 0.0, 0.0),
+	])
+	unit.prepare_custom_rts_route(route, Vector3(16.0, 0.0, 0.0), 11, Vector3(16.0, 0.0, 0.0), &"attack_move")
+	unit.set_movement_target(Vector3(16.0, 0.0, 0.0))
+	await get_tree().physics_frame
+
+	# BEFORE evidence: old resume reset index to 0 and followed WP0 with no behind-skip.
+	var wp0: Vector3 = route[0]
+	var old_route_dir: Vector3 = Vector3(wp0.x - unit.global_position.x, 0.0, wp0.z - unit.global_position.z).normalized()
+	var old_slot_dir: Vector3 = Vector3(16.0 - unit.global_position.x, 0.0, 0.0).normalized()
+	var old_desired: Vector3 = (
+		old_route_dir * 1.0
+		+ Vector3.ZERO * 0.35
+		+ old_slot_dir * 0.15
+	).normalized()
+	print(
+		"[MOVE TRACE BEFORE] unit=Pikeman_sim position=", unit.global_position,
+		" route_dir=", old_route_dir,
+		" separation=(0,0,0)",
+		" slot_dir=", old_slot_dir,
+		" final_desired=", old_desired,
+		" custom_route_index=0",
+		" cause=resume_reset_to_WP0"
+	)
+	_expect(failures, "before-fix route_dir points backward", old_route_dir.x < -0.5)
+	_expect(failures, "before-fix desired opposes destination", old_desired.x < 0.0)
+
+	# Fixed resume path.
+	unit._custom_rts_route_index = 3
+	unit.clear_move_target(true)
+	unit._custom_rts_paused_route_index = 3
+	unit.try_resume_custom_rts_route(Vector3(16.0, 0.0, 0.0))
+	var fixed: Dictionary = unit.compose_custom_rts_steering_for_tests()
+	var fixed_route: Vector3 = fixed.get("route_dir", Vector3.ZERO) as Vector3
+	print(
+		"[MOVE TRACE AFTER] unit=Pikeman_sim position=", unit.global_position,
+		" route_dir=", fixed_route,
+		" separation=", fixed.get("separation", Vector3.ZERO),
+		" slot_dir=", fixed.get("slot_dir", Vector3.ZERO),
+		" final_desired=", fixed.get("final_desired", Vector3.ZERO),
+		" custom_route_index=", unit.get_custom_rts_route_index(),
+		" route_dot=", fixed.get("route_dot", 0.0)
+	)
+	_expect(failures, "after-fix route_dir points forward", fixed_route.x > 0.5)
+	_expect(failures, "after-fix index stays ahead", unit.get_custom_rts_route_index() >= 3)
+	_expect(failures, "after-fix desired toward destination", float(fixed.get("route_dot", 0.0)) > 0.0)
+	await _free_harness(harness)
+
+
+func _verify_custom_rts_steering_never_reverses(failures: PackedStringArray) -> void:
+	print("verify: custom RTS steering never reverses route")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(0.0, 0.0, 0.0)
+	await _wait_nav_ready(unit)
+
+	var route := PackedVector3Array([
+		Vector3(2.0, 0.0, 0.0),
+		Vector3(20.0, 0.0, 0.0),
+	])
+	unit.prepare_custom_rts_route(route, Vector3(20.0, 0.0, 0.0), 9, Vector3(20.0, 0.0, 0.0), &"move")
+	unit.set_movement_target(Vector3(20.0, 0.0, 0.0))
+	await get_tree().physics_frame
+
+	# Inject strong rearward + opposing slot-like separation cache.
+	unit._custom_rts_separation_cache = Vector3(-1.0, 0.0, 0.0)
+	unit._custom_rts_separation_cache_frame = Engine.get_physics_frames()
+	var steering: Dictionary = unit.compose_custom_rts_steering_for_tests(
+		Vector3(-1.0, 0.0, 0.2),
+		18.0
+	)
+	var route_dir: Vector3 = steering.get("route_dir", Vector3.ZERO) as Vector3
+	var final_desired: Vector3 = steering.get("final_desired", Vector3.ZERO) as Vector3
+	var route_dot: float = float(steering.get("route_dot", 0.0))
+	print(
+		"[MOVE TRACE] unit=", unit.name,
+		" route_dir=", route_dir,
+		" separation=", steering.get("separation", Vector3.ZERO),
+		" slot_dir=", steering.get("slot_dir", Vector3.ZERO),
+		" final_desired=", final_desired,
+		" route_dot=", route_dot
+	)
+	_expect(failures, "route points forward +X", route_dir.x > 0.5)
+	_expect(failures, "opposing separation does not reverse", route_dot >= Unit.CUSTOM_RTS_MIN_FORWARD - 0.001)
+	_expect(failures, "final desired still forward", final_desired.x > 0.0)
+	await _free_harness(harness)
+
+
+func _verify_spearman_no_preferred_range_backoff(failures: PackedStringArray) -> void:
+	print("verify: spearman/pikeman never preferred-range backoff")
+	const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
+	var spear: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	add_child(spear)
+	spear.global_position = Vector3.ZERO
+	spear.team_id = TeamVisuals.PLAYER_TEAM_ID
+	await get_tree().process_frame
+
+	var dummy: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+	add_child(dummy)
+	dummy.global_position = Vector3(0.6, 0.0, 0.0)
+	dummy.team_id = TeamVisuals.ENEMY_TEAM_ID
+	await get_tree().process_frame
+
+	spear._attack_target = dummy
+	_expect(
+		failures,
+		"spearman attack_range is melee",
+		not CombatTargetValidation.is_ranged_attack_range(spear.attack_range)
+	)
+	_expect(
+		failures,
+		"spearman preferred-range always false",
+		not spear._should_reposition_for_preferred_range()
+	)
+	_expect(
+		failures,
+		"is_too_close_for_preferred_range false for spearman",
+		not CombatTargetValidation.is_too_close_for_preferred_range(
+			spear, dummy, spear.attack_range, spear.stopping_distance, 0
+		)
+	)
+	spear.queue_free()
+	dummy.queue_free()
+	await get_tree().process_frame
+
+
+func _verify_attack_move_resume_keeps_route(failures: PackedStringArray) -> void:
+	print("verify: attack-move stop/resume keeps same strategic route")
+	var harness: Dictionary = await _spawn_nav_harness()
+	var unit: Swordsman = harness["unit"]
+	unit.global_position = Vector3(-6.0, 0.0, 0.0)
+	unit.team_id = TeamVisuals.ENEMY_TEAM_ID
+	await _wait_nav_ready(unit)
+
+	var dest := Vector3(14.0, 0.0, 0.0)
+	var result: Dictionary = PlayerRouteNavigation.request_group_move(
+		[unit], dest, &"attack_move", false, &"test"
+	)
+	_expect(failures, "attack-move route handled", bool(result.get("handled", false)))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	_expect(failures, "unit custom RTS active", unit.is_custom_rts_movement_active())
+	var route_count_before: int = unit.get_custom_rts_route_waypoint_count()
+	unit.global_position = Vector3(2.0, 0.0, 0.0)
+	unit._custom_rts_route_index = mini(2, maxi(route_count_before - 1, 0))
+	var index_before: int = unit.get_custom_rts_route_index()
+
+	# Simulate _stop_and_attack preserve + resume.
+	unit.clear_move_target(true)
+	_expect(failures, "stop preserves waypoints", unit.get_custom_rts_route_waypoint_count() == route_count_before)
+	var ok: bool = unit.try_resume_custom_rts_route(dest)
+	_expect(failures, "attack-move resume ok", ok)
+	_expect(
+		failures,
+		"attack-move resume index not rewound",
+		unit.get_custom_rts_route_index() >= index_before
+	)
+	_expect(
+		failures,
+		"attack-move same waypoint count",
+		unit.get_custom_rts_route_waypoint_count() == route_count_before
+	)
+	await _free_harness(harness)
+
+
+func _verify_group_slots_compact(failures: PackedStringArray) -> void:
+	print("verify: group final slots stay compact")
+	PlayerRouteNavigation.clear_all()
+	await get_tree().process_frame
+	const SPEARMAN_SCENE: PackedScene = preload("res://scenes/units/spearman.tscn")
+	var units: Array = []
+	for i: int in 3:
+		var u: Spearman = SPEARMAN_SCENE.instantiate() as Spearman
+		add_child(u)
+		u.global_position = Vector3(-12.0 + float(i), 0.0, -8.0)
+		u.team_id = TeamVisuals.ENEMY_TEAM_ID
+		units.append(u)
+	await get_tree().process_frame
+
+	var dest := Vector3(12.0, 0.0, 8.0)
+	var result: Dictionary = PlayerRouteNavigation.request_group_move(
+		units, dest, &"attack_move", false, &"test"
+	)
+	_expect(failures, "group CREEP-like move handled", bool(result.get("handled", false)))
+	var slots: Array = result.get("slot_targets", []) as Array
+	_expect(failures, "three slots issued", slots.size() == 3)
+	if slots.size() == 3:
+		var max_span: float = 0.0
+		for a: Variant in slots:
+			for b: Variant in slots:
+				var d: Vector3 = (a as Vector3) - (b as Vector3)
+				d.y = 0.0
+				max_span = maxf(max_span, d.length())
+		print(
+			"[GROUP SLOTS] shared_dest=", result.get("accepted_destination", Vector3.ZERO),
+			" slots=", slots,
+			" max_span=", max_span
+		)
+		_expect(failures, "slots within compact area", max_span <= 4.0)
+		for slot_v: Variant in slots:
+			var slot: Vector3 = slot_v as Vector3
+			var behind: Vector3 = slot - dest
+			# No slot should sit materially behind the shared destination along -travel.
+			# Travel is roughly from (-12,-8) toward (12,8); behind would be much closer to origin.
+			var from_origin: float = Vector3(slot.x + 12.0, 0.0, slot.z + 8.0).length()
+			_expect(failures, "slot near destination not origin", from_origin > 15.0)
+
+	for u: Variant in units:
+		(u as Node).queue_free()
+	await get_tree().process_frame
+
+
 func _verify_custom_rts_api(failures: PackedStringArray) -> void:
 	print("verify: custom RTS movement API present")
 	var source: String = FileAccess.get_file_as_string("res://scripts/base/unit.gd")
@@ -357,6 +626,13 @@ func _verify_custom_rts_api(failures: PackedStringArray) -> void:
 		failures,
 		"acceptance radius helper present",
 		source.contains("func get_movement_acceptance_radius")
+	)
+	_expect(
+		failures,
+		"custom RTS resume preserves progress",
+		source.contains("func try_resume_custom_rts_route")
+		and source.contains("_snap_custom_rts_route_index_to_progress")
+		and source.contains("compose_custom_rts_steering_for_tests")
 	)
 	_expect(
 		failures,

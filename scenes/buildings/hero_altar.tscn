@@ -25,7 +25,7 @@ size = Vector3(4.76, 0.025, 0.06)
 size = Vector3(0.06, 0.025, 4.76)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_altar"]
-size = Vector3(3, 2, 3)
+size = Vector3(4.2, 2, 4.2)
 
 [node name="HeroAltar" type="StaticBody3D" groups=["buildings"]]
 collision_layer = 4

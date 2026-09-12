@@ -20,6 +20,9 @@ func _ready() -> void:
 	await _test_barracks_rally_around_obstacle(failures)
 	await _test_sequential_rally_group(failures)
 	await _test_rmb_same_backend(failures)
+	await _test_rally_marker_visibility(failures)
+	await _test_unit_target_rally_join(failures)
+	await _test_invalid_unit_target_fallback(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -62,12 +65,12 @@ func _test_barracks_rally_around_obstacle(failures: PackedStringArray) -> void:
 	barracks.set_rally_point(rally)
 	_expect(failures, "obstacle blocks straight line", not PlayerRouteNavigation.is_world_walkable(Vector3(0.0, 0.0, 0.0)))
 
-	var before_children: int = get_child_count()
+	var before_ids: Dictionary = _child_unit_instance_ids()
 	barracks._spawn_trained_unit(UNIT_SCENE, barracks.swordsman_spawn_offset)
 	await get_tree().process_frame
 	await get_tree().physics_frame
 
-	var unit: Unit = _find_newest_player_unit(before_children)
+	var unit: Unit = _find_new_player_unit(before_ids)
 	_expect(failures, "unit spawned from barracks", unit != null)
 	if unit == null:
 		_free_nodes([barracks, obstacle])
@@ -141,10 +144,10 @@ func _test_sequential_rally_group(failures: PackedStringArray) -> void:
 
 	var units: Array[Unit] = []
 	for _i: int in 3:
-		var before: int = get_child_count()
+		var before_ids: Dictionary = _child_unit_instance_ids()
 		barracks._spawn_trained_unit(UNIT_SCENE, barracks.swordsman_spawn_offset)
 		await get_tree().process_frame
-		var unit: Unit = _find_newest_player_unit(before)
+		var unit: Unit = _find_new_player_unit(before_ids)
 		if unit != null:
 			units.append(unit)
 			_expect(
@@ -252,15 +255,167 @@ func _test_rmb_same_backend(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 
 
-func _find_newest_player_unit(before_child_count: int) -> Unit:
-	for i: int in range(before_child_count, get_child_count()):
+func _test_rally_marker_visibility(failures: PackedStringArray) -> void:
+	print("verify: rally marker visible only while selected")
+	var barracks: Barracks = BARRACKS_SCENE.instantiate() as Barracks
+	add_child(barracks)
+	barracks.global_position = Vector3(-20.0, 0.0, 12.0)
+	barracks.set_completed()
+	var stable: Stable = (load("res://scenes/buildings/stable.tscn") as PackedScene).instantiate() as Stable
+	add_child(stable)
+	stable.global_position = Vector3(-14.0, 0.0, 12.0)
+	stable.set_completed()
+	await get_tree().process_frame
+
+	var barracks_rally := Vector3(-20.0, 0.0, 4.0)
+	var stable_rally := Vector3(-14.0, 0.0, 2.0)
+	barracks.set_rally_point(barracks_rally)
+	stable.set_rally_point(stable_rally)
+	barracks.set_selected(false)
+	stable.set_selected(false)
+	_expect(failures, "barracks marker hidden when deselected", not _rally_marker_visible(barracks))
+	_expect(failures, "stable marker hidden when deselected", not _rally_marker_visible(stable))
+
+	barracks.set_selected(true)
+	_expect(failures, "barracks marker shown when selected", _rally_marker_visible(barracks))
+	_expect(failures, "stable marker stays hidden", not _rally_marker_visible(stable))
+
+	barracks.set_selected(false)
+	stable.set_selected(true)
+	_expect(failures, "barracks marker hidden after switch", not _rally_marker_visible(barracks))
+	_expect(failures, "stable marker shown when selected", _rally_marker_visible(stable))
+	_expect(failures, "barracks still has rally after hide", barracks.has_production_rally())
+
+	_free_nodes([barracks, stable])
+	await get_tree().process_frame
+
+
+func _test_unit_target_rally_join(failures: PackedStringArray) -> void:
+	print("verify: unit-target rally follows current location")
+	PlayerRouteNavigation.clear_all()
+	await get_tree().process_frame
+
+	var barracks: Barracks = BARRACKS_SCENE.instantiate() as Barracks
+	add_child(barracks)
+	barracks.global_position = Vector3(-16.0, 0.0, 16.0)
+	barracks.set_completed()
+
+	var hero: Unit = UNIT_SCENE.instantiate() as Unit
+	add_child(hero)
+	hero.global_position = Vector3(-8.0, 0.0, 16.0)
+	hero.team_id = TeamVisuals.PLAYER_TEAM_ID
+	await get_tree().process_frame
+	PlayerRouteNavigation.ensure_grid_ready()
+	PlayerRouteNavigation.register_static_obstacle(barracks)
+
+	barracks.set_rally_unit(hero)
+	_expect(
+		failures,
+		"rally type UNIT_TARGET",
+		int(barracks.get("_rally_type")) == int(Building.ProductionRallyType.UNIT_TARGET)
+	)
+
+	hero.global_position = Vector3(10.0, 0.0, 16.0)
+	await get_tree().process_frame
+
+	var before_ids: Dictionary = _child_unit_instance_ids()
+	barracks._spawn_trained_unit(UNIT_SCENE, barracks.swordsman_spawn_offset)
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	var unit: Unit = _find_new_player_unit(before_ids)
+	_expect(failures, "unit spawned for hero rally", unit != null)
+	if unit == null:
+		_free_nodes([barracks, hero])
+		return
+
+	_expect(failures, "spawned unit has rally join", unit.has_production_rally_join())
+	_expect(failures, "spawned unit moving", unit.has_move_target or unit.has_custom_rts_route())
+
+	hero.queue_free()
+	unit.queue_free()
+	_free_nodes([barracks])
+	await get_tree().process_frame
+
+
+func _test_invalid_unit_target_fallback(failures: PackedStringArray) -> void:
+	print("verify: invalid rally target falls back without freed instance")
+	PlayerRouteNavigation.clear_all()
+	await get_tree().process_frame
+
+	var barracks: Barracks = BARRACKS_SCENE.instantiate() as Barracks
+	add_child(barracks)
+	barracks.global_position = Vector3(8.0, 0.0, 16.0)
+	barracks.set_completed()
+
+	var target: Unit = UNIT_SCENE.instantiate() as Unit
+	add_child(target)
+	target.global_position = Vector3(16.0, 0.0, 16.0)
+	target.team_id = TeamVisuals.PLAYER_TEAM_ID
+	await get_tree().process_frame
+	PlayerRouteNavigation.ensure_grid_ready()
+	PlayerRouteNavigation.register_static_obstacle(barracks)
+
+	barracks.set_rally_unit(target)
+	var last_pos: Vector3 = target.global_position
+	target.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var before_ids: Dictionary = _child_unit_instance_ids()
+	barracks._spawn_trained_unit(UNIT_SCENE, barracks.swordsman_spawn_offset)
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	var unit: Unit = _find_new_player_unit(before_ids)
+	_expect(failures, "spawn after dead rally target", unit != null)
+	if unit == null:
+		_free_nodes([barracks])
+		return
+
+	_expect(failures, "dead target does not keep join", not unit.has_production_rally_join())
+	_expect(
+		failures,
+		"fallback move issued",
+		unit.has_move_target or unit.has_custom_rts_route()
+	)
+	var dest: Vector3 = unit.get_movement_destination()
+	if dest == Vector3.ZERO:
+		dest = last_pos
+	_expect(
+		failures,
+		"fallback uses last rally position",
+		_horizontal_distance(dest, last_pos) <= 4.0 or _horizontal_distance(unit.global_position, last_pos) <= 16.0
+	)
+
+	unit.queue_free()
+	_free_nodes([barracks])
+	await get_tree().process_frame
+
+
+func _rally_marker_visible(building: Building) -> bool:
+	var marker_ref: Variant = building.get("_rally_marker")
+	if not NodeSafety.is_alive_node(marker_ref) or not (marker_ref is MeshInstance3D):
+		return false
+	return (marker_ref as MeshInstance3D).visible
+
+
+func _child_unit_instance_ids() -> Dictionary:
+	var ids: Dictionary = {}
+	for i: int in get_child_count():
 		var child: Node = get_child(i)
 		if child is Unit:
+			ids[child.get_instance_id()] = true
+	return ids
+
+
+func _find_new_player_unit(before_ids: Dictionary) -> Unit:
+	for i: int in get_child_count():
+		var child: Node = get_child(i)
+		if child is Unit and not before_ids.has(child.get_instance_id()):
 			return child as Unit
-	# Spawn parent is barracks parent (this node) — also scan group.
 	for node: Node in get_tree().get_nodes_in_group("units"):
 		if node is Unit and (node as Unit).is_inside_tree():
-			return node as Unit
+			if not before_ids.has(node.get_instance_id()):
+				return node as Unit
 	return null
 
 

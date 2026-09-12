@@ -32,6 +32,7 @@ func _ready() -> void:
 	await _test_e_reinforcement_joins_wait()
 	await _test_f_final_approach()
 	await _test_g_combat_keeps_checkpoint()
+	await _test_chase_reaches_target_during_march()
 	await _test_regroup_does_not_steal_march()
 
 	var report: String
@@ -139,7 +140,7 @@ func _test_b_all_arrive_releases_next_segment() -> void:
 
 
 func _test_c_all_means_all() -> void:
-	print("--- TEST C all means all ---")
+	print("--- TEST C main force waits briefly, then advances ---")
 	await _reset_world()
 	var origin := Vector3(-28.0, 0.0, 0.0)
 	var dest := Vector3(26.0, 0.0, 0.0)
@@ -165,6 +166,18 @@ func _test_c_all_means_all() -> void:
 		_flat_dist(checkpoint, PlayerRouteNavigation.get_army_march_checkpoint_for_test()) < 0.2
 	)
 	_expect("TEST C next release is WAITING", String(snap.get("next_segment_release", "")) == "WAITING")
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test(2.0)
+	_expect("TEST C allows a catch-up window", PlayerRouteNavigation.get_army_march_segment_index_for_test() == seg)
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test(2.1)
+	_expect("TEST C ready majority is not held forever", PlayerRouteNavigation.get_army_march_segment_index_for_test() > seg)
+	_expect("TEST C straggler keeps its route", (units[4] as Unit).has_custom_rts_route())
+	_expect("TEST C straggler follows new checkpoint", _flat_dist((units[4] as Unit).get_army_march_checkpoint(), PlayerRouteNavigation.get_army_march_checkpoint_for_test()) < 0.1)
+	var next_seg: int = PlayerRouteNavigation.get_army_march_segment_index_for_test()
+	for unit_v: Variant in units:
+		(unit_v as Unit).global_position = origin
+	(units[0] as Unit).global_position = PlayerRouteNavigation.get_army_march_checkpoint_for_test()
+	PlayerRouteNavigation.evaluate_enemy_army_march_for_test(20.0)
+	_expect("TEST C lone front unit cannot release the army", PlayerRouteNavigation.get_army_march_segment_index_for_test() == next_seg)
 
 
 func _test_d_member_dies() -> void:
@@ -296,6 +309,34 @@ func _test_g_combat_keeps_checkpoint() -> void:
 		PlayerRouteNavigation.total_path_calculations == routes_before
 	)
 	_expect("TEST G march still active", PlayerRouteNavigation.is_enemy_army_march_in_progress())
+
+
+func _test_chase_reaches_target_during_march() -> void:
+	print("--- march combat physically reaches target ---")
+	await _reset_world()
+	var fighter: MilitaryUnit = _spawn_enemy_spearman(Vector3(-28, 0, 0), "MarchChaser") as MilitaryUnit
+	await get_tree().process_frame
+	PlayerRouteNavigation.request_group_move([fighter], Vector3(-8, 0, 0), &"attack_move", false, &"enemy_ai")
+	var checkpoint: Vector3 = PlayerRouteNavigation.get_army_march_checkpoint_for_test()
+	var target: Unit = _spawn_player_spearman(fighter.global_position + Vector3(0, 0, 7))
+	target.set_physics_process(false)
+	await get_tree().process_frame
+	# This checks chase execution, independently of the real-time order cooldown.
+	fighter._last_path_request_msec = Time.get_ticks_msec() - 1000
+	fighter._begin_attack_on_target(target, -1, false)
+	var health: HealthComponent = target.get_node("HealthComponent") as HealthComponent
+	var before: float = health.current_health
+	for frame: int in 360:
+		await get_tree().physics_frame
+		if health.current_health < before:
+			break
+	_expect("march chase reaches and damages off-route target", health.current_health < before)
+	_expect("local chase preserves strategic checkpoint", _flat_dist(checkpoint, fighter.get_army_march_checkpoint()) < 0.1)
+	_expect("local chase preserves ATTACK_MOVE", fighter.has_attack_move_destination())
+	_kill_unit(target)
+	await get_tree().process_frame
+	fighter._sanitize_attack_target()
+	_expect("after kill strategic route remains available", fighter.has_custom_rts_route())
 
 
 func _test_regroup_does_not_steal_march() -> void:

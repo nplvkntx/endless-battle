@@ -49,4 +49,3 @@ script = ExtResource("8_enemy_ai")
 enemy_command_center_path = NodePath("../../EnemyStartingBase/EnemyCommandCenter")
 enemy_build_manager_path = NodePath("../EnemyBuildManager")
 enemy_gather_manager_path = NodePath("../EnemyGatherManager")
-show_debug_overlay = true

@@ -25,7 +25,7 @@ size = Vector3(2.3, 0.025, 0.06)
 size = Vector3(0.06, 0.025, 2.1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_farm"]
-size = Vector3(2, 1, 1.4)
+size = Vector3(2, 1, 1.8)
 
 [node name="Farm" type="StaticBody3D" groups=["buildings"]]
 script = ExtResource("1_farm")

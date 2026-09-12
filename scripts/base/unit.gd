@@ -1012,10 +1012,10 @@ func _snap_custom_rts_route_index_to_progress(destination: Vector3) -> void:
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
 		var to_wp: Vector3 = _flat_xz(wp - global_position)
 		var dist: float = to_wp.length()
-		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS:
+		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
 			continue
-		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0:
+		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0 and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
 			continue
 		break
@@ -1217,6 +1217,10 @@ func compose_custom_rts_steering_for_tests(
 
 
 func _custom_rts_route_direction() -> Vector3:
+	# Local chase temporarily owns steering; the march route is saved for resume.
+	# Its checkpoint must not redirect an attack approach back into the army.
+	if _custom_rts_paused_route_index >= 0:
+		return _flat_xz(_movement_target - global_position).normalized()
 	if _custom_rts_route.is_empty():
 		return _flat_xz(_movement_target - global_position).normalized()
 	var dest_dir: Vector3 = _flat_xz(_movement_target - global_position)
@@ -1230,11 +1234,11 @@ func _custom_rts_route_direction() -> Vector3:
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
 		var to_wp: Vector3 = _flat_xz(wp - global_position)
 		var dist: float = to_wp.length()
-		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS:
+		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
 			continue
 		# Never steer back to waypoints already behind the remaining destination.
-		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0:
+		if dest_dir.length_squared() > 0.0001 and to_wp.dot(dest_dir) < 0.0 and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
 			continue
 		return to_wp.normalized()
@@ -1243,7 +1247,25 @@ func _custom_rts_route_direction() -> Vector3:
 	return _flat_xz(_movement_target - global_position).normalized()
 
 
+func _can_skip_custom_rts_waypoint() -> bool:
+	# A detour can point away from the destination. Never skip it through a building.
+	var next_index: int = _custom_rts_route_index + 1
+	var next_point: Vector3 = _movement_target
+	if next_index < _custom_rts_route.size():
+		next_point = _custom_rts_route[next_index]
+	var distance: float = _horizontal_distance_xz(global_position, next_point)
+	var steps: int = maxi(1, int(ceil(distance / (PlayerRouteNavigation.grid.cell_size * 0.5))))
+	for step: int in range(1, steps + 1):
+		var sample: Vector3 = global_position.lerp(next_point, float(step) / float(steps))
+		for offset: Vector3 in [Vector3.ZERO, Vector3(0.35, 0, 0), Vector3(-0.35, 0, 0), Vector3(0, 0, 0.35), Vector3(0, 0, -0.35)]:
+			if not PlayerRouteNavigation.is_world_walkable(sample + offset):
+				return false
+	return true
+
+
 func _custom_rts_advance_waypoint() -> void:
+	if _custom_rts_paused_route_index >= 0:
+		return
 	if _custom_rts_route.is_empty():
 		return
 	while _custom_rts_route_index < _custom_rts_route.size():
@@ -1251,7 +1273,7 @@ func _custom_rts_advance_waypoint() -> void:
 			_clamp_custom_rts_route_index_to_march_cap()
 			return
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
-		if _horizontal_distance_xz(global_position, wp) <= CUSTOM_RTS_WAYPOINT_RADIUS:
+		if _horizontal_distance_xz(global_position, wp) <= CUSTOM_RTS_WAYPOINT_RADIUS and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
 			continue
 		break
@@ -1542,6 +1564,7 @@ func request_movement_target(
 	## Fighting / in-range units must not repath for soft formation refreshes.
 	if (
 		urgency != RepathUrgency.PLAYER_ORDER
+		and urgency != RepathUrgency.CHASE
 		and urgency != RepathUrgency.STUCK_RECOVERY
 		and urgency != RepathUrgency.URGENT
 		and _should_skip_repath_while_engaged()

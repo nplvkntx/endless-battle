@@ -6,7 +6,10 @@ extends RefCounted
 ## Dynamic units are never marked as blocked cells.
 
 const DEFAULT_CELL_SIZE := 1.0
-const DEFAULT_CLEARANCE := 0.75
+## Small wall-clip margin only. Physical unit collision already keeps bodies
+## out of the solid building; adding unit_radius + 0.75 previously marked a
+## huge invisible square around every structure.
+const DEFAULT_CLEARANCE := 0.15
 const DEFAULT_UNIT_RADIUS := 0.4
 const MAP_MIN := -50.0
 const MAP_MAX := 50.0
@@ -60,7 +63,7 @@ func set_obstacle_aabb(obstacle_id: int, center: Vector3, half_extents: Vector3)
 		return
 	clear_obstacle(obstacle_id)
 
-	var inflate: float = unit_radius + building_clearance
+	var inflate: float = get_obstacle_inflate()
 	var min_x: float = center.x - half_extents.x - inflate
 	var max_x: float = center.x + half_extents.x + inflate
 	var min_z: float = center.z - half_extents.z - inflate
@@ -119,6 +122,31 @@ func is_cell_blocked(cell: Vector2i) -> bool:
 
 func is_world_walkable(world: Vector3) -> bool:
 	return not is_cell_blocked(world_to_cell(world))
+
+
+## Padding applied outside the collision AABB when marking blocked cells.
+func get_obstacle_inflate() -> float:
+	return building_clearance
+
+
+## True when the 1m cell containing `world` overlaps an axis-aligned occupancy AABB.
+func cell_overlaps_aabb(world: Vector3, center: Vector3, half_extents: Vector3) -> bool:
+	var inflate: float = get_obstacle_inflate()
+	var occ_min_x: float = center.x - half_extents.x - inflate
+	var occ_max_x: float = center.x + half_extents.x + inflate
+	var occ_min_z: float = center.z - half_extents.z - inflate
+	var occ_max_z: float = center.z + half_extents.z + inflate
+	var cell: Vector2i = world_to_cell(world)
+	var cell_min_x: float = origin_xz.x + float(cell.x) * cell_size
+	var cell_max_x: float = cell_min_x + cell_size
+	var cell_min_z: float = origin_xz.y + float(cell.y) * cell_size
+	var cell_max_z: float = cell_min_z + cell_size
+	return (
+		cell_min_x < occ_max_x
+		and cell_max_x > occ_min_x
+		and cell_min_z < occ_max_z
+		and cell_max_z > occ_min_z
+	)
 
 
 func world_to_cell(world: Vector3) -> Vector2i:

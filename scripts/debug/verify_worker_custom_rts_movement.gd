@@ -25,6 +25,7 @@ func _ready() -> void:
 	await _test_worker_tree_travel(failures)
 	await _test_worker_return_travel(failures)
 	await _test_worker_build_travel(failures)
+	await _test_worker_detour_progress(failures)
 
 	var report: String
 	if failures.is_empty():
@@ -40,6 +41,28 @@ func _ready() -> void:
 	print(report)
 	await get_tree().process_frame
 	get_tree().quit(0 if failures.is_empty() else 1)
+
+
+func _test_worker_detour_progress(failures: PackedStringArray) -> void:
+	print("verify: worker physically travels around command centre")
+	PlayerRouteNavigation.clear_all()
+	await get_tree().process_frame
+	var cc: Building = CC_SCENE.instantiate() as Building
+	add_child(cc)
+	cc.global_position = Vector3(0, 0, 0)
+	cc.set_completed()
+	var worker: Worker = WORKER_SCENE.instantiate() as Worker
+	add_child(worker)
+	worker.global_position = Vector3(0, 0, -4)
+	await get_tree().process_frame
+	PlayerRouteNavigation.register_static_obstacle(cc)
+	worker.set_movement_target(Vector3(0, 0, 8))
+	for frame: int in 900:
+		await get_tree().physics_frame
+		if worker.global_position.z > 5.0:
+			break
+	_expect(failures, "worker reaches opposite side instead of pushing into CC", worker.global_position.z > 5.0)
+	_free_nodes([worker, cc])
 
 
 func _worker_scene_has_no_nav_agent() -> bool:

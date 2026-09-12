@@ -25,7 +25,7 @@ size = Vector3(3.2, 0.025, 0.06)
 size = Vector3(0.06, 0.025, 2.52)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_stable"]
-size = Vector3(3.0, 1.6, 2.2)
+size = Vector3(3.4, 1.6, 2.2)
 
 [node name="Stable" type="StaticBody3D" groups=["buildings"]]
 collision_layer = 4

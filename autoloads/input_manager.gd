@@ -28,6 +28,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if key_event.keycode == KEY_A:
 			arm_attack_move()
 		elif key_event.keycode == KEY_P:
+			if _try_toggle_ai_brain_debug():
+				get_viewport().set_input_as_handled()
+				return
 			arm_patrol()
 
 
@@ -54,3 +57,13 @@ func disarm_all_command_modes() -> void:
 	patrol_armed = false
 	if HeroAbilityTargetingController != null and HeroAbilityTargetingController.is_targeting():
 		HeroAbilityTargetingController.cancel_targeting()
+
+
+func _try_toggle_ai_brain_debug() -> bool:
+	if not OS.is_debug_build():
+		return false
+	var root: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(get_tree())
+	if root == null or root.enemy_ai == null:
+		return false
+	root.enemy_ai.toggle_brain_debug()
+	return true

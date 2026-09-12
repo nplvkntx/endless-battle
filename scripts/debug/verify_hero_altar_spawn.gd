@@ -143,13 +143,13 @@ func _test_repeated_enemy_hero_exit_reaches_destination(failures: PackedStringAr
 		PlayerRouteNavigation.register_static_obstacle(altar)
 		PlayerRouteNavigation.register_static_obstacle(neighbor)
 
-		var before: int = get_child_count()
+		var before_ids: Dictionary = _child_unit_instance_ids()
 		altar._training_kit_id = HeroCatalog.KIT_SHADOW_ASSASSIN
 		altar._spawn_enemy_hero()
 		await get_tree().process_frame
 		await get_tree().physics_frame
 
-		var hero: Hero = _find_newest_hero(before)
+		var hero: Hero = _find_new_hero(before_ids)
 		_expect(failures, "enemy hero loop %d spawned" % loop_index, hero != null)
 		if hero == null:
 			_free_nodes(trees, altar, neighbor)
@@ -275,13 +275,13 @@ func _test_player_hero_exit_reaches_destination(failures: PackedStringArray) -> 
 	PlayerRouteNavigation.register_static_obstacle(altar)
 	PlayerRouteNavigation.register_static_obstacle(neighbor)
 
-	var before: int = get_child_count()
+	var before_ids: Dictionary = _child_unit_instance_ids()
 	altar._training_kit_id = HeroCatalog.KIT_PALADIN
 	altar._spawn_hero()
 	await get_tree().process_frame
 	await get_tree().physics_frame
 
-	var hero: Hero = _find_newest_hero(before)
+	var hero: Hero = _find_new_hero(before_ids)
 	_expect(failures, "player hero spawned", hero != null)
 	if hero != null:
 		_expect(
@@ -350,11 +350,11 @@ func _test_barracks_pikeman_exit_compare(failures: PackedStringArray) -> void:
 	PlayerRouteNavigation.ensure_grid_ready()
 	PlayerRouteNavigation.register_static_obstacle(barracks)
 
-	var before: int = get_child_count()
+	var before_ids: Dictionary = _child_unit_instance_ids()
 	barracks._spawn_trained_unit(SPEARMAN_SCENE, barracks.spearman_spawn_offset)
 	await get_tree().process_frame
 	await get_tree().physics_frame
-	var unit: Unit = _find_newest_non_hero_unit(before)
+	var unit: Unit = _find_new_non_hero_unit(before_ids)
 	_expect(failures, "pikeman spawned", unit != null)
 	if unit != null:
 		_expect(
@@ -434,19 +434,28 @@ func _clear_hero_store() -> void:
 	HeroProgressionStore.clear()
 
 
-func _find_newest_hero(before_count: int) -> Hero:
-	for index: int in range(get_child_count() - 1, before_count - 1, -1):
-		var node: Node = get_child(index)
-		if node is Hero:
-			return node as Hero
+func _child_unit_instance_ids() -> Dictionary:
+	var ids: Dictionary = {}
+	for i: int in get_child_count():
+		var child: Node = get_child(i)
+		if child is Unit:
+			ids[child.get_instance_id()] = true
+	return ids
+
+
+func _find_new_hero(before_ids: Dictionary) -> Hero:
+	for i: int in get_child_count():
+		var child: Node = get_child(i)
+		if child is Hero and not before_ids.has(child.get_instance_id()):
+			return child as Hero
 	return null
 
 
-func _find_newest_non_hero_unit(before_count: int) -> Unit:
-	for index: int in range(get_child_count() - 1, before_count - 1, -1):
-		var node: Node = get_child(index)
-		if node is Unit and not (node is Hero):
-			return node as Unit
+func _find_new_non_hero_unit(before_ids: Dictionary) -> Unit:
+	for i: int in get_child_count():
+		var child: Node = get_child(i)
+		if child is Unit and not (child is Hero) and not before_ids.has(child.get_instance_id()):
+			return child as Unit
 	return null
 
 

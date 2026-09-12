@@ -5,7 +5,7 @@ extends RefCounted
 ## Uses Godot AStarGrid2D. Not used by production movement.
 
 const DEFAULT_CELL_SIZE := 1.0
-const DEFAULT_CLEARANCE := 0.75
+const DEFAULT_CLEARANCE := 0.15
 const DEFAULT_UNIT_RADIUS := 0.4
 
 var cell_size: float = DEFAULT_CELL_SIZE
@@ -44,7 +44,7 @@ func clear_obstacles() -> void:
 
 
 func mark_building_aabb(center: Vector3, half_extents: Vector3) -> void:
-	var inflate: float = unit_radius + building_clearance
+	var inflate: float = building_clearance
 	var min_x: float = center.x - half_extents.x - inflate
 	var max_x: float = center.x + half_extents.x + inflate
 	var min_z: float = center.z - half_extents.z - inflate

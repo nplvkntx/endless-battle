@@ -864,7 +864,7 @@ func _test_creep_strategy_stays_camp_based() -> void:
 	_expect("camp strategy → EARLY_CREEP", _ai.get_debug_condition_bucket_for_test() == &"EARLY_CREEP")
 	_expect("camp strategy cmd=creep", _ai.get_last_command_kind_for_test() == &"creep")
 	_expect("camp strategy F3 label CREEP", _ai.get_strategic_order_label_for_test() == "CREEP")
-	## Camp instance commitment / camps_cleared counters were removed from simple AI.
+	## Strategic travel targets the camp approach, not an individual creep.
 	var staging0: Vector3 = _ai.get_creep_staging_point_for_test(camp)
 	var dest0: Vector3 = _ai.get_last_command_destination_for_test()
 	_expect(
@@ -873,7 +873,9 @@ func _test_creep_strategy_stays_camp_based() -> void:
 		and dest0.distance_to(staging0) <= EnemyAI.ORDER_DEST_RADIUS
 	)
 
-	## One creep death must not retarget onto the remaining individual creep.
+	## Level 3 during a camp must not abandon its surviving guards.
+	hero.level = 3
+	HeroProgressionStore.register_living_hero(hero)
 	_kill_unit(creep_a)
 	await get_tree().process_frame
 	_ai.force_tick_for_test()

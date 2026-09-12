@@ -525,6 +525,7 @@ func supports_combat_orders() -> bool:
 
 func _prepare_for_new_player_order() -> void:
 	_on_prepare_for_new_player_order()
+	super._prepare_for_new_player_order()
 	_clear_hold_position_state()
 	_clear_patrol_state()
 	_clear_auto_acquire_leash()
@@ -791,7 +792,7 @@ func _sanitize_attack_target() -> void:
 			_finish_attack_target_lost()
 		elif _has_chase_target:
 			_has_chase_target = false
-			clear_move_target()
+			clear_move_target(true)
 			_resume_attack_move_or_patrol()
 		return
 
@@ -802,7 +803,7 @@ func _sanitize_attack_target() -> void:
 	if _attack_target == null:
 		if _has_chase_target:
 			_has_chase_target = false
-			clear_move_target()
+			clear_move_target(true)
 			_resume_attack_move_or_patrol()
 		return
 
@@ -1104,7 +1105,8 @@ func _process_attack(delta: float) -> void:
 
 
 func _stop_and_attack(delta: float) -> void:
-	clear_move_target()
+	# Preserve strategic custom route so attack-move resumes without rewinding.
+	clear_move_target(true)
 	_has_chase_target = false
 	_is_backing_off_for_range = false
 	apply_standing_separation(true)
@@ -1222,6 +1224,10 @@ func _process_move_to_cast(_delta: float) -> void:
 
 
 func _should_reposition_for_preferred_range() -> bool:
+	# Melee heroes must never kite backward for ranged-style preferred range.
+	if not CombatTargetValidation.is_ranged_attack_range(attack_range):
+		_is_backing_off_for_range = false
+		return false
 	if not NodeSafety.is_alive_node(_attack_target):
 		_is_backing_off_for_range = false
 		return false
@@ -1563,6 +1569,8 @@ func _resume_attack_move_or_patrol() -> bool:
 		return false
 
 	_has_chase_target = false
+	if try_resume_custom_rts_route(_attack_move_destination):
+		return true
 	_set_move_destination(_attack_move_destination, RepathUrgency.NORMAL)
 	return true
 

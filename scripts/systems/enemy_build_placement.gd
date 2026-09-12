@@ -62,16 +62,16 @@ const TOWER_FRONT_OFFSET: float = 11.0
 const TOWER_SIDE_OFFSET: float = 10.0
 const TOWER_BACK_OFFSET: float = 10.5
 
-const FARM_SIZE := Vector2(2.0, 1.4)
+const FARM_SIZE := Vector2(2.0, 1.8)
 const BARRACKS_SIZE := Vector2(3.5, 2.5)
-const BLACKSMITH_SIZE := Vector2(2.2, 1.8)
-const STABLE_SIZE := Vector2(3.0, 2.2)
+const BLACKSMITH_SIZE := Vector2(3.5, 2.8)
+const STABLE_SIZE := Vector2(3.4, 2.2)
 const ARTILLERY_DEPOT_SIZE := Vector2(3.2, 2.4)
 const ACADEMY_SIZE := Vector2(3.0, 2.2)
-const SHOP_SIZE := Vector2(2.0, 1.6)
-const TOWER_SIZE := Vector2(2.0, 2.0)
+const SHOP_SIZE := Vector2(3.4, 3.4)
+const TOWER_SIZE := Vector2(2.0, 2.1)
 const WALL_SEGMENT_SIZE := Vector2(1.0, 1.0)
-const HERO_ALTAR_SIZE := Vector2(3.0, 3.0)
+const HERO_ALTAR_SIZE := Vector2(4.2, 4.2)
 const COMMAND_CENTER_SIZE := Vector2(3.5, 3.5)
 const DEFAULT_FOOTPRINT := Vector2(2.5, 2.5)
 

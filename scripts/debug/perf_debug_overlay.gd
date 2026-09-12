@@ -1,7 +1,7 @@
 extends CanvasLayer
 
 ## Toggle with F3. Refreshes about 4 times per second while visible.
-## Enemy AI lines come from EnemyAI's last condition-tick snapshot (same helpers).
+## Performance counters only. Enemy AI reasoning is the P-key brain panel.
 
 const TOGGLE_KEY := KEY_F3
 const REFRESH_INTERVAL_SECONDS := 0.25
@@ -149,15 +149,7 @@ func _update_label() -> void:
 			PerfCounters.get_rate(PerfCounters.KEY_STUCK_RECOVERIES),
 		],
 		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
-		"",
 	])
-
-	var ai_lines: PackedStringArray = _collect_enemy_ai_lines(tree)
-	if ai_lines.is_empty():
-		lines.append("ENEMY AI")
-		lines.append("AI CONDITION: (EnemyAI not in match)")
-	else:
-		lines.append_array(ai_lines)
 
 	var warnings: PackedStringArray = PerfCounters.collect_warnings()
 	if not warnings.is_empty():
@@ -167,13 +159,6 @@ func _update_label() -> void:
 			lines.append("- %s" % warning)
 
 	_label.text = "\n".join(lines)
-
-
-func _collect_enemy_ai_lines(tree: SceneTree) -> PackedStringArray:
-	var root: MatchCompositionRoot = MatchCompositionRoot.find_from_tree(tree)
-	if root == null or root.enemy_ai == null:
-		return PackedStringArray()
-	return root.enemy_ai.get_debug_overlay_lines()
 
 
 func _collect_unit_stats(tree: SceneTree) -> Dictionary:

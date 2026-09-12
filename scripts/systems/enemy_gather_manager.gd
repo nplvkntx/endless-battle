@@ -28,10 +28,12 @@ func assign_gather_job(worker: Worker, prefer_gold: bool = false, _force_recover
 		return false
 	if worker.is_on_construction_trip():
 		return false
+	if WorkerAiUnstuck.blocks_external_commands(worker):
+		return false
 	if _resolve_enemy_command_center() == null:
 		return false
 
-	var gold_mine: GoldMine = _resolve_gold_mine()
+	var gold_mine: GoldMine = _resolve_gold_mine(worker.global_position)
 	var trees: Array[WoodTree] = _resolve_safe_trees()
 	if gold_mine == null and trees.is_empty():
 		return false
@@ -50,7 +52,7 @@ func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
 		return false
 	worker.pin_starting_gold_mine(gold_mine)
 	worker.command_gather_gold_mine(gold_mine, false)
-	if not worker.needs_gather_target_reassignment():
+	if worker.get_assigned_gather_resource_id() == &"gold" and not worker.needs_gather_target_reassignment():
 		return true
 	return false
 
@@ -58,7 +60,7 @@ func _try_assign_gold_gather(worker: Worker, gold_mine: GoldMine) -> bool:
 func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
 	var tree_target: WoodTree = null
 	for tree: WoodTree in trees:
-		if tree != null and is_instance_valid(tree) and tree.can_gather():
+		if NodeSafety.is_alive_node(tree) and tree.can_gather():
 			if worker.is_enemy_gather_target_blacklisted(tree):
 				continue
 			tree_target = tree
@@ -66,7 +68,7 @@ func _try_assign_wood_gather(worker: Worker, trees: Array[WoodTree]) -> bool:
 	if tree_target == null:
 		return false
 	worker.command_gather_tree(tree_target, false)
-	if not worker.needs_gather_target_reassignment():
+	if worker.get_assigned_gather_resource_id() == &"wood" and not worker.needs_gather_target_reassignment():
 		return true
 	return false
 
@@ -85,14 +87,11 @@ func _resolve_enemy_command_center() -> CommandCenter:
 	return null
 
 
-func _resolve_gold_mine() -> GoldMine:
-	if _is_valid_gold_mine(_starting_gold_mine):
-		return _starting_gold_mine
+func _resolve_gold_mine(worker_position: Vector3 = Vector3.INF) -> GoldMine:
 	if enemy_gold_mine_path != NodePath(""):
 		var via_path: GoldMine = get_node_or_null(enemy_gold_mine_path) as GoldMine
 		if via_path != null and _is_valid_gold_mine(via_path):
 			_starting_gold_mine = via_path
-			return via_path
 	var cc: CommandCenter = _resolve_enemy_command_center()
 	if cc == null:
 		return null
@@ -100,18 +99,22 @@ func _resolve_gold_mine() -> GoldMine:
 	if tree == null:
 		return null
 	var best: GoldMine = null
-	var best_dist: float = INF
-	for node: Node in tree.get_nodes_in_group(&"gold_mines"):
+	var best_score: float = INF
+	var origin: Vector3 = cc.global_position if worker_position == Vector3.INF else worker_position
+	for node: Node in WorkerGathering.get_gatherable_resources(tree, tree.current_scene):
 		if not node is GoldMine:
 			continue
 		var mine: GoldMine = node as GoldMine
 		if not _is_valid_gold_mine(mine):
 			continue
-		var dist: float = _horizontal_distance(cc.global_position, mine.global_position)
-		if dist > GOLD_MINE_NEAR_CC_DISTANCE:
+		if not mine.is_usable_by_faction(true) or not WorkerGathering.is_safe_gather_source(mine, tree):
 			continue
-		if dist < best_dist:
-			best_dist = dist
+		var dropoff: CommandCenter = WorkerGathering.find_nearest_dropoff(mine.global_position, true, tree)
+		if dropoff == null or _horizontal_distance(dropoff.global_position, mine.global_position) > GOLD_MINE_NEAR_CC_DISTANCE:
+			continue
+		var score: float = _horizontal_distance(origin, mine.global_position) + float(mine.get_assigned_worker_count()) * 6.0
+		if score < best_score:
+			best_score = score
 			best = mine
 	if best != null:
 		_starting_gold_mine = best
@@ -125,17 +128,24 @@ func _resolve_safe_trees() -> Array[WoodTree]:
 		return result
 	var cc: CommandCenter = _resolve_enemy_command_center()
 	var origin: Vector3 = cc.global_position if cc != null else Vector3.ZERO
-	for node: Node in tree.get_nodes_in_group(&"wood_trees"):
+	for node: Node in WorkerGathering.get_gatherable_resources(tree, tree.current_scene):
 		if not node is WoodTree:
 			continue
 		var wood_tree: WoodTree = node as WoodTree
-		if not wood_tree.can_gather():
+		if not NodeSafety.is_alive_node(wood_tree) or not wood_tree.can_gather():
+			continue
+		if not wood_tree.is_usable_by_faction(true):
+			continue
+		if not WorkerGathering.is_safe_gather_source(wood_tree, tree):
 			continue
 		if cc != null:
 			var dist: float = _horizontal_distance(origin, wood_tree.global_position)
 			if dist > 80.0:
 				continue
 		result.append(wood_tree)
+	result.sort_custom(func(a: WoodTree, b: WoodTree) -> bool:
+		return a.global_position.distance_squared_to(origin) < b.global_position.distance_squared_to(origin)
+	)
 	return result
 
 

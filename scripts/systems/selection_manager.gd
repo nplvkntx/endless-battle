@@ -629,6 +629,58 @@ func _is_shift_queue() -> bool:
 	return Input.is_key_pressed(KEY_SHIFT)
 
 
+func _is_production_rally_building(building: Building) -> bool:
+	return (
+		building is CommandCenter
+		or building is Barracks
+		or building is HeroAltar
+		or building is Stable
+		or building is ArtilleryDepot
+	)
+
+
+func _is_friendly_rally_unit(unit: Unit, building: Building) -> bool:
+	if not _is_commandable_unit(unit):
+		return false
+	if not NodeSafety.is_alive_node(building):
+		return false
+	return (
+		TeamVisuals.resolve_team(unit, unit.team_id)
+		== TeamVisuals.resolve_team(building, building.team_id)
+	)
+
+
+func _try_set_production_building_rally(
+	building: Building,
+	camera: Camera3D,
+	screen_position: Vector2
+) -> bool:
+	if not _is_production_rally_building(building):
+		return false
+
+	var clicked_unit: Unit = _raycast_unit(camera, screen_position)
+	if clicked_unit != null and _is_friendly_rally_unit(clicked_unit, building):
+		building.set_rally_unit(clicked_unit)
+		return true
+
+	if building is CommandCenter:
+		var command_center: CommandCenter = building as CommandCenter
+		var rally_gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
+		if rally_gold_mine != null:
+			command_center.set_rally_resource(rally_gold_mine)
+			return true
+		var rally_tree: WoodTree = _raycast_tree(camera, screen_position)
+		if rally_tree != null:
+			command_center.set_rally_resource(rally_tree)
+			return true
+
+	var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
+	if rally_ground_position.is_finite():
+		building.set_rally_point(rally_ground_position)
+		return true
+	return true
+
+
 func _handle_right_click(screen_position: Vector2) -> void:
 	var camera: Camera3D = _get_camera()
 	if camera == null:
@@ -638,46 +690,7 @@ func _handle_right_click(screen_position: Vector2) -> void:
 	var selected_building_ref: Variant = selected_building
 	if NodeSafety.is_alive_node(selected_building_ref) and selected_building_ref is Building:
 		var building: Building = selected_building_ref as Building
-
-		if building is CommandCenter:
-			var command_center: CommandCenter = building as CommandCenter
-			var rally_gold_mine: GoldMine = _raycast_gold_mine(camera, screen_position)
-			if rally_gold_mine != null:
-				command_center.set_rally_resource(rally_gold_mine)
-				return
-
-			var rally_tree: WoodTree = _raycast_tree(camera, screen_position)
-			if rally_tree != null:
-				command_center.set_rally_resource(rally_tree)
-				return
-
-			var rally_ground_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-			if rally_ground_position.is_finite():
-				command_center.set_rally_point(rally_ground_position)
-			return
-
-		if building is Barracks:
-			var barracks_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-			if barracks_rally_position.is_finite():
-				(building as Barracks).set_rally_point(barracks_rally_position)
-			return
-
-		if building is HeroAltar:
-			var hero_altar_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-			if hero_altar_rally_position.is_finite():
-				(building as HeroAltar).set_rally_point(hero_altar_rally_position)
-			return
-
-		if building is Stable:
-			var stable_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-			if stable_rally_position.is_finite():
-				(building as Stable).set_rally_point(stable_rally_position)
-			return
-
-		if building is ArtilleryDepot:
-			var depot_rally_position: Vector3 = _raycast_ground_plane(camera, screen_position)
-			if depot_rally_position.is_finite():
-				(building as ArtilleryDepot).set_rally_point(depot_rally_position)
+		if _try_set_production_building_rally(building, camera, screen_position):
 			return
 
 	if selected_units.is_empty():

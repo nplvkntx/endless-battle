@@ -237,6 +237,16 @@ func _tick_military() -> void:
 		_creep()
 		return
 
+	# Clear a route to a second mine while the economy prepares its expansion.
+	if int(_w.tier) >= 2 and _w.expansion_cc == null and not _w.expansion_constructing:
+		if (_w.workers as Array).size() >= T3_WORKER_MINIMUM and _find_expansion_mine() == null:
+			var expansion_camp: Node3D = _find_useful_creep_camp()
+			if expansion_camp != null:
+				_debug_record_condition(&"EXTRA_CREEP", true, {"reason": "clear expansion access", "camp": expansion_camp.name})
+				_set_condition(&"EXTRA_CREEP")
+				_creep()
+				return
+
 	var attack_player: bool = _should_attack_player()
 	_debug_record_condition(&"ATTACK_PLAYER", attack_player, _dbg_attack.duplicate())
 	if attack_player:
@@ -632,10 +642,11 @@ func _maintain_worker_distribution() -> void:
 		elif _wood_critically_low():
 			prefer_gold = false
 		if _gather_manager.assign_gather_job(worker, prefer_gold):
-			if prefer_gold:
+			var assigned: StringName = worker.get_assigned_gather_resource_id()
+			if assigned == &"gold":
 				_w.gold_workers += 1
 				reassignment = "idle→gold"
-			else:
+			elif assigned == &"wood":
 				_w.wood_workers += 1
 				reassignment = "idle→wood"
 
@@ -666,9 +677,12 @@ func _reassign_one_gold_worker_to_wood() -> void:
 			continue
 		if worker.is_on_construction_trip():
 			continue
+		# Finish deposits and let an existing physical recovery finish first.
+		if worker.is_carrying_gathered_resources() or WorkerAiUnstuck.blocks_external_commands(worker):
+			continue
 		if worker.get_assigned_gather_resource_id() != &"gold":
 			continue
-		if _gather_manager.assign_gather_job(worker, false):
+		if _gather_manager.assign_gather_job(worker, false) and worker.get_assigned_gather_resource_id() == &"wood":
 			_w.gold_workers = maxi(0, int(_w.gold_workers) - 1)
 			_w.wood_workers += 1
 			return
@@ -1433,7 +1447,7 @@ func _army_below_minimum() -> bool:
 
 
 func _needs_early_creep() -> bool:
-	if int(_w.hero_level) >= EARLY_HERO_LEVEL_TARGET:
+	if int(_w.hero_level) >= EARLY_HERO_LEVEL_TARGET and _committed_creep_camp() == null:
 		if _debug_enabled:
 			_dbg_creep["early_creep_needed"] = false
 			_dbg_creep["hero_level"] = int(_w.hero_level)
@@ -1586,7 +1600,23 @@ func _get_player_base_target() -> Node3D:
 			return b_v as Node3D
 	return null
 
+func _committed_creep_camp() -> Node3D:
+	if _last_command_kind != CMD_CREEP or _last_command_target_id == 0:
+		return null
+	for camp_v: Variant in _w.active_camps as Array:
+		if not NodeSafety.is_alive_node(camp_v) or not camp_v is Node3D:
+			continue
+		var camp: Node3D = camp_v as Node3D
+		if camp.get_instance_id() == _last_command_target_id and _count_living_creeps_in_camp(camp) > 0:
+			return camp
+	return null
+
+
 func _find_useful_creep_camp() -> Node3D:
+	# Finish the camp already engaged, even if a kill just grants hero level 3.
+	var committed: Node3D = _committed_creep_camp()
+	if committed != null:
+		return committed
 	var origin: Vector3 = _main_army_center()
 	if origin == Vector3.ZERO:
 		origin = _w.home as Vector3
@@ -2384,11 +2414,15 @@ func _find_expansion_mine() -> GoldMine:
 	var best: GoldMine = null
 	var best_dist: float = INF
 
-	for node: Node in tree.get_nodes_in_group(&"gold_mines"):
+	for node: Node in WorkerGathering.get_gatherable_resources(tree, tree.current_scene):
 		if not node is GoldMine:
 			continue
 		var mine: GoldMine = node as GoldMine
 		if not NodeSafety.is_alive_node(mine) or not mine.can_gather():
+			continue
+		if not mine.is_usable_by_faction(true):
+			continue
+		if not WorkerGathering.is_safe_gather_source(mine, tree):
 			continue
 		var dist_to_base: float = _horizontal_distance(origin, mine.global_position)
 		if dist_to_base < 22.0:

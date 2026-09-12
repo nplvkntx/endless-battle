@@ -8,11 +8,13 @@ extends Node
 
 const SLOT_SPACING := 1.4
 const GROUND_Y := 0.0
-## Meaningful army travel chunk before waiting for every living member.
+## Meaningful army travel chunk before briefly gathering the main force.
 ## Map is 100m across; Spearman 4.5 m/s, cavalry 8.5 m/s, heroes ~5.4–6.0.
 const ARMY_MARCH_SEGMENT_DISTANCE := 16.0
 ## Cluster tolerance around the current checkpoint — not pixel-perfect overlap.
 const MARCH_ARRIVAL_RADIUS := 6.0
+const ARMY_MARCH_READY_FRACTION := 0.75
+const ARMY_MARCH_MAX_GATHER_SECONDS := 4.0
 const ARMY_MARCH_OBJECTIVE_EQUIV_RADIUS := 4.0
 const ENEMY_ARMY_MARCH_SOURCE: StringName = &"enemy_ai"
 
@@ -48,6 +50,7 @@ var _army_march_last_arrived: int = -1
 var _army_march_last_required: int = -1
 var _army_march_last_waiting_name: String = ""
 var _army_march_logged_hero_ids: Dictionary = {}
+var _army_march_gather_seconds: float = 0.0
 
 
 func _ready() -> void:
@@ -532,9 +535,9 @@ func _issue_unit_ground_order(
 			unit.issue_order(UnitOrder.move(target), queued)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if _army_march_active:
-		_evaluate_army_march()
+		_evaluate_army_march(delta)
 
 
 func is_enemy_army_march_in_progress() -> bool:
@@ -590,8 +593,8 @@ func get_army_march_debug_snapshot() -> Dictionary:
 	}
 
 
-func evaluate_enemy_army_march_for_test() -> void:
-	_evaluate_army_march()
+func evaluate_enemy_army_march_for_test(delta: float = 0.0) -> void:
+	_evaluate_army_march(delta)
 
 
 func get_army_march_checkpoint_for_test() -> Vector3:
@@ -782,6 +785,7 @@ func _remember_march_member(unit: Unit) -> void:
 
 
 func _set_checkpoint_at_distance(target_dist: float, is_new_march: bool) -> void:
+	_army_march_gather_seconds = 0.0
 	var sampled: Dictionary = _sample_route_at_distance(target_dist)
 	var point: Vector3 = sampled.get("point", _army_march_final) as Vector3
 	if not grid.is_world_walkable(point):
@@ -866,7 +870,7 @@ func _sample_route_at_distance(target_dist: float) -> Dictionary:
 	}
 
 
-func _evaluate_army_march() -> void:
+func _evaluate_army_march(delta: float = 0.0) -> void:
 	if not _army_march_active:
 		set_physics_process(false)
 		return
@@ -877,7 +881,15 @@ func _evaluate_army_march() -> void:
 		return
 	var arrived: int = int(tally.get("arrived", 0))
 	var waiting_name: String = String(tally.get("farthest_name", ""))
-	if arrived < required:
+	# Give stragglers a short catch-up window, then move the ready main force.
+	# New production must not hold a large army at each checkpoint forever.
+	var ready_main_force: bool = arrived >= maxi(3, int(ceil(float(required) * ARMY_MARCH_READY_FRACTION)))
+	if ready_main_force:
+		_army_march_gather_seconds += maxf(0.0, delta)
+	else:
+		_army_march_gather_seconds = 0.0
+	var release_main_force: bool = ready_main_force and _army_march_gather_seconds >= ARMY_MARCH_MAX_GATHER_SECONDS
+	if arrived < required and not release_main_force:
 		if arrived > 0 and _army_march_mode != &"FINAL_APPROACH":
 			_army_march_mode = &"WAITING_FOR_ALL"
 		elif arrived <= 0 and _army_march_mode != &"FINAL_APPROACH":
@@ -888,7 +900,7 @@ func _evaluate_army_march() -> void:
 	if _army_march_mode == &"FINAL_APPROACH":
 		_finish_army_march(tally.get("members", []) as Array)
 		return
-	_log_march_event("ALL_ARRIVED\n%d/%d\nreleasing next segment" % [arrived, required])
+	_log_march_event("%s\n%d/%d\nreleasing next segment" % ["MAIN_FORCE_READY" if arrived < required else "ALL_ARRIVED", arrived, required])
 	_release_next_march_segment(tally.get("members", []) as Array)
 
 
@@ -1090,6 +1102,7 @@ func _finish_army_march(members: Array) -> void:
 
 
 func _clear_army_march() -> void:
+	_army_march_gather_seconds = 0.0
 	_army_march_active = false
 	_army_march_mode = &""
 	_army_march_route = PackedVector3Array()
