@@ -1,7 +1,7 @@
 class_name UnitFormationRole
 extends RefCounted
 
-## Reusable combat-role metadata for formation slot assignment.
+## Combat-role metadata for targeting / classification.
 ## Prefer role categories over hardcoding scene/class names at call sites.
 
 enum Role {
@@ -78,23 +78,6 @@ static func get_role(unit: Node) -> Role:
 	return Role.NONE
 
 
-static func is_formation_eligible(unit: Node, allow_siege: bool = true) -> bool:
-	if unit == null or not is_instance_valid(unit):
-		return false
-	if unit is Hero or unit is Worker or unit is NeutralCreep or unit is Building:
-		return false
-	if not unit is Unit:
-		return false
-	var role: Role = get_role(unit)
-	if role == Role.NONE:
-		return false
-	if role == Role.SIEGE and not allow_siege:
-		return false
-	if unit is MilitaryUnit or unit is Cannon:
-		return true
-	return false
-
-
 static func is_siege_role(role: Role) -> bool:
 	return role == Role.SIEGE
 
@@ -149,17 +132,3 @@ static func _hero_follow_role(hero: Hero) -> Role:
 		return Role.HERO_REAR
 	# Paladin / default melee heroes stay near front-center.
 	return Role.HERO_FRONT
-
-
-static func hero_follow_offset(role: Role, spacing: float) -> Vector3:
-	## Local offset relative to formation forward (+Z local = forward in layout space).
-	## Layout space: +Z forward, +X right.
-	match role:
-		Role.HERO_FRONT:
-			return Vector3(0.0, 0.0, spacing * 0.35)
-		Role.HERO_FLANK:
-			return Vector3(spacing * 2.2, 0.0, 0.0)
-		Role.HERO_REAR:
-			return Vector3(0.0, 0.0, -spacing * 2.4)
-		_:
-			return Vector3(0.0, 0.0, -spacing)

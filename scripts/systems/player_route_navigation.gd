@@ -1,13 +1,17 @@
 extends Node
 
 ## Custom RTS movement authority (sole strategic movement foundation).
-## One shared strategic grid route per group command + personal slots +
-## lightweight local separation.
-## Used by player SelectionManager / FormationManager, production rally, and
-## any future commander that issues destinations through this shared API.
+## One shared strategic grid route per group command + automatic formation
+## slots assigned once per command + lightweight local separation.
+## Used by player SelectionManager, production rally, and enemy army march.
 
-const SLOT_SPACING := 1.4
+const SLOT_SPACING := 1.7
 const GROUND_Y := 0.0
+const FORMATION_LINE_MAX := 5
+const FORMATION_RECTANGLE_MAX := 15
+const FORMATION_SHAPE_LINE := &"line"
+const FORMATION_SHAPE_RECTANGLE := &"rectangle"
+const FORMATION_SHAPE_SQUARE := &"square"
 ## Meaningful army travel chunk before briefly gathering the main force.
 ## Map is 100m across; Spearman 4.5 m/s, cavalry 8.5 m/s, heroes ~5.4–6.0.
 const ARMY_MARCH_SEGMENT_DISTANCE := 16.0
@@ -19,6 +23,8 @@ const ARMY_MARCH_OBJECTIVE_EQUIV_RADIUS := 4.0
 const ENEMY_ARMY_MARCH_SOURCE: StringName = &"enemy_ai"
 
 var grid: PlayerRtsOccupancyGrid = PlayerRtsOccupancyGrid.new()
+## Same occupancy cells, dynamic unit/building instance IDs for neighbors + acquire.
+var spatial: UnitSpatialHash = UnitSpatialHash.new()
 
 var _global_command_generation: int = 0
 var path_calculations_this_command: int = 0
@@ -69,6 +75,7 @@ func clear_all() -> void:
 	last_route_waypoints = 0
 	_clear_army_march()
 	grid.clear_all()
+	spatial.clear()
 	_grid_ready = true
 	_scan_pending = true
 	call_deferred("_scan_static_obstacles_if_needed")
@@ -90,6 +97,7 @@ func register_static_obstacle(body: Node3D) -> void:
 		# Explicitly clear when footprint becomes walkable (e.g. open gate).
 		grid.clear_obstacle(body.get_instance_id())
 		grid.commit()
+		update_combat_occupant(body)
 		return
 	grid.set_obstacle_aabb(
 		body.get_instance_id(),
@@ -97,6 +105,7 @@ func register_static_obstacle(body: Node3D) -> void:
 		footprint["half_extents"] as Vector3
 	)
 	grid.commit()
+	update_combat_occupant(body)
 
 
 func unregister_static_obstacle(body: Node3D) -> void:
@@ -107,6 +116,7 @@ func unregister_static_obstacle(body: Node3D) -> void:
 		return
 	grid.clear_obstacle(obstacle_id)
 	grid.commit()
+	# Combat occupant stays until the node leaves the tree (foundations still exist).
 
 
 func refresh_static_obstacle(body: Node3D) -> void:
@@ -144,14 +154,14 @@ func request_group_move(
 	# Shift-queued: unique slots only; each unit paths individually when the order runs.
 	if queued:
 		result["handled"] = true
-		var slot_targets: Array[Vector3] = _make_destination_slots(
-			destination, ordered_units.size()
+		var queued_origin: Vector3 = _group_centroid(ordered_units)
+		var queued_plan: Dictionary = _plan_group_formation(
+			ordered_units, destination, queued_origin, PackedVector3Array()
 		)
+		var queued_slots: Array[Vector3] = queued_plan["slots"] as Array[Vector3]
 		for index: int in ordered_units.size():
 			var unit: Unit = ordered_units[index] as Unit
-			var slot: Vector3 = slot_targets[index]
-			if not grid.is_world_walkable(slot):
-				slot = grid.nearest_walkable_world(slot)
+			var slot: Vector3 = queued_slots[index] if index < queued_slots.size() else destination
 			_issue_unit_ground_order(unit, slot, order_kind, true)
 		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		return result
@@ -169,6 +179,7 @@ func request_group_move(
 		group_destination = grid.nearest_walkable_world(group_destination)
 
 	var origin: Vector3 = _group_centroid(ordered_units)
+	## Single A* for the whole command — members follow this corridor.
 	var shared_route: PackedVector3Array = grid.find_path(origin, group_destination)
 	path_calculations_this_command += 1
 	total_path_calculations += 1
@@ -182,24 +193,25 @@ func request_group_move(
 		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		return result
 
-	var slots: Array[Vector3] = _make_destination_slots(
-		group_destination, ordered_units.size()
+	var plan: Dictionary = _plan_group_formation(
+		ordered_units, group_destination, origin, shared_route
 	)
-	for i: int in slots.size():
-		if not grid.is_world_walkable(slots[i]):
-			slots[i] = grid.nearest_walkable_world(slots[i])
+	var slots: Array[Vector3] = plan["slots"] as Array[Vector3]
+	var locals: Array[Vector3] = plan["locals"] as Array[Vector3]
 
 	var slot_targets_out: Array = []
 	for index: int in ordered_units.size():
 		var unit: Unit = ordered_units[index] as Unit
 		var slot: Vector3 = slots[index] if index < slots.size() else group_destination
+		var local: Vector3 = locals[index] if index < locals.size() else Vector3.ZERO
 		slot_targets_out.append(slot)
 		unit.prepare_custom_rts_route(
 			shared_route,
 			slot,
 			_global_command_generation,
 			group_destination,
-			order_kind
+			order_kind,
+			local
 		)
 		_issue_unit_ground_order(unit, slot, order_kind, false)
 
@@ -211,7 +223,7 @@ func request_group_move(
 	return result
 
 
-## Player SelectionManager / FormationManager / production-rally entry.
+## Player SelectionManager / production-rally entry.
 func issue_player_group_command(
 	units: Array,
 	destination: Vector3,
@@ -242,12 +254,27 @@ func bind_unit_strategic_route(
 	if not grid.is_world_walkable(origin):
 		origin = grid.nearest_walkable_world(origin)
 
+	var origin_cell: Vector2i = grid.world_to_cell(origin)
+	var dest_cell: Vector2i = grid.world_to_cell(dest)
+	var now_msec: int = Time.get_ticks_msec()
+	if (
+		unit.has_meta(&"_rts_bind_origin_cell")
+		and unit.get_meta(&"_rts_bind_origin_cell") == origin_cell
+		and unit.get_meta(&"_rts_bind_dest_cell") == dest_cell
+		and now_msec - int(unit.get_meta(&"_rts_bind_msec", 0)) < 200
+		and unit.is_custom_rts_movement_active()
+	):
+		return true
+
 	var route: PackedVector3Array = grid.find_path(origin, dest)
 	path_calculations_this_command += 1
 	total_path_calculations += 1
 	PerfCounters.record_strategic_route_request()
 	PerfCounters.record_navigation_path_request()
 	_global_command_generation += 1
+	unit.set_meta(&"_rts_bind_origin_cell", origin_cell)
+	unit.set_meta(&"_rts_bind_dest_cell", dest_cell)
+	unit.set_meta(&"_rts_bind_msec", now_msec)
 
 	if route.is_empty():
 		route = PackedVector3Array([dest])
@@ -257,7 +284,8 @@ func bind_unit_strategic_route(
 		dest,
 		_global_command_generation,
 		dest,
-		&"move"
+		&"move",
+		Vector3.ZERO
 	)
 	_record_command_telemetry(1, route.size(), command_source)
 	return true
@@ -314,6 +342,85 @@ func nearest_walkable_world(world: Vector3) -> Vector3:
 	return grid.nearest_walkable_world(world)
 
 
+func combat_occupant_count() -> int:
+	return spatial.occupant_count()
+
+
+## Register or refresh a unit / creep at its current cell.
+func update_mobile_occupant(body: Node3D) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	ensure_grid_ready()
+	spatial.update_point(body.get_instance_id(), body.global_position)
+
+
+## Register a building (or other static combat body) across its footprint cells.
+func update_combat_occupant(body: Node3D) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	ensure_grid_ready()
+	if body is Building:
+		var footprint: Dictionary = _resolve_footprint(body)
+		if footprint.is_empty():
+			spatial.update_point(body.get_instance_id(), body.global_position)
+			return
+		spatial.update_aabb(
+			body.get_instance_id(),
+			footprint["center"] as Vector3,
+			footprint["half_extents"] as Vector3
+		)
+		return
+	spatial.update_point(body.get_instance_id(), body.global_position)
+
+
+func remove_combat_occupant(body: Node3D) -> void:
+	if body == null:
+		return
+	spatial.remove(body.get_instance_id())
+
+
+## Nearby live Node3D occupants. Empty when nothing is indexed in range.
+## max_count > 0 bounds resolve work so overlapping armies stay O(neighbors), not O(clump).
+func query_nearby_nodes(world: Vector3, radius: float, max_count: int = 0) -> Array[Node3D]:
+	ensure_grid_ready()
+	var started_usec: int = Time.get_ticks_usec()
+	var ids: Array[int] = (
+		spatial.query_all_ids()
+		if is_inf(radius)
+		else spatial.query_ids(world, radius, max_count)
+	)
+	var nodes: Array[Node3D] = _resolve_occupant_nodes(ids, max_count)
+	PerfCounters.record_usec(PerfCounters.KEY_QUERY_NEARBY_USEC, Time.get_ticks_usec() - started_usec)
+	return nodes
+
+
+func query_nearby_units(world: Vector3, radius: float, max_count: int = 0) -> Array[Unit]:
+	var units: Array[Unit] = []
+	for node: Node3D in query_nearby_nodes(world, radius, max_count):
+		if node is Unit:
+			units.append(node as Unit)
+			if max_count > 0 and units.size() >= max_count:
+				break
+	return units
+
+
+func _resolve_occupant_nodes(ids: Array[int], max_count: int = 0) -> Array[Node3D]:
+	var nodes: Array[Node3D] = []
+	for instance_id: int in ids:
+		var node_ref: Variant = instance_from_id(instance_id)
+		if not NodeSafety.is_alive_node(node_ref) or not node_ref is Node3D:
+			spatial.remove(instance_id)
+			continue
+		var node: Node3D = node_ref as Node3D
+		if not node.is_inside_tree():
+			spatial.remove(instance_id)
+			continue
+		nodes.append(node)
+		if max_count > 0 and nodes.size() >= max_count:
+			break
+	return nodes
+
+
 func _setup_default_grid() -> void:
 	var extent: float = PlayerRtsOccupancyGrid.MAP_MAX - PlayerRtsOccupancyGrid.MAP_MIN
 	var cells: int = int(ceil(extent / PlayerRtsOccupancyGrid.DEFAULT_CELL_SIZE))
@@ -325,6 +432,7 @@ func _setup_default_grid() -> void:
 		PlayerRtsOccupancyGrid.DEFAULT_CLEARANCE,
 		PlayerRtsOccupancyGrid.DEFAULT_UNIT_RADIUS
 	)
+	spatial.setup(grid.origin_xz, grid.grid_width, grid.grid_height, grid.cell_size)
 	_grid_ready = true
 	_scan_pending = true
 
@@ -368,6 +476,7 @@ func _scan_static_obstacles() -> void:
 	_scan_static_bodies_recursive(root if root != null else tree.root)
 
 	grid.commit()
+	_reindex_combat_occupants(tree)
 
 
 func _scan_buildings_recursive(node: Node) -> void:
@@ -378,7 +487,15 @@ func _scan_buildings_recursive(node: Node) -> void:
 
 
 func _scan_static_bodies_recursive(node: Node) -> void:
-	if node is StaticBody3D and not (node is Building) and not (node is GatherableResource):
+	if node is GoldMine:
+		var mine_footprint: Dictionary = _resolve_footprint(node as Node3D)
+		if not mine_footprint.is_empty():
+			grid.set_obstacle_aabb(
+				node.get_instance_id(),
+				mine_footprint["center"] as Vector3,
+				mine_footprint["half_extents"] as Vector3
+			)
+	elif node is StaticBody3D and not (node is Building) and not (node is GatherableResource):
 		var body: StaticBody3D = node as StaticBody3D
 		if (body.collision_layer & PhysicsLayers.BUILDINGS) != 0:
 			var footprint: Dictionary = _resolve_footprint(body)
@@ -392,6 +509,18 @@ func _scan_static_bodies_recursive(node: Node) -> void:
 		_scan_static_bodies_recursive(child)
 
 
+func _reindex_combat_occupants(tree: SceneTree) -> void:
+	if tree == null:
+		return
+	for group_name: StringName in [&"units", &"heroes", &"enemies", &"neutral_creeps"]:
+		for node_variant: Variant in tree.get_nodes_in_group(group_name):
+			if node_variant is Unit:
+				update_mobile_occupant(node_variant as Unit)
+	for node_variant: Variant in tree.get_nodes_in_group(&"buildings"):
+		if node_variant is Building:
+			update_combat_occupant(node_variant as Building)
+
+
 func _register_building_internal(building: Building) -> void:
 	if building == null or not is_instance_valid(building):
 		return
@@ -400,16 +529,19 @@ func _register_building_internal(building: Building) -> void:
 	## Foundations under construction stay walkable for builder handoff.
 	if building.is_being_constructed():
 		grid.clear_obstacle(building.get_instance_id())
+		update_combat_occupant(building)
 		return
 	# Open gates: still register posts-only footprint via resolver.
 	var footprint: Dictionary = _resolve_footprint(building)
 	if footprint.is_empty():
+		update_combat_occupant(building)
 		return
 	grid.set_obstacle_aabb(
 		building.get_instance_id(),
 		footprint["center"] as Vector3,
 		footprint["half_extents"] as Vector3
 	)
+	update_combat_occupant(building)
 
 
 func _resolve_footprint(body: Node3D) -> Dictionary:
@@ -426,6 +558,13 @@ func _resolve_footprint(body: Node3D) -> Dictionary:
 				"half_extents": custom,
 			}
 		return {}
+
+	if body is GoldMine:
+		var mine: GoldMine = body as GoldMine
+		return {
+			"center": mine.global_position,
+			"half_extents": mine.get_occupancy_half_extents(),
+		}
 
 	var collision_shape: CollisionShape3D = (
 		body.get_node_or_null("CollisionShape3D") as CollisionShape3D
@@ -490,22 +629,221 @@ func _group_centroid(units: Array) -> Vector3:
 	return c
 
 
-func _make_destination_slots(center: Vector3, count: int) -> Array[Vector3]:
-	if count <= 1:
-		return [Vector3(center.x, GROUND_Y, center.z)]
-	var cols: int = int(ceil(sqrt(float(count))))
-	var rows: int = int(ceil(float(count) / float(cols)))
-	var out: Array[Vector3] = []
+func _plan_group_formation(
+	units: Array,
+	destination: Vector3,
+	origin: Vector3,
+	route: PackedVector3Array
+) -> Dictionary:
+	var count: int = units.size()
+	var dest := Vector3(destination.x, GROUND_Y, destination.z)
+	var empty_slots: Array[Vector3] = []
+	var empty_locals: Array[Vector3] = []
+	var result: Dictionary = {
+		"slots": empty_slots,
+		"locals": empty_locals,
+		"shape": FORMATION_SHAPE_LINE,
+		"forward": Vector3(0.0, 0.0, 1.0),
+		"right": Vector3(1.0, 0.0, 0.0),
+	}
+	if count <= 0:
+		return result
+
+	var forward: Vector3 = _formation_travel_forward(origin, dest, route)
+	var right: Vector3 = Vector3(forward.z, 0.0, -forward.x)
+	if right.length_squared() < 0.0001:
+		right = Vector3(1.0, 0.0, 0.0)
+	else:
+		right = right.normalized()
+
+	var shape: StringName = choose_formation_shape(count)
+	var layout: Array[Vector3] = build_formation_locals(count, shape)
+	var assigned: Array[Vector3] = _assign_formation_locals(units, layout, origin, forward, right)
+	var slots: Array[Vector3] = []
+	slots.resize(count)
+	for i: int in count:
+		var local: Vector3 = assigned[i] if i < assigned.size() else Vector3.ZERO
+		var world: Vector3 = dest + right * local.x + forward * local.z
+		world.y = GROUND_Y
+		slots[i] = _compress_slot_to_walkable(world, dest)
+
+	result["slots"] = slots
+	result["locals"] = assigned
+	result["shape"] = shape
+	result["forward"] = forward
+	result["right"] = right
+	return result
+
+
+func choose_formation_shape(count: int) -> StringName:
+	if count <= FORMATION_LINE_MAX:
+		return FORMATION_SHAPE_LINE
+	if count <= FORMATION_RECTANGLE_MAX:
+		return FORMATION_SHAPE_RECTANGLE
+	return FORMATION_SHAPE_SQUARE
+
+
+func build_formation_locals(count: int, shape: StringName = &"") -> Array[Vector3]:
+	var locals: Array[Vector3] = []
+	if count <= 0:
+		return locals
+	if count == 1:
+		locals.append(Vector3.ZERO)
+		return locals
+
+	var resolved: StringName = shape if shape != &"" else choose_formation_shape(count)
+	var cols: int = 1
+	var rows: int = 1
+	match resolved:
+		FORMATION_SHAPE_LINE:
+			cols = count
+			rows = 1
+		FORMATION_SHAPE_RECTANGLE:
+			cols = maxi(2, int(ceil(sqrt(float(count) * 1.7))))
+			rows = maxi(1, int(ceil(float(count) / float(cols))))
+			if rows > cols:
+				var swap: int = cols
+				cols = rows
+				rows = swap
+				rows = maxi(1, int(ceil(float(count) / float(cols))))
+		_:
+			cols = maxi(1, int(ceil(sqrt(float(count)))))
+			rows = maxi(1, int(ceil(float(count) / float(cols))))
+
 	var index: int = 0
 	for row: int in rows:
 		for col: int in cols:
 			if index >= count:
 				break
 			var ox: float = (float(col) - float(cols - 1) * 0.5) * SLOT_SPACING
-			var oz: float = (float(row) - float(rows - 1) * 0.5) * SLOT_SPACING
-			out.append(Vector3(center.x + ox, GROUND_Y, center.z + oz))
+			var oz: float = (float(rows - 1) * 0.5 - float(row)) * SLOT_SPACING
+			locals.append(Vector3(ox, 0.0, oz))
 			index += 1
-	return out
+	return locals
+
+
+func _formation_travel_forward(
+	origin: Vector3,
+	destination: Vector3,
+	route: PackedVector3Array
+) -> Vector3:
+	if route.size() >= 2:
+		var look_index: int = mini(4, route.size() - 1)
+		var look: Vector3 = route[look_index] - route[0]
+		look.y = 0.0
+		if look.length_squared() >= 0.25:
+			return look.normalized()
+	var face: Vector3 = destination - origin
+	face.y = 0.0
+	if face.length_squared() < 0.0001:
+		return Vector3(0.0, 0.0, 1.0)
+	return face.normalized()
+
+
+func _assign_formation_locals(
+	units: Array,
+	layout: Array[Vector3],
+	origin: Vector3,
+	forward: Vector3,
+	right: Vector3
+) -> Array[Vector3]:
+	var count: int = units.size()
+	var assigned: Array[Vector3] = []
+	assigned.resize(count)
+	if count <= 0 or layout.is_empty():
+		return assigned
+	if count == 1:
+		assigned[0] = layout[0] if not layout.is_empty() else Vector3.ZERO
+		return assigned
+
+	var used_slots: PackedByteArray = PackedByteArray()
+	used_slots.resize(layout.size())
+	used_slots.fill(0)
+	var filled: PackedByteArray = PackedByteArray()
+	filled.resize(count)
+	filled.fill(0)
+
+	var hero_index: int = -1
+	for i: int in count:
+		if units[i] is Hero:
+			hero_index = i
+			break
+	if hero_index >= 0:
+		var hero_slot: int = _pick_front_center_slot(layout)
+		assigned[hero_index] = layout[hero_slot]
+		used_slots[hero_slot] = 1
+		filled[hero_index] = 1
+
+	var remaining_units: Array[int] = []
+	for i: int in count:
+		if filled[i] == 1:
+			continue
+		remaining_units.append(i)
+	remaining_units.sort_custom(
+		func(a: int, b: int) -> bool:
+			var pa: Vector3 = _project_local(
+				(units[a] as Unit).global_position, origin, right, forward
+			)
+			var pb: Vector3 = _project_local(
+				(units[b] as Unit).global_position, origin, right, forward
+			)
+			if absf(pa.x - pb.x) > 0.05:
+				return pa.x < pb.x
+			return pa.z > pb.z
+	)
+
+	var remaining_slots: Array[int] = []
+	for slot_i: int in layout.size():
+		if used_slots[slot_i] == 0:
+			remaining_slots.append(slot_i)
+	remaining_slots.sort_custom(
+		func(a: int, b: int) -> bool:
+			var la: Vector3 = layout[a]
+			var lb: Vector3 = layout[b]
+			if absf(la.x - lb.x) > 0.05:
+				return la.x < lb.x
+			return la.z > lb.z
+	)
+
+	var pair_count: int = mini(remaining_units.size(), remaining_slots.size())
+	for i: int in pair_count:
+		assigned[remaining_units[i]] = layout[remaining_slots[i]]
+		filled[remaining_units[i]] = 1
+	for i: int in count:
+		if filled[i] == 0:
+			assigned[i] = layout[mini(i, layout.size() - 1)]
+	return assigned
+
+
+func _pick_front_center_slot(layout: Array[Vector3]) -> int:
+	var best: int = 0
+	var best_score: float = -INF
+	for i: int in layout.size():
+		var local: Vector3 = layout[i]
+		var score: float = local.z * 100.0 - absf(local.x)
+		if score > best_score:
+			best_score = score
+			best = i
+	return best
+
+
+func _project_local(world: Vector3, origin: Vector3, right: Vector3, forward: Vector3) -> Vector3:
+	var delta: Vector3 = world - origin
+	delta.y = 0.0
+	return Vector3(delta.dot(right), 0.0, delta.dot(forward))
+
+
+func _compress_slot_to_walkable(slot: Vector3, center: Vector3) -> Vector3:
+	if grid.is_world_walkable(slot):
+		return Vector3(slot.x, GROUND_Y, slot.z)
+	var offset: Vector3 = slot - center
+	offset.y = 0.0
+	for scale: float in [0.75, 0.5, 0.25, 0.0]:
+		var candidate: Vector3 = center + offset * scale
+		candidate.y = GROUND_Y
+		if grid.is_world_walkable(candidate):
+			return candidate
+	return grid.nearest_walkable_world(Vector3(slot.x, GROUND_Y, slot.z))
 
 
 func _issue_unit_ground_order(
@@ -650,6 +988,7 @@ func _request_enemy_army_march_move(
 	path_calculations_this_command = 0
 
 	var origin: Vector3 = _group_centroid(ordered_units)
+	## Single A* for the army march — members share this corridor.
 	var shared_route: PackedVector3Array = grid.find_path(origin, group_destination)
 	path_calculations_this_command += 1
 	total_path_calculations += 1
@@ -663,12 +1002,11 @@ func _request_enemy_army_march_move(
 		_record_command_telemetry(ordered_units.size(), 0, command_source)
 		return result
 
-	var slots: Array[Vector3] = _make_destination_slots(
-		group_destination, ordered_units.size()
+	var plan: Dictionary = _plan_group_formation(
+		ordered_units, group_destination, origin, shared_route
 	)
-	for i: int in slots.size():
-		if not grid.is_world_walkable(slots[i]):
-			slots[i] = grid.nearest_walkable_world(slots[i])
+	var slots: Array[Vector3] = plan["slots"] as Array[Vector3]
+	var locals: Array[Vector3] = plan["locals"] as Array[Vector3]
 
 	_start_army_march(
 		shared_route,
@@ -682,8 +1020,9 @@ func _request_enemy_army_march_move(
 	for index: int in ordered_units.size():
 		var unit: Unit = ordered_units[index] as Unit
 		var slot: Vector3 = slots[index] if index < slots.size() else group_destination
+		var local: Vector3 = locals[index] if index < locals.size() else Vector3.ZERO
 		slot_targets_out.append(slot)
-		_bind_unit_to_army_march(unit, shared_route, slot, order_kind, false)
+		_bind_unit_to_army_march(unit, shared_route, slot, order_kind, false, local)
 		_issue_unit_ground_order(unit, slot, order_kind, false)
 
 	result["handled"] = true
@@ -748,7 +1087,7 @@ func _join_units_to_army_march(
 		if not grid.is_world_walkable(slot):
 			slot = grid.nearest_walkable_world(slot)
 		slot_targets_out.append(slot)
-		_bind_unit_to_army_march(unit, join_route, slot, order_kind, true)
+		_bind_unit_to_army_march(unit, join_route, slot, order_kind, true, Vector3.ZERO)
 		_issue_unit_ground_order(unit, slot, order_kind, false)
 	result["slot_targets"] = slot_targets_out
 
@@ -758,14 +1097,16 @@ func _bind_unit_to_army_march(
 	route: PackedVector3Array,
 	slot: Vector3,
 	order_kind: StringName,
-	_is_join: bool
+	_is_join: bool,
+	formation_local: Vector3 = Vector3.ZERO
 ) -> void:
 	unit.prepare_custom_rts_route(
 		route,
 		slot,
 		_army_march_generation,
 		_army_march_clicked,
-		order_kind
+		order_kind,
+		formation_local
 	)
 	unit.bind_army_march_checkpoint(
 		_army_march_checkpoint,

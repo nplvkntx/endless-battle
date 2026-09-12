@@ -1,8 +1,11 @@
-[gd_scene load_steps=22 format=3 uid="uid://djfuwaovwcf3c"]
+[gd_scene format=3 uid="uid://djfuwaovwcf3c"]
 
 [ext_resource type="Script" path="res://scripts/units/hero.gd" id="1_hero"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 [ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="3_selection_glow"]
+
+[ext_resource type="PackedScene" path="res://assets/art/endless_paladin/paladin.glb" id="4_paladin"]
+[ext_resource type="Script" path="res://scripts/components/paladin_art_visuals.gd" id="5_art"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_gold"]
 albedo_color = Color(0.82, 0.62, 0.14, 1)
@@ -67,39 +70,13 @@ script = ExtResource("1_hero")
 move_speed = 5.5
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
-mesh = SubResource("CapsuleMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_gold")
+position = Vector3(0, -0.5, 0)
 
-[node name="Head" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.44, 0)
-mesh = SubResource("SphereMesh_head")
-surface_material_override/0 = SubResource("StandardMaterial3D_skin")
+[node name="PaladinModel" parent="MeshInstance3D" instance=ExtResource("4_paladin")]
+scale = Vector3(0.76, 0.76, 0.76)
 
-[node name="Crown" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.58, 0)
-mesh = SubResource("CylinderMesh_crown")
-surface_material_override/0 = SubResource("StandardMaterial3D_crown")
-
-[node name="PauldronL" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.22, 0.18, 0)
-mesh = SubResource("BoxMesh_pauldron")
-surface_material_override/0 = SubResource("StandardMaterial3D_gold")
-
-[node name="PauldronR" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.22, 0.18, 0)
-mesh = SubResource("BoxMesh_pauldron")
-surface_material_override/0 = SubResource("StandardMaterial3D_gold")
-
-[node name="Cape" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0.2)
-mesh = SubResource("BoxMesh_cape")
-surface_material_override/0 = SubResource("StandardMaterial3D_cape")
-
-[node name="Sword" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0.965926, 0.258819, 0, -0.258819, 0.965926, 0, 0, 0, 1, 0.34, 0.06, 0)
-mesh = SubResource("BoxMesh_sword")
-surface_material_override/0 = SubResource("StandardMaterial3D_sword")
+[node name="PaladinArtVisuals" type="Node" parent="."]
+script = ExtResource("5_art")
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false

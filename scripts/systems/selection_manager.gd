@@ -755,16 +755,6 @@ func _dispatch_move_command(ground_position: Vector3, queued: bool = false) -> v
 	if commandable_units.is_empty():
 		return
 
-	# Formation-aware destinations when any selected military unit is formed.
-	if FormationManager.issue_formation_ground_order(
-		commandable_units,
-		ground_position,
-		&"move",
-		queued
-	):
-		CommandFeedback.show_move_marker(ground_position)
-		return
-
 	# PlayerRouteNavigation — single or multi unit strategic group move.
 	var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
 		commandable_units,
@@ -816,19 +806,8 @@ func _dispatch_attack_command(target: Node3D, queued: bool = false) -> void:
 		return
 
 	military_units.sort_custom(_compare_units_by_instance_id)
-	var approach_slots: Dictionary = FormationManager.compute_attack_approach_slots(
-		military_units,
-		target
-	)
 	for index: int in military_units.size():
 		var unit: Unit = military_units[index]
-		# Approach slots keep backline protection; attack target remains shared.
-		if approach_slots.has(unit.get_instance_id()):
-			var approach: Vector3 = approach_slots[unit.get_instance_id()] as Vector3
-			if _horizontal_distance_xz(unit.global_position, approach) > 1.5:
-				unit.issue_order(UnitOrder.move(approach), queued)
-				unit.issue_order(UnitOrder.attack(target, index), true)
-				continue
 		unit.issue_order(UnitOrder.attack(target, index), queued)
 
 	_play_attack_target_feedback(target)
@@ -837,15 +816,6 @@ func _dispatch_attack_move_command(ground_position: Vector3, queued: bool = fals
 	_purge_invalid_selected_units()
 	var commandable_units := _get_commandable_selected_units()
 	if commandable_units.is_empty():
-		return
-
-	if FormationManager.issue_formation_ground_order(
-		commandable_units,
-		ground_position,
-		&"attack_move",
-		queued
-	):
-		CommandFeedback.show_attack_move_marker(ground_position)
 		return
 
 	var custom_result: Dictionary = PlayerRouteNavigation.issue_player_group_command(
@@ -897,15 +867,6 @@ func _dispatch_patrol_command(ground_position: Vector3, queued: bool = false) ->
 	_purge_invalid_selected_units()
 	var commandable_units := _get_commandable_selected_units()
 	if commandable_units.is_empty():
-		return
-
-	if FormationManager.issue_formation_ground_order(
-		commandable_units,
-		ground_position,
-		&"patrol",
-		queued
-	):
-		CommandFeedback.show_patrol_marker(ground_position)
 		return
 
 	if not queued:

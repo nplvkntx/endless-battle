@@ -74,7 +74,8 @@ func _ready() -> void:
 	_health_component.health_depleted.connect(_on_health_depleted)
 	_body_mesh_rest_position = _body_mesh.position
 	_body_material = HealthBarDisplay.duplicate_mesh_material(_body_mesh)
-	_body_mesh.set_surface_override_material(0, _body_material)
+	if _body_mesh.mesh != null and _body_mesh.mesh.get_surface_count() > 0:
+		_body_mesh.set_surface_override_material(0, _body_material)
 	_body_base_color = _body_material.albedo_color
 	if CombatTargetValidation.is_enemy_faction(self):
 		if HeroProgressionStore.has_saved_enemy_progression():
@@ -913,6 +914,7 @@ func _physics_process(delta: float) -> void:
 	if _health_component.current_health <= 0:
 		return
 
+	_sync_spatial_hash()
 	_sanitize_attack_target()
 	_sanitize_hero_ability_targets()
 	_sanitize_move_to_cast_target()

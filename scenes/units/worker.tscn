@@ -1,8 +1,9 @@
-[gd_scene load_steps=10 format=3 uid="uid://c34sseipvxy7a"]
+[gd_scene load_steps=11 format=3 uid="uid://c34sseipvxy7a"]
 
 [ext_resource type="Script" path="res://scripts/units/worker.gd" id="1_worker"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
-[ext_resource type="PackedScene" path="res://assets/art/quaternius/characters/ranger_warrior_candidates/Warrior.gltf" id="3_worker_model"]
+[ext_resource type="PackedScene" path="res://assets/art/endless_worker/worker.glb" id="3_worker_model"]
+[ext_resource type="Script" path="res://scripts/components/worker_art_visuals.gd" id="5_worker_art"]
 [ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="4_selection_glow"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_sel_glow"]
@@ -26,10 +27,13 @@ size = Vector3(1.0, 0.08, 0.02)
 script = ExtResource("1_worker")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.06, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 
 [node name="WorkerModel" parent="MeshInstance3D" instance=ExtResource("3_worker_model")]
-transform = Transform3D(-0.4, 0, 0, 0, 0.4, 0, 0, 0, -0.4, 0, 0, 0)
+transform = Transform3D(0.68, 0, 0, 0, 0.68, 0, 0, 0, 0.68, 0, 0, 0)
+
+[node name="WorkerArtVisuals" type="Node" parent="."]
+script = ExtResource("5_worker_art")
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false
@@ -42,7 +46,7 @@ mesh = SubResource("CylinderMesh_sel_glow")
 surface_material_override/0 = ExtResource("4_selection_glow")
 
 [node name="HealthBar" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.65, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
 
 [node name="Background" type="MeshInstance3D" parent="HealthBar"]
 mesh = SubResource("BoxMesh_health_bar")

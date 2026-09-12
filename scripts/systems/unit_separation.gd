@@ -267,10 +267,6 @@ static func apply_standing_push(
 
 
 static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) -> Vector3:
-	var world: World3D = body.get_world_3d()
-	if world == null:
-		return Vector3.ZERO
-
 	var self_radius: float = get_unit_radius(body)
 	var self_team: int = -999
 	var self_dest: Vector3 = Vector3.ZERO
@@ -282,31 +278,20 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 			self_has_dest = true
 			self_dest = self_unit.get_movement_destination()
 
-	var query: PhysicsShapeQueryParameters3D = _get_query_params()
-	query.shape = _get_probe_shape()
-	query.transform = Transform3D(Basis.IDENTITY, body.global_position)
-	query.collision_mask = PhysicsLayers.UNITS
-	query.exclude = [body.get_rid()]
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-
-	var hits: Array[Dictionary] = world.direct_space_state.intersect_shape(
-		query, MAX_NEIGHBORS
-	)
-	PerfCounters.record_unit_neighbor_query(hits.size())
-	if hits.is_empty():
+	var neighbors: Array = _collect_neighbor_bodies(body)
+	PerfCounters.record_unit_neighbor_query(neighbors.size())
+	if neighbors.is_empty():
 		return Vector3.ZERO
 
 	var push: Vector3 = Vector3.ZERO
 	var contributors: int = 0
-	for hit: Dictionary in hits:
-		var collider: Object = hit.get("collider")
-		if collider == null or not collider is CharacterBody3D:
+	for other_variant: Variant in neighbors:
+		if other_variant == null or not other_variant is CharacterBody3D:
 			continue
-		if not (collider as Node).is_in_group(&"units"):
+		if not (other_variant as Node).is_in_group(&"units"):
 			continue
 
-		var other: CharacterBody3D = collider as CharacterBody3D
+		var other: CharacterBody3D = other_variant as CharacterBody3D
 		# Soft avoidance is friendly-only. Hostiles remain packing blockers (no soft peel).
 		if not hard_overlap_only and other is Unit and self_team >= 0:
 			var other_team: int = (other as Unit).team_id
@@ -361,12 +346,46 @@ static func _query_push(body: CharacterBody3D, hard_overlap_only: bool = false) 
 
 		push += direction * weight
 		contributors += 1
+		if contributors >= MAX_NEIGHBORS:
+			break
 
 	if contributors <= 0 or push.length_squared() < PUSH_DEAD_ZONE_SQ:
 		return Vector3.ZERO
 
 	PerfCounters.record_separation_update()
 	return push.normalized()
+
+
+## Occupancy-cell neighbors. Physics shape query only when nothing is indexed
+## (headless stubs). Moving custom-RTS and idle standing share this source.
+static func _collect_neighbor_bodies(body: CharacterBody3D) -> Array:
+	var neighbors: Array = []
+	if PlayerRouteNavigation.combat_occupant_count() > 0:
+		for other: Unit in PlayerRouteNavigation.query_nearby_units(
+			body.global_position, QUERY_RADIUS, MAX_NEIGHBORS + 4
+		):
+			if other == body:
+				continue
+			neighbors.append(other)
+			if neighbors.size() >= MAX_NEIGHBORS:
+				break
+		return neighbors
+
+	var world: World3D = body.get_world_3d()
+	if world == null:
+		return neighbors
+	var query: PhysicsShapeQueryParameters3D = _get_query_params()
+	query.shape = _get_probe_shape()
+	query.transform = Transform3D(Basis.IDENTITY, body.global_position)
+	query.collision_mask = PhysicsLayers.UNITS
+	query.exclude = [body.get_rid()]
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	for hit: Dictionary in world.direct_space_state.intersect_shape(query, MAX_NEIGHBORS):
+		var collider: Variant = hit.get("collider")
+		if collider != null:
+			neighbors.append(collider)
+	return neighbors
 
 
 static func _get_probe_shape() -> SphereShape3D:

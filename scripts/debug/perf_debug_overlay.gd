@@ -148,6 +148,21 @@ func _update_label() -> void:
 			PerfCounters.get_rate(PerfCounters.KEY_STUCK_CHECKS),
 			PerfCounters.get_rate(PerfCounters.KEY_STUCK_RECOVERIES),
 		],
+		"query %.1fms/f  slide %.1fms/f  tgtSearch %.1fms/f  pairs %.0f"
+		% [
+			_usec_rate_to_frame_ms(PerfCounters.KEY_QUERY_NEARBY_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_MOVE_AND_SLIDE_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_TARGET_SEARCH_USEC, fps),
+			Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS),
+		],
+		"unit %.1fms  mil %.1fms  rts %.1fms  stuck %.1fms  steer %.1fms"
+		% [
+			_usec_rate_to_frame_ms(PerfCounters.KEY_UNIT_PHYS_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_MIL_PHYS_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_RTS_MOVE_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_STUCK_WATCH_USEC, fps),
+			_usec_rate_to_frame_ms(PerfCounters.KEY_STEER_USEC, fps),
+		],
 		"Difficulty: %s" % MatchSession.get_ai_difficulty_name(),
 	])
 
@@ -220,3 +235,7 @@ func _count_moving_units(nodes: Array) -> int:
 		if unit.has_move_target:
 			moving += 1
 	return moving
+
+
+func _usec_rate_to_frame_ms(key: StringName, fps: float) -> float:
+	return PerfCounters.get_rate(key) / 1000.0 / maxf(fps, 1.0)

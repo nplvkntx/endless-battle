@@ -82,6 +82,8 @@ var _awaiting_queued_builder: bool = false
 
 func _enter_tree() -> void:
 	_register_with_entity_registry()
+	if is_inside_tree():
+		PlayerRouteNavigation.update_combat_occupant(self)
 
 
 func _ready() -> void:
@@ -106,6 +108,7 @@ func _exit_tree() -> void:
 	## so workers and ConstructionReservations never keep freed building handles.
 	_clear_rally_marker()
 	_unregister_rts_occupancy()
+	PlayerRouteNavigation.remove_combat_occupant(self)
 	ConstructionReservations.release_build_slots_for_building(self)
 	if not _registered_builders.is_empty():
 		_release_registered_builders_on_destroy()
@@ -120,6 +123,7 @@ func _register_rts_occupancy() -> void:
 	## large footprints) otherwise snaps approach points away and stalls the handoff.
 	if is_being_constructed():
 		PlayerRouteNavigation.unregister_static_obstacle(self)
+		PlayerRouteNavigation.update_combat_occupant(self)
 		return
 	PlayerRouteNavigation.register_static_obstacle(self)
 

@@ -1,7 +1,7 @@
 class_name Worker
 extends Unit
 
-## Placeholder worker unit used for early 3D scene testing.
+## Worker gameplay; WorkerArtVisuals maps jobs onto the imported model.
 
 signal idle_status_changed(is_idle: bool)
 
@@ -73,6 +73,7 @@ var _wood_chop_spot_valid: bool = false
 var _locked_wood_tree: WoodTree = null
 var _pinned_starting_gold_mine: GoldMine = null
 var _reserved_gold_mine: GoldMine = null
+var _gold_access_slot: int = -1
 var _suspended_gather_source: GatherableResource = null
 var _suspended_resource_id: StringName = &""
 var _gather_loop_failures: int = 0
@@ -188,8 +189,14 @@ func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
 	animator.set_clip_preferences({
 		UnitVisualAnimator.STATE_IDLE: [&"Idle"],
 		UnitVisualAnimator.STATE_MOVE: [&"Walk", &"Run"],
-		UnitVisualAnimator.STATE_WORK: [&"PickUp"],
+		UnitVisualAnimator.STATE_WORK: [&"Build", &"Chop", &"Mine"],
+		UnitVisualAnimator.STATE_ATTACK: [&"Attack"],
 	})
+
+
+func _detect_visual_facing_yaw_offset() -> float:
+	# The original worker model faces +Z after glTF conversion.
+	return 0.0
 
 
 func _is_playing_work_animation() -> bool:
@@ -341,6 +348,7 @@ func _sanitize_stored_targets() -> void:
 
 	if not NodeSafety.is_alive_node(_reserved_gold_mine):
 		_reserved_gold_mine = null
+		_gold_access_slot = -1
 
 	if not NodeSafety.is_alive_node(_suspended_gather_source):
 		_suspended_gather_source = null
@@ -844,6 +852,7 @@ func cancel_gathering() -> void:
 	_carried_amount = 0
 	_source_approach_candidate_index = 0
 	_gather_approach_slot_hint = -1
+	_gold_access_slot = -1
 	_dropoff_candidate_index = 0
 	_assigned_dropoff = null
 	_return_dropoff = null
@@ -1528,6 +1537,15 @@ func _attempt_gather_stuck_recovery() -> void:
 			_set_movement_to_gather_source(_get_valid_gather_source())
 			return
 
+		var gold_source: GatherableResource = _get_valid_gather_source()
+		if gold_source is GoldMine:
+			var mine: GoldMine = gold_source as GoldMine
+			_gold_access_slot = mine.reclaim_access_slot(self, _gold_access_slot)
+			_set_movement_to_gather_source(mine)
+			if _is_enemy_worker():
+				_log_ai_worker_recovery_once("stuck path detected, retrying alternate mine slot")
+			return
+
 		if _advance_task_approach_candidate():
 			if _is_enemy_worker():
 				_log_ai_worker_recovery_once("stuck path detected, retrying alternate approach")
@@ -1687,6 +1705,16 @@ func _is_valid_gather_source(source: Variant) -> bool:
 func _is_near_resource_for_gather(source: CollisionObject3D) -> bool:
 	if source is WoodTree and _wood_chop_spot_valid:
 		return _is_near_wood_chop_spot()
+
+	if source is GoldMine and _gold_access_slot >= 0:
+		var slot_position: Vector3 = (source as GoldMine).get_access_world_position(
+			_gold_access_slot
+		)
+		var to_slot: Vector3 = global_position - slot_position
+		to_slot.y = 0.0
+		var slot_reach: float = stopping_distance + _get_collision_xz_radius(self) + 0.85
+		if to_slot.length_squared() <= slot_reach * slot_reach:
+			return true
 
 	return _is_near_collision_target(source, GatheringConfig.RESOURCE_INTERACTION_REACH_BONUS)
 
@@ -2683,17 +2711,22 @@ func _lock_to_gold_mine(mine: GoldMine) -> void:
 
 	if _reserved_gold_mine == mine:
 		mine.refresh_worker_reservation(self)
+		if _gold_access_slot < 0:
+			_gold_access_slot = mine.claim_access_slot(self, _gather_approach_slot_hint)
 		return
 
 	_unlock_gold_mine()
 	_reserved_gold_mine = mine
 	mine.register_assigned_worker(self)
+	_gold_access_slot = mine.claim_access_slot(self, _gather_approach_slot_hint)
 
 
 func _unlock_gold_mine() -> void:
 	if _reserved_gold_mine != null and is_instance_valid(_reserved_gold_mine):
+		_reserved_gold_mine.release_access_slot(self)
 		_reserved_gold_mine.unregister_assigned_worker(self)
 	_reserved_gold_mine = null
+	_gold_access_slot = -1
 
 
 func _suspend_gathering_for_construction() -> void:
@@ -2828,6 +2861,14 @@ func _set_movement_to_gather_source(source: Variant) -> void:
 
 	_clear_wood_chop_spot()
 	set_movement_target(_compute_resource_approach_position(gather_source))
+
+
+func _get_gold_mine_access_position(mine: GoldMine) -> Vector3:
+	if mine == null or not is_instance_valid(mine):
+		return global_position
+	if _gold_access_slot < 0:
+		_gold_access_slot = mine.claim_access_slot(self, _gather_approach_slot_hint)
+	return mine.get_access_world_position(_gold_access_slot)
 
 
 func _compute_wood_chop_spot(tree: WoodTree) -> Vector3:
@@ -2985,6 +3026,9 @@ func _is_approach_position_occupied(
 func _compute_resource_approach_position(source: CollisionObject3D) -> Vector3:
 	if source == null or not is_instance_valid(source):
 		return global_position
+
+	if source is GoldMine:
+		return _get_gold_mine_access_position(source as GoldMine)
 
 	var fallback_position: Vector3 = global_position
 	var nearby_workers: Array[Worker] = _collect_workers_for_approach_check(source)

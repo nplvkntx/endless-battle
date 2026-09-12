@@ -338,6 +338,7 @@ func _verify_command_feedback_reset_kills_effect_tweens(failures: PackedStringAr
 	add_child(unit)
 	unit.global_position = Vector3(0.0, 0.0, 0.0)
 	await _settle()
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 
 	_expect(
@@ -369,6 +370,7 @@ func _verify_command_feedback_reset_kills_effect_tweens(failures: PackedStringAr
 
 	## Spawn again then tear down the parent scene nodes while FX tweens are live.
 	CommandFeedback.show_move_marker(Vector3(4.0, 0.0, 4.0))
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 	_expect(
 		failures,

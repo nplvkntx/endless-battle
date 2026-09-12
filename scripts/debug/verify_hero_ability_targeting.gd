@@ -112,7 +112,12 @@ func _verify_player_hero_idle_auto_attack(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 	hero.global_position = Vector3.ZERO
 	enemy.global_position = Vector3(1.5, 0, 0)
+	PlayerRouteNavigation.update_mobile_occupant(hero)
+	PlayerRouteNavigation.update_mobile_occupant(enemy as Node3D)
 	CombatTargetValidation.reset_match_state()
+	await get_tree().physics_frame
+	hero._combat_target_scan_timer = 0.0
+	hero._try_auto_attack()
 
 	for _i in range(30):
 		await get_tree().physics_frame

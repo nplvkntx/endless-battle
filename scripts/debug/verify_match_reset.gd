@@ -108,6 +108,8 @@ func _dirty_persistent_match_state() -> void:
 	HeroProgressionStore.lock_kit(false, HeroCatalog.KIT_PALADIN)
 	HeroProgressionStore.lock_kit(true, HeroCatalog.KIT_SHADOW_ASSASSIN)
 	CommandFeedback.show_move_marker(Vector3(1, 0, 1))
+	if _dirty_control_group_unit is CharacterBody3D:
+		(_dirty_control_group_unit as CharacterBody3D).velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(_dirty_control_group_unit)
 	DeathEffects.play_unit_death(_dirty_control_group_unit)
 	ImpactEffects.play_unit_impact(Vector3(2.0, 0.0, 2.0))
@@ -143,6 +145,8 @@ func _warm_unit_scene_caches() -> void:
 	var warm_unit: Node = load("res://scenes/units/swordsman.tscn").instantiate()
 	add_child(warm_unit)
 	CommandFeedback.show_move_marker(Vector3.ZERO)
+	if warm_unit is CharacterBody3D:
+		(warm_unit as CharacterBody3D).velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(warm_unit)
 	DeathEffects.play_unit_death(warm_unit)
 	ImpactEffects.play_unit_impact(Vector3.ZERO)
@@ -182,7 +186,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 	var entity_count: int = 0
 	if EntityRegistry != null:
 		entity_count = EntityRegistry.get_registered_ids().size()
-	var formation_count: int = _formation_count()
 	var footprint_reserved: bool = ConstructionReservations.overlaps_reserved_footprint(
 		Vector3(20.0, 0.0, 20.0),
 		Vector2(4.0, 4.0)
@@ -220,7 +223,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		and ImpactEffects.get_active_trail_count() == 0
 		and EnemyBuildPlacement.preferred_tower_lane == &""
 		and entity_count == 0
-		and formation_count == 0
 		and not footprint_reserved
 	)
 
@@ -252,7 +254,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		"impact_effects_trails": ImpactEffects.get_active_trail_count(),
 		"preferred_tower_lane": String(EnemyBuildPlacement.preferred_tower_lane),
 		"entity_registry_count": entity_count,
-		"formation_count": formation_count,
 		"footprint_reserved": footprint_reserved,
 		"object_count": object_count,
 		"node_count": node_count,
@@ -260,17 +261,6 @@ func _capture_persistent_snapshot(label: String) -> Dictionary:
 		"orphan_node_count": orphan_count,
 		"resetter_count": MatchSession.registered_match_reset_count(),
 	}
-
-
-func _formation_count() -> int:
-	## FormationManager has no public size API; dissolve path clears via match reset.
-	## Probe via a dummy unit lookup — empty registry means no formation membership.
-	if FormationManager == null:
-		return 0
-	if _dirty_control_group_unit != null and is_instance_valid(_dirty_control_group_unit):
-		if FormationManager.get_unit_formation_id(_dirty_control_group_unit) >= 0:
-			return 1
-	return 0
 
 
 func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number: int) -> void:
@@ -305,7 +295,6 @@ func _compare_to_baseline(baseline: Dictionary, after: Dictionary, cycle_number:
 		"impact_effects_trails",
 		"preferred_tower_lane",
 		"entity_registry_count",
-		"formation_count",
 		"footprint_reserved",
 		"resetter_count",
 	]

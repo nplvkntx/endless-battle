@@ -23,6 +23,7 @@ func _ready() -> void:
 	_verify_marker_spam_cleanup(failures)
 	_verify_attack_pulse(failures)
 	await _verify_movement_dust(failures)
+	await _verify_ghost_walking_dust(failures)
 	await _verify_construction_dust(failures)
 	await _verify_tree_exit_lifetime_safety(failures)
 	_verify_ai_does_not_spawn_markers(failures)
@@ -88,6 +89,8 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 
 	var applied: bool = unit.request_movement_target(Vector3(12, 0, 0), Unit.RepathUrgency.PLAYER_ORDER)
 	_expect(failures, "movement request applied", applied)
+	unit.velocity = Vector3(5, 0, 0)
+	CommandFeedback.notify_movement_started(unit)
 	_expect(failures, "start dust spawned", CommandFeedback.get_active_dust_count() >= 1)
 
 	# Deferred attach must still place the effect in the unlocked tree.
@@ -99,7 +102,6 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 	)
 
 	# Simulate motion so footstep cooldown can fire.
-	unit.velocity = Vector3(5, 0, 0)
 	CommandFeedback.notify_unit_moving(unit)
 	var dust_after_step: int = CommandFeedback.get_active_dust_count()
 	_expect(failures, "footstep dust respects first call", dust_after_step >= 1)
@@ -114,6 +116,70 @@ func _verify_movement_dust(failures: PackedStringArray) -> void:
 
 	unit.queue_free()
 	await get_tree().process_frame
+
+
+func _verify_ghost_walking_dust(failures: PackedStringArray) -> void:
+	print("verify: walking dust only from a live moving unit")
+	CommandFeedback.clear_all()
+	var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
+	add_child(unit)
+	unit.global_position = Vector3(3, 0, 3)
+	await get_tree().process_frame
+
+	unit.velocity = Vector3.ZERO
+	CommandFeedback.notify_movement_started(unit)
+	CommandFeedback.notify_unit_moving(unit)
+	_expect(
+		failures,
+		"stationary unit does not emit walking dust",
+		CommandFeedback.get_active_dust_count() == 0
+	)
+
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
+	CommandFeedback.notify_unit_moving(unit)
+	_expect(failures, "moving unit emits walking dust", CommandFeedback.get_active_dust_count() >= 1)
+	_expect(
+		failures,
+		"debug snapshot names CommandFeedback.MovementDust",
+		str(CommandFeedback.debug_last_walk_dust.get("source", ""))
+			== "CommandFeedback.MovementDust"
+	)
+	_expect(
+		failures,
+		"debug snapshot owner is the moving unit",
+		int(CommandFeedback.debug_last_walk_dust.get("owner_id", -1)) == unit.get_instance_id()
+	)
+	print(
+		"WALK_DUST_PROOF owner=%s type=%s pos=%s vel=%s emitting=%s source=%s"
+		% [
+			CommandFeedback.debug_last_walk_dust.get("owner_id", -1),
+			CommandFeedback.debug_last_walk_dust.get("unit_type", ""),
+			CommandFeedback.debug_last_walk_dust.get("position", Vector3.ZERO),
+			CommandFeedback.debug_last_walk_dust.get("velocity", Vector3.ZERO),
+			CommandFeedback.debug_last_walk_dust.get("emitting", false),
+			CommandFeedback.debug_last_walk_dust.get("source", ""),
+		]
+	)
+
+	unit.velocity = Vector3.ZERO
+	var before_stop: int = CommandFeedback.get_active_dust_count()
+	CommandFeedback.notify_unit_moving(unit)
+	_expect(
+		failures,
+		"stopped unit does not spawn new walking dust",
+		CommandFeedback.get_active_dust_count() == before_stop
+	)
+
+	unit.queue_free()
+	await get_tree().process_frame
+	CommandFeedback.notify_movement_started(unit)
+	_expect(
+		failures,
+		"freed unit cannot spawn walking dust",
+		CommandFeedback.get_active_dust_count() == before_stop
+	)
+	CommandFeedback.clear_all()
+	_expect(failures, "clear_all removes walking dust", CommandFeedback.get_active_dust_count() == 0)
 
 
 func _verify_construction_dust(failures: PackedStringArray) -> void:
@@ -157,6 +223,7 @@ func _verify_tree_exit_lifetime_safety(failures: PackedStringArray) -> void:
 	await get_tree().process_frame
 
 	## Seed one attached dust so later cap eviction frees a live tracked effect.
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 	await get_tree().process_frame
 	_expect(
@@ -201,6 +268,7 @@ func _verify_tree_exit_lifetime_safety(failures: PackedStringArray) -> void:
 
 	## Normal unlocked-tree spawn still works after the locked-tree case.
 	CommandFeedback.clear_all()
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 	await get_tree().process_frame
 	_expect(
@@ -221,12 +289,16 @@ func _on_verify_tree_exiting_spawn_feedback() -> void:
 	var unit: Node3D = _tree_exit_dust_unit
 	if unit == null or not is_instance_valid(unit):
 		return
+	if unit is CharacterBody3D:
+		(unit as CharacterBody3D).velocity = Vector3(4.0, 0.0, 0.0)
 	for _i: int in range(CommandFeedback.MAX_ACTIVE_DUST + 2):
 		CommandFeedback.notify_movement_started(unit)
 	_tree_exit_tracked = CommandFeedback.get_active_dust_count()
 	_tree_exit_spawned = _tree_exit_tracked >= 1
 	## Explicit tracked cleanup while the tree is still mutating.
 	CommandFeedback.clear_all()
+	if unit is CharacterBody3D:
+		(unit as CharacterBody3D).velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 
 
@@ -261,6 +333,7 @@ func _verify_match_reset_clears(failures: PackedStringArray) -> void:
 	CommandFeedback.show_patrol_marker(Vector3(2, 0, 2))
 	var unit: Swordsman = SWORDSMAN_SCENE.instantiate() as Swordsman
 	add_child(unit)
+	unit.velocity = Vector3(4.0, 0.0, 0.0)
 	CommandFeedback.notify_movement_started(unit)
 	_expect(failures, "pre-reset has markers", CommandFeedback.get_active_marker_count() > 0)
 	_expect(failures, "pre-reset has dust", CommandFeedback.get_active_dust_count() > 0)

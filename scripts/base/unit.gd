@@ -94,6 +94,8 @@ const PHYSICAL_STUCK_SECONDS: float = 1.6
 const PHYSICAL_STUCK_MOVE_EPSILON: float = 0.35
 const PHYSICAL_STUCK_DEST_MIN: float = 2.5
 const PHYSICAL_STUCK_SPEED_EPSILON: float = 0.12
+## Movement samples every physics frame; expensive confirmation is staggered.
+const PHYSICAL_STUCK_EVAL_BUCKETS := 8
 var _visual_pivot: Node3D
 var _visual_facing_yaw_offset: float = PI
 var _visual_facing_initialized: bool = false
@@ -128,7 +130,9 @@ const CUSTOM_RTS_SLOT_NEAR_DISTANCE := 6.0
 const CUSTOM_RTS_MIN_FORWARD := 0.35
 ## Soft mobile-vs-mobile peel — capped neighbors, staggered refresh (not every physics frame).
 const CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS := 6
+const CUSTOM_RTS_SEPARATION_QUERY_SLACK := 4
 const CUSTOM_RTS_SEPARATION_STAGGER_BUCKETS := 5
+const CUSTOM_RTS_STEER_STAGGER_BUCKETS := 3
 const STANDING_SEPARATION_STAGGER_BUCKETS := 5
 var _custom_rts_active: bool = false
 var _custom_rts_pending: bool = false
@@ -139,8 +143,16 @@ var _custom_rts_paused_route_index: int = -1
 var _custom_rts_generation: int = -1
 var _custom_rts_separation_cache: Vector3 = Vector3.ZERO
 var _custom_rts_separation_cache_frame: int = -999999
-static var _custom_rts_probe_shape: SphereShape3D = null
-static var _custom_rts_query: PhysicsShapeQueryParameters3D = null
+var _spatial_sync_frame: int = -1
+var _custom_rts_desired_cache: Vector3 = Vector3.ZERO
+var _waypoint_skip_cell: Vector2i = Vector2i(-999999, -999999)
+var _waypoint_skip_index: int = -1
+var _waypoint_skip_result: bool = false
+var _step_walkable_cell: Vector2i = Vector2i(-999999, -999999)
+var _step_walkable_result: bool = true
+## Stable local formation offset for this command. x = right, z = forward.
+## Assigned once when the group command is issued — never reshuffled per frame.
+var _formation_local_offset: Vector3 = Vector3.ZERO
 
 ## Enemy army march execution cap. Strategic order destination stays the final objective.
 var _army_march_enabled: bool = false
@@ -380,10 +392,12 @@ func _ensure_default_player_team_id() -> void:
 
 func _enter_tree() -> void:
 	_register_with_entity_registry()
+	_sync_spatial_hash()
 
 
 func _exit_tree() -> void:
 	_unregister_with_entity_registry()
+	PlayerRouteNavigation.remove_combat_occupant(self)
 	_clear_order_queue_internal()
 	_active_order = null
 	if _visual_animator != null:
@@ -404,6 +418,16 @@ func _unregister_with_entity_registry() -> void:
 	var registry: Node = tree.root.get_node_or_null("/root/EntityRegistry")
 	if registry != null and registry.has_method(&"unregister_entity"):
 		registry.call(&"unregister_entity", self)
+
+
+func _sync_spatial_hash() -> void:
+	if not is_inside_tree():
+		return
+	var frame: int = Engine.get_physics_frames()
+	if frame == _spatial_sync_frame:
+		return
+	_spatial_sync_frame = frame
+	PlayerRouteNavigation.update_mobile_occupant(self)
 
 
 ## Applies a team-colored accent ring and subtle body tint from team_id or faction groups.
@@ -849,7 +873,8 @@ func prepare_custom_rts_route(
 	final_arrival: Vector3,
 	generation: int,
 	clicked_destination: Vector3,
-	command_type: StringName
+	command_type: StringName,
+	formation_local: Vector3 = Vector3.ZERO
 ) -> void:
 	clear_army_march_checkpoint()
 	_custom_rts_pending = true
@@ -858,6 +883,9 @@ func prepare_custom_rts_route(
 	_custom_rts_route_index = 0
 	_custom_rts_paused_route_index = -1
 	_custom_rts_generation = generation
+	_formation_local_offset = formation_local
+	_waypoint_skip_cell = Vector2i(-999999, -999999)
+	_waypoint_skip_index = -1
 	bind_player_squad_command(generation, clicked_destination, final_arrival, command_type)
 
 
@@ -868,6 +896,9 @@ func clear_custom_rts_route() -> void:
 	_custom_rts_route_index = 0
 	_custom_rts_paused_route_index = -1
 	_custom_rts_generation = -1
+	_formation_local_offset = Vector3.ZERO
+	_waypoint_skip_cell = Vector2i(-999999, -999999)
+	_waypoint_skip_index = -1
 	clear_army_march_checkpoint()
 
 
@@ -1055,6 +1086,14 @@ func _pause_custom_rts_preserving_route() -> void:
 
 
 func _process_custom_rts_movement(delta: float) -> void:
+	var started_usec: int = Time.get_ticks_usec()
+	_process_custom_rts_movement_inner(delta)
+	PerfCounters.record_usec(
+		PerfCounters.KEY_RTS_MOVE_USEC, Time.get_ticks_usec() - started_usec
+	)
+
+
+func _process_custom_rts_movement_inner(delta: float) -> void:
 	if not _custom_rts_active:
 		return
 
@@ -1074,10 +1113,14 @@ func _process_custom_rts_movement(delta: float) -> void:
 		return
 
 	var slot_dir: Vector3 = to_slot.normalized() if dist_to_slot > 0.001 else Vector3.ZERO
-	var steering: Dictionary = compose_custom_rts_steering_for_tests(slot_dir, dist_to_slot)
-	var desired: Vector3 = steering.get("final_desired", Vector3.ZERO) as Vector3
+	if (
+		should_run_staggered_update(CUSTOM_RTS_STEER_STAGGER_BUCKETS)
+		or _custom_rts_desired_cache.length_squared() < 0.0001
+	):
+		_custom_rts_desired_cache = _compose_custom_rts_desired_direction(slot_dir, dist_to_slot)
+	var desired: Vector3 = _custom_rts_desired_cache
 	if desired.length_squared() < 0.0001:
-		desired = slot_dir if slot_dir.length_squared() > 0.0 else (steering.get("route_dir", Vector3.ZERO) as Vector3)
+		desired = slot_dir
 	if desired.length_squared() < 0.0001:
 		if _custom_rts_is_intermediate_target():
 			_pause_custom_rts_preserving_route()
@@ -1091,7 +1134,7 @@ func _process_custom_rts_movement(delta: float) -> void:
 	var step: float = travel_speed * delta
 	var candidate: Vector3 = global_position + desired * step
 	candidate.y = global_position.y
-	if not PlayerRouteNavigation.is_world_walkable(candidate):
+	if not _is_next_step_walkable(candidate):
 		desired = _custom_rts_safe_slide_direction(desired, step)
 		if desired.length_squared() < 0.0001:
 			var blocked_before: Vector3 = global_position
@@ -1101,7 +1144,8 @@ func _process_custom_rts_movement(delta: float) -> void:
 			if dist_to_slot <= maxf(BLOCKED_ARRIVAL_DISTANCE, get_soft_arrival_radius()):
 				_complete_movement_arrival()
 				return
-			CommandFeedback.notify_unit_moving(self)
+			if should_run_staggered_update(8):
+				CommandFeedback.notify_unit_moving(self)
 			return
 
 	var arrival_speed: float = travel_speed
@@ -1117,12 +1161,14 @@ func _process_custom_rts_movement(delta: float) -> void:
 	# Separation already blended above — do not double-apply UnitSeparation soft push.
 	var position_before: Vector3 = global_position
 	apply_steered_velocity(desired * arrival_speed, delta, 0.0)
+	_custom_rts_peel_static_corner(desired, delta, position_before)
 	_custom_rts_advance_waypoint()
 	if _try_complete_blocked_arrival(delta, position_before, desired, dist_to_slot):
 		return
 	if _try_complete_soft_arrival():
 		return
-	CommandFeedback.notify_unit_moving(self)
+	if should_run_staggered_update(8):
+		CommandFeedback.notify_unit_moving(self)
 
 
 ## Observational / test helper: route-dominant custom RTS steering components.
@@ -1131,6 +1177,19 @@ func compose_custom_rts_steering_for_tests(
 	slot_dir: Vector3 = Vector3.ZERO,
 	dist_to_slot: float = -1.0
 ) -> Dictionary:
+	var debug_out: Dictionary = {}
+	var final_desired: Vector3 = _compose_custom_rts_desired_direction(
+		slot_dir, dist_to_slot, debug_out
+	)
+	debug_out["final_desired"] = final_desired
+	return debug_out
+
+
+func _compose_custom_rts_desired_direction(
+	slot_dir: Vector3 = Vector3.ZERO,
+	dist_to_slot: float = -1.0,
+	debug_out: Variant = null
+) -> Vector3:
 	var route_dir: Vector3 = _custom_rts_route_direction()
 	var separation_raw: Vector3 = _custom_rts_separation_vector()
 	var to_slot: Vector3 = _flat_xz(_movement_target - global_position)
@@ -1200,20 +1259,20 @@ func compose_custom_rts_steering_for_tests(
 			if final_desired.dot(route_dir) < 0.0:
 				final_desired = route_dir
 
-	return {
-		"route_dir": route_dir,
-		"separation": separation_raw,
-		"separation_clamped": separation,
-		"slot_dir": slot_dir,
-		"slot_w": slot_w,
-		"dist_to_final": dist_to_final,
-		"final_desired": final_desired,
-		"route_dot": (
+	if debug_out is Dictionary:
+		var out: Dictionary = debug_out as Dictionary
+		out["route_dir"] = route_dir
+		out["separation"] = separation_raw
+		out["separation_clamped"] = separation
+		out["slot_dir"] = slot_dir
+		out["slot_w"] = slot_w
+		out["dist_to_final"] = dist_to_final
+		out["route_dot"] = (
 			final_desired.dot(route_dir)
 			if route_dir.length_squared() > 0.0001 and final_desired.length_squared() > 0.0001
 			else 0.0
-		),
-	}
+		)
+	return final_desired
 
 
 func _custom_rts_route_direction() -> Vector3:
@@ -1232,7 +1291,15 @@ func _custom_rts_route_direction() -> Vector3:
 		if _army_march_route_index_is_past_cap():
 			return _flat_xz(_army_march_checkpoint - global_position).normalized()
 		var wp: Vector3 = _custom_rts_route[_custom_rts_route_index]
-		var to_wp: Vector3 = _flat_xz(wp - global_position)
+		var tangent: Vector3 = dest_dir
+		if _custom_rts_route_index + 1 < _custom_rts_route.size():
+			var look: Vector3 = _flat_xz(
+				_custom_rts_route[_custom_rts_route_index + 1] - wp
+			)
+			if look.length_squared() > 0.0001:
+				tangent = look.normalized()
+		var guided: Vector3 = _formation_guided_world(wp, tangent)
+		var to_wp: Vector3 = _flat_xz(guided - global_position)
 		var dist: float = to_wp.length()
 		if dist <= CUSTOM_RTS_WAYPOINT_RADIUS and _can_skip_custom_rts_waypoint():
 			_custom_rts_route_index += 1
@@ -1248,19 +1315,39 @@ func _custom_rts_route_direction() -> Vector3:
 
 
 func _can_skip_custom_rts_waypoint() -> bool:
-	# A detour can point away from the destination. Never skip it through a building.
+	# Occupancy is cell-based. Re-sample only when this unit enters a new cell
+	# or the route index changes — not every physics tick with 5-offset spam.
+	var cell: Vector2i = PlayerRouteNavigation.grid.world_to_cell(global_position)
+	if cell == _waypoint_skip_cell and _custom_rts_route_index == _waypoint_skip_index:
+		return _waypoint_skip_result
+
 	var next_index: int = _custom_rts_route_index + 1
 	var next_point: Vector3 = _movement_target
 	if next_index < _custom_rts_route.size():
 		next_point = _custom_rts_route[next_index]
 	var distance: float = _horizontal_distance_xz(global_position, next_point)
-	var steps: int = maxi(1, int(ceil(distance / (PlayerRouteNavigation.grid.cell_size * 0.5))))
-	for step: int in range(1, steps + 1):
-		var sample: Vector3 = global_position.lerp(next_point, float(step) / float(steps))
-		for offset: Vector3 in [Vector3.ZERO, Vector3(0.35, 0, 0), Vector3(-0.35, 0, 0), Vector3(0, 0, 0.35), Vector3(0, 0, -0.35)]:
-			if not PlayerRouteNavigation.is_world_walkable(sample + offset):
-				return false
-	return true
+	var cell_size: float = PlayerRouteNavigation.grid.cell_size
+	var walkable: bool = true
+	if distance > cell_size * 2.0:
+		# Far: three occupancy samples (now / mid / next). Dense skip only when near.
+		var mid: Vector3 = global_position.lerp(next_point, 0.5)
+		walkable = (
+			PlayerRouteNavigation.is_world_walkable(global_position)
+			and PlayerRouteNavigation.is_world_walkable(mid)
+			and PlayerRouteNavigation.is_world_walkable(next_point)
+		)
+	else:
+		var steps: int = maxi(1, int(ceil(distance / cell_size)))
+		for step: int in range(1, steps + 1):
+			var sample: Vector3 = global_position.lerp(next_point, float(step) / float(steps))
+			if not PlayerRouteNavigation.is_world_walkable(sample):
+				walkable = false
+				break
+
+	_waypoint_skip_cell = cell
+	_waypoint_skip_index = _custom_rts_route_index
+	_waypoint_skip_result = walkable
+	return walkable
 
 
 func _custom_rts_advance_waypoint() -> void:
@@ -1294,7 +1381,7 @@ func _clamp_custom_rts_route_index_to_march_cap() -> void:
 
 
 func _custom_rts_separation_vector() -> Vector3:
-	## Soft friendly spacing only. Staggered physics-shape probes — not a full repath trigger.
+	## Soft friendly spacing only. Staggered occupancy-cell neighbors — not a full repath trigger.
 	var physics_frame: int = Engine.get_physics_frames()
 	if physics_frame == _custom_rts_separation_cache_frame:
 		return _custom_rts_separation_cache
@@ -1306,31 +1393,13 @@ func _custom_rts_separation_vector() -> Vector3:
 
 	var push := Vector3.ZERO
 	var count: int = 0
-	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	if space == null:
-		_custom_rts_separation_cache = Vector3.ZERO
-		_custom_rts_separation_cache_frame = physics_frame
-		return Vector3.ZERO
-
-	var query: PhysicsShapeQueryParameters3D = _get_custom_rts_query()
-	query.shape = _get_custom_rts_probe_shape()
-	query.transform = Transform3D(Basis.IDENTITY, global_position)
-	query.collision_mask = PhysicsLayers.UNITS
-	query.exclude = [get_rid()]
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-
-	var hits: Array[Dictionary] = space.intersect_shape(
-		query, CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS
+	var neighbors: Array[Unit] = PlayerRouteNavigation.query_nearby_units(
+		global_position,
+		CUSTOM_RTS_SEPARATION_RADIUS,
+		CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS + CUSTOM_RTS_SEPARATION_QUERY_SLACK
 	)
-	PerfCounters.record_unit_neighbor_query(hits.size())
-	for hit: Dictionary in hits:
-		var collider: Variant = hit.get("collider")
-		if not NodeSafety.is_alive_node(collider):
-			continue
-		if not collider is Unit:
-			continue
-		var other: Unit = collider as Unit
+	PerfCounters.record_unit_neighbor_query(neighbors.size())
+	for other: Unit in neighbors:
 		if other == self:
 			continue
 		# Friendly separation only — do not soft-push through enemies (melee contact).
@@ -1343,6 +1412,8 @@ func _custom_rts_separation_vector() -> Vector3:
 		var strength: float = (CUSTOM_RTS_SEPARATION_RADIUS - dist) / CUSTOM_RTS_SEPARATION_RADIUS
 		push += offset.normalized() * strength
 		count += 1
+		if count >= CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS:
+			break
 	if count == 0:
 		_custom_rts_separation_cache = Vector3.ZERO
 		_custom_rts_separation_cache_frame = physics_frame
@@ -1353,36 +1424,113 @@ func _custom_rts_separation_vector() -> Vector3:
 	return _custom_rts_separation_cache
 
 
-func _get_custom_rts_probe_shape() -> SphereShape3D:
-	if _custom_rts_probe_shape == null:
-		_custom_rts_probe_shape = SphereShape3D.new()
-		_custom_rts_probe_shape.radius = CUSTOM_RTS_SEPARATION_RADIUS
-	return _custom_rts_probe_shape
-
-
-func _get_custom_rts_query() -> PhysicsShapeQueryParameters3D:
-	if _custom_rts_query == null:
-		_custom_rts_query = PhysicsShapeQueryParameters3D.new()
-	return _custom_rts_query
-
-
 func _custom_rts_safe_slide_direction(desired: Vector3, step: float) -> Vector3:
 	var candidates: Array[Vector3] = [
 		desired,
+		desired + Vector3(-desired.z, 0.0, desired.x) * 0.55,
+		desired + Vector3(desired.z, 0.0, -desired.x) * 0.55,
 		Vector3(desired.x, 0.0, 0.0),
 		Vector3(0.0, 0.0, desired.z),
 		Vector3(-desired.z, 0.0, desired.x),
 		Vector3(desired.z, 0.0, -desired.x),
+		desired + Vector3(-desired.z, 0.0, desired.x),
+		desired + Vector3(desired.z, 0.0, -desired.x),
 	]
+	var best: Vector3 = Vector3.ZERO
+	var best_dot: float = -2.0
 	for dir: Vector3 in candidates:
 		if dir.length_squared() < 0.0001:
 			continue
 		var normalized: Vector3 = dir.normalized()
-		var next: Vector3 = global_position + normalized * step
+		var next: Vector3 = global_position + normalized * maxf(step, 0.35)
 		next.y = global_position.y
-		if PlayerRouteNavigation.is_world_walkable(next):
-			return normalized
-	return Vector3.ZERO
+		if not PlayerRouteNavigation.is_world_walkable(next):
+			continue
+		var score: float = normalized.dot(desired)
+		if score > best_dot:
+			best_dot = score
+			best = normalized
+	return best
+
+
+func _formation_guided_world(anchor: Vector3, forward: Vector3) -> Vector3:
+	var center := Vector3(anchor.x, 0.0, anchor.z)
+	if _formation_local_offset.length_squared() < 0.0001:
+		return center
+	var fwd: Vector3 = _flat_xz(forward)
+	if fwd.length_squared() < 0.0001:
+		fwd = _flat_xz(_movement_target - global_position)
+	if fwd.length_squared() < 0.0001:
+		return center
+	fwd = fwd.normalized()
+	var right := Vector3(fwd.z, 0.0, -fwd.x)
+	for scale: float in [1.0, 0.7, 0.4, 0.15]:
+		var candidate: Vector3 = (
+			center
+			+ right * (_formation_local_offset.x * scale)
+			+ fwd * (_formation_local_offset.z * scale)
+		)
+		if PlayerRouteNavigation.is_world_walkable(candidate):
+			return candidate
+	return center
+
+
+func _custom_rts_peel_static_corner(
+	desired: Vector3, delta: float, position_before: Vector3
+) -> void:
+	if get_slide_collision_count() <= 0:
+		return
+	var moved: Vector3 = global_position - position_before
+	moved.y = 0.0
+	var expected: float = get_effective_move_speed() * delta
+	if expected > 0.001 and moved.length() > expected * 0.35:
+		return
+
+	var combined: Vector3 = Vector3.ZERO
+	var first_normal: Vector3 = Vector3.ZERO
+	var distinct_walls: int = 0
+	var hit_static := false
+	for index: int in get_slide_collision_count():
+		var collision: KinematicCollision3D = get_slide_collision(index)
+		var collider: Object = collision.get_collider()
+		if collider == null or collider is Unit:
+			continue
+		var normal: Vector3 = collision.get_normal()
+		normal.y = 0.0
+		if normal.length_squared() < 0.0001:
+			continue
+		normal = normal.normalized()
+		hit_static = true
+		combined += normal
+		if first_normal.length_squared() < 0.0001:
+			first_normal = normal
+		elif normal.dot(first_normal) < 0.55:
+			distinct_walls += 1
+	if not hit_static:
+		return
+
+	if combined.length_squared() < 0.0001:
+		combined = first_normal
+	else:
+		combined = combined.normalized()
+	var tangent := Vector3(-combined.z, 0.0, combined.x)
+	if tangent.dot(desired) < 0.0:
+		tangent = -tangent
+	var peel: Vector3 = tangent
+	if distinct_walls > 0:
+		peel = (combined * 0.7 + tangent * 0.3)
+	if peel.length_squared() < 0.0001:
+		return
+	peel = peel.normalized()
+	if desired.length_squared() > 0.0001 and peel.dot(desired) < -0.15:
+		peel = (peel + desired).normalized()
+	if peel.length_squared() < 0.0001:
+		return
+
+	var peel_speed: float = get_effective_move_speed() * 0.9
+	velocity = peel * peel_speed
+	velocity.y = 0.0
+	move_and_slide()
 
 
 func _flat_xz(v: Vector3) -> Vector3:
@@ -1408,6 +1556,22 @@ func _begin_movement_generation() -> void:
 ## update_facing=false for standing unpack so residual push does not spin the unit.
 ## allow_stationary_correction=true only for hard body-overlap peel while idle/attacking.
 func apply_steered_velocity(
+	desired_velocity: Vector3,
+	delta: float = -1.0,
+	separation_blend: float = -1.0,
+	update_facing: bool = true,
+	allow_stationary_correction: bool = false
+) -> void:
+	var started_usec: int = Time.get_ticks_usec()
+	_apply_steered_velocity_inner(
+		desired_velocity, delta, separation_blend, update_facing, allow_stationary_correction
+	)
+	PerfCounters.record_usec(
+		PerfCounters.KEY_STEER_USEC, Time.get_ticks_usec() - started_usec
+	)
+
+
+func _apply_steered_velocity_inner(
 	desired_velocity: Vector3,
 	delta: float = -1.0,
 	separation_blend: float = -1.0,
@@ -1476,13 +1640,19 @@ func apply_steered_velocity(
 		velocity = Vector3.ZERO
 		return
 
+	var slide_started_usec: int = Time.get_ticks_usec()
 	move_and_slide()
+	PerfCounters.record_usec(PerfCounters.KEY_MOVE_AND_SLIDE_USEC, Time.get_ticks_usec() - slide_started_usec)
 
 
 ## Stationary halt, plus a tiny peel only when collision bodies truly intersect.
 ## Soft proximity packing is travel-only (blend_desired_velocity while movement-active).
 func apply_standing_separation(combat_mode: bool = false) -> void:
 	if is_movement_active():
+		return
+
+	if not should_run_staggered_update(STANDING_SEPARATION_STAGGER_BUCKETS):
+		_apply_cached_standing_velocity()
 		return
 
 	var desired: Vector3 = UnitSeparation.compute_standing_desired_velocity(
@@ -1496,6 +1666,19 @@ func apply_standing_separation(combat_mode: bool = false) -> void:
 	apply_steered_velocity(desired, -1.0, 0.0, false, true)
 
 
+func _apply_cached_standing_velocity() -> void:
+	if not has_meta(UnitSeparation.META_STANDING_VEL):
+		velocity = Vector3.ZERO
+		_smoothed_move_velocity = Vector3.ZERO
+		return
+	var cached: Vector3 = get_meta(UnitSeparation.META_STANDING_VEL) as Vector3
+	if cached.length_squared() >= MOVE_VELOCITY_DEAD_ZONE_SQ:
+		apply_steered_velocity(cached, -1.0, 0.0, false, true)
+	else:
+		velocity = Vector3.ZERO
+		_smoothed_move_velocity = Vector3.ZERO
+
+
 func _clear_residual_movement() -> void:
 	velocity = Vector3.ZERO
 	_smoothed_move_velocity = Vector3.ZERO
@@ -1503,6 +1686,7 @@ func _clear_residual_movement() -> void:
 	_blocked_arrival_time = 0.0
 	_custom_rts_separation_cache = Vector3.ZERO
 	_custom_rts_separation_cache_frame = -999999
+	_custom_rts_desired_cache = Vector3.ZERO
 	UnitSeparation.clear_state(self)
 	if has_meta(&"_nav_last_path_point"):
 		remove_meta(&"_nav_last_path_point")
@@ -1689,7 +1873,14 @@ func is_physically_blocked_from_current_move() -> bool:
 
 
 func _update_physical_stuck_watch(delta: float = -1.0) -> void:
-	PerfCounters.record_stuck_check()
+	var started_usec: int = Time.get_ticks_usec()
+	_update_physical_stuck_watch_inner(delta)
+	PerfCounters.record_usec(
+		PerfCounters.KEY_STUCK_WATCH_USEC, Time.get_ticks_usec() - started_usec
+	)
+
+
+func _update_physical_stuck_watch_inner(delta: float = -1.0) -> void:
 	if not has_move_target:
 		_reset_physical_stuck_watch()
 		return
@@ -1731,6 +1922,16 @@ func _update_physical_stuck_watch(delta: float = -1.0) -> void:
 
 	var step: float = delta if delta > 0.0 else get_physics_process_delta_time()
 	_physical_stuck_watch_seconds += maxf(step, 0.0)
+
+	# Cheap no-progress timer stays physics-rate. Confirmation + congestion query
+	# are staggered so 100 movers do not all pay that work every physics tick.
+	if (
+		(Engine.get_physics_frames() % PHYSICAL_STUCK_EVAL_BUCKETS)
+		!= get_update_bucket(PHYSICAL_STUCK_EVAL_BUCKETS)
+	):
+		return
+
+	PerfCounters.record_stuck_check()
 	var progress_from_watch: float = _horizontal_distance_xz(
 		global_position,
 		_physical_stuck_watch_origin
@@ -1754,26 +1955,20 @@ func _is_temporary_mobile_congestion() -> bool:
 	## Only probed when the time gate already elapsed — avoid per-frame spam.
 	if _physical_stuck_watch_seconds < PHYSICAL_STUCK_SECONDS:
 		return false
-	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	if space == null:
-		return false
-	var query: PhysicsShapeQueryParameters3D = _get_custom_rts_query()
-	query.shape = _get_custom_rts_probe_shape()
-	query.transform = Transform3D(Basis.IDENTITY, global_position)
-	query.collision_mask = PhysicsLayers.UNITS
-	query.exclude = [get_rid()]
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	var hits: Array[Dictionary] = space.intersect_shape(query, CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS)
+	var neighbors: Array[Unit] = PlayerRouteNavigation.query_nearby_units(
+		global_position,
+		CUSTOM_RTS_SEPARATION_RADIUS,
+		CUSTOM_RTS_SEPARATION_MAX_NEIGHBORS + CUSTOM_RTS_SEPARATION_QUERY_SLACK
+	)
 	var moving_neighbors: int = 0
-	for hit: Dictionary in hits:
-		var collider: Variant = hit.get("collider")
-		if not NodeSafety.is_alive_node(collider) or not collider is CharacterBody3D:
+	for other: Unit in neighbors:
+		if other == self:
 			continue
-		var other: CharacterBody3D = collider as CharacterBody3D
 		var horiz: Vector3 = Vector3(other.velocity.x, 0.0, other.velocity.z)
 		if horiz.length_squared() > PHYSICAL_STUCK_SPEED_EPSILON * PHYSICAL_STUCK_SPEED_EPSILON:
 			moving_neighbors += 1
+			if moving_neighbors >= 2:
+				break
 	## Require actual moving traffic — frozen piles / creep bodies do not suppress stuck.
 	return moving_neighbors >= 2
 
@@ -1921,12 +2116,14 @@ func get_update_bucket(bucket_count: int = 4) -> int:
 	return abs(get_instance_id()) % maxi(1, bucket_count)
 
 
-## True when this unit should run expensive maintenance on the current process frame.
+## True when this unit should run expensive maintenance on the current physics tick.
 func should_run_staggered_update(bucket_count: int = 4) -> bool:
-	return (Engine.get_process_frames() % maxi(1, bucket_count)) == get_update_bucket(bucket_count)
+	return (Engine.get_physics_frames() % maxi(1, bucket_count)) == get_update_bucket(bucket_count)
 
 
 func _physics_process(delta: float) -> void:
+	var started_usec: int = Time.get_ticks_usec()
+	_sync_spatial_hash()
 	if _crowd_yield_seconds > 0.0:
 		_crowd_yield_seconds = maxf(0.0, _crowd_yield_seconds - delta)
 
@@ -1934,6 +2131,9 @@ func _physics_process(delta: float) -> void:
 	if not BuffService.can_move(self):
 		_clear_residual_movement()
 		_reset_physical_stuck_watch()
+		PerfCounters.record_usec(
+			PerfCounters.KEY_UNIT_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
 	_tick_production_rally_join(delta)
@@ -1943,16 +2143,10 @@ func _physics_process(delta: float) -> void:
 		_reset_physical_stuck_watch()
 		_blocked_arrival_time = 0.0
 		# Hard body-intersection peel only — nearby idle units must not soft-slide.
-		# Stagger the expensive shape query; reuse cached peel on other frames.
-		if should_run_staggered_update(STANDING_SEPARATION_STAGGER_BUCKETS):
-			apply_standing_separation(false)
-		elif has_meta(UnitSeparation.META_STANDING_VEL):
-			var cached: Vector3 = get_meta(UnitSeparation.META_STANDING_VEL) as Vector3
-			if cached.length_squared() >= MOVE_VELOCITY_DEAD_ZONE_SQ:
-				apply_steered_velocity(cached, delta, 0.0, false, true)
-			else:
-				velocity = Vector3.ZERO
-				_smoothed_move_velocity = Vector3.ZERO
+		apply_standing_separation(false)
+		PerfCounters.record_usec(
+			PerfCounters.KEY_UNIT_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
 	_update_physical_stuck_watch(delta)
@@ -1963,12 +2157,18 @@ func _physics_process(delta: float) -> void:
 	var arrive_distance: float = get_movement_acceptance_radius()
 	if distance <= arrive_distance:
 		_complete_movement_arrival()
+		PerfCounters.record_usec(
+			PerfCounters.KEY_UNIT_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
 	# Custom RTS executor: sole strategic/combat locomotion path.
 	if not is_custom_rts_movement_active():
 		_activate_custom_rts_direct_move(_movement_target)
 	_process_custom_rts_movement(delta)
+	PerfCounters.record_usec(
+		PerfCounters.KEY_UNIT_PHYS_USEC, Time.get_ticks_usec() - started_usec
+	)
 
 
 func _process(delta: float) -> void:
@@ -2042,6 +2242,16 @@ func _update_visual_facing(delta: float) -> void:
 
 	var blend: float = minf(1.0, delta * VISUAL_FACING_TURN_SPEED)
 	_visual_pivot.rotation.y = lerp_angle(current_yaw, target_yaw, blend)
+
+
+func _is_next_step_walkable(candidate: Vector3) -> bool:
+	PlayerRouteNavigation.ensure_grid_ready()
+	var cell: Vector2i = PlayerRouteNavigation.grid.world_to_cell(candidate)
+	if cell == _step_walkable_cell:
+		return _step_walkable_result
+	_step_walkable_cell = cell
+	_step_walkable_result = PlayerRouteNavigation.is_world_walkable(candidate)
+	return _step_walkable_result
 
 
 func _setup_visual_animator() -> void:

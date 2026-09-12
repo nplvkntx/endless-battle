@@ -25,6 +25,14 @@ const KEY_STUCK_CHECKS := &"stuck_checks"
 const KEY_STUCK_RECOVERIES := &"stuck_recoveries"
 const KEY_STRATEGIC_ROUTE_REQUESTS := &"strategic_route_requests"
 const KEY_MOVING_UNITS_SAMPLES := &"moving_units_samples"
+const KEY_QUERY_NEARBY_USEC := &"query_nearby_usec"
+const KEY_MOVE_AND_SLIDE_USEC := &"move_and_slide_usec"
+const KEY_TARGET_SEARCH_USEC := &"target_search_usec"
+const KEY_UNIT_PHYS_USEC := &"unit_phys_usec"
+const KEY_MIL_PHYS_USEC := &"mil_phys_usec"
+const KEY_RTS_MOVE_USEC := &"rts_move_usec"
+const KEY_STUCK_WATCH_USEC := &"stuck_watch_usec"
+const KEY_STEER_USEC := &"steer_usec"
 
 const FPS_SAMPLE_WINDOW_SECONDS := 3.0
 const WARN_FPS_THRESHOLD := 30.0
@@ -198,6 +206,12 @@ func record_moving_units_sample(count: int) -> void:
 	if not OS.is_debug_build() or count <= 0:
 		return
 	bump_by(KEY_MOVING_UNITS_SAMPLES, count)
+
+
+func record_usec(key: StringName, usec: int) -> void:
+	if not OS.is_debug_build() or usec <= 0:
+		return
+	bump_by(key, usec)
 
 
 func set_squad_nav_status(
@@ -714,6 +728,15 @@ func collect_rate_snapshot() -> Dictionary:
 		"separation_updates_per_sec": get_rate(KEY_SEPARATION_UPDATES),
 		"stuck_checks_per_sec": get_rate(KEY_STUCK_CHECKS),
 		"stuck_recoveries_per_sec": get_rate(KEY_STUCK_RECOVERIES),
+		"query_nearby_ms": get_rate(KEY_QUERY_NEARBY_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"move_and_slide_ms": get_rate(KEY_MOVE_AND_SLIDE_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"target_search_ms": get_rate(KEY_TARGET_SEARCH_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"unit_phys_ms": get_rate(KEY_UNIT_PHYS_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"mil_phys_ms": get_rate(KEY_MIL_PHYS_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"rts_move_ms": get_rate(KEY_RTS_MOVE_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"stuck_watch_ms": get_rate(KEY_STUCK_WATCH_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"steer_ms": get_rate(KEY_STEER_USEC) / 1000.0 / maxf(get_fps(), 1.0),
+		"collision_pairs": Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS),
 	}
 
 

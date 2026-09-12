@@ -330,6 +330,8 @@ func try_divine_protection() -> bool:
 
 
 func _execute_divine_protection() -> void:
+	_play_paladin_ability(&"Invulnerability")
+	$PaladinArtVisuals.set_protected(true)
 	current_mana = maxi(0, current_mana - get_divine_protection_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
 	_divine_protection_timer = get_divine_protection_duration()
@@ -338,6 +340,7 @@ func _execute_divine_protection() -> void:
 
 
 func _deactivate_divine_protection() -> void:
+	$PaladinArtVisuals.set_protected(false)
 	_divine_protection_timer = 0.0
 	_clear_divine_protection_visual()
 	_divine_protection_cooldown_timer = get_divine_protection_cooldown()
@@ -521,6 +524,7 @@ func _execute_power_strike() -> void:
 	_power_strike_cooldown_timer = get_power_strike_cooldown()
 	_cancel_power_strike()
 
+	_play_paladin_ability(&"PowerStrike")
 	var strike_damage: int = get_power_strike_damage()
 	if not DamageService.apply_damage(target, float(strike_damage), self):
 		return
@@ -863,6 +867,7 @@ func _perform_execute() -> void:
 	_execute_cooldown_timer = get_execute_cooldown()
 	_cancel_execute()
 
+	_play_paladin_ability(&"Execution")
 	_kill_execute_target(target)
 	MeleeHitSound.play_at(self, target.global_position)
 	_play_execute_lunge(target)
@@ -977,6 +982,7 @@ func try_ground_slam() -> bool:
 
 
 func _execute_ground_slam() -> void:
+	_play_paladin_ability(&"GroundSlam")
 	current_mana = maxi(0, current_mana - get_ground_slam_mana_cost())
 	mana_changed.emit(current_mana, max_mana)
 	_ground_slam_cooldown_timer = get_ground_slam_cooldown()
@@ -1068,3 +1074,34 @@ func _tick_divine_protection_cooldown(delta: float) -> void:
 		return
 
 	_divine_protection_cooldown_timer = maxf(_divine_protection_cooldown_timer - delta, 0.0)
+
+
+func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
+	animator.set_clip_preferences({
+		UnitVisualAnimator.STATE_ATTACK: [&"Attack"],
+		&"GroundSlam": [&"GroundSlam"],
+		&"Invulnerability": [&"Invulnerability"],
+		&"PowerStrike": [&"PowerStrike"],
+		&"Execution": [&"Execution"],
+	})
+
+
+func _detect_visual_facing_yaw_offset() -> float:
+	return 0.0
+
+
+func _play_attack_animation() -> void:
+	if not play_visual_attack_animation():
+		super._play_attack_animation()
+
+
+func _play_paladin_ability(clip: StringName) -> void:
+	if _visual_animator != null:
+		_visual_animator.play_one_shot(clip)
+
+
+func apply_team_visuals() -> void:
+	super.apply_team_visuals()
+	var art: Node = get_node_or_null("PaladinArtVisuals")
+	if art != null:
+		art.apply_team(team_id)

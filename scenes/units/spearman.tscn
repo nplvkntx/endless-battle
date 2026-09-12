@@ -1,6 +1,8 @@
 [gd_scene format=3 uid="uid://pxh1nciana53"]
 
 [ext_resource type="Script" path="res://scripts/units/spearman.gd" id="1_spearman"]
+[ext_resource type="PackedScene" path="res://assets/art/endless_spearman/spearman.glb" id="4_model"]
+[ext_resource type="Script" path="res://scripts/components/spearman_art_visuals.gd" id="5_art"]
 [ext_resource type="Script" path="res://scripts/components/health_component.gd" id="2_health_component"]
 [ext_resource type="Material" path="res://assets/materials/unit_selection_glow.tres" id="3_selection_glow"]
 
@@ -44,22 +46,13 @@ move_speed = 4.25
 script = ExtResource("1_spearman")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.04, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 
-[node name="Body" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.42, 0)
-mesh = SubResource("CapsuleMesh_body")
-surface_material_override/0 = SubResource("StandardMaterial3D_body")
+[node name="SpearmanModel" parent="MeshInstance3D" instance=ExtResource("4_model")]
+scale = Vector3(0.7, 0.7, 0.7)
 
-[node name="Spear" type="MeshInstance3D" parent="MeshInstance3D"]
-transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0.55, 0.55, 0)
-mesh = SubResource("CylinderMesh_spear")
-surface_material_override/0 = SubResource("StandardMaterial3D_spear_shaft")
-
-[node name="SpearTip" type="MeshInstance3D" parent="MeshInstance3D/Spear"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
-mesh = SubResource("CylinderMesh_spear")
-surface_material_override/0 = SubResource("StandardMaterial3D_spear_tip")
+[node name="SpearmanArtVisuals" type="Node" parent="."]
+script = ExtResource("5_art")
 
 [node name="SelectionIndicator" type="Node3D" parent="."]
 visible = false

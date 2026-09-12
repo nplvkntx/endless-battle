@@ -133,7 +133,12 @@ func _process(_delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if _active_placement.is_empty() and _can_use_worker_build_hotkeys():
+		if event.keycode == KEY_ESCAPE:
+			if not _active_placement.is_empty():
+				_cancel_placement()
+				get_viewport().set_input_as_handled()
+			return
+		if _can_use_worker_build_hotkeys():
 			if event.keycode == KEY_B:
 				start_farm_placement()
 				get_viewport().set_input_as_handled()
@@ -158,36 +163,38 @@ func _input(event: InputEvent) -> void:
 				start_command_center_placement()
 				get_viewport().set_input_as_handled()
 				return
-		elif event.keycode == KEY_ESCAPE:
-			_cancel_placement()
-			get_viewport().set_input_as_handled()
-			return
 
 	if _active_placement.is_empty():
 		return
 
-	if _active_placement == PLACEMENT_WALL_SEGMENT:
-		if event is InputEventMouseButton and event.pressed:
-			match event.button_index:
-				MOUSE_BUTTON_LEFT:
-					if not _wall_drag_has_start:
-						_set_wall_drag_start()
-					else:
-						_place_wall_line()
-					get_viewport().set_input_as_handled()
-				MOUSE_BUTTON_RIGHT:
-					_cancel_placement()
-					get_viewport().set_input_as_handled()
+	if not event is InputEventMouseButton or not event.pressed:
 		return
 
-	if event is InputEventMouseButton and event.pressed:
+	## GUI owns HUD clicks. `_input` runs before Controls, so placing here
+	## would drop a building through the command bar (Farm click → Barracks).
+	if _is_pointer_over_gui():
+		return
+
+	if _active_placement == PLACEMENT_WALL_SEGMENT:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
-				_place_building()
+				if not _wall_drag_has_start:
+					_set_wall_drag_start()
+				else:
+					_place_wall_line()
 				get_viewport().set_input_as_handled()
 			MOUSE_BUTTON_RIGHT:
 				_cancel_placement()
 				get_viewport().set_input_as_handled()
+		return
+
+	match event.button_index:
+		MOUSE_BUTTON_LEFT:
+			_place_building()
+			get_viewport().set_input_as_handled()
+		MOUSE_BUTTON_RIGHT:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
 
 
 func start_farm_placement() -> void:
@@ -254,7 +261,7 @@ func _start_placement(placement_type: StringName) -> void:
 	if not is_inside_tree():
 		return
 
-	if not _active_placement.is_empty():
+	if _active_placement == placement_type:
 		return
 
 	if not _has_worker_selected():
@@ -268,6 +275,9 @@ func _start_placement(placement_type: StringName) -> void:
 	var scene: PackedScene = _get_building_scene(placement_type)
 	if scene == null:
 		return
+
+	if not _active_placement.is_empty():
+		_cancel_placement()
 
 	_active_placement = placement_type
 	_placement_ghost = scene.instantiate()
@@ -524,6 +534,14 @@ func _has_worker_selected() -> bool:
 	return not _get_selected_workers().is_empty()
 
 
+func _is_pointer_over_gui() -> bool:
+	var viewport: Viewport = get_viewport()
+	if viewport == null:
+		return false
+
+	return viewport.gui_get_hovered_control() != null
+
+
 func _can_use_worker_build_hotkeys() -> bool:
 	var selection_manager: Node = get_node_or_null(selection_manager_path)
 	if selection_manager == null:
@@ -655,7 +673,7 @@ func _start_wall_drag_placement() -> void:
 	if not is_inside_tree():
 		return
 
-	if not _active_placement.is_empty():
+	if _active_placement == PLACEMENT_WALL_SEGMENT:
 		return
 
 	if not _has_worker_selected():
@@ -665,6 +683,9 @@ func _start_wall_drag_placement() -> void:
 	var buildings_parent: Node = get_node_or_null(buildings_parent_path)
 	if buildings_parent == null:
 		return
+
+	if not _active_placement.is_empty():
+		_cancel_placement()
 
 	_active_placement = PLACEMENT_WALL_SEGMENT
 	_wall_drag_has_start = false

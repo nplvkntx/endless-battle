@@ -21,6 +21,7 @@ func _ready() -> void:
 	await _verify_multi_tree_gather(failures)
 	await _verify_multi_gold_mine(failures)
 	await _verify_five_workers_one_mine_no_stuck(failures)
+	await _verify_overflow_gold_workers(failures)
 	await _verify_invalid_resource_target(failures)
 	await _verify_ordered_away_while_gathering(failures)
 	await _verify_blocked_route_recovery(failures)
@@ -140,11 +141,22 @@ func _verify_multi_gold_mine(failures: PackedStringArray) -> void:
 	_expect(failures, "gold mine: workers assigned to gold", active >= 3)
 
 	var approaches: Dictionary = {}
+	var used_mine_center: int = 0
 	for worker: Worker in workers:
 		var approach: Vector3 = worker._compute_resource_approach_position(mine)
 		var key: String = "%.1f,%.1f" % [approach.x, approach.z]
 		approaches[key] = true
+		var to_center: Vector3 = approach - mine.global_position
+		to_center.y = 0.0
+		if to_center.length() < 0.35:
+			used_mine_center += 1
+		_expect(
+			failures,
+			"gold mine: worker has reserved access slot",
+			worker._gold_access_slot >= 0
+		)
 	_expect(failures, "gold mine: approach points are not all identical", approaches.size() >= 2)
+	_expect(failures, "gold mine: no worker targets mine center", used_mine_center == 0)
 
 	await _free_harness(harness)
 
@@ -192,6 +204,60 @@ func _verify_five_workers_one_mine_no_stuck(failures: PackedStringArray) -> void
 	_expect(failures, "5-mine: none permanently abandoned idle", idle_stuck == 0)
 	_expect(failures, "5-mine: unique approach slots", approaches.size() >= 3)
 	_expect(failures, "5-mine: reservations present", mine.get_assigned_worker_count() >= 3)
+	var exclusive_slots: Dictionary = {}
+	for worker: Worker in workers:
+		if worker._gold_access_slot >= 0 and worker._gold_access_slot < mine.get_access_slot_count():
+			exclusive_slots[worker._gold_access_slot] = true
+	_expect(failures, "5-mine: exclusive slots are unique", exclusive_slots.size() >= 3)
+
+	await _free_harness(harness)
+
+
+func _verify_overflow_gold_workers(failures: PackedStringArray) -> void:
+	print("verify: more gold workers than exclusive mine slots")
+	var harness: Dictionary = await _spawn_harness()
+	var mine: GoldMine = GOLD_SCENE.instantiate() as GoldMine
+	harness["root"].add_child(mine)
+	mine.set_owner_faction(GatherableResource.OwnerFaction.PLAYER)
+	mine.global_position = Vector3(8.0, 0.0, 0.0)
+
+	var workers: Array[Worker] = []
+	for index: int in 7:
+		var worker: Worker = _spawn_worker(
+			harness["root"],
+			Vector3(-6.0 + float(index) * 1.1, 0.0, -5.0),
+			false
+		)
+		workers.append(worker)
+
+	await _wait_nav_ready(workers[0])
+	for index: int in workers.size():
+		workers[index].set_gather_approach_slot_hint(index)
+		workers[index].command_gather_gold_mine(mine, true)
+
+	await _wait_msec(SETTLE_MS)
+
+	var exclusive: Dictionary = {}
+	var overflow: int = 0
+	var center_targets: int = 0
+	var destinations: Dictionary = {}
+	for worker: Worker in workers:
+		_expect(failures, "overflow: worker assigned gold", worker.get_assigned_gather_resource_id() == &"gold")
+		if worker._gold_access_slot >= 0 and worker._gold_access_slot < mine.get_access_slot_count():
+			exclusive[worker._gold_access_slot] = true
+		elif worker._gold_access_slot >= mine.get_access_slot_count():
+			overflow += 1
+		var dest: Vector3 = worker._compute_resource_approach_position(mine)
+		destinations["%.1f,%.1f" % [dest.x, dest.z]] = true
+		var to_center: Vector3 = dest - mine.global_position
+		to_center.y = 0.0
+		if to_center.length() < 0.35:
+			center_targets += 1
+
+	_expect(failures, "overflow: exclusive slots stay unique", exclusive.size() >= 3)
+	_expect(failures, "overflow: extras receive overflow slots", overflow >= 1)
+	_expect(failures, "overflow: extras do not sit on mine center", center_targets == 0)
+	_expect(failures, "overflow: destinations stay spread", destinations.size() >= 4)
 
 	await _free_harness(harness)
 

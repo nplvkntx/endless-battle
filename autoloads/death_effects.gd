@@ -77,7 +77,7 @@ func play_unit_death(unit: Node3D) -> void:
 
 	if corpse_enabled:
 		var corpse_scale: float = HERO_CORPSE_SCALE if is_hero else UNIT_CORPSE_SCALE
-		_spawn_corpse(world_position, corpse_scale)
+		_spawn_corpse(world_position, corpse_scale, unit)
 
 
 ## Plays building rubble dust once per entity instance id.
@@ -148,24 +148,35 @@ func _spawn_burst(kind: DeathFxPool.FxKind, world_position: Vector3, scale_facto
 	_active_particles.append(entry)
 
 
-func _spawn_corpse(world_position: Vector3, scale_factor: float) -> void:
+func _spawn_corpse(world_position: Vector3, scale_factor: float, unit: Node3D = null) -> void:
 	_prune_active_corpses()
 	while _active_corpses.size() >= MAX_ACTIVE_CORPSES:
 		_force_release_oldest_corpse()
 
-	var corpse: Node3D = DeathFxPool.acquire_corpse()
+	var worker_art: Node = unit.get_node_or_null("WorkerArtVisuals") if unit != null else null
+	if worker_art == null and unit != null:
+		worker_art = unit.get_node_or_null("SpearmanArtVisuals")
+	if worker_art == null and unit != null:
+		worker_art = unit.get_node_or_null("PaladinArtVisuals")
+	var corpse: Node3D = worker_art.create_death_model() if worker_art != null else DeathFxPool.acquire_corpse()
 	if corpse == null:
 		return
 
 	var parent: Node = _fx_parent()
 	if parent == null:
-		DeathFxPool.release_corpse(corpse)
+		_release_corpse_visual(corpse)
 		return
 
 	parent.add_child(corpse)
-	corpse.global_position = Vector3(world_position.x, 0.02, world_position.z)
-	corpse.rotation.y = randf_range(0.0, TAU)
-	corpse.scale = Vector3.ONE * maxf(0.1, scale_factor)
+	if worker_art != null:
+		var player: AnimationPlayer = UnitVisualAnimator._find_animation_player(corpse)
+		if player != null and player.has_animation(&"Death"):
+			player.get_animation(&"Death").loop_mode = Animation.LOOP_NONE
+			player.play(&"Death")
+	else:
+		corpse.global_position = Vector3(world_position.x, 0.02, world_position.z)
+		corpse.rotation.y = randf_range(0.0, TAU)
+		corpse.scale = Vector3.ONE * maxf(0.1, scale_factor)
 
 	var corpse_id: int = corpse.get_instance_id()
 	var linger: float = maxf(0.1, corpse_duration)
@@ -217,7 +228,14 @@ func _finish_corpse_by_id(corpse_id: int) -> void:
 	var corpse_ref: Variant = entry.get("node")
 	if not NodeSafety.is_alive_node(corpse_ref):
 		return
-	DeathFxPool.release_corpse(corpse_ref as Node3D)
+	_release_corpse_visual(corpse_ref as Node3D)
+
+
+func _release_corpse_visual(corpse: Node3D) -> void:
+	if corpse.has_meta(&"worker_animated_corpse"):
+		corpse.queue_free()
+	else:
+		DeathFxPool.release_corpse(corpse)
 
 
 func _find_corpse_entry(corpse_id: int) -> Dictionary:
@@ -297,7 +315,7 @@ func _force_release_oldest_corpse() -> void:
 	_kill_entry_tween(entry)
 	var corpse_ref: Variant = entry.get("node")
 	if NodeSafety.is_alive_node(corpse_ref):
-		DeathFxPool.release_corpse(corpse_ref as Node3D)
+		_release_corpse_visual(corpse_ref as Node3D)
 
 
 func _release_active_particles_now() -> void:

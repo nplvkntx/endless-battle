@@ -40,8 +40,10 @@ const DUST_CONSTRUCTION_COOLDOWN := 0.48
 const DUST_CONSTRUCTION_RISE := 2.35
 const DUST_CONSTRUCTION_END_SCALE := 3.1
 const DUST_MIN_SPEED_SQ := 0.35
+const WALK_DUST_SPEED_THRESHOLD := 0.6
 const MAX_ACTIVE_DUST := 28
 const FOOTSTEP_COOLDOWN_PRUNE_LIMIT := 256
+const DUST_CLEANUP_PADDING := 0.2
 
 ## Colors chosen for contrast on grass/dirt; kinds also differ by shape.
 const MOVE_COLOR := Color(0.92, 0.95, 1.0, 0.92)
@@ -57,6 +59,8 @@ var _active_dust: PackedInt64Array = []
 var _footstep_last_msec: Dictionary = {}
 ## instance_id -> last construction dust msec
 var _construction_dust_last_msec: Dictionary = {}
+## Last walking-dust emit snapshot for debug proof (not per-frame spam).
+var debug_last_walk_dust: Dictionary = {}
 
 
 func _ready() -> void:
@@ -112,29 +116,25 @@ func pulse_attack_target(target: Node3D) -> void:
 
 
 ## Called when a ground unit transitions into moving.
-func notify_movement_started(unit: Node3D) -> void:
+func notify_movement_started(unit: Variant) -> void:
 	if not enabled or not dust_enabled:
 		return
-	if not _is_dust_eligible_unit(unit):
+	if not _is_walking_dust_allowed(unit):
 		return
-	_spawn_dust_puff(unit.global_position, DustKind.START)
+	var live_unit: Node3D = unit as Node3D
+	_record_walk_dust_debug(live_unit, true)
+	_spawn_dust_puff(live_unit.global_position, DustKind.START)
 
 
 ## Lightweight footstep dust while moving (cooldown-gated, not per-frame spawn).
-func notify_unit_moving(unit: Node3D) -> void:
+func notify_unit_moving(unit: Variant) -> void:
 	if not enabled or not dust_enabled:
 		return
-	if not _is_dust_eligible_unit(unit):
+	if not _is_walking_dust_allowed(unit):
 		return
 
-	var body := unit as CharacterBody3D
-	if body == null:
-		return
-	var horizontal: Vector3 = Vector3(body.velocity.x, 0.0, body.velocity.z)
-	if horizontal.length_squared() < DUST_MIN_SPEED_SQ:
-		return
-
-	var id: int = unit.get_instance_id()
+	var live_unit: Node3D = unit as Node3D
+	var id: int = live_unit.get_instance_id()
 	var now_msec: int = Time.get_ticks_msec()
 	var last_msec: int = int(_footstep_last_msec.get(id, 0))
 	if now_msec - last_msec < int(DUST_FOOTSTEP_COOLDOWN * 1000.0):
@@ -144,11 +144,12 @@ func notify_unit_moving(unit: Node3D) -> void:
 	if _footstep_last_msec.size() > FOOTSTEP_COOLDOWN_PRUNE_LIMIT:
 		_footstep_last_msec.clear()
 
-	_spawn_dust_puff(unit.global_position, DustKind.FOOTSTEP)
+	_record_walk_dust_debug(live_unit, true)
+	_spawn_dust_puff(live_unit.global_position, DustKind.FOOTSTEP)
 
 
 ## Stronger pulsed dust while a worker is actively constructing. Cooldown-gated.
-func notify_construction_working(unit: Node3D, world_position: Vector3 = Vector3.ZERO) -> void:
+func notify_construction_working(unit: Variant, world_position: Vector3 = Vector3.ZERO) -> void:
 	if not enabled or not dust_enabled:
 		return
 	if not _is_dust_eligible_unit(unit):
@@ -252,23 +253,19 @@ func _attach_tracked_effect(
 	if effect.is_queued_for_deletion():
 		_remove_tracked_kind_id(track_kind, effect_id)
 		return
-	## Already attached — do not create a duplicate under another parent.
-	if effect.get_parent() != null:
-		return
-
-	var parent_obj: Object = instance_from_id(parent_id)
-	if parent_obj == null or not is_instance_valid(parent_obj) or not parent_obj is Node:
-		_remove_tracked_kind_id(track_kind, effect_id)
-		effect.free()
-		return
-	var parent: Node = parent_obj as Node
-	if parent.is_queued_for_deletion() or not parent.is_inside_tree():
-		_remove_tracked_kind_id(track_kind, effect_id)
-		effect.free()
-		return
-
-	parent.add_child(effect)
-	effect.global_position = world_position
+	if effect.get_parent() == null:
+		var parent_obj: Object = instance_from_id(parent_id)
+		if parent_obj == null or not is_instance_valid(parent_obj) or not parent_obj is Node:
+			_remove_tracked_kind_id(track_kind, effect_id)
+			effect.free()
+			return
+		var parent: Node = parent_obj as Node
+		if parent.is_queued_for_deletion() or not parent.is_inside_tree():
+			_remove_tracked_kind_id(track_kind, effect_id)
+			effect.free()
+			return
+		parent.add_child(effect)
+		effect.global_position = world_position
 	match track_kind:
 		TrackKind.MARKER:
 			_animate_fade_and_free(effect, MARKER_DURATION, MARKER_FADE_START_RATIO)
@@ -282,20 +279,63 @@ func _attach_tracked_effect(
 				lifetime = DUST_CONSTRUCTION_LIFETIME
 				rise = DUST_CONSTRUCTION_RISE
 				end_scale = DUST_CONSTRUCTION_END_SCALE
+			if effect.has_meta(&"_dust_animated"):
+				return
+			effect.set_meta(&"_dust_animated", true)
 			_animate_dust(effect, lifetime, rise, end_scale)
+			_schedule_dust_cleanup(effect_id, lifetime)
 		_:
 			pass
 
 
-func _is_dust_eligible_unit(unit: Node3D) -> bool:
+func _is_dust_eligible_unit(unit: Variant) -> bool:
 	if unit == null or not is_instance_valid(unit):
 		return false
-	# Buildings and projectiles are not Unit/CharacterBody3D movers in this codebase.
-	if not unit is Unit:
+	if not unit is Node3D:
 		return false
-	if unit.is_in_group(&"buildings"):
+	var node: Node3D = unit as Node3D
+	if node.is_queued_for_deletion() or not node.is_inside_tree():
+		return false
+	# Buildings and projectiles are not Unit/CharacterBody3D movers in this codebase.
+	if not node is Unit:
+		return false
+	if node.is_in_group(&"buildings"):
 		return false
 	return true
+
+
+func _is_walking_dust_allowed(unit: Variant) -> bool:
+	if not _is_dust_eligible_unit(unit):
+		return false
+	var body := unit as CharacterBody3D
+	if body == null:
+		return false
+	var horizontal: Vector3 = Vector3(body.velocity.x, 0.0, body.velocity.z)
+	return horizontal.length() > WALK_DUST_SPEED_THRESHOLD
+
+
+func _record_walk_dust_debug(unit: Variant, emitting: bool) -> void:
+	var body := unit as CharacterBody3D
+	var horizontal := Vector3.ZERO
+	if body != null:
+		horizontal = Vector3(body.velocity.x, 0.0, body.velocity.z)
+	debug_last_walk_dust = {
+		"owner_id": unit.get_instance_id(),
+		"unit_type": unit.get_class(),
+		"unit_name": unit.name,
+		"position": unit.global_position,
+		"velocity": horizontal,
+		"emitting": emitting,
+		"source": &"CommandFeedback.MovementDust",
+	}
+
+
+func _schedule_dust_cleanup(effect_id: int, lifetime: float) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var timer: SceneTreeTimer = tree.create_timer(lifetime + DUST_CLEANUP_PADDING)
+	timer.timeout.connect(_finish_tracked_by_id.bind(effect_id, TrackKind.DUST), CONNECT_ONE_SHOT)
 
 
 func _fx_parent() -> Node:

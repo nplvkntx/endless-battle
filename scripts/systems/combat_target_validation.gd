@@ -79,7 +79,10 @@ static var _group_cache_tree_id: int = -1
 static var _cached_group_nodes: Dictionary = {}
 ## Shared nearby-threat results for AI squads: bucket_key -> {target, msec, origin}.
 static var _shared_enemy_target_cache: Dictionary = {}
+## Player idle / attack-move auto-acquire: same bucket idea so nearby units share one search.
+static var _shared_player_target_cache: Dictionary = {}
 const SHARED_ENEMY_TARGET_CACHE_TTL_MSEC: int = 450
+const SHARED_PLAYER_TARGET_CACHE_TTL_MSEC: int = 350
 const SHARED_ENEMY_TARGET_BUCKET_SIZE: float = 8.0
 
 
@@ -92,6 +95,7 @@ static func reset_match_state() -> void:
 	_group_cache_tree_id = -1
 	_cached_group_nodes.clear()
 	_shared_enemy_target_cache.clear()
+	_shared_player_target_cache.clear()
 
 
 ## Per-process-frame group snapshot. Entries are validated when the cache is built.
@@ -117,6 +121,58 @@ static func get_cached_group_nodes(tree: SceneTree, group_name: StringName) -> A
 		_cached_group_nodes[group_name] = valid_nodes
 
 	return _cached_group_nodes[group_name]
+
+
+## Nearby combat occupants from the occupancy-cell hash. Group scan only when
+## nothing is indexed (headless stubs that never registered).
+static func _collect_range_candidates(attacker: Node3D, search_range: float) -> Array:
+	if not NodeSafety.is_alive_node(attacker):
+		return []
+	if not _has_any_hostile_candidate(attacker):
+		return []
+	var raw: Array = []
+	if PlayerRouteNavigation.combat_occupant_count() > 0:
+		raw = PlayerRouteNavigation.query_nearby_nodes(attacker.global_position, search_range)
+	else:
+		raw = _collect_group_candidates(attacker)
+	var hostiles: Array = []
+	for node_variant: Variant in raw:
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node3D:
+			continue
+		if not are_hostile(attacker, node_variant):
+			continue
+		hostiles.append(node_variant)
+	return hostiles
+
+
+static func _has_any_hostile_candidate(attacker: Node3D) -> bool:
+	var tree: SceneTree = attacker.get_tree()
+	if tree == null:
+		return false
+	for group_name: StringName in get_hostile_search_groups(attacker):
+		if not get_cached_group_nodes(tree, group_name).is_empty():
+			return true
+	return false
+
+
+static func _collect_group_candidates(attacker: Node3D) -> Array:
+	var tree: SceneTree = attacker.get_tree()
+	if tree == null:
+		return []
+	var seen: Dictionary = {}
+	var nodes: Array = []
+	for group_name: StringName in get_hostile_search_groups(attacker):
+		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+			if node_variant == null or not is_instance_valid(node_variant):
+				continue
+			if not node_variant is Node3D:
+				continue
+			var id: int = (node_variant as Node).get_instance_id()
+			if seen.has(id):
+				continue
+			seen[id] = true
+			nodes.append(node_variant)
+	return nodes
 
 
 static func is_neutral_creep(target: Variant) -> bool:
@@ -491,34 +547,36 @@ static func find_closest_tower_attack_target_in_range(
 	if tower == null or attack_range <= 0.0:
 		return null
 
-	var tree: SceneTree = tower.get_tree()
-	if tree == null:
-		return null
-
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
+	var candidates: Array = _collect_range_candidates(tower, attack_range)
+	if candidates.is_empty() and PlayerRouteNavigation.combat_occupant_count() == 0:
+		var tree: SceneTree = tower.get_tree()
+		if tree != null:
+			for group_name: StringName in get_tower_hostile_search_groups(tower):
+				for node_variant: Variant in get_cached_group_nodes(tree, group_name):
+					candidates.append(node_variant)
 
-	for group_name: StringName in get_tower_hostile_search_groups(tower):
-		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
-			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
-				continue
+	for node_variant: Variant in candidates:
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
 
-			var node: Node = node_variant as Node
-			if not node is Node3D:
-				continue
-			if not is_tower_attack_target(tower, node):
-				continue
-			if StealthService.is_combat_hidden(node):
-				continue
+		var node: Node = node_variant as Node
+		if not node is Node3D:
+			continue
+		if not is_tower_attack_target(tower, node):
+			continue
+		if StealthService.is_combat_hidden(node):
+			continue
 
-			var target: Node3D = node as Node3D
-			var distance: float = get_horizontal_center_distance(tower, target)
-			if distance > attack_range:
-				continue
+		var target: Node3D = node as Node3D
+		var distance: float = get_horizontal_center_distance(tower, target)
+		if distance > attack_range:
+			continue
 
-			if distance < closest_distance:
-				closest_distance = distance
-				closest_target = target
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = target
 
 	return closest_target
 
@@ -656,41 +714,47 @@ static func find_best_auto_acquire_target_in_range(
 	if search_range <= 0.0:
 		return null
 
+	var shared: Node3D = _try_get_shared_player_target(attacker, search_range)
+	if shared != null:
+		return shared
+	if not _has_any_hostile_candidate(attacker):
+		return null
+
+	var started_usec: int = Time.get_ticks_usec()
 	PerfCounters.record_target_search()
 	var best_target: Node3D = null
 	var best_priority: int = AUTO_ACQUIRE_PRIORITY_INVALID
 	var best_distance: float = INF
-	var tree: SceneTree = attacker.get_tree()
-	if tree == null:
-		return null
 
-	for group_name: StringName in get_hostile_search_groups(attacker):
-		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
-			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
-				continue
-			var node: Node = node_variant as Node
-			if not node is Node3D:
-				continue
-			var target: Node3D = node as Node3D
-			if not is_attack_target_for_attacker(attacker, target):
-				continue
-			if StealthService.is_combat_hidden(target):
-				continue
+	for node_variant: Variant in _collect_range_candidates(attacker, search_range):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
+		var node: Node = node_variant as Node
+		if not node is Node3D:
+			continue
+		var target: Node3D = node as Node3D
+		if not is_attack_target_for_attacker(attacker, target):
+			continue
+		if StealthService.is_combat_hidden(target):
+			continue
 
-			var distance: float = get_horizontal_attack_distance(attacker, target)
-			if distance > search_range:
-				continue
+		var distance: float = get_horizontal_attack_distance(attacker, target)
+		if distance > search_range:
+			continue
 
-			var priority: int = get_auto_acquire_target_priority(attacker, target, distance)
-			if priority >= AUTO_ACQUIRE_PRIORITY_INVALID:
-				continue
-			if priority > best_priority:
-				continue
-			if priority < best_priority or distance < best_distance:
-				best_priority = priority
-				best_distance = distance
-				best_target = target
+		var priority: int = get_auto_acquire_target_priority(attacker, target, distance)
+		if priority >= AUTO_ACQUIRE_PRIORITY_INVALID:
+			continue
+		if priority > best_priority:
+			continue
+		if priority < best_priority or distance < best_distance:
+			best_priority = priority
+			best_distance = distance
+			best_target = target
 
+	if best_target != null:
+		_store_shared_player_target(attacker, best_target)
+	PerfCounters.record_usec(PerfCounters.KEY_TARGET_SEARCH_USEC, Time.get_ticks_usec() - started_usec)
 	return best_target
 
 
@@ -849,47 +913,48 @@ static func _find_best_enemy_faction_attack_target(
 	var shared: Node3D = _try_get_shared_enemy_target(attacker, search_range)
 	if shared != null:
 		return shared
+	if not _has_any_hostile_candidate(attacker):
+		return null
 
+	var started_usec: int = Time.get_ticks_usec()
 	PerfCounters.record_enemy_target_search()
 	var best_target: Node3D = null
 	var best_priority: int = ENEMY_ATTACK_PRIORITY_INVALID
 	var best_distance: float = INF
-	var groups_to_search: Array[StringName] = get_hostile_search_groups(attacker)
 
-	var tree: SceneTree = attacker.get_tree()
-	for group_name: StringName in groups_to_search:
-		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
-			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
-				continue
+	for node_variant: Variant in _collect_range_candidates(attacker, search_range):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
 
-			var node: Node = node_variant as Node
-			if not node is Node3D:
-				continue
+		var node: Node = node_variant as Node
+		if not node is Node3D:
+			continue
 
-			var target: Node3D = node as Node3D
-			if not is_attack_target_for_attacker(attacker, target):
-				continue
-			if StealthService.is_combat_hidden(target):
-				continue
+		var target: Node3D = node as Node3D
+		if not is_attack_target_for_attacker(attacker, target):
+			continue
+		if StealthService.is_combat_hidden(target):
+			continue
 
-			var distance: float = get_horizontal_attack_distance(attacker, target)
-			if distance > search_range:
-				continue
+		var distance: float = get_horizontal_attack_distance(attacker, target)
+		if distance > search_range:
+			continue
 
-			var priority: int = get_enemy_attack_target_priority(attacker, target, distance)
-			if priority >= ENEMY_ATTACK_PRIORITY_INVALID:
-				continue
+		var priority: int = get_enemy_attack_target_priority(attacker, target, distance)
+		if priority >= ENEMY_ATTACK_PRIORITY_INVALID:
+			continue
 
-			if priority > best_priority:
-				continue
+		if priority > best_priority:
+			continue
 
-			if priority < best_priority or distance < best_distance:
-				best_priority = priority
-				best_distance = distance
-				best_target = target
+		if priority < best_priority or distance < best_distance:
+			best_priority = priority
+			best_distance = distance
+			best_target = target
 
 	if best_target != null:
 		_store_shared_enemy_target(attacker, best_target)
+	PerfCounters.record_usec(PerfCounters.KEY_TARGET_SEARCH_USEC, Time.get_ticks_usec() - started_usec)
 	return best_target
 
 
@@ -935,42 +1000,81 @@ static func _store_shared_enemy_target(attacker: Node3D, target: Node3D) -> void
 		"origin": attacker.global_position,
 	}
 	## Bound cache size so long matches cannot leak entries.
-	if _shared_enemy_target_cache.size() > 64:
-		var keys: Array = _shared_enemy_target_cache.keys()
-		_shared_enemy_target_cache.erase(keys[0])
+	if _shared_player_target_cache.size() > 64:
+		var player_keys: Array = _shared_player_target_cache.keys()
+		_shared_player_target_cache.erase(player_keys[0])
+
+
+static func _try_get_shared_player_target(attacker: Node3D, search_range: float) -> Node3D:
+	if attacker == null:
+		return null
+	var key: String = _shared_enemy_target_bucket_key(attacker.global_position)
+	if not _shared_player_target_cache.has(key):
+		return null
+	var entry: Dictionary = _shared_player_target_cache[key]
+	var age: int = Time.get_ticks_msec() - int(entry.get("msec", 0))
+	if age > SHARED_PLAYER_TARGET_CACHE_TTL_MSEC:
+		_shared_player_target_cache.erase(key)
+		return null
+	var cached: Variant = entry.get("target")
+	if not NodeSafety.is_alive_node(cached) or not cached is Node3D:
+		_shared_player_target_cache.erase(key)
+		return null
+	var target: Node3D = cached as Node3D
+	if not is_attack_target_for_attacker(attacker, target):
+		return null
+	if StealthService.is_combat_hidden(target):
+		return null
+	var distance: float = get_horizontal_attack_distance(attacker, target)
+	if distance > search_range:
+		return null
+	return target
+
+
+static func _store_shared_player_target(attacker: Node3D, target: Node3D) -> void:
+	if attacker == null or not NodeSafety.is_alive_node(target):
+		return
+	var key: String = _shared_enemy_target_bucket_key(attacker.global_position)
+	_shared_player_target_cache[key] = {
+		"target": target,
+		"msec": Time.get_ticks_msec(),
+		"origin": attacker.global_position,
+	}
+	if _shared_player_target_cache.size() > 64:
+		var keys: Array = _shared_player_target_cache.keys()
+		_shared_player_target_cache.erase(keys[0])
 
 
 static func _find_closest_hostile_attack_target_in_range(
 	attacker: Node3D, attack_range: float
 ) -> Node3D:
 	PerfCounters.record_target_search()
+	var started_usec: int = Time.get_ticks_usec()
 	var closest_target: Node3D = null
 	var closest_distance: float = INF
-	var groups_to_search: Array[StringName] = get_hostile_search_groups(attacker)
 
-	var tree: SceneTree = attacker.get_tree()
-	for group_name: StringName in groups_to_search:
-		for node_variant: Variant in get_cached_group_nodes(tree, group_name):
-			if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
-				continue
+	for node_variant: Variant in _collect_range_candidates(attacker, attack_range):
+		if node_variant == null or not is_instance_valid(node_variant) or not node_variant is Node:
+			continue
 
-			var node: Node = node_variant as Node
-			if not node is Node3D:
-				continue
-			if not is_attack_target_for_attacker(attacker, node):
-				continue
-			if StealthService.is_combat_hidden(node):
-				continue
+		var node: Node = node_variant as Node
+		if not node is Node3D:
+			continue
+		if not is_attack_target_for_attacker(attacker, node):
+			continue
+		if StealthService.is_combat_hidden(node):
+			continue
 
-			var target: Node3D = node as Node3D
-			var distance: float = get_horizontal_attack_distance(attacker, target)
-			if distance > attack_range:
-				continue
+		var target: Node3D = node as Node3D
+		var distance: float = get_horizontal_attack_distance(attacker, target)
+		if distance > attack_range:
+			continue
 
-			if distance < closest_distance:
-				closest_distance = distance
-				closest_target = target
+		if distance < closest_distance:
+			closest_distance = distance
+			closest_target = target
 
+	PerfCounters.record_usec(PerfCounters.KEY_TARGET_SEARCH_USEC, Time.get_ticks_usec() - started_usec)
 	return closest_target
 
 

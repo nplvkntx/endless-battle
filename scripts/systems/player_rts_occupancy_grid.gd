@@ -27,6 +27,12 @@ var _cell_refcount: PackedInt32Array = PackedInt32Array()
 ## obstacle_id -> PackedInt32Array of flat cell indices owned by that obstacle.
 var _obstacle_cells: Dictionary = {}
 var _dirty: bool = true
+## flat -> solid. Last write wins so overlapping add/remove in one batch stays correct.
+var _pending_solid: Dictionary = {}
+var _astar_built: bool = false
+## Observational: full grid rebuilds vs per-cell flips (building placement).
+var debug_full_rebuild_count: int = 0
+var debug_cell_update_count: int = 0
 
 
 func setup(
@@ -46,13 +52,16 @@ func setup(
 	_cell_refcount.resize(grid_width * grid_height)
 	_cell_refcount.fill(0)
 	_obstacle_cells.clear()
+	_pending_solid.clear()
 	_dirty = true
+	_astar_built = false
 	_rebuild_astar()
 
 
 func clear_all() -> void:
 	_cell_refcount.fill(0)
 	_obstacle_cells.clear()
+	_pending_solid.clear()
 	_dirty = true
 	_rebuild_astar()
 
@@ -78,7 +87,7 @@ func set_obstacle_aabb(obstacle_id: int, center: Vector3, half_extents: Vector3)
 			if not is_cell_in_bounds(cell):
 				continue
 			var flat: int = cell.y * grid_width + cell.x
-			_cell_refcount[flat] += 1
+			_add_cell_refcount(flat)
 			owned.append(flat)
 	_obstacle_cells[obstacle_id] = owned
 	_dirty = true
@@ -89,9 +98,7 @@ func clear_obstacle(obstacle_id: int) -> void:
 		return
 	var owned: PackedInt32Array = _obstacle_cells[obstacle_id] as PackedInt32Array
 	for flat: int in owned:
-		if flat < 0 or flat >= _cell_refcount.size():
-			continue
-		_cell_refcount[flat] = maxi(0, _cell_refcount[flat] - 1)
+		_sub_cell_refcount(flat)
 	_obstacle_cells.erase(obstacle_id)
 	_dirty = true
 
@@ -99,7 +106,7 @@ func clear_obstacle(obstacle_id: int) -> void:
 ## Call after batched obstacle edits so A* solids stay in sync.
 func commit() -> void:
 	if _dirty:
-		_rebuild_astar()
+		_sync_astar()
 
 
 func has_obstacle(obstacle_id: int) -> bool:
@@ -125,6 +132,9 @@ func is_world_walkable(world: Vector3) -> bool:
 
 
 ## Padding applied outside the collision AABB when marking blocked cells.
+## Keep this as a small wall-clip margin. Adding unit_radius (or the old
+## unit_radius + 0.75 halo) pushes construction standees off the building
+## and boxes entire structures. Corner snags are handled by physical peel.
 func get_obstacle_inflate() -> float:
 	return building_clearance
 
@@ -169,7 +179,7 @@ func nearest_walkable_world(world: Vector3) -> Vector3:
 
 func find_path(from_world: Vector3, to_world: Vector3) -> PackedVector3Array:
 	if _dirty:
-		_rebuild_astar()
+		_sync_astar()
 	var start: Vector2i = _nearest_walkable(world_to_cell(from_world))
 	var goal: Vector2i = _nearest_walkable(world_to_cell(to_world))
 	if not is_cell_in_bounds(start) or not is_cell_in_bounds(goal):
@@ -201,6 +211,39 @@ func get_blocked_cells() -> Array[Vector2i]:
 	return cells
 
 
+func _add_cell_refcount(flat: int) -> void:
+	if flat < 0 or flat >= _cell_refcount.size():
+		return
+	var was_blocked: bool = _cell_refcount[flat] > 0
+	_cell_refcount[flat] += 1
+	if not was_blocked:
+		_pending_solid[flat] = true
+
+
+func _sub_cell_refcount(flat: int) -> void:
+	if flat < 0 or flat >= _cell_refcount.size():
+		return
+	var was_blocked: bool = _cell_refcount[flat] > 0
+	_cell_refcount[flat] = maxi(0, _cell_refcount[flat] - 1)
+	var now_blocked: bool = _cell_refcount[flat] > 0
+	if was_blocked != now_blocked:
+		_pending_solid[flat] = now_blocked
+
+
+func _sync_astar() -> void:
+	if not _astar_built:
+		_rebuild_astar()
+		return
+	for flat_variant: Variant in _pending_solid.keys():
+		var flat: int = int(flat_variant)
+		var x: int = flat % grid_width
+		var y: int = int(flat / grid_width)
+		_astar.set_point_solid(Vector2i(x, y), bool(_pending_solid[flat_variant]))
+		debug_cell_update_count += 1
+	_pending_solid.clear()
+	_dirty = false
+
+
 func _rebuild_astar() -> void:
 	_astar = AStarGrid2D.new()
 	_astar.region = Rect2i(0, 0, grid_width, grid_height)
@@ -214,7 +257,10 @@ func _rebuild_astar() -> void:
 		for x: int in grid_width:
 			if _cell_refcount[y * grid_width + x] > 0:
 				_astar.set_point_solid(Vector2i(x, y), true)
+	_pending_solid.clear()
+	_astar_built = true
 	_dirty = false
+	debug_full_rebuild_count += 1
 
 
 func _nearest_walkable(cell: Vector2i) -> Vector2i:

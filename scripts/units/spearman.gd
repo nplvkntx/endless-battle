@@ -2,6 +2,40 @@ class_name Spearman
 extends MilitaryUnit
 
 ## Tier 1 melee infantry.
+var _art_guarding: bool = false
+
+
+func get_visual_loop_state() -> UnitVisualAnimator.LoopState:
+	if _visual_animator != null and _art_guarding != _is_holding_position:
+		_art_guarding = _is_holding_position
+		_visual_animator.set_clip_preferences({UnitVisualAnimator.STATE_IDLE: [&"Guard" if _art_guarding else &"Idle"]})
+	return super.get_visual_loop_state()
+
+
+func _configure_visual_animator(animator: UnitVisualAnimator) -> void:
+	animator.set_clip_preferences({
+		UnitVisualAnimator.STATE_IDLE: [&"Idle"],
+		UnitVisualAnimator.STATE_MOVE: [&"Walk"],
+		UnitVisualAnimator.STATE_ATTACK: [&"Attack"],
+	})
+
+
+func _detect_visual_facing_yaw_offset() -> float:
+	return 0.0
+
+
+func _deliver_attack() -> bool:
+	if not super._deliver_attack():
+		return false
+	play_visual_attack_animation()
+	return true
+
+
+func apply_team_visuals() -> void:
+	super.apply_team_visuals()
+	var art: SpearmanArtVisuals = get_node_or_null("SpearmanArtVisuals") as SpearmanArtVisuals
+	if art != null:
+		art.apply_team(team_id)
 
 
 func _init() -> void:

@@ -19,6 +19,7 @@ func _ready() -> void:
 	_verify_cached_group_death(failures, &"enemies", ENEMY_DUMMY_SCENE, "enemy unit")
 	_verify_cached_group_death(failures, &"neutral_creeps", NEUTRAL_CREEP_SCENE, "creep")
 	_verify_overlay_refresh_survives_freed_cache(failures)
+	await _measure_overlay_refresh_cost()
 
 	var report: String
 	if failures.is_empty():
@@ -152,6 +153,43 @@ func _verify_overlay_refresh_survives_freed_cache(failures: PackedStringArray) -
 		PerfDebugOverlay._label != null and not String(PerfDebugOverlay._label.text).is_empty()
 	)
 	PerfDebugOverlay.hide_overlay()
+	CombatTargetValidation.reset_match_state()
+
+
+func _measure_overlay_refresh_cost() -> void:
+	CombatTargetValidation.reset_match_state()
+	var spawned: Array[Unit] = []
+	for index: int in 60:
+		var unit: Unit = SWORDSMAN_SCENE.instantiate() as Unit
+		add_child(unit)
+		_ensure_exclusive_group(unit, &"units")
+		unit.has_move_target = index < 20
+		spawned.append(unit)
+	await _settle()
+
+	var hidden_usec: int = 0
+	PerfDebugOverlay.hide_overlay()
+	var hidden_start: int = Time.get_ticks_usec()
+	for _i: int in 40:
+		# Hidden overlay does not process; this is the OFF path cost (none).
+		pass
+	hidden_usec = Time.get_ticks_usec() - hidden_start
+
+	PerfDebugOverlay.show_overlay()
+	var shown_start: int = Time.get_ticks_usec()
+	for _i: int in 40:
+		PerfDebugOverlay._update_label()
+	var shown_usec: int = Time.get_ticks_usec() - shown_start
+	PerfDebugOverlay.hide_overlay()
+
+	print(
+		"F3_OVERLAY_COST hidden_loop_us=%d shown_40x_update_us=%d shown_avg_ms=%.3f"
+		% [hidden_usec, shown_usec, float(shown_usec) / 40.0 / 1000.0]
+	)
+
+	for unit: Unit in spawned:
+		if NodeSafety.is_alive_node(unit):
+			unit.queue_free()
 	CombatTargetValidation.reset_match_state()
 
 

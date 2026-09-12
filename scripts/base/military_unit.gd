@@ -491,17 +491,28 @@ func _set_move_destination(
 
 
 func _physics_process(delta: float) -> void:
+	var started_usec: int = Time.get_ticks_usec()
 	if _health_component.current_health <= 0:
+		PerfCounters.record_usec(
+			PerfCounters.KEY_MIL_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
+	_sync_spatial_hash()
 	var can_scan_targets: bool = tick_combat_target_scan_timer(delta)
 
 	if _is_holding_position:
 		_update_hold_position(can_scan_targets, delta)
+		PerfCounters.record_usec(
+			PerfCounters.KEY_MIL_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
 	if _is_returning_from_leash:
 		_update_leash_return(delta)
+		PerfCounters.record_usec(
+			PerfCounters.KEY_MIL_PHYS_USEC, Time.get_ticks_usec() - started_usec
+		)
 		return
 
 	if _attack_target == null and not has_move_target:
@@ -523,8 +534,14 @@ func _physics_process(delta: float) -> void:
 			if can_scan_targets:
 				_try_retarget_higher_priority_during_attack()
 			_process_attack(delta)
+			PerfCounters.record_usec(
+				PerfCounters.KEY_MIL_PHYS_USEC, Time.get_ticks_usec() - started_usec
+			)
 			return
 
+	PerfCounters.record_usec(
+		PerfCounters.KEY_MIL_PHYS_USEC, Time.get_ticks_usec() - started_usec
+	)
 	super._physics_process(delta)
 
 	if _has_attack_move_destination and _attack_target == null and not has_move_target:
