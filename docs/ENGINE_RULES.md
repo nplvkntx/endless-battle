@@ -21,7 +21,6 @@ Supporting infrastructure (not alternative owners):
 
 - `NodeSafety` — alive/freed Node validation helpers
 - `EntityHandle` — identity-only safe entity references
-- `FormationManager` — formation registry/UI helpers; must not override newer player movement commands
 
 ---
 
@@ -113,7 +112,7 @@ Extract code only when it materially improves:
 - bug isolation
 - future feature development
 
-(This intentionally overrides older “max 500 lines” guidance in `cursor/RULES.md` / `docs/Architecture.md` when those conflict.)
+(This intentionally overrides older “max 500 lines” guidance in historical `docs/Architecture.md` and any leftover notes in `cursor/RULES.md`.)
 
 ---
 

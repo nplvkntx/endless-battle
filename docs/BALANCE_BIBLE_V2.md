@@ -1,11 +1,12 @@
 # Endless Battle — Balance Bible V2
 
-> Complete source-of-truth balance document generated from embedded code-extracted values.
-> Calculated estimates are labeled `[CALC]`. Missing values: `NOT FOUND`. Disagreements: `CONFLICT`.
-> No invented gameplay values. No rebalance proposals in §14.
+> **DATED SNAPSHOT (2026-08-04).** Useful as a number dump, not as architecture.
+> AI V2 timing tables and “director” language are historical. Current AI is `EnemyAI`.
+> **Canonical numbers:** `scripts/balance/`. If this file disagrees, the scripts win.
 
-**Document date:** 2026-08-04
-**Canonical balance tables:** `scripts/balance/`
+Calculated estimates are labeled `[CALC]`. Missing values: `NOT FOUND`. Disagreements: `CONFLICT`.
+No invented gameplay values. No rebalance proposals in §14.
+
 
 ---
 

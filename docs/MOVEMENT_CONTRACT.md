@@ -1,6 +1,6 @@
 # Endless Battle — Player Movement Contract
 
-**Status:** Target design for player movement.
+**Status:** Current player-movement law. Live implementation: `PlayerRouteNavigation`. See also `cursor/AI_CONTEXT.md`.
 
 The historical high-level player movement stack (continuous formation steering, corridor state machines, competing stuck layers, etc.) is considered failed / overcomplicated and must be replaced or fully bypassed for normal player Move / Attack-Move.
 
@@ -55,7 +55,7 @@ Remove or bypass for normal player movement:
 
 Do **not** stack replacements on top of these.
 
-`FormationManager` may still exist for AI, UI prefs, or future arrival organization — it must not continuously steer player march orders or fight a newer player command.
+Automatic army slots live inside `PlayerRouteNavigation` and are assigned once per group command. Do not restore `FormationManager` or player-facing formation UI.
 
 ---
 
@@ -110,17 +110,17 @@ A valid path is more important than perfect spacing.
 
 ## Group Principle
 
-Multiple selected military units may share a strategic route.
+Multiple selected military units share one strategic route.
 
-The route is a **corridor**, not a moving formation.
+The route is a **corridor**. Stable formation slots are guidance targets, not rigid physics.
 
 Units may:
 
-- compress
+- compress around buildings / chokes
 - trail
 - temporarily queue
 
-They do not need to preserve formation during travel.
+Traversability always beats perfect spacing.
 
 ---
 
@@ -167,11 +167,16 @@ Do not copy exact physical footsteps.
 
 ## Formations
 
-Formations are **not** part of the baseline movement rewrite.
+Automatic line / rectangle / square slots are generated inside `PlayerRouteNavigation` when a group Move or Attack-Move is issued.
 
-Add formations only after basic movement is proven stable.
+Rules:
 
-Future formations should primarily affect **final arrival organization**, not continuously steer marching units.
+- one shared strategic route for the group
+- slots assigned once per command (stable until a new command or membership change)
+- hero travels in the same formation, preferably front-center
+- no player formation selector / buttons
+- do not regenerate or reassign slots every frame
+- do not fight buildings to hold spacing — compress onto the shared route instead
 
 ---
 

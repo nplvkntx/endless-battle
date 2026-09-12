@@ -1,40 +1,24 @@
 # IMPLEMENT FEATURE
 
-You are working on the game **Endless Battle**.
+You are working on **Endless Battle**.
 
-Before writing any code:
+Before writing any code, read:
 
-1. Read:
+1. `docs/CURRENT_STATE.md`
+2. `cursor/AI_CONTEXT.md`
+3. `docs/GAME_CONSTITUTION.md`
+4. `docs/ENGINE_RULES.md`
+5. `docs/MOVEMENT_CONTRACT.md` (if the task touches movement)
+6. `docs/WORKFLOW.md`
+7. Current source for the owning system
 
-   * AI_CONTEXT.md
-   * RULES.md
-   * /docs/ROADMAP.md (current priorities and known issues)
-   * Relevant documentation from /docs
+Then implement only the requested task.
 
-2. Only implement the requested task.
+- Do not modify unrelated systems
+- Do not revive dead architecture
+- Do not invent mechanics
+- UI never becomes gameplay-state authority
+- After code changes: run existing parse / headless validation when appropriate
+- Provide manual playtest steps; the user accepts gameplay before commit unless they say otherwise
 
-3. Do NOT modify unrelated systems.
-
-4. If another system is required but does not exist:
-
-   * Leave a TODO.
-   * Do not implement extra features.
-
-5. Follow these rules:
-
-   * Maximum 500 lines per script
-   * Typed GDScript
-   * Use signals
-   * No duplicated code
-   * No hardcoded gameplay values
-   * Use Resources (.tres)
-   * One small task — no whole-project scan, no big refactors, no new helpers unless requested
-   * UI/production: RMB cancel uses `Control.accept_event()`, not `event.accept_event()`
-
-After implementation provide:
-
-* Files created
-* Files modified
-* Explanation of every change
-* Possible edge cases
-* Manual F5 testing instructions (user tests before commit)
+Report: files created / modified, why, edge cases, how to test.

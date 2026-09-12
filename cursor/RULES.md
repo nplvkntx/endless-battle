@@ -1,83 +1,35 @@
-# Endless Battle - AI Coding Rules
+# Endless Battle — AI Coding Rules
 
-## General Rules
+These are short reminders. They do **not** replace `docs/GAME_CONSTITUTION.md`, `docs/ENGINE_RULES.md`, `docs/MOVEMENT_CONTRACT.md`, or `docs/WORKFLOW.md`.
 
-* Engine: Godot 4.x
-* Language: GDScript
-* Architecture first, features second.
-* Never sacrifice architecture for speed.
+**Source code is implementation truth.** `cursor/AI_CONTEXT.md` and `docs/CURRENT_STATE.md` are the live snapshot. Do not follow `docs/Architecture.md`, the 2026 technical audit, or `AUDIT_PROGRESS.md` as current architecture.
 
-## Coding Standards
+## Stack
 
-* Maximum script length: 500 lines.
-* Always use typed GDScript.
-* Use signals instead of direct references whenever possible.
-* Never duplicate code.
-* Follow the Single Responsibility Principle.
-* One class = one responsibility.
-* No circular dependencies.
-* Avoid singleton abuse.
+- Godot 4.7, GDScript, 3D RTS
+- Typed GDScript
+- UI reads state and issues requests; UI is never gameplay-state authority
+- Balance numbers belong in `scripts/balance/`
 
-## Data Rules
+## Do
 
-* Never hardcode gameplay values.
-* Store gameplay values inside Resources (.tres).
-* Managers read Resources.
-* UI never changes gameplay directly.
+- One focused task
+- Read current source for the system you touch
+- Prefer `EntityHandle` / instance IDs + `NodeSafety`
+- Latest player command wins (generations / tokens)
+- After gameplay code: run existing parse / headless validation when appropriate
+- Manual RTS play is the acceptance test for feel
 
-## Modification Rules
+## Do not
 
-* Never rewrite working systems.
-* Only modify files related to the current task.
-* Preserve backwards compatibility.
-* If a future feature is required, leave a TODO comment instead of implementing it.
+- Add MilitaryDirector, ArmyCommander, behavior trees, wave/mission/watchdog managers
+- Restore NavigationAgent3D-per-unit travel or FormationManager
+- Layer a second movement or AI brain
+- Invent mechanics not in source or the current design docs
+- Rewrite unrelated systems
+- Commit gameplay changes unless the user asked (and usually after they playtested)
+- Split a script only because it is over 500 lines — see `ENGINE_RULES.md`
 
-## Performance
+## UI note
 
-* Avoid unnecessary processing every frame.
-* Cache expensive lookups.
-* Use object pooling later for projectiles and effects.
-
-## File Organization
-
-Scenes:
-scenes/
-
-Scripts:
-scripts/
-
-Resources:
-resources/
-
-Documentation:
-docs/
-
-## UI Rules
-
-* For production queue UI, RMB cancel/dequeue must use `Control.accept_event()` — not `event.accept_event()` (causes crashes).
-* Avoid creating parser-risk helper classes for UI tasks unless explicitly requested.
-* Victory/defeat and other modal UI must not break input handling — defer if unstable.
-
-## Cursor Workflow
-
-* One small task at a time — no big refactors.
-* Read only files needed for the task — do not scan the whole project.
-* No new helper scripts unless the task explicitly requests them.
-* Manual F5 test before commit; provide exact test steps after changes.
-* See `AI_CONTEXT.md` and `/docs/ROADMAP.md` for current project state and priorities.
-
-## AI Behavior
-
-If something is unclear:
-
-Do NOT guess.
-
-Instead explain what information is missing.
-
-Never invent game mechanics not described in the documentation.
-
-Always explain:
-
-* which files were created
-* which files were modified
-* why the changes were made
+Production-queue RMB cancel must use `Control.accept_event()`, not `event.accept_event()`.

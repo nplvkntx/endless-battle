@@ -1,176 +1,250 @@
-# Endless Battle AI Context
+# Endless Battle — AI Context
 
-## Project
+Read this first. Then `docs/CURRENT_STATE.md`, `docs/GAME_CONSTITUTION.md`, `docs/ENGINE_RULES.md`, `docs/MOVEMENT_CONTRACT.md`, and `docs/WORKFLOW.md`.
 
-Endless Battle — an **existing Godot 4.x RTS project** in active development.
+**Source code is the source of truth.** If this file disagrees with scripts, scenes, or `project.godot`, the source wins and this file is stale.
 
-This is **not** a new project initialization. Core gameplay systems are already implemented and playable.
+Do not treat `docs/Architecture.md`, `docs/Endless_Battle_Technical_Audit.md`, `AUDIT_PROGRESS.md`, or the Balance Bibles as current architecture.
 
-**Canonical scenes (do not change casually):**
-* **App entry / F5:** `scenes/ui/main_menu.tscn` — `project.godot` `run/main_scene` and `MatchSession.MAIN_MENU_SCENE`
-* **Match load:** `scenes/main.tscn` — only via `MatchSession.start_match()` / rematch (`MatchSession.MATCH_SCENE`)
-* Debug harnesses live under `scenes/debug/` and are excluded from release export; they are not entry points.
+---
 
-**Milestone 1 goal:** playable **1v1 RTS** (player vs AI opponent). See `/docs/ROADMAP.md` for current priorities.
+## ENDLESS BATTLE
 
-## Engine
+### Project Summary
 
-Godot 4.x
+Endless Battle is a **classic 3D RTS** inspired by Warcraft III, Age of Empires, Stronghold, and Cossacks. It is **its own game**, not a Warcraft clone and not a MOBA.
 
-## Language
+**Engine:** Godot 4.7, GDScript, Jolt Physics.  
+**Current target:** single-player **1v1 vs AI**.
 
-GDScript
+**Canonical scenes:**
 
-## Art Style
+- App entry / F5: `scenes/ui/main_menu.tscn` (`project.godot` `run/main_scene`)
+- Match: `scenes/main.tscn` only via `MatchSession.start_match()` / rematch
+- Debug harnesses: `scenes/debug/` — not release entry points
 
-Simple placeholder cubes.
+**Main loop (implemented):**
 
-No final art yet. Enemy buildings/units are hard to identify visually because they are mostly cubes — art differentiation is a known gap.
+main menu → economy → build → Hero → army → creep → tech → expansion → fight → destroy enemy Command Center → victory/defeat → restart/menu
 
-## Architecture
+**Starting match (both sides):** 5 Workers, 500 gold, 500 wood, food used 5 / cap 15.
 
-Signal-based.
+**Win / loss:** destroy the enemy main Command Center → Victory. Player main Command Center destroyed → Defeat. `MatchManager` then returns to the main menu with the result. Debug-only: F8 / F9 destroy those CCs.
 
-Resource-driven (goal — many stats still exported/hardcoded in scripts).
+---
 
-Data-oriented.
+## NON-NEGOTIABLE AI ARCHITECTURE
 
-Maximum script size: 500 lines.
+Enemy strategic AI is **`EnemyAI`** (`scripts/systems/enemy_ai.gd`).
 
-Press F5 to run the main menu; start a match from the UI (loads `scenes/main.tscn`).
+It is a **simple ordered condition tree** on a **0.5s strategic tick**.
 
-## Current Phase
+Each tick:
 
-Active **1v1 RTS** development — economy, combat, heroes, HUD, and **enemy AI** are in place. Current work focuses on AI stability, economy balance, and HUD polish — not new core systems.
+1. Read live world facts into `_w`
+2. Always run **macro** (workers, food, buildings, hero train, tech, expansion, upgrades, production, light hero micro)
+3. Evaluate **military IF conditions in order**
+4. First true condition acts
+5. Return
+6. Next tick reads reality again
 
-## Implemented Systems
+**CONDITIONS ARE THE STATE.** There is no mission manager, no strategic state machine, no wave director.
 
-### Economy
+### Do NOT introduce
 
-* Gold, wood, and food via `ResourceManager` autoload
-* Food cap from Farms
-* Population/food checks block training when cap is full
-* Resource bar HUD and feedback messages
+- `MilitaryDirector` / `MilitaryDirectorV2`
+- `ArmyCommander` / `ArmyCommanderV2`
+- behavior trees
+- strategic state machines
+- mission / wave / watchdog / recovery / squad-strategic managers
 
-### Buildings
+`EnemyBuildManager` and `EnemyGatherManager` execute placements and gather jobs. They do **not** decide strategy.
 
-* Town Center (Command Center) — trains Workers
-* Barracks — trains Swordsmen and Archers
-* Hero Altar — trains one Hero at a time
-* Farm, Tower
-* Worker-driven building placement (BuildManager)
-* Construction progress on buildings
+`PlayerRouteNavigation` executes **how** the enemy army marches. It is not a second strategic brain.
 
-### Workers
+### Current military condition order (source)
 
-* Gold mine and tree gathering
-* Gather → carry → return to Town Center → deposit → auto-repeat cycle
-* Build assignment for new structures
+Verified in `EnemyAI._tick_military()`:
 
-### Units
+1. **DEFEND** — player army inside base defense radius
+2. **HERO MISSING** — no living hero → army goes home (`HOME_NO_HERO`)
+3. **ARMY TOO SMALL** — T1: fewer than 5 Spearmen; later: fewer than 6 combat units → home
+4. **HERO STUCK** — hero physically blocked → local unstuck only (not a regroup mission)
+5. **EARLY CREEP** — hero below level 3 and a useful camp exists
+6. **EXTRA CREEP (expansion access)** — T2+, no expansion CC, workers ≥ 18, and no expansion mine found
+7. **ATTACK PLAYER** — living army and ~1.25× player power (or ≥ 6 soldiers if player army is empty)
+8. **EXTRA CREEP** — any remaining useful camp
+9. **HOME / WAIT**
 
-* Worker, Swordsman, Archer, Hero
-* Training queues with rally points (Barracks, Hero Altar, Town Center)
-* **Ctrl-click repeat training** — hold Ctrl and click a train button to queue repeated production
+`_army_is_together()` is **march/debug observation**, not a strategic mission. Do not reintroduce REGROUP / assembly-as-strategy.
 
-### Combat
+Hero is part of the army. If the hero is missing, the army waits at home. Do not send the AI hero as an independent suicide unit.
 
-* Melee combat (Swordsman, Hero, enemy unit retaliation)
-* Ranged combat with arrow projectiles (Archer, Tower)
-* Attack cooldowns, auto-attack when idle, attack-move
-* Shared `CombatTargetValidation` helper
-* `HealthComponent`, dynamic health bars, floating damage numbers
-* Melee hit sound placeholder
+---
 
-### Hero
+## MOVEMENT ARCHITECTURE
 
-* One Hero per player; trainable from Hero Altar
-* Mana (`max_mana`, `current_mana`, mana costs, mana regeneration)
-* Abilities with cooldowns and placeholder VFX:
-  * **Q** — Ground Slam (AoE)
-  * **W** — Divine Protection (temporary damage immunity)
-  * **E** — Power Strike (single-target empowered melee)
-  * **R** — Execute (instant kill below health threshold)
-* Hero shown in selection info panel with mana display
+**Active authority:** autoload `PlayerRouteNavigation` + `PlayerRtsOccupancyGrid` + `UnitSpatialHash`.
 
-### HUD & UI
+Used by player `SelectionManager`, production rally, worker travel, and enemy army march.
 
-* **Compact MOBA/RTS-style HUD layout**
-* Resource bar at top
-* RTS bottom command bar (`CommandBar` — portrait/info left, details center, commands right)
-* **Bottom selected-unit HUD hides when nothing is selected**
-* **Minimap placeholder** — shows unit/building dots; orientation is good enough for now but needs polish later
-* **Building production HUD** — displays queue/progress when available
-* **RMB production cancel/dequeue** — right-click a queued production slot to cancel; uses `Control.accept_event()`, not `event.accept_event()` (crash fix applied)
-* Context-sensitive command panel (build, train, attack, hero abilities)
+### How it works
 
-### Selection & Commands
+- One **shared strategic grid route** per group command (one A* for the group)
+- **Automatic formation slots** assigned **once** per command (line ≤5, rectangle ≤15, square 16+)
+- Hero prefers a front-center slot
+- Each unit follows the shared corridor to its slot (local execution)
+- Buildings / walls / world blockers on the BUILDINGS layer are **hard occupancy obstacles**
+- **Mobile units are not grid blockers** — soft separation via `UnitSeparation` (max 6 neighbors)
+- Attack-move uses the same route bind, then `MilitaryUnit` / combat scripts engage locally
+- Command generation invalidates old routes. Latest command wins
+- NavigationAgent3D is **not** used for strategic travel
 
-* Click and box selection
-* Multi-selection (shared worker build commands, shared combat move/attack)
-* Mixed selection hides conflicting commands
+### Enemy march vs player group
 
-### Camera
+- **Player:** shared route + slots; each unit uses its own move speed
+- **Enemy:** same grid, plus cohesive **checkpoint march** (gather ~75% / 4s, then next 16m segment)
 
-* RTS camera controller (pan, zoom)
+### Trees
 
-### Enemy AI
+`GatherableResource` (trees, mines) is **explicitly excluded** from the occupancy scan. Living trees still have physical collision. Strategic routes can walk through forest on the grid, then units hit tree collision. This is a current known issue.
 
-* AI opponent builds structures (including Hero Altar and additional army production buildings)
-* AI trains units and **scales army production** over time
-* AI can **train and respawn hero** from Hero Altar
-* Enemy hero integration exists but **still needs smarter behavior** (ability use, positioning, etc.)
-* `EnemyDummy` may still exist for dev/test setups — do not assume all enemies are dummies
+### Do NOT
 
-## Known Issues & Next Priorities
+- return to NavigationAgent3D-per-unit strategic movement
+- create a `FormationManager` (autoload removed; leftover `formation_*.gd` files are not the live path)
+- pathfind independently for every army unit every frame
+- treat formation as rigid physics
+- layer corridor / follow-leader / stuck-stack / REGROUP managers
 
-Do not assume these are fixed. Current focus order is in `/docs/ROADMAP.md`.
+Formation is **guidance**. World/buildings are **hard**. Mobile traffic is **soft**.
 
-1. **AI worker gathering pathfinding** — still needs improvement; enemy workers can cluster at one tree and get stuck
-2. **AI economy balance** — too rigid; e.g. too many wood workers and too few gold workers
-3. **AI construction/placement** — sometimes places buildings in poor positions; sometimes leaves buildings unfinished
-4. **Enemy selection HUD** — player should be able to select enemy units/buildings and see HUD info (not yet implemented)
-5. **AI hero behavior** — hero exists and respawns but needs smarter decision-making
-6. **Visual identification** — enemy buildings/units hard to tell apart (placeholder cubes)
-7. **Victory/Defeat UI** — attempted but skipped because input handling became unstable; defer until input/UI is stable
-8. **Minimap polish** — functional enough for now; orientation/details can improve later
+Stuck recovery must keep the current command and destination. Do not randomize destinations or reshuffle the whole group.
 
-## Not Yet Implemented
+---
 
-Do not assume these exist:
+## PERFORMANCE RULES
 
-* Player selection of enemy units/buildings with full HUD info
-* Victory/Defeat screen (deferred — input instability)
-* Hero leveling / XP (player hero)
-* Full enemy AI polish (smart hero, adaptive economy, reliable pathfinding/placement)
-* Fog of war (autoload stub only)
-* Gameplay data Resources (`.tres`) for unit/building stats — mostly TODO on base classes
-* Tech tree, upgrades, formations (autoload stubs only)
-* Distinct enemy visual identity (still placeholder cubes)
+Dense unit overlap has historically caused severe FPS drops. Do not “solve” that by shrinking layout army sizes.
 
-## Cursor Workflow Rules
+Rules:
 
-Every task should follow these rules:
+- Avoid O(N²) crowd logic
+- Neighbor processing is bounded (`UnitSeparation.MAX_NEIGHBORS = 6`)
+- Use the spatial hash / occupancy grid, not per-frame full-group scans
+- Rate-limit / cache target acquisition
+- Stagger / rate-limit expensive stuck checks
+- One shared strategic route, not per-unit global A* every frame
+- Profile before adding architecture
 
-* **One small task at a time** — small focused changes only
-* **Do not scan the whole project** — read only the files needed for the current task
-* **Do not run tests** — no automated test commands
-* **Manual F5 test before commit** — user tests manually; always provide exact F5 test steps after changes
-* **Do not refactor unrelated systems** or rewrite working systems
-* **Do not modify completed systems** unless the task explicitly asks
-* **No new helper scripts** unless the task explicitly requests them
-* **No big refactors**
-* **For UI tasks** — avoid creating parser-risk helper classes
-* **For production UI** — RMB cancel must use `Control.accept_event()`, not `event.accept_event()`
-* **Do not invent mechanics** not described in the task or `/docs`
+**F3** (`PerfDebugOverlay` + `PerfCounters`, debug builds) currently shows:
 
-## Important
+- FPS / avg / low / frame ms, physics ms, script ms
+- unit counts (total, moving, player/enemy military, workers, creeps)
+- neighbor queries / neighbors processed / separation updates per sec
+- repaths / strategic routes / orders / target searches per sec
+- stuck checks / recoveries per sec
+- query / slide / target-search / collision-pair timings
+- unit / military / RTS-move / stuck / steer ms
+- difficulty name
 
-The documentation inside `/docs` is the source of truth.
+Do not document removed counters. The overlay is performance-only. Enemy reasoning is the **P-key brain panel** (debug builds; see hotkey conflict below).
 
-Never contradict it.
+---
 
-Never invent mechanics.
+## GAMEPLAY AUTHORITY
 
-Never modify completed systems unless explicitly instructed.
+| Concern | Owner |
+|---------|--------|
+| Enemy strategy | `EnemyAI` only |
+| Enemy build / gather execution | `EnemyBuildManager` / `EnemyGatherManager` |
+| Player / shared strategic movement | `PlayerRouteNavigation` |
+| Combat orders | `MilitaryUnit` (and forked combat scripts — see Known Issues) |
+| Building placement | `BuildManager` |
+| Selection / inspect | `SelectionManager` |
+| Match wiring | `MatchCompositionRoot` (`MatchSystems`) |
+| Match win/loss | `MatchManager` → `MatchSession` |
+| Resources | `ResourceManager` / `EnemyResourceManager` |
+| Tech gates | `TechTree` (CC tier + Blacksmith presence) |
+| Upgrades | `UpgradeManager` (Blacksmith / Stable / Academy) |
+| Control groups / F1 / idle worker | `ControlGroupManager` |
+| UI | `scripts/ui/` — reads state, issues requests, never owns gameplay state |
 
+`InputManager` only arms Attack-Move / Patrol. It must not become a second command brain.
+
+**Known duplicated authority (problem, not design):** Heavy Cavalry, Cavalry Archer, and Cannon copy combat on `Unit` instead of `MilitaryUnit`. Light Cavalry already uses `MilitaryUnit`. Hold / Patrol on the forked units are empty `Unit` stubs.
+
+Leftover unused code (do not revive): `autoloads/fog_of_war_manager.gd` (not autoloaded), old `formation_layout.gd` / `formation_group.gd` helpers, historical V2 director/commander names.
+
+---
+
+## CURRENT MAJOR KNOWN ISSUES
+
+Only issues still true in current source. Not a bug tracker.
+
+**ISSUE:** Dense army overlap can still spike FPS  
+**IMPACT:** Late-game battles become unplayable  
+**OWNER:** `UnitSeparation`, `UnitSpatialHash`, `PerfCounters` / F3
+
+**ISSUE:** Trees / gatherables are not strategic-grid obstacles  
+**IMPACT:** Armies route through forests, then stick on tree collision  
+**OWNER:** `PlayerRouteNavigation` occupancy scan
+
+**ISSUE:** Player group has no shared travel-speed cap  
+**IMPACT:** Cavalry / faster units pull ahead of Spearmen on the same order  
+**OWNER:** `PlayerRouteNavigation` player group path (enemy march already checkpoints)
+
+**ISSUE:** Building-corner / occupancy pinches  
+**IMPACT:** Units stall on inflated building cells; inflate was tightened, still a playability risk  
+**OWNER:** `PlayerRtsOccupancyGrid`, unit stuck watch
+
+**ISSUE:** Heavy Cavalry / Cavalry Archer / Cannon combat-order fork  
+**IMPACT:** Hold / Patrol no-ops; attack-move / resume can diverge from infantry  
+**OWNER:** those unit scripts vs `MilitaryUnit`
+
+**ISSUE:** Hotkey collisions  
+**IMPACT:** Debug **P** opens AI brain and blocks Patrol; worker **H/W/R** steal Hold / hero W / hero R  
+**OWNER:** `InputManager`, `BuildManager._input`, `BuildCommands`
+
+**ISSUE:** Mixed / placeholder art  
+**IMPACT:** Cavalry, cannon, heroes, creeps, and many buildings are hard to read  
+**OWNER:** scenes / art (Worker and Spearman already have original GLB art)
+
+**ISSUE:** Fog of war is a leftover stub, not wired  
+**IMPACT:** Full map always visible  
+**OWNER:** not an active system — do not “finish the stub” unless asked
+
+---
+
+## CURRENT DEVELOPMENT RULES
+
+- Fix existing systems before adding features.
+- Do not add managers / states / watchdogs to solve local bugs.
+- Prove the root cause before adding a mechanism.
+- Prefer deleting conflicting leftover code over layering another implementation.
+- Tests / headless `verify_*.tscn` do not replace manual RTS play.
+- Performance changes need before/after F3 (or equivalent) numbers.
+- Commit only after the user asks, and after the implementation/test workflow in `WORKFLOW.md`.
+- Avoid architecture churn unless measured evidence demands it.
+- UI never becomes gameplay-state authority.
+- Latest player command always wins (command generations).
+- Prefer `EntityHandle` / instance IDs + `NodeSafety` over raw stale Node refs.
+
+Balance numbers live in `scripts/balance/`. Do not rebalance in random scripts.
+
+---
+
+## IMPLEMENTED (do not document as missing)
+
+- Gold / wood / food, farms, expansions, worker gather cycles
+- Full building roster including walls/gates, Shop, Blacksmith, Stable, Academy, Artillery Depot
+- Full unit roster: Worker, Spearman, Swordsman, Archer, Light/Heavy Cavalry, Cavalry Archer, Cannon
+- Three Heroes (Paladin, Shadow Assassin, Ranger) with XP, levels, QWER ranks, items, passives
+- Neutral camps (medium + strong on the current map), camp respawn, kill XP/gold
+- Command Center T1/T2/T3 gates and Blacksmith / Stable / Academy upgrades
+- Victory / defeat → main menu
+- Easy / Normal / Hard (same brain; Hard 1.5× enemy income and train speed; Easy fewer military buildings / towers)
+- Custom RTS movement, automatic formations, F3 overlay, enemy inspect HUD
+- Control groups 1–9, F1 hero, Space hero-follow, idle-worker `.`
+
+See `docs/GAME_DESIGN.md` for design meaning and `docs/ROADMAP.md` for priority.

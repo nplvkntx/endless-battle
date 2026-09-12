@@ -1,10 +1,10 @@
 # Endless Battle — Balance Bible
 
-> Extracted from the live codebase. No values were changed.
-> **Canonical balance tables:** `scripts/balance/` (`UnitStats`, `BuildingStats`, `HeroStats`, `UpgradeStats`, `ItemStats`, `EconomyStats`).
-> Change numbers there only; other scripts re-export or reference those consts.
+> **DATED SNAPSHOT (2026-07-31).** Architecture comments in this file may be wrong.
+> **Canonical numbers:** `scripts/balance/` (`UnitStats`, `BuildingStats`, `HeroStats`, `UpgradeStats`, `ItemStats`, `EconomyStats`).
+> If a number here disagrees with those scripts, the scripts win.
+> Fog-of-war “TODO stub” and similar system claims are not current architecture guidance.
 
-**Document date:** 2026-07-31
 
 ---
 

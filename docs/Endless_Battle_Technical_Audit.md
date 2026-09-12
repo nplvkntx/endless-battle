@@ -1,5 +1,12 @@
 # Endless Battle — Commercial RTS Technical Audit
 
+> **HISTORICAL (2026 archive).** This audit describes a later-removed stack (MilitaryDirectorV2, ArmyCommanderV2, FormationManager, SharedSquadNavigation, competing AI managers).
+>
+> It is useful as history. It is **incorrect** as current architecture. Victory/defeat, Hero XP, tech, and upgrades are implemented now. Live movement is `PlayerRouteNavigation`. Live AI is `EnemyAI`.
+>
+> Start from `docs/CURRENT_STATE.md` and `cursor/AI_CONTEXT.md`.
+
+
 **Audit basis:** static inspection of the uploaded Godot 4 project archive, repository structure, scripts, scenes, project autoload configuration, verification logs and recent git history. I did **not** have an executable Godot runtime in this environment, so claims about measured frame time are explicitly limited to code evidence and stored logs. A profiler capture is still required before final performance conclusions.
 
 ## Executive verdict

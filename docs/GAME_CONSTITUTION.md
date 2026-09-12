@@ -84,8 +84,12 @@ Do not add content to hide broken core mechanics.
 
 ## Related Documents
 
+- `docs/CURRENT_STATE.md` — short live snapshot
+- `cursor/AI_CONTEXT.md` — current architecture for agents
+- `docs/GAME_DESIGN.md` — what the game is
 - `docs/ENGINE_RULES.md` — ownership, Node safety, performance
-- `docs/MOVEMENT_CONTRACT.md` — target player movement design
+- `docs/MOVEMENT_CONTRACT.md` — player movement design
 - `docs/WORKFLOW.md` — Cursor/dev workflow and commit discipline
-- `docs/MILITARY_AI_V2.md` — enemy military V2 ownership details
-- `docs/ROADMAP.md` — current milestone task order (subordinate to this constitution when they conflict)
+- `docs/ROADMAP.md` — milestone order (subordinate to this constitution when they conflict)
+
+`docs/MILITARY_AI_V2.md` was removed. Enemy strategy is `EnemyAI` condition ticks. Do not revive director / commander / watchdog architecture.

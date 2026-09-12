@@ -1,14 +1,21 @@
 # Endless Battle — Technical Audit Progress
 
+> **HISTORICAL.** This tracker describes the retired MilitaryDirectorV2 / ArmyCommanderV2 / watchdog era.
+>
+> Current enemy AI is `EnemyAI` condition ticks. Do not resume Phase 2 director/commander work. See `cursor/AI_CONTEXT.md` and `docs/CURRENT_STATE.md`.
+
+
 Permanent tracker for [docs/Endless_Battle_Technical_Audit.md](docs/Endless_Battle_Technical_Audit.md).
 
 ## Current phase
 
-**PHASE 2 — Architecture**
+**SUPERSEDED.** Do not treat this file’s “current phase/task” as live work.
+
+Live priorities: `docs/CURRENT_STATE.md` and `docs/ROADMAP.md`.
 
 ## Current task
 
-**PHASE 2 major architecture complete.** Military command authority is singular (`ArmyCommanderV2`). Do not begin navigation, gameplay, AI tuning, performance, or further refactoring until a fresh re-audit identifies the next high-impact seam.
+**Historical note only.** The V2 director/commander/watchdog program is finished *and then removed*. Current military authority is `EnemyAI` condition ticks plus `PlayerRouteNavigation` execution.
 
 ## Completed tasks
 

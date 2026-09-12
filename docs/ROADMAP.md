@@ -1,46 +1,162 @@
-# Endless Battle - Roadmap
+# Endless Battle — Roadmap
 
-## Milestone 1: Playable 1v1 RTS
+Priority order for the **current** repository. Status values: **DONE**, **IN PROGRESS**, **NEXT**, **LATER**, **NOT PLANNED**.
 
-**Goal:** A single-player match where the human player faces an AI opponent with economy, army production, heroes, and basic combat — win/lose conditions optional until UI is stable.
+Constitution and movement contract outrank this file. Source outranks all three if they disagree.
 
-**Status:** In progress. Core loop works; AI and HUD need stability and polish.
+---
 
-## Current Focus (priority order)
+## Milestone
 
-1. **AI worker/resource pathfinding stability** — workers cluster at trees, get stuck; gathering routes unreliable
-2. **AI construction/placement reliability** — poor building positions, unfinished buildings left behind
-3. **Adaptive AI economy** — balance worker allocation (gold vs wood); reduce rigid over-commitment to wood
-4. **Enemy selection HUD info** — player can select enemy units/buildings and see relevant HUD details
-5. **AI hero smarter behavior** — hero trains and respawns but needs better ability/combat decisions
-6. **Victory/defeat UI** — later, after input/UI handling is stable (previous attempt skipped due to input instability)
+Playable 1v1 vs AI on one map: economy, Hero, army, creep, tech, expand, fight, win/lose, restart.
 
-## Deferred / Lower Priority
+Core loop is **DONE**. Remaining work is reliability, command consistency, and readability — not missing victory, XP, tech, or upgrades.
 
-* Minimap polish (orientation and presentation — good enough for now)
-* Enemy visual differentiation (placeholder cubes — readability issue but not blocking milestone)
-* Hero leveling / XP for player hero
-* Fog of war
-* Tech tree, upgrades, formations
-* Gameplay data Resources (`.tres`) migration from hardcoded stats
+---
 
-## Done Recently (context for AI)
+## PHASE 1 — PERFORMANCE + MOVEMENT RELIABILITY
 
-* Compact MOBA/RTS-style HUD layout
-* Bottom selected-unit HUD hides when nothing is selected
-* Minimap placeholder with unit/building dots
-* Building production HUD with queue/progress display
-* Ctrl-click repeat training
-* RMB production cancel/dequeue (with `Control.accept_event()` fix)
-* Enemy AI: Hero Altar build, hero train/respawn
-* Enemy AI: additional army production buildings and scaled production
+**Status: IN PROGRESS / NEXT**
 
-## Definition of Done (Milestone 1)
+| Item | Status |
+|------|--------|
+| Custom RTS grid + shared group route (no NavigationAgent3D travel) | DONE |
+| Automatic line / rectangle / square slots in `PlayerRouteNavigation` | DONE |
+| Bounded soft separation + spatial hash | DONE |
+| F3 performance counters (live overlay) | DONE |
+| Enemy cohesive checkpoint march | DONE |
+| Dense-army FPS at intended sizes | IN PROGRESS |
+| Trees / forests on the strategic occupancy grid | NEXT |
+| Player group travel-speed sync (faster units wait for slower) | NEXT |
+| Building-corner / choke stall | IN PROGRESS |
+| Formation as guidance that compresses off buildings | DONE (keep improving if playtests fail) |
 
-* Player can play a full match vs AI without soft-locks or crash loops
-* AI gathers, builds, trains, and attacks with reasonable economy balance
-* AI hero participates meaningfully in combat
-* HUD supports player and (target) enemy selection feedback
-* Manual F5 test checklist passes for the changed feature
-* No regressions in production cancel or selection input
-
+**Definition of done:** a normal mid/late army stays playable and reaches valid destinations without a second movement architecture.
+
+---
+
+## PHASE 2 — MILITARY COMMAND CONSISTENCY
+
+**Status: NEXT** (after or beside Phase 1 only when a command bug is the proven cause)
+
+| Item | Status |
+|------|--------|
+| Spearman / Swordsman / Archer / Light Cavalry / Heroes on `MilitaryUnit` | DONE |
+| Move / Attack-Move / Stop on those units | DONE |
+| Hold / Patrol on `MilitaryUnit` | DONE |
+| Heavy Cavalry / Cavalry Archer / Cannon inherit the same contract | NEXT |
+| Focus fire (RMB enemy) | DONE |
+| Local combat resume after attack-move kills | IN PROGRESS (forked units diverge) |
+
+Do not add a new command bus. Move the forked units onto `MilitaryUnit` (or delete the duplicate layer).
+
+---
+
+## PHASE 3 — PLAYER INPUT / UI RELIABILITY
+
+**Status: IN PROGRESS**
+
+| Item | Status |
+|------|--------|
+| HUD command bar, production queue, RMB cancel | DONE |
+| Enemy / resource inspect HUD | DONE |
+| Build ghost skips HUD clicks (Farm click must not drop Barracks) | DONE (keep a regression watch) |
+| Debug P vs Patrol | NEXT |
+| Worker H / W / R vs Hold and Hero QWER | NEXT |
+| Attack-move cursor / mode clarity | LATER |
+| Debug F3 / F8 / F9 / movement-lab stay debug-only | DONE enough |
+
+---
+
+## PHASE 4 — MATCH / COMBAT POLISH
+
+**Status: LATER** (basics exist)
+
+| Item | Status |
+|------|--------|
+| Win / loss → menu with rematch | DONE |
+| Combat damage numbers / health bars | DONE |
+| Alerts / missing-base / under-attack readability | LATER |
+| Attack timing / role readability | LATER |
+
+---
+
+## PHASE 5 — AI OUTCOME POLISH
+
+**Status: LATER**
+
+Keep the 0.5s IF-condition brain. No new AI framework.
+
+| Item | Status |
+|------|--------|
+| Condition-tick `EnemyAI` | DONE |
+| Macro independent of military | DONE |
+| Easy / Normal / Hard capacity knobs | DONE |
+| Hero stays with army (home if missing) | DONE |
+| Placement / gather edge cases | IN PROGRESS |
+| Hard feels smarter, Easy softer, without a second brain | LATER |
+
+---
+
+## PHASE 6 — MAP + CREEP GAMEPLAY
+
+**Status: LATER**
+
+| Item | Status |
+|------|--------|
+| Neutral camps + respawn + XP/gold | DONE |
+| Medium + strong camps on the live map | DONE |
+| Weak camps as a first-night ladder | LATER |
+| Chokes / expansion geography | LATER |
+
+---
+
+## PHASE 7 — VISUAL READABILITY
+
+**Status: IN PROGRESS**
+
+| Item | Status |
+|------|--------|
+| Original Worker art | DONE |
+| Original Spearman art | DONE |
+| Quaternius stand-ins (Swordsman, Archer, some buildings, trees) | IN PROGRESS |
+| Cavalry, Cannon, Heroes, creeps still placeholder / cube-like | NEXT after Phase 1–2 |
+| New roster units | NOT PLANNED until existing roster is readable |
+
+---
+
+## PHASE 8 — AUDIO / FEEDBACK
+
+**Status: LATER**
+
+Placeholder melee hit and some VFX exist. Full audio pass is after core feel is stable.
+
+---
+
+## PHASE 9 — DEMO FEATURES
+
+**Status: LATER**
+
+Fog of war, richer minimap, extra maps — only once movement, FPS, and commands are trustworthy.
+
+| Item | Status |
+|------|--------|
+| Fog of war | LATER (stub file exists, not wired, not autoloaded) |
+| Minimap dots | DONE as placeholder |
+| Campaign / multiplayer / extra races / replays | NOT PLANNED |
+
+---
+
+## Removed from “future work” (already in source)
+
+Do not put these back on the todo list as if they were missing:
+
+- Victory / defeat
+- Hero XP / levels / ability ranks
+- Tech tiers and upgrades
+- Shop items
+- Walls / gates
+- Cavalry and Cannon as trainable units
+- Three Hero kits
+- Condition-tick enemy AI
+- Custom RTS movement and automatic formations

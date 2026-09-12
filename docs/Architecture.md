@@ -1,5 +1,12 @@
 # Endless Battle - Technical Architecture
 
+> **HISTORICAL.** This is an early architecture sketch. It is **not** current guidance.
+>
+> Current architecture: `cursor/AI_CONTEXT.md`, `docs/ENGINE_RULES.md`, `docs/MOVEMENT_CONTRACT.md`.
+>
+> FormationManager, FogOfWarManager-as-autoload, “max 500 lines”, and “stats must already be `.tres`” are outdated. TechTree and UpgradeManager exist as live gates/upgrades, not empty stubs.
+
+
 ## Goal
 
 Endless Battle must be built as small independent systems.
